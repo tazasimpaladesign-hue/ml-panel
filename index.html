@@ -903,7 +903,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;heigh
 // ═══════════════════════════════════════════════════════════
 const APP_ID = '5818174126848543';
 const REDIR = window.location.origin + window.location.pathname;
-const ML_AUTH = `https://auth.mercadolibre.com.ar/authorization?response_type=code&client_id=${APP_ID}&redirect_uri=${encodeURIComponent(REDIR)}`;
 
 let token=null, userId=null, userData=null;
 let allItems=[], allOrders=[], allQuestions=[];
@@ -915,18 +914,53 @@ let activeRules=[];
 let aiHistory=[];
 
 // ═══════════════════════════════════════════════════════════
+// PKCE HELPERS
+// ═══════════════════════════════════════════════════════════
+function generateRandom(len){
+  const arr=new Uint8Array(len);
+  crypto.getRandomValues(arr);
+  return btoa(String.fromCharCode(...arr)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+}
+
+async function generateCodeChallenge(verifier){
+  const data=new TextEncoder().encode(verifier);
+  const digest=await crypto.subtle.digest('SHA-256',data);
+  return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+}
+
+// ═══════════════════════════════════════════════════════════
 // AUTH
 // ═══════════════════════════════════════════════════════════
-function startOAuth(){window.location.href=ML_AUTH;}
+async function startOAuth(){
+  const verifier=generateRandom(64);
+  const challenge=await generateCodeChallenge(verifier);
+  sessionStorage.setItem('pkce_verifier',verifier);
+  const url=`https://auth.mercadolibre.com.ar/authorization`+
+    `?response_type=code`+
+    `&client_id=${APP_ID}`+
+    `&redirect_uri=${encodeURIComponent(REDIR)}`+
+    `&code_challenge=${challenge}`+
+    `&code_challenge_method=S256`;
+  window.location.href=url;
+}
 
 async function exchangeCode(code){
+  const verifier=sessionStorage.getItem('pkce_verifier');
+  if(!verifier){alert('Error: no se encontró el code_verifier. Intentá iniciar sesión de nuevo.');return;}
   try{
     const r=await fetch('https://api.mercadolibre.com/oauth/token',{
       method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
-      body:new URLSearchParams({grant_type:'authorization_code',client_id:APP_ID,
-        client_secret:'n9YB2Tkn2enSeiruvyKALHnb10T4HuL2',code,redirect_uri:REDIR})
+      body:new URLSearchParams({
+        grant_type:'authorization_code',
+        client_id:APP_ID,
+        client_secret:'n9YB2Tkn2enSeiruvyKALHnb10T4HuL2',
+        code,
+        redirect_uri:REDIR,
+        code_verifier:verifier
+      })
     });
     const d=await r.json();
+    sessionStorage.removeItem('pkce_verifier');
     if(d.access_token){
       token=d.access_token;
       sessionStorage.setItem('ml_token',token);
@@ -934,7 +968,7 @@ async function exchangeCode(code){
       window.history.replaceState({},'',window.location.pathname);
       await initApp();
     } else alert('Error auth: '+JSON.stringify(d));
-  }catch(e){console.error(e);}
+  }catch(e){console.error(e);alert('Error de red: '+e.message);}
 }
 
 async function mlGet(ep){
