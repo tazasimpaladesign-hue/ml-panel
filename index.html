@@ -914,22 +914,44 @@ let activeRules=[];
 let aiHistory=[];
 
 // ═══════════════════════════════════════════════════════════
-// AUTH — flujo implícito (token directo en URL, sin server)
+// AUTH — authorization_code via Cloudflare Worker (proxy)
 // ═══════════════════════════════════════════════════════════
+
+// ⬇️ PEGÁ ACÁ la URL de tu Cloudflare Worker después de crearlo
+const WORKER_URL = 'https://ml-oauth.tazasimpaladesign.workers.dev';
+
 function startOAuth(){
-  const url=`https://auth.mercadolibre.com.ar/authorization`+
-    `?response_type=token`+
-    `&client_id=${APP_ID}`+
-    `&redirect_uri=${encodeURIComponent(REDIR)}`;
-  window.location.href=url;
+  const url = `https://auth.mercadolibre.com.ar/authorization`
+    + `?response_type=code`
+    + `&client_id=${APP_ID}`
+    + `&redirect_uri=${encodeURIComponent(REDIR)}`;
+  window.location.href = url;
 }
 
-// El token llega en el hash de la URL: #access_token=...&...
-function parseTokenFromHash(){
-  const hash=window.location.hash.substring(1);
-  if(!hash) return null;
-  const params=Object.fromEntries(hash.split('&').map(p=>p.split('=')));
-  return params.access_token||null;
+async function exchangeCode(code){
+  if(!WORKER_URL || WORKER_URL.includes('TU-USUARIO')){
+    alert('⚠️ Primero configurá la URL del Worker en el código (línea WORKER_URL).');
+    return;
+  }
+  try {
+    const r = await fetch(WORKER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, redirect_uri: REDIR })
+    });
+    const d = await r.json();
+    if(d.access_token){
+      token = d.access_token;
+      sessionStorage.setItem('ml_token', token);
+      if(d.refresh_token) sessionStorage.setItem('ml_refresh', d.refresh_token);
+      window.history.replaceState({}, '', window.location.pathname);
+      await initApp();
+    } else {
+      alert('Error al obtener token: ' + JSON.stringify(d));
+    }
+  } catch(e) {
+    alert('Error de red con el Worker: ' + e.message);
+  }
 }
 
 async function mlGet(ep){
@@ -2004,18 +2026,18 @@ document.addEventListener('click',e=>{if(e.target.classList.contains('modal-over
 // BOOT
 // ═══════════════════════════════════════════════════════════
 (async function boot(){
-  // Flujo implícito: ML devuelve el token en el hash #access_token=...
-  const hashToken = parseTokenFromHash();
-  const saved = sessionStorage.getItem('ml_token');
-  if(hashToken){
-    token = hashToken;
-    sessionStorage.setItem('ml_token', token);
-    window.history.replaceState({}, '', window.location.pathname);
-    await initApp();
+  // authorization_code flow: ML devuelve ?code= en la URL
+  const params = new URLSearchParams(window.location.search);
+  const code   = params.get('code');
+  const saved  = sessionStorage.getItem('ml_token');
+
+  if(code){
+    await exchangeCode(code);
   } else if(saved){
     token = saved;
     await initApp();
   }
+  // else: pantalla de login visible
 })();
 </script>
 </body>
