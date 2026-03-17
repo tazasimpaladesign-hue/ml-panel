@@ -251,9 +251,15 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;heigh
     <div class="login-logo">🚀</div>
     <div class="login-title">ML Panel Pro v2</div>
     <div class="login-sub">Centro de control avanzado para Mercado Libre Argentina. SEO, IA, automatizaciones y más.</div>
-    <button class="btn-ml" onclick="startOAuth()">
-      <span style="font-size:20px">🟡</span> Conectar con Mercado Libre
-    </button>
+    <div style="font-size:13px;color:var(--text2);margin-bottom:14px">Elegí la cuenta a conectar:</div>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px">
+      <button class="btn-ml" onclick="startOAuth('5818174126848543')" style="background:#ffe600">
+        <span style="font-size:18px">🟡</span> Tienda Impala Design
+      </button>
+      <button class="btn-ml" onclick="startOAuth('5770335587905717')" style="background:#1dd18b;color:#001a0d">
+        <span style="font-size:18px">🟢</span> Segunda Tienda
+      </button>
+    </div>
     <div class="login-note">OAuth 2.0 oficial · No almacenamos contraseñas</div>
   </div>
 </div>
@@ -311,6 +317,9 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;heigh
     <div><div class="sb-store-name" id="sb-store">Tienda Impala</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
     <span style="color:var(--text3);font-size:11px">●●</span>
   </div>
+  <button id="switch-account-btn" onclick="switchAccount()" style="display:none;margin:4px 10px 0;padding:7px 12px;background:var(--bg4);border:1px solid var(--border2);border-radius:var(--rs);font-size:11px;color:var(--text2);cursor:pointer;width:calc(100% - 20px);text-align:left;font-family:var(--font)">
+    🔄 Cambiar cuenta
+  </button>
 
   <div class="sb-sec">Dashboard</div>
   <button class="nav active" onclick="showSection('dashboard')" id="nav-dashboard"><span class="ni">⬡</span>Resumen general</button>
@@ -901,8 +910,15 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;heigh
 // ═══════════════════════════════════════════════════════════
 // CONFIG
 // ═══════════════════════════════════════════════════════════
-const APP_ID = '5818174126848543';
+const WORKER_URL = 'https://ml-oauth.tazasimpaladesign.workers.dev';
 const REDIR = window.location.origin + window.location.pathname;
+
+// ── Cuentas registradas ──────────────────────────────────
+const ACCOUNTS = [
+  { id: '5818174126848543', name: 'Tienda Impala Design',  color: '#4f8ef7' },
+  { id: '5770335587905717', name: 'Segunda Tienda',        color: '#23d18b' },
+];
+let currentAccount = null; // { id, name, color }
 
 let token=null, userId=null, userData=null;
 let allItems=[], allOrders=[], allQuestions=[];
@@ -914,69 +930,69 @@ let activeRules=[];
 let aiHistory=[];
 
 // ═══════════════════════════════════════════════════════════
-// AUTH — PKCE + authorization_code via Cloudflare Worker
+// AUTH — PKCE + multi-cuenta via Cloudflare Worker
 // ═══════════════════════════════════════════════════════════
-
-// ⬇️ PEGÁ ACÁ la URL de tu Cloudflare Worker
-const WORKER_URL = 'https://ml-oauth.tazasimpaladesign.workers.dev';
 
 // PKCE helpers
 function pkceRandom(len){
   const arr = new Uint8Array(len);
   crypto.getRandomValues(arr);
-  return btoa(String.fromCharCode(...arr))
-    .replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+  return btoa(String.fromCharCode(...arr)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
 }
 async function pkceChallenge(verifier){
   const data = new TextEncoder().encode(verifier);
   const digest = await crypto.subtle.digest('SHA-256', data);
-  return btoa(String.fromCharCode(...new Uint8Array(digest)))
-    .replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+  return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
 }
 
-async function startOAuth(){
+// Iniciar OAuth para una cuenta específica
+async function startOAuth(appId){
   const verifier  = pkceRandom(64);
   const challenge = await pkceChallenge(verifier);
   localStorage.setItem('pkce_verifier', verifier);
-  const url = `https://auth.mercadolibre.com.ar/authorization`
-    + `?response_type=code`
-    + `&client_id=${APP_ID}`
-    + `&redirect_uri=${encodeURIComponent(REDIR)}`
-    + `&code_challenge=${challenge}`
-    + `&code_challenge_method=S256`;
+  localStorage.setItem('pkce_app_id',   appId);
+  const url = 'https://auth.mercadolibre.com.ar/authorization'
+    + '?response_type=code'
+    + '&client_id=' + appId
+    + '&redirect_uri=' + encodeURIComponent(REDIR)
+    + '&code_challenge=' + challenge
+    + '&code_challenge_method=S256';
   window.location.href = url;
 }
 
 async function exchangeCode(code){
-  if(!WORKER_URL || WORKER_URL.includes('TU-USUARIO')){
-    alert('⚠️ Configurá la URL del Worker en el código (constante WORKER_URL).');
-    return;
-  }
   const verifier = localStorage.getItem('pkce_verifier');
-  if(!verifier){
-    alert('⚠️ No se encontró el code_verifier. Intentá conectar de nuevo.');
+  const appId    = localStorage.getItem('pkce_app_id');
+  if(!verifier || !appId){
+    alert('⚠️ No se encontró el code_verifier o app_id. Intentá conectar de nuevo.');
     return;
   }
   localStorage.removeItem('pkce_verifier');
+  localStorage.removeItem('pkce_app_id');
+
   console.log('DEBUG exchangeCode:', {
     code: code?.slice(0,15)+'...',
     redirect_uri: REDIR,
     hasVerifier: !!verifier,
-    verifier_preview: verifier?.slice(0,15),
+    appId,
     worker_url: WORKER_URL
   });
+
   try {
     const r = await fetch(WORKER_URL + '/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code, redirect_uri: REDIR, code_verifier: verifier })
+      body: JSON.stringify({ code, redirect_uri: REDIR, code_verifier: verifier, app_id: appId })
     });
     const d = await r.json();
     if(d.access_token){
       token = d.access_token;
-      sessionStorage.setItem('ml_token', token);
-      if(d.refresh_token) sessionStorage.setItem('ml_refresh', d.refresh_token);
+      // Guardar token por cuenta
+      localStorage.setItem('ml_token_' + appId, token);
+      localStorage.setItem('ml_active_app', appId);
+      if(d.refresh_token) localStorage.setItem('ml_refresh_' + appId, d.refresh_token);
       window.history.replaceState({}, '', window.location.pathname);
+      currentAccount = ACCOUNTS.find(a => a.id === appId) || ACCOUNTS[0];
       await initApp();
     } else {
       alert('Error al obtener token: ' + JSON.stringify(d));
@@ -985,7 +1001,6 @@ async function exchangeCode(code){
     alert('Error de red con el Worker: ' + e.message);
   }
 }
-
 // Todas las llamadas a ML van por el Worker (evita CORS)
 async function mlGet(ep){
   const r=await fetch(WORKER_URL+'/api'+ep,{headers:{Authorization:'Bearer '+token}});
@@ -1009,7 +1024,13 @@ async function initApp(){
   document.getElementById('login-screen').style.display='none';
   userData=await mlGet('/users/me');
   userId=userData.id;
-  document.getElementById('sb-store').textContent=userData.nickname||'Tu tienda';
+  const acctName = currentAccount?.name || userData.nickname || 'Tu tienda';
+  const acctColor = currentAccount?.color || 'var(--accent)';
+  document.getElementById('sb-store').textContent = acctName;
+  document.getElementById('sb-store').style.color = acctColor;
+  // Mostrar botón para cambiar cuenta
+  const switchBtn = document.getElementById('switch-account-btn');
+  if(switchBtn) switchBtn.style.display = 'flex';
   stamp();
   await Promise.all([loadItems(),loadOrders(),loadQuestions()]);
   renderDashboard();
@@ -2056,21 +2077,38 @@ function closeModal(id){document.getElementById(id).classList.remove('open');}
 document.addEventListener('click',e=>{if(e.target.classList.contains('modal-overlay'))e.target.classList.remove('open');});
 
 // ═══════════════════════════════════════════════════════════
+// SWITCH ACCOUNT
+// ═══════════════════════════════════════════════════════════
+function switchAccount(){
+  // Limpiar sesión actual y volver al login
+  token = null; userId = null; userData = null;
+  allItems = []; allOrders = []; allQuestions = [];
+  currentAccount = null;
+  localStorage.removeItem('ml_active_app');
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('switch-account-btn').style.display = 'none';
+  // Reset nav
+  showSection('dashboard');
+}
+
+// ═══════════════════════════════════════════════════════════
 // BOOT
 // ═══════════════════════════════════════════════════════════
 (async function boot(){
-  // authorization_code flow: ML devuelve ?code= en la URL
-  const params = new URLSearchParams(window.location.search);
-  const code   = params.get('code');
-  const saved  = sessionStorage.getItem('ml_token');
+  const params  = new URLSearchParams(window.location.search);
+  const code    = params.get('code');
+  const activeApp = localStorage.getItem('ml_active_app');
 
   if(code){
+    // Volvemos del OAuth de ML con un código nuevo
     await exchangeCode(code);
-  } else if(saved){
-    token = saved;
+  } else if(activeApp && localStorage.getItem('ml_token_' + activeApp)){
+    // Ya hay sesión guardada → cargar directamente
+    token = localStorage.getItem('ml_token_' + activeApp);
+    currentAccount = ACCOUNTS.find(a => a.id === activeApp) || ACCOUNTS[0];
     await initApp();
   }
-  // else: pantalla de login visible
+  // else: pantalla de login visible con selector de cuentas
 })();
 </script>
 </body>
