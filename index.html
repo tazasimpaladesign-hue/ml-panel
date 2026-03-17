@@ -914,61 +914,22 @@ let activeRules=[];
 let aiHistory=[];
 
 // ═══════════════════════════════════════════════════════════
-// PKCE HELPERS
+// AUTH — flujo implícito (token directo en URL, sin server)
 // ═══════════════════════════════════════════════════════════
-function generateRandom(len){
-  const arr=new Uint8Array(len);
-  crypto.getRandomValues(arr);
-  return btoa(String.fromCharCode(...arr)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
-}
-
-async function generateCodeChallenge(verifier){
-  const data=new TextEncoder().encode(verifier);
-  const digest=await crypto.subtle.digest('SHA-256',data);
-  return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
-}
-
-// ═══════════════════════════════════════════════════════════
-// AUTH
-// ═══════════════════════════════════════════════════════════
-async function startOAuth(){
-  const verifier=generateRandom(64);
-  const challenge=await generateCodeChallenge(verifier);
-  sessionStorage.setItem('pkce_verifier',verifier);
+function startOAuth(){
   const url=`https://auth.mercadolibre.com.ar/authorization`+
-    `?response_type=code`+
+    `?response_type=token`+
     `&client_id=${APP_ID}`+
-    `&redirect_uri=${encodeURIComponent(REDIR)}`+
-    `&code_challenge=${challenge}`+
-    `&code_challenge_method=S256`;
+    `&redirect_uri=${encodeURIComponent(REDIR)}`;
   window.location.href=url;
 }
 
-async function exchangeCode(code){
-  const verifier=sessionStorage.getItem('pkce_verifier');
-  if(!verifier){alert('Error: no se encontró el code_verifier. Intentá iniciar sesión de nuevo.');return;}
-  try{
-    const r=await fetch('https://api.mercadolibre.com/oauth/token',{
-      method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
-      body:new URLSearchParams({
-        grant_type:'authorization_code',
-        client_id:APP_ID,
-        client_secret:'n9YB2Tkn2enSeiruvyKALHnb10T4HuL2',
-        code,
-        redirect_uri:REDIR,
-        code_verifier:verifier
-      })
-    });
-    const d=await r.json();
-    sessionStorage.removeItem('pkce_verifier');
-    if(d.access_token){
-      token=d.access_token;
-      sessionStorage.setItem('ml_token',token);
-      if(d.refresh_token) sessionStorage.setItem('ml_refresh',d.refresh_token);
-      window.history.replaceState({},'',window.location.pathname);
-      await initApp();
-    } else alert('Error auth: '+JSON.stringify(d));
-  }catch(e){console.error(e);alert('Error de red: '+e.message);}
+// El token llega en el hash de la URL: #access_token=...&...
+function parseTokenFromHash(){
+  const hash=window.location.hash.substring(1);
+  if(!hash) return null;
+  const params=Object.fromEntries(hash.split('&').map(p=>p.split('=')));
+  return params.access_token||null;
 }
 
 async function mlGet(ep){
@@ -2043,11 +2004,18 @@ document.addEventListener('click',e=>{if(e.target.classList.contains('modal-over
 // BOOT
 // ═══════════════════════════════════════════════════════════
 (async function boot(){
-  const url=new URLSearchParams(window.location.search);
-  const code=url.get('code');
-  const saved=sessionStorage.getItem('ml_token');
-  if(code) await exchangeCode(code);
-  else if(saved){token=saved;await initApp();}
+  // Flujo implícito: ML devuelve el token en el hash #access_token=...
+  const hashToken = parseTokenFromHash();
+  const saved = sessionStorage.getItem('ml_token');
+  if(hashToken){
+    token = hashToken;
+    sessionStorage.setItem('ml_token', token);
+    window.history.replaceState({}, '', window.location.pathname);
+    await initApp();
+  } else if(saved){
+    token = saved;
+    await initApp();
+  }
 })();
 </script>
 </body>
