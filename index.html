@@ -914,30 +914,55 @@ let activeRules=[];
 let aiHistory=[];
 
 // ═══════════════════════════════════════════════════════════
-// AUTH — authorization_code via Cloudflare Worker (proxy)
+// AUTH — PKCE + authorization_code via Cloudflare Worker
 // ═══════════════════════════════════════════════════════════
 
-// ⬇️ PEGÁ ACÁ la URL de tu Cloudflare Worker después de crearlo
+// ⬇️ PEGÁ ACÁ la URL de tu Cloudflare Worker
 const WORKER_URL = 'https://ml-oauth.tazasimpaladesign.workers.dev';
 
-function startOAuth(){
+// PKCE helpers
+function pkceRandom(len){
+  const arr = new Uint8Array(len);
+  crypto.getRandomValues(arr);
+  return btoa(String.fromCharCode(...arr))
+    .replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+}
+async function pkceChallenge(verifier){
+  const data = new TextEncoder().encode(verifier);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return btoa(String.fromCharCode(...new Uint8Array(digest)))
+    .replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+}
+
+async function startOAuth(){
+  const verifier  = pkceRandom(64);
+  const challenge = await pkceChallenge(verifier);
+  sessionStorage.setItem('pkce_verifier', verifier);
   const url = `https://auth.mercadolibre.com.ar/authorization`
     + `?response_type=code`
     + `&client_id=${APP_ID}`
-    + `&redirect_uri=${encodeURIComponent(REDIR)}`;
+    + `&redirect_uri=${encodeURIComponent(REDIR)}`
+    + `&code_challenge=${challenge}`
+    + `&code_challenge_method=S256`;
   window.location.href = url;
 }
 
 async function exchangeCode(code){
   if(!WORKER_URL || WORKER_URL.includes('TU-USUARIO')){
-    alert('⚠️ Primero configurá la URL del Worker en el código (línea WORKER_URL).');
+    alert('⚠️ Configurá la URL del Worker en el código (constante WORKER_URL).');
     return;
   }
+  const verifier = sessionStorage.getItem('pkce_verifier');
+  if(!verifier){
+    alert('⚠️ No se encontró el code_verifier. Intentá conectar de nuevo.');
+    return;
+  }
+  sessionStorage.removeItem('pkce_verifier');
   try {
     const r = await fetch(WORKER_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code, redirect_uri: REDIR })
+      body: JSON.stringify({ code, redirect_uri: REDIR, code_verifier: verifier })
     });
     const d = await r.json();
     if(d.access_token){
