@@ -445,7 +445,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;heigh
       <button class="btn btn-primary btn-sm" onclick="openModal('m-bulk')">✏️ Editar masivo</button>
       <button class="btn btn-ghost btn-sm" onclick="clearSel()">✕ Limpiar</button>
     </div>
-    <div id="pub-loading" class="loading"><div class="spin"></div>Cargando publicaciones...</div>
+    <div id="pub-loading" class="loading"><div class="spin"></div>Cargando publicaciones... (catálogos grandes pueden tardar 30-60s)</div>
     <div class="tw" id="pub-table-wrap" style="display:none">
       <table>
         <thead><tr>
@@ -1204,22 +1204,40 @@ function reconnectAccount(){
 // ═══════════════════════════════════════════════════════
 async function initApp(){
   document.getElementById('login').style.display='none';
+  
+  // Mostrar dashboard de inmediato con skeleton
+  showSec('dashboard');
+  document.getElementById('sb-name').textContent=curAcct?.name||'Cargando...';
+  document.getElementById('sb-name').style.color=curAcct?.color||'#fff';
+  document.getElementById('btn-switch').style.display='block';
+
+  // Cargar datos del usuario
   userData=await mlGet('/users/me');
   userId=userData.id;
-  const n=curAcct?.name||userData.nickname||'Tienda';
-  document.getElementById('sb-name').textContent=n;
-  document.getElementById('sb-name').style.color=curAcct?.color||'#fff';
+  document.getElementById('sb-name').textContent=curAcct?.name||userData.nickname||'Tienda';
   document.getElementById('sb-status').textContent=userData.nickname||'Conectado';
-  document.getElementById('btn-switch').style.display='block';
   stamp();
-  await Promise.all([loadItems(),loadOrders(),loadQuestions()]);
+
+  // Cargar órdenes y preguntas primero (son rápidas)
+  // Items se carga en paralelo pero es más lento
+  await Promise.all([loadOrders(), loadQuestions()]);
+  
+  // Mostrar dashboard parcial inmediatamente
   renderDash();
   initAI();
   buildAlgoFactors();
-  populateOptSel();
-  populatePAItems();
-  showSec('dashboard');
-  genAlerts();
+
+  // Cargar items en background (puede tardar para catálogos grandes)
+  document.getElementById('d-items').textContent='⏳';
+  document.getElementById('nb-pub').textContent='⏳';
+  loadItems().then(()=>{
+    renderDash();
+    populateOptSel();
+    populatePAItems();
+    genAlerts();
+    stamp();
+    console.log('[Init] Items cargados, dashboard actualizado');
+  });
 }
 
 function stamp(){document.getElementById('last-upd').textContent='Actualizado '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});}
@@ -1229,87 +1247,68 @@ function stamp(){document.getElementById('last-upd').textContent='Actualizado '+
 // ═══════════════════════════════════════════════════════
 async function loadItems(){
   try{
-    // ML: /users/{id}/items/search tiene límite duro de offset=950 (1000 items max).
-    // Para catálogos >1000: usamos /sites/MLA/search?seller_id= que SÍ soporta
-    // filtros de precio_min/precio_max y permite cubrir todo el catálogo.
     let allIds=[];
 
+    // Paso 1: obtener total real
     const first=await mlGet(`/users/${userId}/items/search?limit=1&offset=0`);
     const totalActive=first.paging?.total||0;
     console.log(`[loadItems] Total activas en ML: ${totalActive}`);
 
+    // Paso 2: traer activas paginando hasta el límite de ML (offset max 950)
+    // Para >1000 items, dividimos por tipo de publicación
+    const listingTypes=['bronze','free','silver','gold','gold_special','gold_premium','gold_pro'];
+    
     if(totalActive<=950){
-      // Catálogo pequeño: una sola pasada
-      let offset=0;
-      while(offset<950){
+      // Simple: una sola pasada
+      for(let offset=0;offset<950;offset+=50){
         const s=await mlGet(`/users/${userId}/items/search?limit=50&offset=${offset}`);
         const ids=s.results||[];
         allIds.push(...ids);
         if(ids.length<50) break;
-        offset+=50;
       }
     } else {
-      // Catálogo grande (>1000): usar /sites/MLA/search con seller_id
-      // Este endpoint acepta price_min/price_max y tiene límite de 1000 por rango
-      // Rangos calibrados para tazas/botellas ($5000-$30000 típicamente)
-      const priceRanges=[
-        [0,     9000],
-        [9001,  10000],
-        [10001, 11000],
-        [11001, 12000],
-        [12001, 12500],
-        [12501, 13000],
-        [13001, 14000],
-        [14001, 15000],
-        [15001, 17000],
-        [17001, 99999999],
-      ];
-
-      for(const [pmin,pmax] of priceRanges){
+      // Grande: dividir por tipo de publicación
+      for(const lt of listingTypes){
         let offset=0;
         while(offset<950){
           try{
-            const s=await mlGet(`/sites/MLA/search?seller_id=${userId}&price_min=${pmin}&price_max=${pmax}&limit=50&offset=${offset}`);
-            const results=s.results||[];
-            const ids=results.map(i=>i.id).filter(Boolean);
+            const s=await mlGet(`/users/${userId}/items/search?limit=50&offset=${offset}&listing_type_id=${lt}`);
+            const ids=s.results||[];
             allIds.push(...ids);
-            const rangeTotal=s.paging?.total||0;
-            if(ids.length<50||offset+50>=Math.min(rangeTotal,950)) break;
+            if(ids.length<50) break;
             offset+=50;
-          }catch(e){
-            console.warn(`[loadItems] Error rango ${pmin}-${pmax} offset ${offset}:`,e);
-            break;
-          }
+          }catch(e){break;}
         }
-        await new Promise(r=>setTimeout(r,80));
+        await new Promise(r=>setTimeout(r,50));
       }
-
-      // También la primera página sin filtro para capturar los que no tienen precio
-      const noPrice=await mlGet(`/users/${userId}/items/search?limit=50&offset=0`);
-      allIds.push(...(noPrice.results||[]));
+      // También sin filtro para capturar los que no tienen tipo asignado
+      for(let offset=0;offset<950;offset+=50){
+        const s=await mlGet(`/users/${userId}/items/search?limit=50&offset=${offset}`);
+        const ids=s.results||[];
+        allIds.push(...ids);
+        if(ids.length<50) break;
+      }
     }
 
-    // Pausadas y moderadas
+    // Paso 3: pausadas y moderadas
     for(const status of ['paused','under_review']){
-      let offset=0;
-      while(offset<500){
+      for(let offset=0;offset<500;offset+=50){
         try{
           const s=await mlGet(`/users/${userId}/items/search?limit=50&offset=${offset}&status=${status}`);
           const ids=s.results||[];
           allIds.push(...ids);
           if(ids.length<50) break;
-          offset+=50;
         }catch(e){break;}
       }
     }
 
     allIds=[...new Set(allIds)];
-    console.log(`[loadItems] IDs únicos obtenidos: ${allIds.length} de ${totalActive} activas`);
+    console.log(`[loadItems] IDs únicos: ${allIds.length} de ${totalActive} activas`);
 
     if(!allIds.length){allItems=[];return;}
     allItems=[];
 
-    // Traer detalles en chunks de 20
+    // Paso 4: traer detalles en chunks de 20
     for(let i=0;i<allIds.length;i+=20){
       const chunk=allIds.slice(i,i+20);
       try{
@@ -1319,7 +1318,7 @@ async function loadItems(){
       if(i>0&&i%200===0) await new Promise(r=>setTimeout(r,150));
     }
 
-    console.log(`[loadItems] Items cargados: ${allItems.length}`);
+    console.log(`[loadItems] Cargados: ${allItems.length} items`);
     const active=allItems.filter(i=>i.status==='active').length;
     const z=allItems.filter(i=>(i.available_quantity||0)===0).length;
     const l=allItems.filter(i=>(i.available_quantity||0)>0&&(i.available_quantity||0)<=3).length;
@@ -1331,6 +1330,7 @@ async function loadItems(){
     document.getElementById('nb-pub').textContent=active;
   }catch(e){console.error('loadItems',e);}
 }
+
 
 async function loadOrders(){
   try{
