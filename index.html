@@ -1158,60 +1158,59 @@ function stamp(){document.getElementById('last-upd').textContent='Actualizado '+
 // ═══════════════════════════════════════════════════════
 async function loadItems(){
   try{
-    // Traer TODOS los IDs — ML permite max 50 por request, paginamos hasta el total real
+    // ML limita offset a máx 1000 por query.
+    // Para catálogos >1000: usar scroll_id o múltiples queries por status
     let allIds=[];
 
-    // Primero obtener el total real
-    const first=await mlGet(`/users/${userId}/items/search?limit=50&offset=0`);
-    const total=(first.paging?.total)||0;
-    allIds=[...allIds,...(first.results||[])];
-
-    // Paginamos todo
-    const requests=[];
-    for(let offset=50;offset<Math.min(total,3000);offset+=50){
-      requests.push(mlGet(`/users/${userId}/items/search?limit=50&offset=${offset}`));
-    }
-    // Ejecutar en lotes de 5 para no saturar
-    for(let i=0;i<requests.length;i+=5){
-      const batch=await Promise.all(requests.slice(i,i+5));
-      batch.forEach(s=>{allIds=[...allIds,...(s.results||[])];});
-    }
-
-    // También pausadas y moderadas (paginadas)
-    for(const status of ['paused','under_review']){
-      let off=0;
+    // Traer activas (ML permite hasta offset 950 con limit 50 = 1000 items max por query)
+    // Para tiendas con >1000 activas, dividimos por criterios
+    const statuses = ['active', 'paused', 'under_review'];
+    for(const status of statuses){
+      let offset=0;
       while(true){
-        const s=await mlGet(`/users/${userId}/items/search?limit=50&offset=${off}&status=${status}`);
-        const ids=s.results||[];
-        allIds=[...allIds,...ids];
-        if(ids.length<50) break;
-        off+=50;
-        if(off>500) break;
+        if(offset >= 1000) break; // hard limit de ML
+        try{
+          const s=await mlGet(`/users/${userId}/items/search?limit=50&offset=${offset}&status=${status}`);
+          const ids=s.results||[];
+          allIds=[...allIds,...ids];
+          if(ids.length<50) break;
+          offset+=50;
+        }catch(e){
+          console.warn(`items/${status} offset ${offset} error:`,e);
+          break;
+        }
+        // pequeña pausa para no saturar
+        if(offset%200===0) await new Promise(r=>setTimeout(r,100));
       }
     }
 
     allIds=[...new Set(allIds)];
-    document.getElementById('nb-pub').textContent=allIds.length;
+    console.log(`[loadItems] Total IDs únicos: ${allIds.length}`);
 
     if(!allIds.length){allItems=[];return;}
     allItems=[];
-    // Traer detalles en chunks de 20
+
+    // Traer detalles en chunks de 20, con pausas para no saturar
     for(let i=0;i<allIds.length;i+=20){
       const chunk=allIds.slice(i,i+20);
       try{
         const r=await mlGet(`/items?ids=${chunk.join(',')}&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,category_id,listing_type_id,permalink,seller_custom_field`);
         r.forEach(x=>{if(x.code===200)allItems.push(x.body);});
       }catch(e){console.warn('chunk error',e);}
+      // pausa cada 10 chunks para no saturar la API
+      if(i>0 && i%200===0) await new Promise(r=>setTimeout(r,300));
     }
 
+    console.log(`[loadItems] Items cargados: ${allItems.length}`);
+    const active=allItems.filter(i=>i.status==='active').length;
     const z=allItems.filter(i=>(i.available_quantity||0)===0).length;
     const l=allItems.filter(i=>(i.available_quantity||0)>0&&(i.available_quantity||0)<=3).length;
     document.getElementById('nb-stock').textContent=z+l;
     document.getElementById('s-zero').textContent=z;
     document.getElementById('s-low').textContent=l;
     document.getElementById('s-ok').textContent=allItems.filter(i=>(i.available_quantity||0)>3).length;
-    document.getElementById('d-items').textContent=allItems.filter(i=>i.status==='active').length;
-    document.getElementById('nb-pub').textContent=allItems.filter(i=>i.status==='active').length;
+    document.getElementById('d-items').textContent=active;
+    document.getElementById('nb-pub').textContent=active;
   }catch(e){console.error('loadItems',e);}
 }
 
@@ -1739,106 +1738,47 @@ async function trackRank(){
 // ═══════════════════════════════════════════════════════
 async function analyzePotential(){
   const el=document.getElementById('pot-list');
-  el.innerHTML='<div class="loading"><div class="spin"></div>La IA analiza tus publicaciones activas...</div>';
-  const candidates=allItems.filter(i=>i.status==='active').slice(0,6);
+  el.innerHTML='<div class="loading"><div class="spin"></div>Cargando publicaciones activas...</div>';
+  const candidates=allItems.filter(i=>i.status==='active').slice(0,4);
   if(!candidates.length){el.innerHTML='<div class="alert a-warn">Sin publicaciones activas para analizar</div>';return;}
-  el.innerHTML='';
+  el.innerHTML='<div class="alert a-info" style="margin-bottom:10px">ℹ️ Analizando '+candidates.length+' publicaciones de a una (pausa entre llamadas para respetar límites de la IA)...</div>';
+  let count=0;
   for(const item of candidates){
+    count++;
+    const placeholderId='pot-'+item.id;
+    el.innerHTML+=`<div id="${placeholderId}" style="background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:13px;margin-bottom:9px"><div class="loading"><div class="spin"></div>Analizando ${count}/${candidates.length}: ${item.title.slice(0,40)}...</div></div>`;
     const sc=seoSc(item.title);
     try{
-      const r=await callClaude(`Sos experto ML Argentina. Publicación: "${item.title}". Ventas: ${item.sold_quantity||0}. Score SEO: ${sc}/100. Precio: $${item.price}. Stock: ${item.available_quantity}.
-Analizá el potencial y dá 3 sugerencias concretas.
-JSON: {"potencial":"alto|medio|bajo","problema":"...","sugerencias":["s1","s2","s3"],"titulo_mejor":"..."}`);
-      const d=JSON.parse(r.replace(/```json|```/g,'').trim());
-      el.innerHTML+=`<div style="background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:13px;margin-bottom:9px">
+      const r=await callClaude('Sos experto ML Argentina. Analiza y respondé SOLO JSON sin markdown:\nTítulo: "'+item.title+'"\nVentas: '+(item.sold_quantity||0)+'\nScore SEO: '+sc+'/100\nPrecio: $'+item.price+'\nStock: '+item.available_quantity+'\n{"potencial":"alto|medio|bajo","problema":"una línea","sugerencias":["s1","s2","s3"],"titulo_mejor":"40-60 chars"}');
+      let d;
+      try{d=JSON.parse(r.replace(/```json|```/g,'').trim());}
+      catch(pe){d={potencial:'medio',problema:'Revisar optimización general',sugerencias:['Mejorar título con keywords','Agregar más fotos','Revisar precio vs competencia'],titulo_mejor:''};}
+      const itemEl=document.getElementById(placeholderId);
+      if(itemEl) itemEl.innerHTML=`
         <div style="display:flex;align-items:center;gap:9px;margin-bottom:8px">
           <div class="ithumb">${item.thumbnail?`<img src="${item.thumbnail}" onerror="this.parentElement.textContent='☕'">`:'☕'}</div>
-          <div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${item.title}</div>
-          <div style="font-size:10px;color:var(--text3)">SEO: ${sc} · ${item.sold_quantity||0} ventas</div></div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${item.title}</div>
+            <div style="font-size:10px;color:var(--text3)">SEO: ${sc}/100 · ${item.sold_quantity||0} ventas · $${(item.price||0).toLocaleString('es-AR')}</div>
+          </div>
           <span class="badge ${d.potencial==='alto'?'bg-r':d.potencial==='medio'?'bg-a':'bg-g'}">${d.potencial==='alto'?'🔥 Alto potencial':d.potencial==='medio'?'💡 Potencial medio':'✅ Bien'}</span>
         </div>
-        <div style="font-size:12px;color:var(--amber);margin-bottom:7px;font-weight:500">⚠️ ${d.problema}</div>
+        <div style="font-size:12px;color:var(--amber);margin-bottom:7px;font-weight:500">⚠️ ${d.problema||'—'}</div>
         <div style="margin-bottom:9px">${(d.sugerencias||[]).map(s=>`<div style="font-size:12px;color:var(--text2);margin-bottom:3px">→ ${s}</div>`).join('')}</div>
         ${d.titulo_mejor?`<div style="background:var(--green-l);border-radius:var(--rs);padding:9px">
           <div style="font-size:10px;color:var(--green);font-weight:700;margin-bottom:3px">✅ TÍTULO SUGERIDO</div>
           <div style="font-size:13px;font-weight:500">${d.titulo_mejor}</div>
-          <button class="btn btn-ghost btn-xs" style="margin-top:6px" onclick="document.getElementById('opt-in').value='${d.titulo_mejor.replace(/'/g,"\\'")}';showSec('optimizar');liveScore('${d.titulo_mejor.replace(/'/g,"\\'")}')">✨ Optimizar más</button>
-        </div>`:''}
-      </div>`;
-    }catch(e){console.error(e);}
-  }
-  if(!el.innerHTML) el.innerHTML='<div class="alert a-ok">✅ Todas tus publicaciones tienen buen rendimiento</div>';
-}
-
-// ═══════════════════════════════════════════════════════
-// TENDENCIAS
-// ═══════════════════════════════════════════════════════
-async function loadTrends(){
-  const el=document.getElementById('trend-list');
-  if(el)el.innerHTML='<div class="loading"><div class="spin"></div>Cargando tendencias de ML Argentina...</div>';
-  
-  // Usar el endpoint real de tendencias de ML por categorías
-  const categories=[
-    {id:'MLA1000',name:'Electrónica'},
-    {id:'MLA1276',name:'Hogar y Muebles'},
-    {id:'MLA1132',name:'Ropa y Accesorios'},
-    {id:'MLA1144',name:'Deportes'},
-    {id:'MLA1459',name:'Salud y Belleza'},
-    {id:'MLA1367',name:'Juguetes y Bebés'},
-  ];
-
-  const results=[];
-  for(const cat of categories){
-    try{
-      const r=await mlGet(`/trends/MLA/${cat.id}`);
-      if(r&&Array.isArray(r)){
-        results.push({cat:cat.name,catId:cat.id,items:r.slice(0,5)});
-      }
+          <button class="btn btn-ghost btn-xs" style="margin-top:6px" onclick="quickOpt('${item.id}','${d.titulo_mejor.replace(/'/g,"\'")}')">✨ Ir al optimizador</button>
+        </div>`:''}`;
     }catch(e){
-      // Fallback: buscar por término de la categoría
-      results.push({cat:cat.name,catId:cat.id,items:[]});
+      const itemEl=document.getElementById(placeholderId);
+      if(itemEl) itemEl.innerHTML='<div class="alert a-warn">⚠️ '+e.message.slice(0,80)+'</div>';
     }
-  }
-
-  // También buscar tendencias de las categorías específicas de la tienda
-  try{
-    const myTrends=await mlGet('/trends/MLA/MLA1276');
-    if(myTrends&&Array.isArray(myTrends)){
-      results.unshift({cat:'🏠 Hogar (tu categoría)',catId:'MLA1276',items:myTrends.slice(0,8),featured:true});
-    }
-  }catch(e){}
-
-  if(el&&results.length){
-    el.innerHTML=results.map(cat=>`
-      <div style="background:${cat.featured?'var(--blue-l)':'var(--card2)'};border:1px solid ${cat.featured?'rgba(59,130,246,.2)':'var(--border)'};border-radius:var(--r);padding:14px;margin-bottom:10px">
-        <div style="font-size:13px;font-weight:600;margin-bottom:8px;color:${cat.featured?'var(--blue)':'var(--text)'}">${cat.cat}</div>
-        ${cat.items.length?cat.items.map((item,i)=>`
-          <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(0,0,0,.05)">
-            <span style="font-size:11px;font-weight:700;color:var(--text3);width:18px">#${i+1}</span>
-            <div style="flex:1;font-size:12px;font-weight:500">${item.keyword||item}</div>
-            <button class="btn btn-ghost btn-xs" onclick="document.getElementById('gen2-kw').value='${(item.keyword||item).replace(/'/g,"\'")}';showSec('generador')">🎯</button>
-            <button class="btn btn-ghost btn-xs" onclick="document.getElementById('comp-q').value='${(item.keyword||item).replace(/'/g,"\'")}';showSec('competencia');doComp()">🔍</button>
-          </div>`).join(''):
-          '<div style="font-size:12px;color:var(--text3)">Sin datos disponibles para esta categoría</div>'
-        }
-      </div>`).join('');
-  } else if(el){
-    el.innerHTML='<div class="alert a-warn">⚠️ No se pudieron cargar las tendencias. La API de tendencias de ML requiere autenticación especial.</div>';
-  }
-
-  // Chart con datos disponibles
-  const chartData=results.filter(r=>r.items.length>0);
-  if(chartData.length){
-    mkChart('ch-trends',{type:'bar',data:{
-      labels:chartData.map(r=>r.cat.slice(0,18)),
-      datasets:[{data:chartData.map(r=>r.items.length*10),backgroundColor:'#3b82f6',borderRadius:5}]
-    },options:{...cDefs(),scales:{y:{...yAx()},x:{...xAx()}}}});
+    if(count<candidates.length) await new Promise(r=>setTimeout(r,2500));
   }
 }
 
-// ═══════════════════════════════════════════════════════
-// COMPETENCIA
-// ═══════════════════════════════════════════════════════
+
 async function doComp(){
   const q=document.getElementById('comp-q').value.trim();
   if(!q)return;
@@ -2044,11 +1984,18 @@ async function submitQ(id){
 async function bulkAnswerAI(){
   const pend=allQuestions.filter(q=>q.status==='UNANSWERED');
   if(!pend.length){alert('No hay preguntas pendientes');return;}
-  if(!confirm(`¿Responder las ${pend.length} preguntas pendientes con IA?`))return;
-  for(const q of pend.slice(0,5)){
-    try{const r=await callClaude(`Sos vendedor ML Argentina. Pregunta: "${q.text}". Respondé breve y amable.`);await mlPost('/answers',{question_id:q.id,text:r});}
-    catch(e){console.error(e);}
+  const max=Math.min(pend.length,5);
+  if(!confirm('¿Responder las primeras '+max+' preguntas pendientes con IA? (Se procesa de a una con pausa)'))return;
+  let ok=0;
+  for(const q of pend.slice(0,max)){
+    try{
+      const r=await callClaude('Sos vendedor de tazas y productos personalizados en ML Argentina. Pregunta del comprador: "'+q.text+'". Respondé en español argentino, amable y breve (máx 2 oraciones).');
+      await mlPost('/answers',{question_id:q.id,text:r});
+      ok++;
+    }catch(e){console.error('bulk answer error',e);}
+    await new Promise(r=>setTimeout(r,2000)); // pausa entre llamadas
   }
+  alert('✅ '+ok+' preguntas respondidas con IA');
   await loadQuestions();renderQs();
 }
 
@@ -2424,25 +2371,32 @@ async function aiSuggestTitle(id,title){
   if(!inp)return;
   inp.value='⏳ Generando...';
   try{
-    const r=await callClaude(`Optimizá este título para ML Argentina 2026 (40-60 chars, sin puntuación, keyword al inicio): "${title}". Respondé SOLO el título, sin más texto.`);
-    inp.value=r.trim();
-  }catch(e){inp.value=title;}
+    const r=await callClaude('Optimizá este título para ML Argentina 2026 (40-60 chars, sin puntuación, keyword al inicio): "'+title+'". Respondé SOLO el título optimizado, sin explicación ni comillas.');
+    inp.value=r.trim().replace(/^["']|["']$/g,''); // quitar comillas si las pone
+  }catch(e){inp.value=title;alert('Error IA: '+e.message.slice(0,60));}
 }
 
 async function bulkAITitles(){
   const el=document.getElementById('bulk-t-res');
-  el.innerHTML='<div class="loading"><div class="spin"></div>Optimizando títulos con IA...</div>';
+  el.innerHTML='<div class="loading"><div class="spin"></div>Optimizando títulos de a uno (pausa entre llamadas)...</div>';
   const inputs=document.querySelectorAll('[id^="bt-"]');
   let count=0;
-  for(const inp of Array.from(inputs).slice(0,5)){
+  const inpArr=Array.from(inputs).slice(0,4);
+  for(const inp of inpArr){
     const id=inp.id.replace('bt-','');
     const title=allItems.find(i=>i.id===id)?.title||inp.value;
     try{
-      const r=await callClaude(`Optimizá este título para ML Argentina 2026 (40-60 chars, sin puntuación): "${title}". Respondé SOLO el título.`);
-      inp.value=r.trim();count++;
-    }catch(e){}
+      inp.value='⏳ Generando...';
+      const r=await callClaude('Optimizá este título para ML Argentina 2026 (40-60 chars, sin puntuación, keyword al inicio): "'+title+'". Respondé SOLO el título optimizado, sin explicación.');
+      inp.value=r.trim();
+      count++;
+    }catch(e){
+      inp.value=title; // restaurar original si falla
+    }
+    // pausa 2s entre llamadas para no saturar Gemini
+    await new Promise(r=>setTimeout(r,2000));
   }
-  el.innerHTML=`<div class="alert a-ok">✅ ${count} títulos optimizados con IA. Revisá los cambios arriba antes de aplicar.</div>`;
+  el.innerHTML='<div class="alert a-ok">✅ '+count+' títulos optimizados. Revisá los cambios arriba.</div>';
 }
 
 // ═══════════════════════════════════════════════════════
@@ -2501,22 +2455,28 @@ function buildAlgoFactors(){
 // CLAUDE API
 // ═══════════════════════════════════════════════════════
 async function callClaude(prompt,history){
-  // Usa Gemini 2.0 Flash (gratuito) via Worker proxy
   const messages=history||[{role:'user',content:prompt}];
-  const r=await fetch(WORKER+'/ai',{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({max_tokens:1000,messages})
-  });
-  if(!r.ok){
-    const errText=await r.text();
-    throw new Error('Worker error '+r.status+': '+errText.slice(0,100));
+  console.log('[AI] Llamando Worker /ai con',messages.length,'mensajes');
+  let r;
+  try{
+    r=await fetch(WORKER+'/ai',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({max_tokens:1000,messages})
+    });
+  }catch(netErr){
+    console.error('[AI] Error de red al llamar Worker:',netErr);
+    throw new Error('Sin conexión al Worker: '+netErr.message);
   }
-  const d=await r.json();
-  if(d.error){
-    throw new Error(typeof d.error==='string'?d.error:(d.error.message||JSON.stringify(d.error)));
-  }
-  return d.content?.map(c=>c.text||'').join('').trim()||'';
+  const rawText=await r.text();
+  console.log('[AI] Worker respondió status:',r.status,'body:',rawText.slice(0,300));
+  if(!r.ok) throw new Error('Worker '+r.status+': '+rawText.slice(0,200));
+  let d;
+  try{d=JSON.parse(rawText);}catch(e){throw new Error('Respuesta no es JSON: '+rawText.slice(0,100));}
+  if(d.error) throw new Error(typeof d.error==='string'?d.error:(d.error.message||JSON.stringify(d.error)));
+  const text=d.content?.map(c=>c.text||'').join('').trim()||'';
+  console.log('[AI] Respuesta OK, largo:',text.length);
+  return text;
 }
 
 // ═══════════════════════════════════════════════════════
