@@ -1116,16 +1116,83 @@ async function exchangeCode(code){
 // ═══════════════════════════════════════════════════════
 async function mlGet(ep){
   const r=await fetch(WORKER+'/api'+ep,{headers:{Authorization:'Bearer '+token}});
-  if(!r.ok && r.status===401){alert('Sesión expirada. Por favor reconectá.');throw new Error('401');}
+  if(r.status===401){
+    // Intentar refresh automático
+    const refreshed=await tryRefreshToken();
+    if(refreshed){
+      // Reintentar con nuevo token
+      const r2=await fetch(WORKER+'/api'+ep,{headers:{Authorization:'Bearer '+token}});
+      return r2.json();
+    }
+    showSessionExpired();
+    throw new Error('401 - Sesión expirada');
+  }
   return r.json();
 }
 async function mlPost(ep,body){
   const r=await fetch(WORKER+'/api'+ep,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(r.status===401){showSessionExpired();throw new Error('401');}
   return r.json();
 }
 async function mlPut(ep,body){
   const r=await fetch(WORKER+'/api'+ep,{method:'PUT',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(r.status===401){showSessionExpired();throw new Error('401');}
   return r.json();
+}
+
+async function tryRefreshToken(){
+  const appId=localStorage.getItem('ml_app');
+  const refreshToken=localStorage.getItem('ml_ref_'+appId);
+  if(!appId||!refreshToken) return false;
+  try{
+    const r=await fetch(WORKER+'/refresh',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({refresh_token:refreshToken,app_id:appId})
+    });
+    const d=await r.json();
+    if(d.access_token){
+      token=d.access_token;
+      localStorage.setItem('ml_tok_'+appId,token);
+      if(d.refresh_token) localStorage.setItem('ml_ref_'+appId,d.refresh_token);
+      console.log('[Auth] Token renovado automáticamente ✅');
+      return true;
+    }
+    return false;
+  }catch(e){
+    console.error('[Auth] Error al renovar token:',e);
+    return false;
+  }
+}
+
+function showSessionExpired(){
+  // Mostrar banner de sesión expirada sin bloquear la UI
+  const existing=document.getElementById('session-banner');
+  if(existing) return;
+  const banner=document.createElement('div');
+  banner.id='session-banner';
+  banner.style.cssText='position:fixed;top:52px;left:230px;right:0;background:#fef2f2;border-bottom:1px solid rgba(239,68,68,.3);padding:10px 20px;display:flex;align-items:center;justify-content:space-between;z-index:99;font-size:13px;color:#991b1b';
+  banner.innerHTML=`<span>⚠️ Sesión expirada o token vencido.</span>
+    <div style="display:flex;gap:8px">
+      <button onclick="tryRefreshToken().then(ok=>{if(ok){document.getElementById('session-banner')?.remove();refreshAll();}else{showSessionExpired.retry=true;reconnectAccount();}})" style="background:#ef4444;color:#fff;border:none;padding:6px 14px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:12px;font-weight:600">↺ Renovar sesión</button>
+      <button onclick="reconnectAccount()" style="background:#374151;color:#fff;border:none;padding:6px 14px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:12px;font-weight:600">🔐 Reconectar</button>
+      <button onclick="document.getElementById('session-banner')?.remove()" style="background:transparent;color:#991b1b;border:1px solid rgba(239,68,68,.3);padding:6px 10px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:12px">✕</button>
+    </div>`;
+  document.body.appendChild(banner);
+}
+
+function reconnectAccount(){
+  // Limpiar y mostrar login con la cuenta activa preseleccionada
+  const appId=localStorage.getItem('ml_app');
+  token=null;
+  document.getElementById('session-banner')?.remove();
+  document.getElementById('login').style.display='flex';
+  // Highlight the current account button
+  if(appId===ACCTS[0].id){
+    document.querySelector('.btn-ml-y').style.outline='3px solid #fff';
+  } else {
+    document.querySelector('.btn-ml-g').style.outline='3px solid #fff';
+  }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1158,50 +1225,82 @@ function stamp(){document.getElementById('last-upd').textContent='Actualizado '+
 // ═══════════════════════════════════════════════════════
 async function loadItems(){
   try{
-    // ML limita offset a máx 1000 por query.
-    // Para catálogos >1000: usar scroll_id o múltiples queries por status
+    // ML limita a 1000 resultados por query (offset máx 950 con limit 50).
+    // Para catálogos >1000: hacemos múltiples queries filtrando por rango de precio
+    // Esto cubre TODO el catálogo sin importar el tamaño.
     let allIds=[];
 
-    // Traer activas (ML permite hasta offset 950 con limit 50 = 1000 items max por query)
-    // Para tiendas con >1000 activas, dividimos por criterios
-    const statuses = ['active', 'paused', 'under_review'];
-    for(const status of statuses){
+    // Primero obtener info del catálogo para saber cuántos hay
+    const first=await mlGet(`/users/${userId}/items/search?limit=1&offset=0`);
+    const totalActive=first.paging?.total||0;
+    console.log(`[loadItems] Total publicaciones activas en ML: ${totalActive}`);
+
+    // Estrategia: pedir activas en bloques de 1000 usando range de precios
+    // Si hay <=1000, un solo loop. Si hay >1000, dividimos por rangos de precio.
+    if(totalActive<=1000){
+      // Una sola pasada normal
       let offset=0;
-      while(true){
-        if(offset >= 1000) break; // hard limit de ML
+      while(offset<1000){
+        const s=await mlGet(`/users/${userId}/items/search?limit=50&offset=${offset}`);
+        const ids=s.results||[];
+        allIds=[...allIds,...ids];
+        if(ids.length<50) break;
+        offset+=50;
+      }
+    } else {
+      // Catálogo grande: usar rangos de precio para dividir
+      // Primero obtener precio min y max del catálogo
+      const ranges=[
+        [0,5000],[5001,8000],[8001,10000],[10001,12000],
+        [12001,13000],[13001,15000],[15001,20000],[20001,99999999]
+      ];
+      for(const [pmin,pmax] of ranges){
+        let offset=0;
+        while(offset<1000){
+          try{
+            const s=await mlGet(`/users/${userId}/items/search?limit=50&offset=${offset}&price=${pmin}-${pmax}`);
+            const ids=s.results||[];
+            allIds=[...allIds,...ids];
+            if(ids.length<50) break;
+            offset+=50;
+            if(s.paging?.total<=ids.length+offset) break;
+          }catch(e){break;}
+        }
+        await new Promise(r=>setTimeout(r,100));
+      }
+    }
+
+    // Pausadas y moderadas (estas suelen ser pocas, sin problema)
+    for(const status of ['paused','under_review']){
+      let offset=0;
+      while(offset<500){
         try{
           const s=await mlGet(`/users/${userId}/items/search?limit=50&offset=${offset}&status=${status}`);
           const ids=s.results||[];
           allIds=[...allIds,...ids];
           if(ids.length<50) break;
           offset+=50;
-        }catch(e){
-          console.warn(`items/${status} offset ${offset} error:`,e);
-          break;
-        }
-        // pequeña pausa para no saturar
-        if(offset%200===0) await new Promise(r=>setTimeout(r,100));
+        }catch(e){break;}
       }
     }
 
     allIds=[...new Set(allIds)];
-    console.log(`[loadItems] Total IDs únicos: ${allIds.length}`);
+    console.log(`[loadItems] IDs únicos obtenidos: ${allIds.length} de ${totalActive} activas`);
 
     if(!allIds.length){allItems=[];return;}
     allItems=[];
 
-    // Traer detalles en chunks de 20, con pausas para no saturar
+    // Traer detalles en chunks de 20
     for(let i=0;i<allIds.length;i+=20){
       const chunk=allIds.slice(i,i+20);
       try{
         const r=await mlGet(`/items?ids=${chunk.join(',')}&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,category_id,listing_type_id,permalink,seller_custom_field`);
         r.forEach(x=>{if(x.code===200)allItems.push(x.body);});
       }catch(e){console.warn('chunk error',e);}
-      // pausa cada 10 chunks para no saturar la API
-      if(i>0 && i%200===0) await new Promise(r=>setTimeout(r,300));
+      if(i>0&&i%200===0) await new Promise(r=>setTimeout(r,200));
     }
 
-    console.log(`[loadItems] Items cargados: ${allItems.length}`);
+    console.log(`[loadItems] Items con detalles cargados: ${allItems.length}`);
     const active=allItems.filter(i=>i.status==='active').length;
     const z=allItems.filter(i=>(i.available_quantity||0)===0).length;
     const l=allItems.filter(i=>(i.available_quantity||0)>0&&(i.available_quantity||0)<=3).length;
@@ -2470,7 +2569,12 @@ async function callClaude(prompt,history){
   }
   const rawText=await r.text();
   console.log('[AI] Worker respondió status:',r.status,'body:',rawText.slice(0,300));
-  if(!r.ok) throw new Error('Worker '+r.status+': '+rawText.slice(0,200));
+  if(!r.ok){
+    if(r.status===429){
+      throw new Error('⏳ Límite de IA (429): La key de Gemini se agotó por hoy. Solución: crear una nueva key gratis en https://aistudio.google.com/app/apikey y agregarla al Worker.');
+    }
+    throw new Error('Worker '+r.status+': '+rawText.slice(0,200));
+  }
   let d;
   try{d=JSON.parse(rawText);}catch(e){throw new Error('Respuesta no es JSON: '+rawText.slice(0,100));}
   if(d.error) throw new Error(typeof d.error==='string'?d.error:(d.error.message||JSON.stringify(d.error)));
@@ -2739,8 +2843,11 @@ function switchAcct(){
   token=null;userId=null;userData=null;curAcct=null;
   allItems=[];allOrders=[];allQuestions=[];
   localStorage.removeItem('ml_app');
+  document.getElementById('session-banner')?.remove();
   document.getElementById('login').style.display='flex';
   document.getElementById('btn-switch').style.display='none';
+  // Reset outline en botones de login
+  document.querySelectorAll('.btn-ml-y,.btn-ml-g').forEach(b=>b.style.outline='');
 }
 
 // ═══════════════════════════════════════════════════════
@@ -2765,6 +2872,15 @@ document.addEventListener('click',e=>{if(e.target.classList.contains('modal-ov')
     await initApp();
   }
 })();
+
+// Verificar y renovar token cada 25 minutos (ML tokens duran 6 horas)
+setInterval(async()=>{
+  if(!token) return;
+  const appId=localStorage.getItem('ml_app');
+  if(!appId) return;
+  const refreshed=await tryRefreshToken();
+  if(refreshed) console.log('[Auth] Token renovado automáticamente en background');
+}, 25*60*1000);
 </script>
 </body>
 </html>
