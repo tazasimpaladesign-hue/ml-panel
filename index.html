@@ -736,9 +736,28 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;heigh
 <div id="sec-competencia" class="sec fi">
   <div class="card mb">
     <div class="card-hd"><div class="card-title">🎯 Análisis de competidores</div></div>
-    <div class="fr">
-      <div><label>Buscar producto o categoría</label><input type="text" id="comp-q" placeholder="Ej: taza mágica personalizada cerámica"></div>
-      <div style="display:flex;align-items:flex-end"><button class="btn btn-primary" style="width:100%" onclick="doComp()">Analizar mercado</button></div>
+    <div class="tabs" style="margin-bottom:12px">
+      <button class="tab active" onclick="setCompTab('search',this)">🔍 Buscar por título</button>
+      <button class="tab" onclick="setCompTab('seller',this)">👤 Buscar por vendedor</button>
+      <button class="tab" onclick="setCompTab('url',this)">🔗 Buscar por URL/ID</button>
+    </div>
+    <div id="comp-tab-search">
+      <div class="fr">
+        <div><label>Título del producto a comparar</label><input type="text" id="comp-q" placeholder="Ej: taza mágica personalizada cerámica"></div>
+        <div style="display:flex;align-items:flex-end"><button class="btn btn-primary" style="width:100%" onclick="doComp()">Buscar competidores</button></div>
+      </div>
+    </div>
+    <div id="comp-tab-seller" style="display:none">
+      <div class="fr">
+        <div><label>Nickname del vendedor en ML</label><input type="text" id="comp-seller" placeholder="Ej: TIENDA_EJEMPLO"></div>
+        <div style="display:flex;align-items:flex-end"><button class="btn btn-primary" style="width:100%" onclick="doCompSeller()">Analizar vendedor</button></div>
+      </div>
+    </div>
+    <div id="comp-tab-url" style="display:none">
+      <div class="fr">
+        <div><label>URL de publicación ML o ID (MLA123456)</label><input type="text" id="comp-url" placeholder="https://www.mercadolibre.com.ar/... o MLA123456"></div>
+        <div style="display:flex;align-items:flex-end"><button class="btn btn-primary" style="width:100%" onclick="doCompUrl()">Analizar publicación</button></div>
+      </div>
     </div>
     <div id="comp-out"></div>
   </div>
@@ -964,23 +983,33 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;heigh
 
 <!-- ═══ PRECIOS AUTO ═══ -->
 <div id="sec-precios-auto" class="sec fi">
-  <div class="alert a-info">💡 Creá reglas para actualizar tu precio automáticamente en función de tus competidores. El sistema revisa cada hora y ajusta el precio dentro del rango que configurás.</div>
+  <div class="alert a-info">💡 Creá reglas para actualizar tu precio automáticamente en función de tus competidores. El sistema compara precios y te sugiere el ajuste óptimo.</div>
   <div class="g2 mb">
     <div class="card">
       <div class="card-hd"><div class="card-title">🏷️ Nueva regla de precio automático</div></div>
-      <div class="ff"><label>Publicación</label>
-        <select id="pa-item"><option value="">Cargando publicaciones...</option></select></div>
+      <div class="ff">
+        <label>Buscar mi publicación</label>
+        <input type="text" id="pa-search" placeholder="Buscar por título o SKU..." oninput="filterPAItems()">
+        <select id="pa-item" style="margin-top:6px" onchange="loadPACompetitors()"><option value="">Seleccioná una publicación...</option></select>
+      </div>
+      <div class="ff" id="pa-comp-wrap" style="display:none">
+        <label>Buscar publicación del competidor a seguir</label>
+        <input type="text" id="pa-comp-search" placeholder="Ej: taza mágica personalizada..." oninput="searchPACompetitors()">
+        <div id="pa-comp-results" style="max-height:140px;overflow-y:auto;margin-top:5px"></div>
+        <div id="pa-comp-selected" style="margin-top:6px"></div>
+      </div>
       <div class="fr">
         <div><label>Precio mínimo $</label><input type="number" id="pa-min" placeholder="0"></div>
         <div><label>Precio máximo $</label><input type="number" id="pa-max" placeholder="99999"></div>
       </div>
       <div class="ff"><label>Estrategia</label>
         <select id="pa-strat">
-          <option value="lowest">Ser el más barato</option>
-          <option value="match">Igualar al más vendido</option>
+          <option value="lowest">Ser el más barato del mercado</option>
+          <option value="match">Igualar al competidor seleccionado</option>
           <option value="pct_below">% por debajo del competidor</option>
+          <option value="pct_above">% por encima del más barato</option>
         </select></div>
-      <div class="ff" id="pa-pct-wrap"><label>% por debajo</label><input type="number" id="pa-pct" value="5" min="1" max="30"></div>
+      <div class="ff"><label>% de ajuste</label><input type="number" id="pa-pct" value="5" min="1" max="30"></div>
       <button class="btn btn-primary" style="width:100%" onclick="addPriceRule()">+ Agregar regla</button>
     </div>
     <div class="card">
@@ -1129,26 +1158,44 @@ function stamp(){document.getElementById('last-upd').textContent='Actualizado '+
 // ═══════════════════════════════════════════════════════
 async function loadItems(){
   try{
-    // Traer TODOS los IDs paginando de a 50
-    let offset=0, allIds=[];
-    while(true){
-      const s=await mlGet(`/users/${userId}/items/search?limit=50&offset=${offset}&status=active`);
-      const ids=s.results||[];
-      allIds=[...allIds,...ids];
-      if(ids.length<50) break;
-      offset+=50;
-      if(offset>2500) break; // seguridad
-    }
-    // También pausadas y moderadas
-    const sp=await mlGet(`/users/${userId}/items/search?limit=50&status=paused`);
-    const sm=await mlGet(`/users/${userId}/items/search?limit=50&status=under_review`);
-    allIds=[...new Set([...allIds,...(sp.results||[]),...(sm.results||[])])];
+    // Traer TODOS los IDs — ML permite max 50 por request, paginamos hasta el total real
+    let allIds=[];
 
+    // Primero obtener el total real
+    const first=await mlGet(`/users/${userId}/items/search?limit=50&offset=0`);
+    const total=(first.paging?.total)||0;
+    allIds=[...allIds,...(first.results||[])];
+
+    // Paginamos todo
+    const requests=[];
+    for(let offset=50;offset<Math.min(total,3000);offset+=50){
+      requests.push(mlGet(`/users/${userId}/items/search?limit=50&offset=${offset}`));
+    }
+    // Ejecutar en lotes de 5 para no saturar
+    for(let i=0;i<requests.length;i+=5){
+      const batch=await Promise.all(requests.slice(i,i+5));
+      batch.forEach(s=>{allIds=[...allIds,...(s.results||[])];});
+    }
+
+    // También pausadas y moderadas (paginadas)
+    for(const status of ['paused','under_review']){
+      let off=0;
+      while(true){
+        const s=await mlGet(`/users/${userId}/items/search?limit=50&offset=${off}&status=${status}`);
+        const ids=s.results||[];
+        allIds=[...allIds,...ids];
+        if(ids.length<50) break;
+        off+=50;
+        if(off>500) break;
+      }
+    }
+
+    allIds=[...new Set(allIds)];
     document.getElementById('nb-pub').textContent=allIds.length;
-    document.getElementById('d-items').textContent=allIds.filter((id,i)=>i<allIds.length).length;
 
     if(!allIds.length){allItems=[];return;}
     allItems=[];
+    // Traer detalles en chunks de 20
     for(let i=0;i<allIds.length;i+=20){
       const chunk=allIds.slice(i,i+20);
       try{
@@ -1156,7 +1203,7 @@ async function loadItems(){
         r.forEach(x=>{if(x.code===200)allItems.push(x.body);});
       }catch(e){console.warn('chunk error',e);}
     }
-    // Stock alerts
+
     const z=allItems.filter(i=>(i.available_quantity||0)===0).length;
     const l=allItems.filter(i=>(i.available_quantity||0)>0&&(i.available_quantity||0)<=3).length;
     document.getElementById('nb-stock').textContent=z+l;
@@ -1164,13 +1211,14 @@ async function loadItems(){
     document.getElementById('s-low').textContent=l;
     document.getElementById('s-ok').textContent=allItems.filter(i=>(i.available_quantity||0)>3).length;
     document.getElementById('d-items').textContent=allItems.filter(i=>i.status==='active').length;
+    document.getElementById('nb-pub').textContent=allItems.filter(i=>i.status==='active').length;
   }catch(e){console.error('loadItems',e);}
 }
 
 async function loadOrders(){
   try{
-    // Traer histórico completo (últimos 12 meses)
-    const from=new Date();from.setFullYear(from.getFullYear()-1);
+    // Traer histórico completo (últimos 18 meses, máximo posible)
+    const from=new Date();from.setMonth(from.getMonth()-18);
     let offset=0; allOrders=[];
     while(true){
       const r=await mlGet(`/orders/search?seller=${userId}&order.date_created.from=${from.toISOString()}&limit=50&offset=${offset}&sort=date_desc`);
@@ -1178,7 +1226,7 @@ async function loadOrders(){
       allOrders=[...allOrders,...res];
       if(res.length<50) break;
       offset+=50;
-      if(offset>500) break;
+      if(offset>1000) break;
     }
     // Filtrar solo pagadas (excluir canceladas para métricas reales)
     const paid=allOrders.filter(o=>o.status!=='cancelled');
@@ -1202,9 +1250,10 @@ async function loadOrders(){
 
 async function loadQuestions(){
   try{
-    const ua=await mlGet(`/questions/search?seller_id=${userId}&status=UNANSWERED&limit=50`);
-    const ra=await mlGet(`/questions/search?seller_id=${userId}&limit=50`);
-    allQuestions=ra.questions||[];
+    // Traer todas las preguntas recientes (últimas 100)
+    const ua=await mlGet(`/questions/search?seller_id=${userId}&status=UNANSWERED&limit=50&sort_fields=date_created&sort_types=DESC`);
+    const ra=await mlGet(`/questions/search?seller_id=${userId}&limit=100&sort_fields=date_created&sort_types=DESC`);
+    allQuestions=(ra.questions||[]).sort((a,b)=>new Date(b.date_created)-new Date(a.date_created));
     const pend=(ua.questions||[]).length;
     document.getElementById('nb-q').textContent=pend;
     document.getElementById('q-pend').textContent=pend;
@@ -1374,7 +1423,28 @@ function toggleItem(cb,id){if(cb.checked)selItems.add(id);else selItems.delete(i
 function toggleAll(cb){document.querySelectorAll('.row-cb').forEach(c=>{c.checked=cb.checked;if(cb.checked)selItems.add(c.value);else selItems.delete(c.value);});updateBulkBar();}
 function clearSel(){selItems.clear();document.querySelectorAll('.row-cb').forEach(c=>c.checked=false);document.getElementById('cb-all').checked=false;updateBulkBar();}
 function updateBulkBar(){const n=selItems.size;const bar=document.getElementById('bulk-bar');if(n>0){bar.classList.add('vis');document.getElementById('bulk-n-bar').textContent=n+' seleccionadas';}else bar.classList.remove('vis');}
-function quickOpt(id,title){showSec('optimizar');document.getElementById('opt-in').value=title;liveScore(title);}
+function quickOpt(id,title){
+  showSec('optimizar');
+  // Load the specific item into optimizer
+  const titleEl=document.getElementById('opt-in');
+  if(titleEl){titleEl.value=title;liveScore(title);}
+  // Also update the select dropdown to show this item
+  const sel=document.getElementById('opt-sel');
+  if(sel){
+    for(let i=0;i<sel.options.length;i++){
+      if(sel.options[i].value===id){sel.selectedIndex=i;break;}
+    }
+  }
+  // Load description if available
+  const item=allItems.find(i=>i.id===id);
+  if(item){
+    // Try to get description
+    mlGet(`/items/${id}/description`).then(d=>{
+      const descEl=document.getElementById('opt-desc');
+      if(descEl&&d.plain_text)descEl.value=d.plain_text.slice(0,500);
+    }).catch(()=>{});
+  }
+}
 
 // ═══════════════════════════════════════════════════════
 // EDITOR
@@ -1638,15 +1708,24 @@ async function trackRank(){
   const kw=document.getElementById('rank-kw').value.trim();
   if(!kw)return;
   const el=document.getElementById('rank-res');
-  el.innerHTML='<div class="loading"><div class="spin"></div>Buscando...</div>';
+  el.innerHTML='<div class="loading"><div class="spin"></div>Buscando en ML Argentina...</div>';
   try{
-    const r=await mlGet(`/sites/MLA/search?q=${encodeURIComponent(kw)}&limit=50`);
-    const items=r.results||[];
-    let pos=null;
-    items.forEach((item,idx)=>{if(allItems.some(mi=>mi.id===item.id))pos=idx+1;});
+    // Buscar en las primeras 100 posiciones
+    const [r1,r2]=await Promise.all([
+      mlGet(`/sites/MLA/search?q=${encodeURIComponent(kw)}&limit=50&offset=0`),
+      mlGet(`/sites/MLA/search?q=${encodeURIComponent(kw)}&limit=50&offset=50`)
+    ]);
+    const items=[...(r1.results||[]),...(r2.results||[])];
+    const myItemIds=new Set(allItems.map(i=>i.id));
+    let pos=null,foundItem=null;
+    items.forEach((item,idx)=>{
+      if(myItemIds.has(item.id)&&pos===null){pos=idx+1;foundItem=item;}
+    });
+    const totalResults=r1.paging?.total||0;
+    const foundTitle=foundItem?.title||'';
     trackedKws.push({kw,pos,total:r.paging?.total||0,time:new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})});
-    el.innerHTML=pos?`<div class="alert a-ok">✅ Tu publicación aparece en posición <strong>#${pos}</strong> de ${(r.paging?.total||0).toLocaleString('es-AR')} resultados</div>`:
-      `<div class="alert a-warn">⚠️ No encontramos tu tienda en los primeros 50 resultados para "${kw}"</div>`;
+    el.innerHTML=pos?`<div class="alert a-ok">✅ Tu publicación "${foundTitle.slice(0,50)}" aparece en posición <strong>#${pos}</strong> de ${totalResults.toLocaleString('es-AR')} resultados</div>`:
+      `<div class="alert a-warn">⚠️ Tu tienda no aparece en las primeras 100 posiciones para "${kw}" (total: ${totalResults.toLocaleString('es-AR')} resultados)</div>`;
     document.getElementById('rank-list').innerHTML=trackedKws.map(k=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)">
       <div><div style="font-size:12px;font-weight:500">${k.kw}</div><div style="font-size:10px;color:var(--text3)">${k.time}</div></div>
       <span class="badge ${k.pos?k.pos<=10?'bg-g':k.pos<=30?'bg-a':'bg-r':'bg-gray'}">${k.pos?'#'+k.pos:'No rankeado'}</span>
@@ -1696,25 +1775,65 @@ JSON: {"potencial":"alto|medio|bajo","problema":"...","sugerencias":["s1","s2","
 // ═══════════════════════════════════════════════════════
 async function loadTrends(){
   const el=document.getElementById('trend-list');
-  if(el)el.innerHTML='<div class="loading"><div class="spin"></div>Buscando tendencias...</div>';
-  const queries=['taza mágica','taza cerámica personalizada','botella deportiva','jarro térmico','taza sublimada','taza regalo'];
+  if(el)el.innerHTML='<div class="loading"><div class="spin"></div>Cargando tendencias de ML Argentina...</div>';
+  
+  // Usar el endpoint real de tendencias de ML por categorías
+  const categories=[
+    {id:'MLA1000',name:'Electrónica'},
+    {id:'MLA1276',name:'Hogar y Muebles'},
+    {id:'MLA1132',name:'Ropa y Accesorios'},
+    {id:'MLA1144',name:'Deportes'},
+    {id:'MLA1459',name:'Salud y Belleza'},
+    {id:'MLA1367',name:'Juguetes y Bebés'},
+  ];
+
   const results=[];
-  for(const q of queries){
+  for(const cat of categories){
     try{
-      const r=await mlGet(`/sites/MLA/search?q=${encodeURIComponent(q)}&limit=3`);
-      results.push({q,total:r.paging?.total||0,items:r.results?.slice(0,2)||[]});
-    }catch(e){results.push({q,total:0,items:[]});}
+      const r=await mlGet(`/trends/MLA/${cat.id}`);
+      if(r&&Array.isArray(r)){
+        results.push({cat:cat.name,catId:cat.id,items:r.slice(0,5)});
+      }
+    }catch(e){
+      // Fallback: buscar por término de la categoría
+      results.push({cat:cat.name,catId:cat.id,items:[]});
+    }
   }
-  if(el){
-    const max=Math.max(...results.map(r=>r.total),1);
-    el.innerHTML=`<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">${results.map(r=>`<div style="background:var(--card2);border:1px solid var(--border);border-radius:var(--r);padding:12px">
-      <div style="font-size:12.5px;font-weight:600;margin-bottom:4px">${r.q}</div>
-      <div style="font-size:11px;color:var(--text3);margin-bottom:7px">${r.total.toLocaleString('es-AR')} resultados</div>
-      <div class="pbar"><div class="pfill" style="width:${(r.total/max)*100}%;background:var(--blue)"></div></div>
-      <button class="btn btn-ghost btn-xs" style="margin-top:8px;width:100%" onclick="document.getElementById('gen2-kw').value='${r.q}';showSec('generador')">🎯 Generar producto</button>
-    </div>`).join('')}</div>`;
+
+  // También buscar tendencias de las categorías específicas de la tienda
+  try{
+    const myTrends=await mlGet('/trends/MLA/MLA1276');
+    if(myTrends&&Array.isArray(myTrends)){
+      results.unshift({cat:'🏠 Hogar (tu categoría)',catId:'MLA1276',items:myTrends.slice(0,8),featured:true});
+    }
+  }catch(e){}
+
+  if(el&&results.length){
+    el.innerHTML=results.map(cat=>`
+      <div style="background:${cat.featured?'var(--blue-l)':'var(--card2)'};border:1px solid ${cat.featured?'rgba(59,130,246,.2)':'var(--border)'};border-radius:var(--r);padding:14px;margin-bottom:10px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px;color:${cat.featured?'var(--blue)':'var(--text)'}">${cat.cat}</div>
+        ${cat.items.length?cat.items.map((item,i)=>`
+          <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(0,0,0,.05)">
+            <span style="font-size:11px;font-weight:700;color:var(--text3);width:18px">#${i+1}</span>
+            <div style="flex:1;font-size:12px;font-weight:500">${item.keyword||item}</div>
+            <button class="btn btn-ghost btn-xs" onclick="document.getElementById('gen2-kw').value='${(item.keyword||item).replace(/'/g,"\'")}';showSec('generador')">🎯</button>
+            <button class="btn btn-ghost btn-xs" onclick="document.getElementById('comp-q').value='${(item.keyword||item).replace(/'/g,"\'")}';showSec('competencia');doComp()">🔍</button>
+          </div>`).join(''):
+          '<div style="font-size:12px;color:var(--text3)">Sin datos disponibles para esta categoría</div>'
+        }
+      </div>`).join('');
+  } else if(el){
+    el.innerHTML='<div class="alert a-warn">⚠️ No se pudieron cargar las tendencias. La API de tendencias de ML requiere autenticación especial.</div>';
   }
-  mkChart('ch-trends',{type:'bar',data:{labels:results.map(r=>r.q.slice(0,18)),datasets:[{data:results.map(r=>r.total),backgroundColor:'#3b82f6',borderRadius:5}]},options:{...cDefs(),scales:{y:{...yAx(v=>(v/1000).toFixed(0)+'k')},x:{...xAx()}}}});
+
+  // Chart con datos disponibles
+  const chartData=results.filter(r=>r.items.length>0);
+  if(chartData.length){
+    mkChart('ch-trends',{type:'bar',data:{
+      labels:chartData.map(r=>r.cat.slice(0,18)),
+      datasets:[{data:chartData.map(r=>r.items.length*10),backgroundColor:'#3b82f6',borderRadius:5}]
+    },options:{...cDefs(),scales:{y:{...yAx()},x:{...xAx()}}}});
+  }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1764,30 +1883,68 @@ async function doMktAnalysis(){
   const q=document.getElementById('mkt-q').value.trim();
   if(!q)return;
   const el=document.getElementById('mkt-out');
-  el.innerHTML='<div class="loading"><div class="spin"></div>Analizando mercado...</div>';
+  el.innerHTML='<div class="loading"><div class="spin"></div>Analizando mercado de ML Argentina...</div>';
   try{
-    const r=await mlGet(`/sites/MLA/search?q=${encodeURIComponent(q)}&limit=20`);
+    // Buscar con más resultados y obtener info de categorías
+    const r=await mlGet(`/sites/MLA/search?q=${encodeURIComponent(q)}&limit=50`);
     const items=r.results||[];
     const prices=items.map(i=>i.price||0).filter(Boolean);
     const avg=prices.reduce((s,p)=>s+p,0)/Math.max(prices.length,1);
+    const min=prices.length?Math.min(...prices):0;
+    const max=prices.length?Math.max(...prices):0;
+
+    // Detectar categorías predominantes
+    const cats={};
+    items.forEach(i=>{if(i.category_id)cats[i.category_id]=(cats[i.category_id]||0)+1;});
+    const topCat=Object.entries(cats).sort((a,b)=>b[1]-a[1])[0]?.[0];
+
+    // Obtener nombre de categoría
+    let catName=topCat||'—';
+    if(topCat){try{const catInfo=await mlGet(`/categories/${topCat}`);catName=catInfo.name||topCat;}catch(e){}}
+
+    // Obtener sellers destacados
+    const sellers={};
+    items.forEach(i=>{if(i.seller?.id)sellers[i.seller.id]=(sellers[i.seller.id]||0)+1;});
+    const topSellers=Object.entries(sellers).sort((a,b)=>b[1]-a[1]).slice(0,5);
+
     el.innerHTML=`
-      <div class="mg" style="margin-top:10px">
-        <div class="mc b"><div class="mc-lbl">Publicaciones</div><div class="mc-val">${(r.paging?.total||0).toLocaleString('es-AR')}</div></div>
+      <div class="mg" style="margin-top:12px">
+        <div class="mc b"><div class="mc-lbl">Total publicaciones</div><div class="mc-val">${(r.paging?.total||0).toLocaleString('es-AR')}</div></div>
         <div class="mc g"><div class="mc-lbl">Precio promedio</div><div class="mc-val">$${Math.round(avg).toLocaleString('es-AR')}</div></div>
-        <div class="mc a"><div class="mc-lbl">Con envío gratis</div><div class="mc-val">${items.filter(i=>i.shipping?.free_shipping).length}/${items.length}</div></div>
-        <div class="mc p"><div class="mc-lbl">Con ventas</div><div class="mc-val">${items.filter(i=>i.sold_quantity>0).length}</div></div>
+        <div class="mc a"><div class="mc-lbl">Precio mínimo</div><div class="mc-val">$${min.toLocaleString('es-AR')}</div></div>
+        <div class="mc p"><div class="mc-lbl">Precio máximo</div><div class="mc-val">$${max.toLocaleString('es-AR')}</div></div>
       </div>
-      <div class="tw" style="margin-top:10px"><table>
-        <thead><tr><th>Top publicaciones</th><th>Precio</th><th>Ventas</th><th>Vendedor</th><th>Envío</th></tr></thead>
-        <tbody>${items.slice(0,10).map(i=>`<tr>
-          <td style="max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><a href="${i.permalink||'#'}" target="_blank" style="color:var(--blue)">${i.title}</a></td>
-          <td>$${(i.price||0).toLocaleString('es-AR')}</td>
-          <td>${i.sold_quantity||0}</td>
-          <td style="font-size:11px">${i.seller?.nickname||'—'}</td>
-          <td>${i.shipping?.free_shipping?'<span class="badge bg-g">Gratis</span>':'—'}</td>
-        </tr>`).join('')}</tbody>
-      </table></div>`;
-  }catch(e){el.innerHTML='<div class="alert a-err">Error al analizar</div>';}
+      <div class="g2" style="margin-top:10px">
+        <div>
+          <div class="card-title" style="margin-bottom:8px">📦 Top 50 publicaciones</div>
+          <div class="tw"><table>
+            <thead><tr><th>Título</th><th>Precio</th><th>Ventas</th><th>Vendedor</th><th>Envío</th></tr></thead>
+            <tbody>${items.slice(0,15).map(i=>`<tr>
+              <td style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+                <a href="${i.permalink||'#'}" target="_blank" style="color:var(--blue);font-size:11.5px">${i.title}</a></td>
+              <td style="font-weight:600;font-size:12px">$${(i.price||0).toLocaleString('es-AR')}</td>
+              <td>${i.sold_quantity||0}</td>
+              <td style="font-size:11px;color:var(--text3)">${i.seller?.nickname||'—'}</td>
+              <td>${i.shipping?.free_shipping?'<span class="badge bg-g">Gratis</span>':'—'}</td>
+            </tr>`).join('')}</tbody>
+          </table></div>
+        </div>
+        <div>
+          <div class="card-title" style="margin-bottom:8px">🏆 Vendedores más activos</div>
+          ${topSellers.map(([sid,count])=>{
+            const seller=items.find(i=>i.seller?.id==sid)?.seller;
+            return`<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)">
+              <div style="font-size:12px;font-weight:500">${seller?.nickname||'Vendedor '+sid}</div>
+              <span class="badge bg-b">${count} publicaciones</span>
+            </div>`;
+          }).join('')}
+          <div style="margin-top:12px">
+            <div class="card-title" style="margin-bottom:6px">📂 Categoría principal</div>
+            <div style="font-size:13px;font-weight:600;color:var(--blue)">${catName}</div>
+          </div>
+        </div>
+      </div>`;
+  }catch(e){el.innerHTML='<div class="alert a-err">Error al analizar. Revisá la búsqueda.</div>';}
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1818,7 +1975,7 @@ function renderVentas(){
       <td style="font-weight:600;color:var(--green)">$${gross.toLocaleString('es-AR')}</td>
       <td style="font-size:11px;color:var(--text2)">$${neto.toLocaleString('es-AR')}</td>
       <td><span class="badge ${o.status==='paid'?'bg-g':o.status==='cancelled'?'bg-r':'bg-a'}">${statusES[o.status]||o.status||'—'}</span></td>
-      <td style="color:var(--text3);font-size:11px">${o.date_created?new Date(o.date_created).toLocaleDateString('es-AR'):''}</td>
+      <td style="color:var(--text3);font-size:11px">${o.date_created?new Date(o.date_created).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}):''}</td>
       <td><a href="https://www.mercadolibre.com.ar/ventas/${o.id}/detalle" target="_blank" class="btn btn-ghost btn-xs">Ver →</a></td>
     </tr>`;
   }).join('');
@@ -1919,16 +2076,40 @@ function renderHistorialQs(){
 // ═══════════════════════════════════════════════════════
 // MENSAJES
 // ═══════════════════════════════════════════════════════
-function renderMensajes(){
+async function renderMensajes(){
   const el=document.getElementById('msgs-list');
-  if(!allOrders.length){el.innerHTML='<div class="alert a-info">Sin órdenes recientes</div>';return;}
-  el.innerHTML=allOrders.slice(0,10).map(o=>`<div style="padding:10px 0;border-bottom:1px solid var(--border)">
-    <div style="display:flex;align-items:center;justify-content:space-between">
-      <div><div style="font-size:12.5px;font-weight:500">Orden #${o.id} — ${o.buyer?.nickname||'—'}</div>
-      <div style="font-size:11px;color:var(--text3);margin-top:2px">${o.order_items?.[0]?.item?.title?.slice(0,50)||'—'} · $${(o.total_amount||0).toLocaleString('es-AR')}</div></div>
-      <a href="https://www.mercadolibre.com.ar/ventas/${o.id}/detalle" target="_blank" class="btn btn-ghost btn-xs">Ver conversación →</a>
-    </div>
-  </div>`).join('');
+  el.innerHTML='<div class="loading"><div class="spin"></div>Cargando mensajes...</div>';
+  try{
+    // Buscar mensajes reales del vendedor
+    const r=await mlGet(`/messages/packs?tag=post_sale&status=unread&limit=20`);
+    const packs=r.data||r.results||[];
+    if(!packs.length){
+      // Fallback: buscar por usuario
+      const r2=await mlGet(`/messages/packs?role=seller&status=unread&limit=20`);
+      const packs2=r2.data||r2.results||[];
+      if(!packs2.length){
+        el.innerHTML='<div class="alert a-ok">✅ Sin mensajes sin leer.<br><div style="margin-top:8px;font-size:12px;color:var(--text3)">Los mensajes post-venta aparecen cuando hay conversaciones activas con compradores.</div></div>';
+        return;
+      }
+    }
+    el.innerHTML=(packs.length?packs:packs||[]).map(p=>`<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div style="font-size:12.5px;font-weight:500">${p.subject||'Mensaje de comprador'}</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px">
+            ${p.from?.user_id||p.buyer_id?'Comprador #'+(p.from?.user_id||p.buyer_id):'—'}
+            · ${p.date_received?new Date(p.date_received).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'—'}
+          </div>
+          ${p.last_message?.text?`<div style="font-size:12px;color:var(--text2);margin-top:4px;font-style:italic">"${p.last_message.text.slice(0,80)}..."</div>`:''}
+        </div>
+        <a href="https://www.mercadolibre.com.ar/mensajes" target="_blank" class="btn btn-ghost btn-xs">Ver →</a>
+      </div>
+    </div>`).join('')||'<div class="alert a-ok">✅ Sin mensajes pendientes</div>';
+  }catch(e){
+    el.innerHTML=`<div class="alert a-info">ℹ️ Los mensajes post-venta se visualizan directamente en ML.<br>
+      <a href="https://www.mercadolibre.com.ar/mensajes" target="_blank" class="btn btn-primary btn-sm" style="margin-top:8px;display:inline-flex">Ver mensajes en ML →</a>
+    </div>`;
+  }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -2091,9 +2272,7 @@ function calcAds(){
 // PRECIOS AUTOMÁTICOS
 // ═══════════════════════════════════════════════════════
 function populatePAItems(){
-  const sel=document.getElementById('pa-item');
-  sel.innerHTML='<option value="">Seleccioná publicación...</option>'+
-    allItems.filter(i=>i.status==='active').slice(0,100).map(i=>`<option value="${i.id}" data-price="${i.price}">${i.title.slice(0,55)}</option>`).join('');
+  filterPAItems();
 }
 
 function addPriceRule(){
@@ -2142,11 +2321,8 @@ function addRule(){
 
 function renderRules(){
   const el=document.getElementById('rules-list');
-  const all=[
-    {id:'default-1',name:'Subir precio si stock bajo',cond:'stock_low',act:'price_up',active:true},
-    {id:'default-2',name:'Bajar precio sin ventas 7 días',cond:'no_sales',act:'price_dn',active:true},
-    ...rules
-  ];
+  const all=[...rules];
+  if(!all.length){el.innerHTML='<div style="color:var(--text3);font-size:12px;padding:12px">Sin reglas configuradas. Creá tu primera regla.</div>';return;}
   el.innerHTML=all.map(r=>`<div style="background:var(--card2);border:1px solid var(--border);border-radius:var(--rs);padding:10px;margin-bottom:8px;display:flex;align-items:center;gap:10px">
     <div style="flex:1">
       <div style="font-size:12px;font-weight:500">${r.name}</div>
@@ -2167,22 +2343,44 @@ function deleteRule(id){rules=rules.filter(r=>r.id!=id);renderRules();}
 // ALERTAS
 // ═══════════════════════════════════════════════════════
 function genAlerts(){
-  const alerts=[];
+  const alertsData=[];
   allItems.forEach(i=>{
-    if((i.available_quantity||0)===0) alerts.push({icon:'⛔',msg:`Sin stock: ${i.title.slice(0,50)}`,type:'r',time:'Ahora'});
-    else if((i.available_quantity||0)<=2) alerts.push({icon:'⚠️',msg:`Stock bajo (${i.available_quantity}): ${i.title.slice(0,45)}`,type:'a',time:'Revisar'});
-    if(i.status==='paused') alerts.push({icon:'⏸',msg:`Pausada: ${i.title.slice(0,45)}`,type:'a',time:'Verificar'});
-    if(seoSc(i.title)<30) alerts.push({icon:'🔍',msg:`SEO débil (${seoSc(i.title)}): ${i.title.slice(0,40)}`,type:'a',time:'Mejorar'});
+    if((i.available_quantity||0)===0)
+      alertsData.push({icon:'⛔',msg:`Sin stock: ${i.title.slice(0,45)}`,type:'r',action:'stock',actionLabel:'Agregar stock',itemId:i.id,itemTitle:i.title});
+    else if((i.available_quantity||0)<=2)
+      alertsData.push({icon:'⚠️',msg:`Stock bajo (${i.available_quantity}): ${i.title.slice(0,42)}`,type:'a',action:'stock',actionLabel:'Actualizar stock',itemId:i.id,itemTitle:i.title});
+    if(i.status==='paused')
+      alertsData.push({icon:'⏸',msg:`Pausada: ${i.title.slice(0,45)}`,type:'a',action:'publicaciones',actionLabel:'Ver publicación'});
+    if(seoSc(i.title)<30)
+      alertsData.push({icon:'🔍',msg:`SEO débil (${seoSc(i.title)}): ${i.title.slice(0,42)}`,type:'a',action:'optimizar',actionLabel:'Mejorar SEO',itemId:i.id,itemTitle:i.title});
   });
   const pend=allQuestions.filter(q=>q.status==='UNANSWERED');
-  if(pend.length) alerts.push({icon:'💬',msg:`${pend.length} pregunta${pend.length>1?'s':''} sin responder`,type:'a',time:'Urgente'});
-  document.getElementById('nb-alerts').textContent=alerts.length;
+  if(pend.length) alertsData.push({icon:'💬',msg:`${pend.length} pregunta${pend.length>1?'s':''} sin responder`,type:'a',action:'preguntas',actionLabel:'Responder'});
+  document.getElementById('nb-alerts').textContent=alertsData.length;
   const el=document.getElementById('alerts-list');
-  if(!alerts.length){el.innerHTML='<div class="alert a-ok">✅ Sin alertas activas. Todo en orden.</div>';return;}
-  el.innerHTML=alerts.map(a=>`<div class="alert ${a.type==='r'?'a-err':'a-warn'}" style="margin-bottom:5px">
+  if(!alertsData.length){el.innerHTML='<div class="alert a-ok">✅ Sin alertas activas. Todo en orden.</div>';return;}
+  el.innerHTML=alertsData.slice(0,20).map(a=>`<div class="alert ${a.type==='r'?'a-err':'a-warn'}" style="margin-bottom:5px;cursor:pointer" onclick="handleAlert('${a.action}','${(a.itemId||'')}','${(a.itemTitle||'').replace(/'/g,"\'")}')">
     <div style="flex:1">${a.icon} ${a.msg}</div>
-    <span class="badge ${a.type==='r'?'bg-r':'bg-a'}" style="flex-shrink:0">${a.time}</span>
+    <span class="badge ${a.type==='r'?'bg-r':'bg-a'}" style="flex-shrink:0;cursor:pointer">${a.actionLabel} →</span>
   </div>`).join('');
+}
+
+function handleAlert(action, itemId, itemTitle){
+  if(action==='stock'){
+    showSec('stock');
+    setTimeout(()=>{
+      const searchEl=document.getElementById('stock-search');
+      if(searchEl&&itemTitle){searchEl.value=itemTitle.slice(0,20);renderStockTable();}
+      if(itemId){const inp=document.getElementById('stk-'+itemId);if(inp)inp.focus();}
+    },300);
+  } else if(action==='optimizar'){
+    showSec('optimizar');
+    setTimeout(()=>{
+      if(itemTitle){document.getElementById('opt-in').value=itemTitle;liveScore(itemTitle);}
+    },200);
+  } else {
+    showSec(action);
+  }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -2303,13 +2501,21 @@ function buildAlgoFactors(){
 // CLAUDE API
 // ═══════════════════════════════════════════════════════
 async function callClaude(prompt,history){
+  // Usa Gemini 2.0 Flash (gratuito) via Worker proxy
   const messages=history||[{role:'user',content:prompt}];
-  const r=await fetch('https://api.anthropic.com/v1/messages',{
-    method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1000,messages})
+  const r=await fetch(WORKER+'/ai',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({max_tokens:1000,messages})
   });
+  if(!r.ok){
+    const errText=await r.text();
+    throw new Error('Worker error '+r.status+': '+errText.slice(0,100));
+  }
   const d=await r.json();
-  if(d.error)throw new Error(d.error.message);
+  if(d.error){
+    throw new Error(typeof d.error==='string'?d.error:(d.error.message||JSON.stringify(d.error)));
+  }
   return d.content?.map(c=>c.text||'').join('').trim()||'';
 }
 
@@ -2341,6 +2547,93 @@ async function applyBulkTitle(){
 async function applyBulkStatus(status){
   document.getElementById('bt-res').innerHTML=`<div class="alert a-ok">✅ Estado cambiado a "${status==='active'?'Activa':'Pausada'}" en ${selItems.size} publicaciones.</div>`;
   closeModal('m-bulk');
+}
+
+// ═══════════════════════════════════════════════════════
+// COMPETENCIA EXTRA FUNCTIONS
+// ═══════════════════════════════════════════════════════
+function setCompTab(tab, btn){
+  document.querySelectorAll('#sec-competencia .tab').forEach(t=>t.classList.remove('active'));
+  btn.classList.add('active');
+  ['search','seller','url'].forEach(t=>{
+    const el=document.getElementById('comp-tab-'+t);
+    if(el) el.style.display=t===tab?'block':'none';
+  });
+}
+
+async function doCompSeller(){
+  const nick=document.getElementById('comp-seller').value.trim();
+  if(!nick)return;
+  const el=document.getElementById('comp-out');
+  el.innerHTML='<div class="loading"><div class="spin"></div>Buscando vendedor...</div>';
+  try{
+    // Buscar usuario por nickname
+    const users=await mlGet(`/users/search?nickname=${encodeURIComponent(nick)}`);
+    const user=users.results?.[0]||users;
+    if(!user||!user.id){el.innerHTML='<div class="alert a-warn">No se encontró el vendedor "'+nick+'"</div>';return;}
+    // Traer sus publicaciones activas
+    const items=await mlGet(`/users/${user.id}/items/search?limit=20`);
+    const ids=items.results||[];
+    let details=[];
+    if(ids.length){
+      const r=await mlGet(`/items?ids=${ids.slice(0,20).join(',')}&attributes=id,title,price,sold_quantity,thumbnail,permalink`);
+      details=r.filter(x=>x.code===200).map(x=>x.body);
+    }
+    const totalSales=details.reduce((s,i)=>s+(i.sold_quantity||0),0);
+    el.innerHTML=`
+      <div style="background:var(--card2);border:1px solid var(--border);border-radius:var(--r);padding:14px;margin-bottom:12px">
+        <div style="font-size:15px;font-weight:700">${user.nickname}</div>
+        <div style="font-size:12px;color:var(--text3);margin-top:4px">ID: ${user.id} · Publicaciones: ${items.paging?.total||ids.length} · Total ventas visibles: ${totalSales}</div>
+      </div>
+      <div class="tw"><table>
+        <thead><tr><th>Publicación</th><th>Precio</th><th>Ventas</th><th>Ver</th></tr></thead>
+        <tbody>${details.map(i=>`<tr>
+          <td style="max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${i.title}</td>
+          <td style="font-weight:600">$${(i.price||0).toLocaleString('es-AR')}</td>
+          <td>${i.sold_quantity||0}</td>
+          <td><a href="${i.permalink||'#'}" target="_blank" class="btn btn-ghost btn-xs">🔗</a></td>
+        </tr>`).join('')}</tbody>
+      </table></div>`;
+  }catch(e){el.innerHTML='<div class="alert a-err">Error al buscar el vendedor</div>';}
+}
+
+async function doCompUrl(){
+  let input=document.getElementById('comp-url').value.trim();
+  if(!input)return;
+  const el=document.getElementById('comp-out');
+  el.innerHTML='<div class="loading"><div class="spin"></div>Analizando publicación...</div>';
+  try{
+    // Extraer ID de URL o usar directamente
+    let itemId=input;
+    const match=input.match(/MLA[\-]?\d+/i);
+    if(match) itemId=match[0].replace('-','');
+    const item=await mlGet(`/items/${itemId}`);
+    if(!item||item.error){el.innerHTML='<div class="alert a-warn">No se encontró la publicación</div>';return;}
+    // Buscar publicaciones similares
+    const similar=await mlGet(`/sites/MLA/search?q=${encodeURIComponent(item.title.split(' ').slice(0,5).join(' '))}&limit=10`);
+    const sims=similar.results||[];
+    el.innerHTML=`
+      <div style="background:var(--blue-l);border:1px solid rgba(59,130,246,.2);border-radius:var(--r);padding:14px;margin-bottom:12px">
+        <div style="font-size:13px;font-weight:700">${item.title}</div>
+        <div style="font-size:12px;margin-top:6px;display:flex;gap:12px">
+          <span>💰 $${(item.price||0).toLocaleString('es-AR')}</span>
+          <span>📦 Stock: ${item.available_quantity||0}</span>
+          <span>🛍️ Ventas: ${item.sold_quantity||0}</span>
+          <span>👤 ${item.seller_id}</span>
+        </div>
+      </div>
+      <div class="card-title" style="margin-bottom:8px">Publicaciones similares</div>
+      <div class="tw"><table>
+        <thead><tr><th>Título</th><th>Precio</th><th>Ventas</th><th>Envío</th><th>Ver</th></tr></thead>
+        <tbody>${sims.map(i=>`<tr>
+          <td style="max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${i.title}</td>
+          <td>$${(i.price||0).toLocaleString('es-AR')}</td>
+          <td>${i.sold_quantity||0}</td>
+          <td>${i.shipping?.free_shipping?'<span class="badge bg-g">Gratis</span>':'—'}</td>
+          <td><a href="${i.permalink||'#'}" target="_blank" class="btn btn-ghost btn-xs">🔗</a></td>
+        </tr>`).join('')}</tbody>
+      </table></div>`;
+  }catch(e){el.innerHTML='<div class="alert a-err">Error al analizar la publicación</div>';}
 }
 
 // ═══════════════════════════════════════════════════════
@@ -2416,6 +2709,67 @@ async function refreshAll(){
   await Promise.all([loadItems(),loadOrders(),loadQuestions()]);
   renderDash();
   stamp();
+}
+
+// ═══════════════════════════════════════════════════════
+// PRECIOS AUTOMÁTICOS HELPERS
+// ═══════════════════════════════════════════════════════
+let paCompetitorId=null;
+
+function filterPAItems(){
+  const search=(document.getElementById('pa-search')?.value||'').toLowerCase();
+  const sel=document.getElementById('pa-item');
+  const active=allItems.filter(i=>i.status==='active');
+  const filtered=search?active.filter(i=>i.title?.toLowerCase().includes(search)||(i.seller_custom_field||'').toLowerCase().includes(search)):active;
+  sel.innerHTML='<option value="">Seleccioná una publicación...</option>'+
+    filtered.slice(0,50).map(i=>`<option value="${i.id}" data-price="${i.price}" data-title="${i.title.replace(/"/g,'')}">${i.title.slice(0,55)} · $${(i.price||0).toLocaleString('es-AR')}</option>`).join('');
+}
+
+function loadPACompetitors(){
+  const sel=document.getElementById('pa-item');
+  const opt=sel.options[sel.selectedIndex];
+  const wrap=document.getElementById('pa-comp-wrap');
+  if(opt?.value){
+    wrap.style.display='block';
+    document.getElementById('pa-min').value=Math.round((parseFloat(opt.dataset.price)||0)*0.85);
+    document.getElementById('pa-max').value=Math.round((parseFloat(opt.dataset.price)||0)*1.2);
+    // Pre-fill competitor search with item title keywords
+    const title=opt.dataset.title||'';
+    document.getElementById('pa-comp-search').value=title.split(' ').slice(0,4).join(' ');
+  } else {
+    wrap.style.display='none';
+  }
+}
+
+let paSearchTimeout=null;
+function searchPACompetitors(){
+  clearTimeout(paSearchTimeout);
+  paSearchTimeout=setTimeout(async()=>{
+    const q=document.getElementById('pa-comp-search').value.trim();
+    if(!q||q.length<3)return;
+    const el=document.getElementById('pa-comp-results');
+    el.innerHTML='<div style="font-size:11px;color:var(--text3)">Buscando...</div>';
+    try{
+      const r=await mlGet(`/sites/MLA/search?q=${encodeURIComponent(q)}&limit=8`);
+      const items=r.results||[];
+      el.innerHTML=items.map(i=>`<div style="display:flex;align-items:center;gap:7px;padding:6px;border:1px solid var(--border);border-radius:var(--rs);margin-bottom:4px;cursor:pointer;background:#fff" onclick="selectPAComp('${i.id}','${i.title.replace(/'/g,"\'")}','${i.price}')">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:11.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${i.title}</div>
+          <div style="font-size:10px;color:var(--text3)">$${(i.price||0).toLocaleString('es-AR')} · ${i.sold_quantity||0} ventas · ${i.seller?.nickname||'—'}</div>
+        </div>
+        <span class="badge bg-b">Seleccionar</span>
+      </div>`).join('')||'<div style="font-size:11px;color:var(--text3)">Sin resultados</div>';
+    }catch(e){el.innerHTML='<div style="font-size:11px;color:var(--red)">Error al buscar</div>';}
+  },600);
+}
+
+function selectPAComp(id,title,price){
+  paCompetitorId=id;
+  document.getElementById('pa-comp-results').innerHTML='';
+  document.getElementById('pa-comp-selected').innerHTML=`<div style="background:var(--green-l);border:1px solid rgba(16,185,129,.2);border-radius:var(--rs);padding:8px;font-size:12px">
+    ✅ Competidor seleccionado: <strong>${title.slice(0,50)}</strong> · $${Number(price).toLocaleString('es-AR')}
+    <button class="btn btn-ghost btn-xs" style="margin-left:6px" onclick="paCompetitorId=null;document.getElementById('pa-comp-selected').innerHTML='';document.getElementById('pa-comp-results').innerHTML=''">✕</button>
+  </div>`;
 }
 
 // ═══════════════════════════════════════════════════════
