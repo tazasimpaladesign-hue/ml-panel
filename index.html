@@ -1249,50 +1249,34 @@ async function loadItems(){
   try{
     let allIds=[];
 
-    // Paso 1: obtener total real
     const first=await mlGet(`/users/${userId}/items/search?limit=1&offset=0`);
     const totalActive=first.paging?.total||0;
     console.log(`[loadItems] Total activas en ML: ${totalActive}`);
 
-    // Paso 2: traer activas paginando hasta el límite de ML (offset max 950)
-    // Para >1000 items, dividimos por tipo de publicación
-    const listingTypes=['bronze','free','silver','gold','gold_special','gold_premium','gold_pro'];
+    // Estrategia definitiva: 2 pasadas con distinto orden de fecha de vencimiento
+    // stop_time_asc: publicaciones que vencen primero (más antiguas)
+    // stop_time_desc: publicaciones que vencen después (más nuevas)
+    // Combinadas cubren todo el catálogo sin importar el tamaño
+    const orders = ['stop_time_asc', 'stop_time_desc'];
     
-    if(totalActive<=950){
-      // Simple: una sola pasada
-      for(let offset=0;offset<950;offset+=50){
-        const s=await mlGet(`/users/${userId}/items/search?limit=50&offset=${offset}`);
-        const ids=s.results||[];
-        allIds.push(...ids);
-        if(ids.length<50) break;
-      }
-    } else {
-      // Grande: dividir por tipo de publicación
-      for(const lt of listingTypes){
-        let offset=0;
-        while(offset<950){
-          try{
-            const s=await mlGet(`/users/${userId}/items/search?limit=50&offset=${offset}&listing_type_id=${lt}`);
-            const ids=s.results||[];
-            allIds.push(...ids);
-            if(ids.length<50) break;
-            offset+=50;
-          }catch(e){break;}
+    for(const order of orders){
+      for(let offset=0; offset<950; offset+=50){
+        try{
+          const s=await mlGet(`/users/${userId}/items/search?limit=50&offset=${offset}&order=${order}`);
+          const ids=s.results||[];
+          allIds.push(...ids);
+          if(ids.length<50) break;
+        }catch(e){
+          console.warn(`[loadItems] error order=${order} offset=${offset}:`,e);
+          break;
         }
-        await new Promise(r=>setTimeout(r,50));
       }
-      // También sin filtro para capturar los que no tienen tipo asignado
-      for(let offset=0;offset<950;offset+=50){
-        const s=await mlGet(`/users/${userId}/items/search?limit=50&offset=${offset}`);
-        const ids=s.results||[];
-        allIds.push(...ids);
-        if(ids.length<50) break;
-      }
+      await new Promise(r=>setTimeout(r,100));
     }
 
-    // Paso 3: pausadas y moderadas
+    // Pausadas y moderadas
     for(const status of ['paused','under_review']){
-      for(let offset=0;offset<500;offset+=50){
+      for(let offset=0; offset<500; offset+=50){
         try{
           const s=await mlGet(`/users/${userId}/items/search?limit=50&offset=${offset}&status=${status}`);
           const ids=s.results||[];
@@ -1308,7 +1292,6 @@ async function loadItems(){
     if(!allIds.length){allItems=[];return;}
     allItems=[];
 
-    // Paso 4: traer detalles en chunks de 20
     for(let i=0;i<allIds.length;i+=20){
       const chunk=allIds.slice(i,i+20);
       try{
