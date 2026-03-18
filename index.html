@@ -1253,30 +1253,27 @@ async function loadItems(){
     const totalActive=first.paging?.total||0;
     console.log(`[loadItems] Total activas en ML: ${totalActive}`);
 
-    // Estrategia definitiva: 2 pasadas con distinto orden de fecha de vencimiento
-    // stop_time_asc: publicaciones que vencen primero (más antiguas)
-    // stop_time_desc: publicaciones que vencen después (más nuevas)
-    // Combinadas cubren todo el catálogo sin importar el tamaño
-    const orders = ['stop_time_asc', 'stop_time_desc'];
-    
-    for(const order of orders){
-      for(let offset=0; offset<950; offset+=50){
-        try{
-          const s=await mlGet(`/users/${userId}/items/search?limit=50&offset=${offset}&order=${order}`);
-          const ids=s.results||[];
-          allIds.push(...ids);
-          if(ids.length<50) break;
-        }catch(e){
-          console.warn(`[loadItems] error order=${order} offset=${offset}:`,e);
-          break;
-        }
-      }
-      await new Promise(r=>setTimeout(r,100));
+    // Método oficial ML para >1000 items: search_type=scan + scroll_id
+    // Primer request con search_type=scan (sin offset)
+    let scrollId=null;
+    while(true){
+      const url=scrollId
+        ? `/users/${userId}/items/search?search_type=scan&scroll_id=${encodeURIComponent(scrollId)}&limit=100`
+        : `/users/${userId}/items/search?search_type=scan&limit=100`;
+      const s=await mlGet(url);
+      const ids=s.results||[];
+      if(!ids.length) break;
+      allIds.push(...ids);
+      scrollId=s.scroll_id||null;
+      console.log(`[loadItems] Obtenidos: ${allIds.length} (scroll_id: ${scrollId?'sí':'no'})`);
+      if(!scrollId) break;
+      // pausa pequeña entre llamadas
+      await new Promise(r=>setTimeout(r,200));
     }
 
-    // Pausadas y moderadas
+    // Pausadas y moderadas (pocas, paginación normal)
     for(const status of ['paused','under_review']){
-      for(let offset=0; offset<500; offset+=50){
+      for(let offset=0;offset<500;offset+=50){
         try{
           const s=await mlGet(`/users/${userId}/items/search?limit=50&offset=${offset}&status=${status}`);
           const ids=s.results||[];
@@ -1287,7 +1284,7 @@ async function loadItems(){
     }
 
     allIds=[...new Set(allIds)];
-    console.log(`[loadItems] IDs únicos: ${allIds.length} de ${totalActive} activas`);
+    console.log(`[loadItems] IDs únicos totales: ${allIds.length}`);
 
     if(!allIds.length){allItems=[];return;}
     allItems=[];
@@ -1311,7 +1308,7 @@ async function loadItems(){
     document.getElementById('s-ok').textContent=allItems.filter(i=>(i.available_quantity||0)>3).length;
     document.getElementById('d-items').textContent=active;
     document.getElementById('nb-pub').textContent=active;
-  }catch(e){console.error('loadItems',e);}
+  }catch(e){console.error('[loadItems] Error:',e);}
 }
 
 
