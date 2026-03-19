@@ -1343,31 +1343,41 @@ async function initApp(){
   const acctColor = currentAccount?.color || 'var(--accent)';
   document.getElementById('sb-store').textContent = acctName;
   document.getElementById('sb-store').style.color = acctColor;
-  // Mostrar botón para cambiar cuenta
   const switchBtn = document.getElementById('switch-account-btn');
   if(switchBtn) switchBtn.style.display = 'flex';
   stamp();
-  await Promise.all([loadItems(),loadOrders(),loadQuestions()]);
+
+  // ── CARGA RÁPIDA: datos del mes actual + preguntas en paralelo ──
+  // El dashboard muestra datos útiles en 2-3 segundos
+  await Promise.all([loadItemsFast(), loadOrdersMonth(), loadQuestions()]);
   renderDashboard();
   initAI();
   buildAlgoFactors();
   buildAdsChart();
+
+  // ── CARGA COMPLETA EN BACKGROUND: no bloquea la UI ──
+  loadItemsFull();        // carga publicaciones pausadas/moderadas
+  loadOrdersHistory();    // carga histórico 18 meses + estados de envío
   loadTrends();
 }
 
-function stamp(){
-  document.getElementById('last-upd').textContent='Actualizado '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+// Carga rápida: solo publicaciones activas (un scroll)
+async function loadItemsFast(){
+  try{
+    const first=await mlGet('/users/'+userId+'/items/search?search_type=scan&limit=100');
+    const ids=first.results||[];
+    if(!ids.length)return;
+    const r=await mlGet('/items?ids='+ids.slice(0,100).join(',')+'&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,category_id,listing_type_id,permalink,seller_custom_field');
+    allItems=[];
+    r.forEach(x=>{if(x.code===200)allItems.push(x.body);});
+    _updateItemsUI();
+  }catch(e){console.warn('[loadItemsFast]',e);}
 }
 
-// ═══════════════════════════════════════════════════════════
-// LOAD
-// ═══════════════════════════════════════════════════════════
-async function loadItems(){
+// Carga completa: todas las páginas + pausadas + moderadas
+async function loadItemsFull(){
   try{
     let allIds=[];
-    const first=await mlGet('/users/'+userId+'/items/search?limit=1&offset=0');
-    const totalActive=first.paging?.total||0;
-    console.log('[loadItems] Total activas:',totalActive);
     let scrollId=null;
     while(true){
       const ep=scrollId
@@ -1378,9 +1388,8 @@ async function loadItems(){
       if(!ids.length)break;
       allIds.push(...ids);
       scrollId=s.scroll_id||null;
-      console.log('[loadItems]',allIds.length,'ids',scrollId?'(continúa)':'(fin)');
       if(!scrollId)break;
-      await new Promise(r=>setTimeout(r,150));
+      await new Promise(r=>setTimeout(r,100));
     }
     for(const status of ['paused','under_review']){
       for(let offset=0;offset<500;offset+=50){
@@ -1391,79 +1400,125 @@ async function loadItems(){
       }
     }
     allIds=[...new Set(allIds)];
-    console.log('[loadItems] IDs únicos:',allIds.length);
-    if(!allIds.length){allItems=[];return;}
-    allItems=[];
+    const full=[];
     for(let i=0;i<allIds.length;i+=20){
       const chunk=allIds.slice(i,i+20);
       try{
         const r=await mlGet('/items?ids='+chunk.join(',')+'&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,category_id,listing_type_id,permalink,seller_custom_field');
-        r.forEach(x=>{if(x.code===200)allItems.push(x.body);});
-      }catch(e){console.warn('chunk',e);}
-      if(i>0&&i%200===0)await new Promise(r=>setTimeout(r,150));
+        r.forEach(x=>{if(x.code===200)full.push(x.body);});
+      }catch(e){}
+      if(i>0&&i%200===0)await new Promise(r=>setTimeout(r,100));
     }
-    console.log('[loadItems] Cargados:',allItems.length);
-    const active=allItems.filter(i=>i.status==='active').length;
-    const paused=allItems.filter(i=>i.status==='paused').length;
-    const review=allItems.filter(i=>i.status==='under_review').length;
-    const z=allItems.filter(i=>(i.available_quantity||0)===0).length;
-    const l=allItems.filter(i=>(i.available_quantity||0)>0&&(i.available_quantity||0)<=3).length;
-    const safe=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
-    safe('nb-pub',active);safe('d-items',active);safe('nb-stock',z+l);safe('s-zero',z);safe('s-low',l);safe('s-ok',allItems.length-z-l);
-    safe('tab-active','✅ Activas ('+active+')');safe('tab-paused','⏸ Pausadas ('+paused+')');
-    safe('tab-review','🔍 Moderadas ('+review+')');safe('tab-all','📋 Todas ('+allItems.length+')');
-  }catch(e){console.error('[loadItems]',e);}
+    allItems=full;
+    _updateItemsUI();
+    console.log('[loadItemsFull]',allItems.length,'ítems');
+  }catch(e){console.error('[loadItemsFull]',e);}
 }
 
-async function loadOrders(){
+function _updateItemsUI(){
+  const active=allItems.filter(i=>i.status==='active').length;
+  const paused=allItems.filter(i=>i.status==='paused').length;
+  const review=allItems.filter(i=>i.status==='under_review').length;
+  const z=allItems.filter(i=>(i.available_quantity||0)===0).length;
+  const l=allItems.filter(i=>(i.available_quantity||0)>0&&(i.available_quantity||0)<=3).length;
+  const safe=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
+  safe('nb-pub',active);safe('d-items',active);safe('nb-stock',z+l);
+  safe('s-zero',z);safe('s-low',l);safe('s-ok',allItems.length-z-l);
+  safe('tab-active','✅ Activas ('+active+')');
+  safe('tab-paused','⏸ Pausadas ('+paused+')');
+  safe('tab-review','🔍 Moderadas ('+review+')');
+  safe('tab-all','📋 Todas ('+allItems.length+')');
+}
+
+// ── Órdenes del mes: 1 sola llamada, rápido ──────────────────
+async function loadOrdersMonth(){
   try{
     const now=new Date();
-    // Mes actual para métricas rápidas
     const fromMonth=new Date(now.getFullYear(),now.getMonth(),1).toISOString();
-    // 18 meses atrás para histórico
+    const r=await mlGet(`/orders/search?seller=${userId}&order.date_created.from=${fromMonth}&sort=date_desc&limit=50`);
+    const orders=r.results||[];
+    allOrders=orders;
+    _updateOrdersUI(orders);
+  }catch(e){console.warn('[loadOrdersMonth]',e);}
+}
+
+// ── Histórico 18 meses + estados de envío en background ──────
+async function loadOrdersHistory(){
+  try{
+    const now=new Date();
     const from18=new Date(now);from18.setMonth(from18.getMonth()-18);
-    const from18Str=from18.toISOString();
-
-    // Cargamos en lotes: primero mes actual para tener las métricas rápido
-    const rMonth=await mlGet(`/orders/search?seller=${userId}&order.date_created.from=${fromMonth}&sort=date_desc&limit=50`);
-    const monthOrders=rMonth.results||[];
-    allOrders=monthOrders;
-
-    // Actualizar métricas del mes
-    const totalMes=monthOrders.reduce((s,o)=>s+(o.total_amount||0),0);
-    const ticket=monthOrders.length?Math.round(totalMes/monthOrders.length):0;
-    const safeSet=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
-    safeSet('d-billing','$'+totalMes.toLocaleString('es-AR'));
-    safeSet('d-sales',monthOrders.length);
-    safeSet('d-ticket','$'+ticket.toLocaleString('es-AR'));
-    safeSet('fac-mes','$'+totalMes.toLocaleString('es-AR'));
-    safeSet('v-mes',monthOrders.length);
-    safeSet('v-ticket','$'+ticket.toLocaleString('es-AR'));
-    safeSet('v-ship',monthOrders.filter(o=>o.shipping?.status==='shipped').length);
-    safeSet('v-delivered',monthOrders.filter(o=>o.shipping?.status==='delivered').length);
-
-    // Ahora cargamos el histórico completo de 18 meses en background
     let allHist=[];
     for(let offset=0;offset<2000;offset+=50){
       try{
-        const r=await mlGet(`/orders/search?seller=${userId}&order.date_created.from=${from18Str}&sort=date_desc&limit=50&offset=${offset}`);
+        const r=await mlGet(`/orders/search?seller=${userId}&order.date_created.from=${from18.toISOString()}&sort=date_desc&limit=50&offset=${offset}`);
         const res=r.results||[];
         allHist.push(...res);
         if(res.length<50)break;
-        await new Promise(r=>setTimeout(r,120));
+        await new Promise(r=>setTimeout(r,80));
       }catch(e){break;}
     }
-    // Dedup y ordenar más reciente primero
     const seen=new Set();
     allOrders=[...allHist].filter(o=>{if(seen.has(o.id))return false;seen.add(o.id);return true;});
     allOrders.sort((a,b)=>new Date(b.date_created)-new Date(a.date_created));
-    console.log('[loadOrders] Histórico 18m cargado:',allOrders.length,'órdenes');
-    // Actualizar badge sidebar con pedidos sin etiqueta impresa
-    const toPrint=allOrders.filter(o=>o.status!=='cancelled'&&o.shipping?.status==='ready_to_ship').length;
-    const nbV=document.getElementById('nb-ventas');
-    if(nbV){nbV.textContent=toPrint;nbV.style.display=toPrint>0?'inline-flex':'none';}
-  }catch(e){console.error('orders',e);}
+    console.log('[loadOrdersHistory]',allOrders.length,'órdenes');
+
+    // Cargar estados de envío para órdenes recientes (último mes, máx 30)
+    // Solo las que tienen shipping.id pero sin status en el objeto orden
+    await loadShippingStatuses();
+
+    _updateOrdersUI(allOrders);
+    // Actualizar badge y tabla si la sección está activa
+    _updateVentasBadge();
+    if(document.getElementById('section-ventas')?.classList.contains('active')) renderVentasTable();
+  }catch(e){console.error('[loadOrdersHistory]',e);}
 }
+
+// Cargar status real de envíos desde /shipments/{id}
+async function loadShippingStatuses(){
+  const recent=allOrders.filter(o=>o.shipping?.id&&!o.shipping?.status).slice(0,40);
+  if(!recent.length) return;
+  await Promise.allSettled(recent.map(async o=>{
+    try{
+      const s=await mlGet('/shipments/'+o.shipping.id);
+      if(s&&s.status) o.shipping.status=s.status;
+      if(s&&s.substatus) o.shipping.substatus=s.substatus;
+    }catch(e){}
+  }));
+}
+
+function _updateOrdersUI(orders){
+  const totalMes=orders.reduce((s,o)=>s+(o.total_amount||0),0);
+  const ticket=orders.length?Math.round(totalMes/orders.length):0;
+  const safeSet=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
+  safeSet('d-billing','$'+totalMes.toLocaleString('es-AR'));
+  safeSet('d-sales',orders.length);
+  safeSet('d-ticket','$'+ticket.toLocaleString('es-AR'));
+  safeSet('fac-mes','$'+totalMes.toLocaleString('es-AR'));
+  safeSet('v-mes',orders.length);
+  safeSet('v-ticket','$'+ticket.toLocaleString('es-AR'));
+}
+
+function _updateVentasBadge(){
+  // Contar órdenes pagadas con envío pendiente de imprimir etiqueta
+  const toPrint=allOrders.filter(o=>
+    o.status!=='cancelled'&&
+    o.shipping?.id&&
+    (o.shipping?.status==='ready_to_ship'||o.shipping?.status==='pending'||(!o.shipping?.status))
+  ).length;
+  const nb=document.getElementById('nb-ventas');
+  if(nb){nb.textContent=toPrint;nb.style.display=toPrint>0?'inline-flex':'none';}
+}
+
+function stamp(){
+  document.getElementById('last-upd').textContent='Actualizado '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+}
+
+// ═══════════════════════════════════════════════════════════
+// LOAD
+// ═══════════════════════════════════════════════════════════
+// ── loadItems / loadOrders: compatibilidad con refreshAll ────
+async function loadItems(){ await loadItemsFull(); }
+async function loadOrders(){ await loadOrdersMonth(); loadOrdersHistory(); }
 
 async function loadQuestions(){
   try{
@@ -2720,23 +2775,19 @@ function renderVentas(){
 }
 
 function getShippingLabel(o){
-  const ss = o.shipping?.status || '';
-  const ls = o.shipping?.substatus || o.shipping?.labels?.status || '';
-  // Prioridad: si cancelada, mostrarlo
   if(o.status==='cancelled') return {label:'❌ Cancelado', cls:'bg-red'};
-  // Sin envío (retiro en persona, etc.)
   if(!o.shipping || !o.shipping.id) return {label:'🏪 Sin envío', cls:'bg-gray'};
-  // Mapa de estados de envío ML → etiqueta visible
-  if(ss==='delivered')                                          return {label:'✅ Entregado',  cls:'bg-green'};
-  if(ss==='not_delivered' || ss==='returned')                   return {label:'❌ No entregado',cls:'bg-red'};
-  if(ss==='shipped' || ss==='in_transit' || ss==='almost_there')return {label:'🚚 En camino',  cls:'bg-blue'};
-  // ready_to_ship + etiqueta no impresa
-  if(ss==='ready_to_ship' && (ls===''||ls==='not_printed'||ls==='to_be_agreed'))
-                                                                return {label:'🖨️ IMPRIMIR',   cls:'bg-amber'};
-  if(ss==='ready_to_ship')                                      return {label:'📦 Listo enviar',cls:'bg-amber'};
-  if(ss==='pending')                                            return {label:'⏳ Pendiente',  cls:'bg-amber'};
-  if(ss==='handling')                                           return {label:'📦 Preparando', cls:'bg-blue'};
-  return {label:'— '+ss, cls:'bg-gray'};
+  const ss = (o.shipping.status || '').toLowerCase();
+  const sub = (o.shipping.substatus || '').toLowerCase();
+  if(ss==='delivered')                                            return {label:'✅ Entregado',   cls:'bg-green'};
+  if(ss==='not_delivered'||ss==='returned'||ss==='lost')         return {label:'❌ No entregado',cls:'bg-red'};
+  if(ss==='shipped'||ss==='in_transit'||ss==='almost_there')     return {label:'🚚 En camino',   cls:'bg-blue'};
+  if(ss==='ready_to_ship')                                       return {label:'🖨️ IMPRIMIR',    cls:'bg-amber'};
+  if(ss==='handling')                                            return {label:'📦 Preparando',  cls:'bg-blue'};
+  if(ss==='pending')                                             return {label:'⏳ Pendiente',   cls:'bg-amber'};
+  // Tiene shipping.id pero aún no cargó el status
+  if(!ss && o.status==='paid')                                   return {label:'⏳ Verificando', cls:'bg-amber'};
+  return {label:ss||'—', cls:'bg-gray'};
 }
 
 function renderVentasTable(){
@@ -2746,11 +2797,7 @@ function renderVentasTable(){
   if(search) orders=orders.filter(o=>(o.buyer?.nickname||'').toLowerCase().includes(search)||(o.order_items?.[0]?.item?.title||'').toLowerCase().includes(search));
   if(statusFilter) orders=orders.filter(o=>o.status===statusFilter);
   orders.sort((a,b)=>new Date(b.date_created)-new Date(a.date_created));
-
-  // Actualizar badge sidebar: órdenes con etiqueta sin imprimir
-  const toPrint=allOrders.filter(o=>o.status!=='cancelled'&&o.shipping?.status==='ready_to_ship'&&(!o.shipping?.substatus||o.shipping?.substatus==='not_printed'||o.shipping?.labels?.status==='not_printed'||o.shipping?.labels?.status==='to_be_agreed')).length;
-  const nb=document.getElementById('nb-ventas');
-  if(nb){nb.textContent=toPrint;nb.style.display=toPrint>0?'inline-flex':'none';}
+  _updateVentasBadge();
 
   const tbody=document.getElementById('orders-tbody');
   if(!tbody)return;
