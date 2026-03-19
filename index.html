@@ -1790,15 +1790,16 @@ ${cat?'CATEGORÍA: '+cat:''}
 ${desc?'DESCRIPCIÓN ACTUAL:\n'+desc.slice(0,400):''}
 ${kws?'KEYWORDS A INCLUIR: '+kws:''}
 
-IMPORTANTE:
-- Optimizá basándote en el TÍTULO ACTUAL — no cambies el tipo de producto ni la temática
-- Si el título dice "botella", el título optimizado debe decir "botella", no "taza"
-- Si el título dice "mochila", "remera", "mate" etc., respetá ese producto
-- El producto tiene un diseño/estilo ya definido. Enfocar en compra impulsiva, regalo, identificación con temática
+REGLAS CRÍTICAS:
+1. Respetá el tipo de producto y la temática del título original — no los cambies
+2. Identificá la palabra CLAVE más fuerte del título (ej: FOTOGRAFA, FUTBOL, AIRBAG, CHEF) y ponela en posición destacada
+3. La descripción debe coincidir con lo que muestra el título y el producto real
+4. NO uses genéricos como "Regalo Original", "Diseño Exclusivo", "Fan" si no aportan nada específico
+5. Usá palabras que el comprador real buscaría en ML
+6. Máximo 60 chars en el título — ESTRICTO, contá los caracteres
+7. SIN puntuación ni emojis en el título (nada de , . ( ) : ; ! ? / -)
 
-REGLAS TÍTULO: máximo 60 chars (ESTRICTO) · SIN emojis · SIN puntuación (nada de , . ( ) : ; ! ?) · keyword principal al inicio · sin palabras repetidas · pensá como comprador que busca en ML
-
-REGLAS DESCRIPCIÓN: 300-450 caracteres · primeras 2 líneas enganchen y describan el producto · apelar a emoción o identificación · cerrar con línea vendedora · formato escaneable con saltos de línea
+REGLAS DESCRIPCIÓN: 300-450 chars · describí el producto real y su diseño · apelar a emoción/identificación · cerrar con frase de acción · saltos de línea para escanear fácil
 
 Respondé SOLO JSON válido (sin markdown, sin backticks):
 {
@@ -1844,11 +1845,14 @@ Respondé SOLO JSON válido (sin markdown, sin backticks):
       </div>`:''}
 
       ${dOpt?`
-      <!-- PREVIEW DESCRIPCIÓN -->
+      <!-- PREVIEW DESCRIPCIÓN — editable -->
       <div style="background:#f8f9fc;border:1px solid #e3e7ef;border-radius:10px;padding:14px;margin-bottom:12px">
-        <div style="font-size:10px;color:#374151;margin-bottom:8px;text-transform:uppercase;font-weight:700;letter-spacing:.05em">📝 DESCRIPCIÓN RECOMENDADA</div>
-        <div style="font-size:12.5px;color:#1e293b;line-height:1.8;max-height:180px;overflow-y:auto;padding-right:4px">${dOpt.replace(/\n/g,'<br>')}</div>
-        <button class="btn btn-ghost btn-xs" style="margin-top:8px" onclick="navigator.clipboard.writeText(\`${dOpt.replace(/`/g,"'")}\`).then(()=>this.textContent='✅ Copiado!')">📋 Copiar descripción</button>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div style="font-size:10px;color:#374151;text-transform:uppercase;font-weight:700;letter-spacing:.05em">📝 DESCRIPCIÓN RECOMENDADA — editá antes de aplicar</div>
+          <span id="opt-desc-rec-chars" style="font-size:10px;color:#6b7280">${dOpt.length} chars</span>
+        </div>
+        <textarea id="opt-desc-editable" rows="6" style="width:100%;font-size:12.5px;line-height:1.7;resize:vertical;border:1px solid #cbd5e1;border-radius:6px;padding:10px;background:#fff;color:#1e293b;font-family:inherit" oninput="window._optDescSugerida=this.value;document.getElementById('opt-desc-rec-chars').textContent=this.value.length+' chars'">${dOpt.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
+        <button class="btn btn-ghost btn-xs" style="margin-top:6px" onclick="navigator.clipboard.writeText(document.getElementById('opt-desc-editable').value).then(()=>this.textContent='✅ Copiado!').catch(()=>{})">📋 Copiar</button>
       </div>`:''}
 
       ${result.keywords?.length?`
@@ -1954,9 +1958,21 @@ async function applyOptTitle(){
     });
     const data = await response.json();
     console.log('[ML] respuesta completa:', JSON.stringify(data));
+
     if(data.error || (data.status && data.status !== 200)){
-      const msg = data.message || (data.cause&&data.cause[0]&&data.cause[0].message) || data.error || ('HTTP '+response.status);
-      if(res) res.innerHTML = `<div class="alert a-red">❌ ${msg}<br><small>Enviado: "${titulo}" (${titulo.length} chars)</small></div>`;
+      // Extraer el mensaje más útil posible
+      let msg = data.message || data.error || ('HTTP ' + response.status);
+      let detail = '';
+      if(data.cause && data.cause.length){
+        detail = data.cause.map(c=>c.message||c.code||JSON.stringify(c)).join(' · ');
+      }
+      // Detectar restricción de catálogo
+      const isCatalog = msg.includes('catalog') || detail.includes('catalog') ||
+                        msg.includes('CATALOG') || (data.error||'').includes('catalog');
+      if(isCatalog){
+        msg = 'Esta publicación es de catálogo y no permite cambiar el título por API. Modificala directamente en ML.';
+      }
+      if(res) res.innerHTML = `<div class="alert a-red">❌ ${msg}${detail && !isCatalog?'<br><small style="opacity:.8">Detalle: '+detail+'</small>':''}<br><small>Enviado: "${titulo}" (${titulo.length} chars)</small></div>`;
       return;
     }
     if(res) res.innerHTML = `<div class="alert a-success">✅ Título actualizado: "${titulo}"</div>`;
@@ -1971,9 +1987,11 @@ async function applyOptTitle(){
 // ── Actualizar SOLO la descripción ──────────────────────────
 async function applyOptDesc(){
   if(!optCurrentItemId){ alert('No hay publicación seleccionada'); return; }
-  const raw = window._optDescSugerida || '';
+  // Leer del textarea editable si existe, sino de la variable global
+  const editEl = document.getElementById('opt-desc-editable');
+  const raw = (editEl ? editEl.value : null) || window._optDescSugerida || '';
   const desc = cleanForML(raw, false);
-  if(!desc){ alert('No hay descripción generada'); return; }
+  if(!desc){ alert('No hay descripción para aplicar'); return; }
 
   const body = JSON.stringify({ plain_text: desc });
   console.log('[ML] PUT descripción — item:', optCurrentItemId);
@@ -2005,7 +2023,8 @@ async function applyOptDesc(){
 async function applyOptBoth(){
   if(!optCurrentItemId){ alert('No hay publicación seleccionada'); return; }
   const titulo = cleanForML(window._optTituloSugerido || document.getElementById('opt-in')?.value || '', true);
-  const desc   = cleanForML(window._optDescSugerida || '', false);
+  const editEl2 = document.getElementById('opt-desc-editable');
+  const desc   = cleanForML((editEl2 ? editEl2.value : null) || window._optDescSugerida || '', false);
   if(!titulo){ alert('No hay título generado'); return; }
   if(titulo.length < 5){ alert('El título quedó muy corto luego de limpiar. Revisalo.'); return; }
 
@@ -2024,8 +2043,11 @@ async function applyOptBoth(){
     const dt = await rt.json();
     console.log('[ML] both — título resp:', JSON.stringify(dt));
     if(dt.error || (dt.status && dt.status !== 200)){
-      const msg = dt.message || (dt.cause&&dt.cause[0]&&dt.cause[0].message) || dt.error || ('HTTP '+rt.status);
-      if(res) res.innerHTML = `<div class="alert a-red">❌ Error título: ${msg}<br><small>"${titulo}" (${titulo.length} chars)</small></div>`;
+      let msg = dt.message || dt.error || ('HTTP '+rt.status);
+      let detail = dt.cause ? dt.cause.map(c=>c.message||c.code||'').join(' · ') : '';
+      const isCatalog = msg.includes('catalog')||detail.includes('catalog');
+      if(isCatalog) msg = 'Publicación de catálogo: no se puede cambiar el título por API. Modificala en ML directamente.';
+      if(res) res.innerHTML = `<div class="alert a-red">❌ ${msg}${detail&&!isCatalog?'<br><small>'+detail+'</small>':''}<br><small>"${titulo}" (${titulo.length} chars)</small></div>`;
       return;
     }
     const item = allItems.find(i => i.id === optCurrentItemId);
