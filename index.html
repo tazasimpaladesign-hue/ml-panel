@@ -1896,92 +1896,149 @@ Respondé SOLO JSON válido (sin markdown, sin backticks):
 }
 
 // Aplicar solo título — lee de window._optTituloSugerido (evita problemas de encoding en onclick)
+// ── Helper: limpiar string para ML ──────────────────────────
+function cleanForML(str, maxChars){
+  if(!str) return '';
+  return String(str)
+    .replace(/[\u0000-\u001F\u007F-\u009F]/g, '') // control chars
+    .replace(/\u00A0/g, ' ')                        // non-breaking space → normal space
+    .replace(/[""'']/g, '"')                        // smart quotes → straight
+    .replace(/\s+/g, ' ')                           // multiple spaces → one
+    .trim()
+    .slice(0, maxChars || 999);
+}
+
+// ── Actualizar SOLO el título ────────────────────────────────
 async function applyOptTitle(){
-  if(!optCurrentItemId){alert('No hay publicación seleccionada');return;}
-  const titulo=window._optTituloSugerido||document.getElementById('opt-in')?.value?.trim();
-  if(!titulo){alert('No hay título generado');return;}
-  const res=document.getElementById('opt-apply-res');
-  if(res)res.innerHTML='<div class="loading"><div class="spin"></div>Aplicando título en ML...</div>';
-  try{
-    const r=await mlPut('/items/'+optCurrentItemId,{title:titulo});
-    if(r.error||r.message){
-      if(res)res.innerHTML=`<div class="alert a-red">❌ ${r.message||r.error}</div>`;
-      return;
-    }
-    if(res)res.innerHTML='<div class="alert a-success">✅ Título actualizado correctamente en ML.</div>';
-    const item=allItems.find(i=>i.id===optCurrentItemId);if(item)item.title=titulo;
-  }catch(e){if(res)res.innerHTML=`<div class="alert a-red">❌ ${e.message}</div>`;}
-}
+  if(!optCurrentItemId){ alert('No hay publicación seleccionada'); return; }
+  const raw = window._optTituloSugerido || document.getElementById('opt-in')?.value || '';
+  const titulo = cleanForML(raw, 60);
+  if(!titulo){ alert('No hay título generado'); return; }
 
-// Aplicar solo descripción — usa PUT si ya existe, POST si es nueva
-async function applyOptDesc(){
-  if(!optCurrentItemId){alert('No hay publicación seleccionada');return;}
-  const desc=window._optDescSugerida||'';
-  if(!desc){alert('No hay descripción generada');return;}
-  const res=document.getElementById('opt-apply-res');
-  if(res)res.innerHTML='<div class="loading"><div class="spin"></div>Aplicando descripción en ML...</div>';
+  const body = JSON.stringify({ title: titulo });
+  console.log('[applyOptTitle] item:', optCurrentItemId);
+  console.log('[applyOptTitle] body:', body);
+
+  const res = document.getElementById('opt-apply-res');
+  if(res) res.innerHTML = '<div class="loading"><div class="spin"></div>Aplicando título...</div>';
   try{
-    // Intentar PUT primero (actualizar descripción existente)
-    let r=await fetch(WORKER+'/api/items/'+optCurrentItemId+'/description',{
-      method:'PUT',
-      headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
-      body:JSON.stringify({plain_text:desc})
+    const response = await fetch(WORKER + '/api/items/' + optCurrentItemId, {
+      method: 'PUT',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: body
     });
-    let data=await r.json();
-    // Si falla con 404 (no existe), crear con POST
-    if(r.status===404||data.error==='not_found'){
-      r=await fetch(WORKER+'/api/items/'+optCurrentItemId+'/description',{
-        method:'POST',
-        headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
-        body:JSON.stringify({plain_text:desc})
-      });
-      data=await r.json();
-    }
-    if(data.error||data.message){
-      if(res)res.innerHTML=`<div class="alert a-red">❌ ${data.message||data.error}</div>`;
+    const data = await response.json();
+    console.log('[applyOptTitle] respuesta ML:', JSON.stringify(data));
+
+    if(data.error || (data.status && data.status !== 200)){
+      const msg = data.message || data.error || ('HTTP ' + response.status);
+      if(res) res.innerHTML = `<div class="alert a-red">❌ ${msg}</div>`;
       return;
     }
-    if(res)res.innerHTML='<div class="alert a-success">✅ Descripción actualizada correctamente en ML.</div>';
-  }catch(e){if(res)res.innerHTML=`<div class="alert a-red">❌ ${e.message}</div>`;}
+    if(res) res.innerHTML = '<div class="alert a-success">✅ Título actualizado en ML correctamente.</div>';
+    const item = allItems.find(i => i.id === optCurrentItemId);
+    if(item) item.title = titulo;
+  } catch(e){
+    console.error('[applyOptTitle] error:', e);
+    if(res) res.innerHTML = `<div class="alert a-red">❌ ${e.message}</div>`;
+  }
 }
 
-// Aplicar título + descripción juntos
-async function applyOptBoth(){
-  if(!optCurrentItemId){alert('No hay publicación seleccionada');return;}
-  const titulo=window._optTituloSugerido||document.getElementById('opt-in')?.value?.trim();
-  const desc=window._optDescSugerida||'';
-  if(!titulo){alert('No hay título generado');return;}
-  const res=document.getElementById('opt-apply-res');
-  if(res)res.innerHTML='<div class="loading"><div class="spin"></div>Aplicando cambios en ML...</div>';
+// ── Actualizar SOLO la descripción ──────────────────────────
+async function applyOptDesc(){
+  if(!optCurrentItemId){ alert('No hay publicación seleccionada'); return; }
+  const raw = window._optDescSugerida || '';
+  const desc = cleanForML(raw, 2000);
+  if(!desc){ alert('No hay descripción generada'); return; }
+
+  const body = JSON.stringify({ plain_text: desc });
+  console.log('[applyOptDesc] item:', optCurrentItemId);
+  console.log('[applyOptDesc] body (primeros 120 chars):', body.slice(0, 120));
+
+  const res = document.getElementById('opt-apply-res');
+  if(res) res.innerHTML = '<div class="loading"><div class="spin"></div>Aplicando descripción...</div>';
   try{
-    // 1. Aplicar título
-    const rt=await mlPut('/items/'+optCurrentItemId,{title:titulo});
-    if(rt.error||rt.message){
-      if(res)res.innerHTML=`<div class="alert a-red">❌ Error en título: ${rt.message||rt.error}</div>`;
+    // ML siempre usa PUT para actualizar la descripción
+    const response = await fetch(WORKER + '/api/items/' + optCurrentItemId + '/description', {
+      method: 'PUT',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: body
+    });
+    const data = await response.json();
+    console.log('[applyOptDesc] respuesta ML:', JSON.stringify(data).slice(0, 200));
+
+    if(data.error && data.error !== 'item_not_found'){
+      const msg = data.message || data.error || ('HTTP ' + response.status);
+      if(res) res.innerHTML = `<div class="alert a-red">❌ ${msg}</div>`;
       return;
     }
-    const item=allItems.find(i=>i.id===optCurrentItemId);if(item)item.title=titulo;
+    if(res) res.innerHTML = '<div class="alert a-success">✅ Descripción actualizada en ML correctamente.</div>';
+  } catch(e){
+    console.error('[applyOptDesc] error:', e);
+    if(res) res.innerHTML = `<div class="alert a-red">❌ ${e.message}</div>`;
+  }
+}
 
-    // 2. Aplicar descripción si hay (PUT, fallback a POST)
-    if(desc){
-      try{
-        let rd=await fetch(WORKER+'/api/items/'+optCurrentItemId+'/description',{
-          method:'PUT',
-          headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
-          body:JSON.stringify({plain_text:desc})
-        });
-        let dd=await rd.json();
-        if(rd.status===404||dd.error==='not_found'){
-          await fetch(WORKER+'/api/items/'+optCurrentItemId+'/description',{
-            method:'POST',
-            headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
-            body:JSON.stringify({plain_text:desc})
-          });
-        }
-      }catch(e){console.warn('desc update:',e);}
+// ── Aplicar título + descripción juntos ─────────────────────
+async function applyOptBoth(){
+  if(!optCurrentItemId){ alert('No hay publicación seleccionada'); return; }
+  const rawT = window._optTituloSugerido || document.getElementById('opt-in')?.value || '';
+  const titulo = cleanForML(rawT, 60);
+  const rawD = window._optDescSugerida || '';
+  const desc = cleanForML(rawD, 2000);
+  if(!titulo){ alert('No hay título generado'); return; }
+
+  const res = document.getElementById('opt-apply-res');
+  if(res) res.innerHTML = '<div class="loading"><div class="spin"></div>Aplicando cambios en ML...</div>';
+
+  // ── Paso 1: título ──
+  const bodyT = JSON.stringify({ title: titulo });
+  console.log('[applyOptBoth] título body:', bodyT);
+  try{
+    const rt = await fetch(WORKER + '/api/items/' + optCurrentItemId, {
+      method: 'PUT',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: bodyT
+    });
+    const dt = await rt.json();
+    console.log('[applyOptBoth] título respuesta:', JSON.stringify(dt).slice(0, 200));
+    if(dt.error || (dt.status && dt.status !== 200)){
+      const msg = dt.message || dt.error || ('HTTP ' + rt.status);
+      if(res) res.innerHTML = `<div class="alert a-red">❌ Error actualizando título: ${msg}</div>`;
+      return;
     }
-    if(res)res.innerHTML='<div class="alert a-success">🚀 Título'+(desc?' y descripción':'')+' actualizados en ML. Los cambios pueden tardar unos minutos en verse.</div>';
-  }catch(e){if(res)res.innerHTML=`<div class="alert a-red">❌ ${e.message}</div>`;}
+    const item = allItems.find(i => i.id === optCurrentItemId);
+    if(item) item.title = titulo;
+  } catch(e){
+    console.error('[applyOptBoth] título error:', e);
+    if(res) res.innerHTML = `<div class="alert a-red">❌ ${e.message}</div>`;
+    return;
+  }
+
+  // ── Paso 2: descripción (si hay) ──
+  if(desc){
+    const bodyD = JSON.stringify({ plain_text: desc });
+    console.log('[applyOptBoth] desc body (primeros 120):', bodyD.slice(0, 120));
+    try{
+      const rd = await fetch(WORKER + '/api/items/' + optCurrentItemId + '/description', {
+        method: 'PUT',
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: bodyD
+      });
+      const dd = await rd.json();
+      console.log('[applyOptBoth] desc respuesta:', JSON.stringify(dd).slice(0, 200));
+    } catch(e){ console.warn('[applyOptBoth] desc error (no crítico):', e); }
+  }
+
+  if(res) res.innerHTML = '<div class="alert a-success">🚀 Título' + (desc ? ' y descripción' : '') + ' actualizados en ML. Los cambios pueden tardar unos minutos en verse.</div>';
 }
 
 // ═══════════════════════════════════════════════════════════
