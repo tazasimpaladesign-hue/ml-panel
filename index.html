@@ -1536,10 +1536,24 @@ function _updateOrdersUI(mesOrders){
 }
 
 function _updateVentasBadge(){
-  // Solo ordenes paid con shipping.status=ready_to_ship (etiqueta sin imprimir)
-  const toPrint=allOrders.filter(o=>o.status==='paid'&&o.shipping?.status==='ready_to_ship').length;
+  // Contar órdenes que necesitan imprimir etiqueta:
+  // - si shipping.status fue cargado: usarlo (más preciso)
+  // - si no: usar order.status=paid/confirmed como proxy confiable
+  const withShipStatus=allOrders.filter(o=>o.shipping?._statusLoaded).length;
+  let toPrint;
+  if(withShipStatus>0){
+    // Tenemos datos reales de shipments
+    toPrint=allOrders.filter(o=>o.shipping?.status==='ready_to_ship').length;
+  } else {
+    // Fallback: órdenes pagadas con envío asignado y sin entregar/cancelar
+    toPrint=allOrders.filter(o=>
+      (o.status==='paid'||o.status==='confirmed')&&
+      o.shipping?.id&&
+      o.status!=='shipped'&&o.status!=='delivered'&&o.status!=='cancelled'
+    ).length;
+  }
   const nb=document.getElementById('nb-ventas');
-  if(nb){nb.textContent=toPrint;nb.style.display=toPrint>0?'inline-flex':'none';}
+  if(nb){nb.textContent=toPrint||'';nb.style.display=toPrint>0?'inline-flex':'none';}
 }
 
 function stamp(){
@@ -2805,19 +2819,33 @@ function renderVentas(){
 }
 
 function getShippingLabel(o){
-  if(o.status==='cancelled') return {label:'❌ Cancelado', cls:'bg-red'};
-  if(!o.shipping || !o.shipping.id) return {label:'🏪 Sin envío', cls:'bg-gray'};
-  const ss = (o.shipping.status || '').toLowerCase();
-  const sub = (o.shipping.substatus || '').toLowerCase();
-  if(ss==='delivered')                                            return {label:'✅ Entregado',   cls:'bg-green'};
-  if(ss==='not_delivered'||ss==='returned'||ss==='lost')         return {label:'❌ No entregado',cls:'bg-red'};
-  if(ss==='shipped'||ss==='in_transit'||ss==='almost_there')     return {label:'🚚 En camino',   cls:'bg-blue'};
-  if(ss==='ready_to_ship')                                       return {label:'🖨️ IMPRIMIR',    cls:'bg-amber'};
-  if(ss==='handling')                                            return {label:'📦 Preparando',  cls:'bg-blue'};
-  if(ss==='pending')                                             return {label:'⏳ Pendiente',   cls:'bg-amber'};
-  // Tiene shipping.id pero aún no cargó el status
-  if(!ss && o.status==='paid')                                   return {label:'⏳ Verificando', cls:'bg-amber'};
-  return {label:ss||'—', cls:'bg-gray'};
+  const os  = o.status || '';
+  const ss  = (o.shipping?.status||'').toLowerCase();
+  const loaded = !!o.shipping?._statusLoaded;
+
+  // Cancelada siempre primero
+  if(os==='cancelled') return {label:'❌ Cancelado', cls:'bg-red'};
+
+  // Estado real del envío (cargado via /shipments/{id})
+  if(loaded || ss){
+    if(ss==='delivered')                                       return {label:'✅ Entregado',   cls:'bg-green'};
+    if(ss==='not_delivered'||ss==='returned'||ss==='lost')     return {label:'❌ No entregado',cls:'bg-red'};
+    if(ss==='shipped'||ss==='in_transit'||ss==='almost_there') return {label:'🚚 En camino',   cls:'bg-blue'};
+    if(ss==='ready_to_ship')                                   return {label:'🖨️ IMPRIMIR',    cls:'bg-amber'};
+    if(ss==='handling')                                        return {label:'📦 Preparando',  cls:'bg-blue'};
+    if(ss==='pending')                                         return {label:'⏳ Pendiente',   cls:'bg-amber'};
+  }
+
+  // Sin shipment status: inferir desde el status de la ORDEN (que sí viene de /orders/search)
+  if(os==='payment_required'||os==='payment_in_process')       return {label:'⏳ Pago pendiente',cls:'bg-amber'};
+  if(os==='paid'||os==='confirmed'){
+    if(!o.shipping?.id) return {label:'🏪 Sin envío', cls:'bg-gray'};
+    return {label:'🖨️ IMPRIMIR', cls:'bg-amber'};  // pagado + tiene envío = imprimir etiqueta
+  }
+  if(os==='shipped')   return {label:'🚚 En camino', cls:'bg-blue'};
+  if(os==='delivered') return {label:'✅ Entregado',  cls:'bg-green'};
+  if(!o.shipping?.id)  return {label:'🏪 Sin envío',  cls:'bg-gray'};
+  return {label:os||'—', cls:'bg-gray'};
 }
 
 function renderVentasTable(){
@@ -2839,7 +2867,7 @@ function renderVentasTable(){
     const dt=o.date_created?new Date(o.date_created):null;
     const dateStr=dt?dt.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'2-digit'})+' '+dt.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}):'—';
     const productTitle=o.order_items?.[0]?.item?.title||'—';
-    const mlUrl=`https://www.mercadolibre.com.ar/ventas/${o.id}/detalle`;
+    const mlUrl='https://www.mercadolibre.com.ar/ventas/'+o.id+'/detalle';
     const ship=getShippingLabel(o);
     return `<tr>
       <td style="font-family:var(--mono);font-size:10.5px;color:var(--text3)">#${o.id}</td>
