@@ -1783,18 +1783,22 @@ async function doOptimize(){
   const el=document.getElementById('opt-out');
   el.innerHTML='<div class="loading"><div class="spin"></div>Optimizando con IA...</div>';
   try{
-    const r=await callClaude(`Actuá como experto en ventas y posicionamiento en MercadoLibre Argentina 2026, especializado en tazas con diseño impreso.
-
-Producto: taza cerámica con diseño ya definido (NO personalizable). Compra impulsiva, regalo, identificación emocional.
+    const r=await callClaude(`Sos un experto en ventas y SEO para MercadoLibre Argentina 2026.
 
 TÍTULO ACTUAL: "${title}"
 ${cat?'CATEGORÍA: '+cat:''}
 ${desc?'DESCRIPCIÓN ACTUAL:\n'+desc.slice(0,400):''}
 ${kws?'KEYWORDS A INCLUIR: '+kws:''}
 
-REGLAS TÍTULO: 60-70 chars · SIN emojis ni símbolos al inicio · keyword principal al inicio · sin puntuación · sin palabras repetidas · temática + intención (regalo, fan, divertido) · pensá como comprador impulsivo
+IMPORTANTE:
+- Optimizá basándote en el TÍTULO ACTUAL — no cambies el tipo de producto ni la temática
+- Si el título dice "botella", el título optimizado debe decir "botella", no "taza"
+- Si el título dice "mochila", "remera", "mate" etc., respetá ese producto
+- El producto tiene un diseño/estilo ya definido. Enfocar en compra impulsiva, regalo, identificación con temática
 
-REGLAS DESCRIPCIÓN: Entre 300 y 450 caracteres. Las primeras 2 líneas deben enganchar y describir el diseño. Luego apelar a emoción o identificación. Cerrar con una línea vendedora (regalo ideal, envío, calidad). Formato con saltos de línea, fácil de escanear.
+REGLAS TÍTULO: máximo 60 chars (ESTRICTO) · SIN emojis · SIN puntuación (nada de , . ( ) : ; ! ?) · keyword principal al inicio · sin palabras repetidas · pensá como comprador que busca en ML
+
+REGLAS DESCRIPCIÓN: 300-450 caracteres · primeras 2 líneas enganchen y describan el producto · apelar a emoción o identificación · cerrar con línea vendedora · formato escaneable con saltos de línea
 
 Respondé SOLO JSON válido (sin markdown, sin backticks):
 {
@@ -1897,53 +1901,69 @@ Respondé SOLO JSON válido (sin markdown, sin backticks):
 
 // Aplicar solo título — lee de window._optTituloSugerido (evita problemas de encoding en onclick)
 // ── Helper: limpiar string para ML ──────────────────────────
-function cleanForML(str, maxChars){
+// ML Argentina rechaza: ( ) [ ] { } . , ; : ! ? + & @ # * % $ " ' / \ = < > | ^ ~ ` emojis y chars especiales
+// Solo permite: letras (incluyendo español), números, espacios y guiones medios
+function cleanForML(str, isTitle){
   if(!str) return '';
-  return String(str)
-    .replace(/[\u0000-\u001F\u007F-\u009F]/g, '') // control chars
-    .replace(/\u00A0/g, ' ')                        // non-breaking space → normal space
-    .replace(/[""'']/g, '"')                        // smart quotes → straight
-    .replace(/\s+/g, ' ')                           // multiple spaces → one
-    .trim()
-    .slice(0, maxChars || 999);
+  let s = String(str)
+    // Quitar caracteres de control y no-imprimibles
+    .replace(/[\u0000-\u001F\u007F-\u009F\u00AD]/g, '')
+    // Quitar emojis y símbolos Unicode
+    .replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{200D}\u{FE0E}]/gu, '')
+    // Non-breaking space → espacio normal
+    .replace(/\u00A0/g, ' ')
+    // Múltiples espacios → uno
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if(isTitle){
+    // Título ML: solo letras (español incluido), números, espacios y guión medio
+    // Quitar todo lo demás: paréntesis, comas, puntos, dos puntos, barras, comillas, +, &, @, etc.
+    s = s
+      .replace(/[()[\]{}.,:;!?+&@#*%$"'\/\\=<>|^~`®™°•–—…]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 60);
+  } else {
+    // Descripción: más permisiva, solo limitar longitud
+    s = s.slice(0, 2000);
+  }
+  return s;
 }
 
 // ── Actualizar SOLO el título ────────────────────────────────
 async function applyOptTitle(){
   if(!optCurrentItemId){ alert('No hay publicación seleccionada'); return; }
   const raw = window._optTituloSugerido || document.getElementById('opt-in')?.value || '';
-  const titulo = cleanForML(raw, 60);
+  const titulo = cleanForML(raw, true);
   if(!titulo){ alert('No hay título generado'); return; }
+  if(titulo.length < 5){ alert('El título quedó muy corto (' + titulo.length + ' chars) luego de limpiar. Revisalo.'); return; }
 
   const body = JSON.stringify({ title: titulo });
-  console.log('[applyOptTitle] item:', optCurrentItemId);
-  console.log('[applyOptTitle] body:', body);
+  console.log('[ML] PUT título — item:', optCurrentItemId);
+  console.log('[ML] body exacto:', body);
+  console.log('[ML] chars:', titulo.length);
 
   const res = document.getElementById('opt-apply-res');
-  if(res) res.innerHTML = '<div class="loading"><div class="spin"></div>Aplicando título...</div>';
+  if(res) res.innerHTML = '<div class="loading"><div class="spin"></div>Aplicando: "' + titulo.slice(0,50) + '"...</div>';
   try{
     const response = await fetch(WORKER + '/api/items/' + optCurrentItemId, {
       method: 'PUT',
-      headers: {
-        'Authorization': 'Bearer ' + token,
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: body
     });
     const data = await response.json();
-    console.log('[applyOptTitle] respuesta ML:', JSON.stringify(data));
-
+    console.log('[ML] respuesta completa:', JSON.stringify(data));
     if(data.error || (data.status && data.status !== 200)){
-      const msg = data.message || data.error || ('HTTP ' + response.status);
-      if(res) res.innerHTML = `<div class="alert a-red">❌ ${msg}</div>`;
+      const msg = data.message || (data.cause&&data.cause[0]&&data.cause[0].message) || data.error || ('HTTP '+response.status);
+      if(res) res.innerHTML = `<div class="alert a-red">❌ ${msg}<br><small>Enviado: "${titulo}" (${titulo.length} chars)</small></div>`;
       return;
     }
-    if(res) res.innerHTML = '<div class="alert a-success">✅ Título actualizado en ML correctamente.</div>';
+    if(res) res.innerHTML = `<div class="alert a-success">✅ Título actualizado: "${titulo}"</div>`;
     const item = allItems.find(i => i.id === optCurrentItemId);
     if(item) item.title = titulo;
   } catch(e){
-    console.error('[applyOptTitle] error:', e);
+    console.error('[ML] error:', e);
     if(res) res.innerHTML = `<div class="alert a-red">❌ ${e.message}</div>`;
   }
 }
@@ -1952,37 +1972,31 @@ async function applyOptTitle(){
 async function applyOptDesc(){
   if(!optCurrentItemId){ alert('No hay publicación seleccionada'); return; }
   const raw = window._optDescSugerida || '';
-  const desc = cleanForML(raw, 2000);
+  const desc = cleanForML(raw, false);
   if(!desc){ alert('No hay descripción generada'); return; }
 
   const body = JSON.stringify({ plain_text: desc });
-  console.log('[applyOptDesc] item:', optCurrentItemId);
-  console.log('[applyOptDesc] body (primeros 120 chars):', body.slice(0, 120));
+  console.log('[ML] PUT descripción — item:', optCurrentItemId);
+  console.log('[ML] desc primeros 200 chars:', desc.slice(0, 200));
 
   const res = document.getElementById('opt-apply-res');
   if(res) res.innerHTML = '<div class="loading"><div class="spin"></div>Aplicando descripción...</div>';
   try{
-    // ML siempre usa PUT para actualizar la descripción
     const response = await fetch(WORKER + '/api/items/' + optCurrentItemId + '/description', {
       method: 'PUT',
-      headers: {
-        'Authorization': 'Bearer ' + token,
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: body
     });
     const data = await response.json();
-    console.log('[applyOptDesc] respuesta ML:', JSON.stringify(data).slice(0, 200));
-
-    if(data.error && data.error !== 'item_not_found'){
-      const msg = data.message || data.error || ('HTTP ' + response.status);
+    console.log('[ML] respuesta desc:', JSON.stringify(data).slice(0, 300));
+    if(data.error && data.error !== 'not_found'){
+      const msg = data.message || (data.cause&&data.cause[0]&&data.cause[0].message) || data.error;
       if(res) res.innerHTML = `<div class="alert a-red">❌ ${msg}</div>`;
       return;
     }
-    if(res) res.innerHTML = '<div class="alert a-success">✅ Descripción actualizada en ML correctamente.</div>';
+    if(res) res.innerHTML = '<div class="alert a-success">✅ Descripción actualizada en ML.</div>';
   } catch(e){
-    console.error('[applyOptDesc] error:', e);
+    console.error('[ML] desc error:', e);
     if(res) res.innerHTML = `<div class="alert a-red">❌ ${e.message}</div>`;
   }
 }
@@ -1990,18 +2004,17 @@ async function applyOptDesc(){
 // ── Aplicar título + descripción juntos ─────────────────────
 async function applyOptBoth(){
   if(!optCurrentItemId){ alert('No hay publicación seleccionada'); return; }
-  const rawT = window._optTituloSugerido || document.getElementById('opt-in')?.value || '';
-  const titulo = cleanForML(rawT, 60);
-  const rawD = window._optDescSugerida || '';
-  const desc = cleanForML(rawD, 2000);
+  const titulo = cleanForML(window._optTituloSugerido || document.getElementById('opt-in')?.value || '', true);
+  const desc   = cleanForML(window._optDescSugerida || '', false);
   if(!titulo){ alert('No hay título generado'); return; }
+  if(titulo.length < 5){ alert('El título quedó muy corto luego de limpiar. Revisalo.'); return; }
 
   const res = document.getElementById('opt-apply-res');
-  if(res) res.innerHTML = '<div class="loading"><div class="spin"></div>Aplicando cambios en ML...</div>';
+  if(res) res.innerHTML = '<div class="loading"><div class="spin"></div>Aplicando...</div>';
 
-  // ── Paso 1: título ──
+  // 1. Título
   const bodyT = JSON.stringify({ title: titulo });
-  console.log('[applyOptBoth] título body:', bodyT);
+  console.log('[ML] both — título body:', bodyT);
   try{
     const rt = await fetch(WORKER + '/api/items/' + optCurrentItemId, {
       method: 'PUT',
@@ -2009,24 +2022,23 @@ async function applyOptBoth(){
       body: bodyT
     });
     const dt = await rt.json();
-    console.log('[applyOptBoth] título respuesta:', JSON.stringify(dt).slice(0, 200));
+    console.log('[ML] both — título resp:', JSON.stringify(dt));
     if(dt.error || (dt.status && dt.status !== 200)){
-      const msg = dt.message || dt.error || ('HTTP ' + rt.status);
-      if(res) res.innerHTML = `<div class="alert a-red">❌ Error actualizando título: ${msg}</div>`;
+      const msg = dt.message || (dt.cause&&dt.cause[0]&&dt.cause[0].message) || dt.error || ('HTTP '+rt.status);
+      if(res) res.innerHTML = `<div class="alert a-red">❌ Error título: ${msg}<br><small>"${titulo}" (${titulo.length} chars)</small></div>`;
       return;
     }
     const item = allItems.find(i => i.id === optCurrentItemId);
     if(item) item.title = titulo;
   } catch(e){
-    console.error('[applyOptBoth] título error:', e);
     if(res) res.innerHTML = `<div class="alert a-red">❌ ${e.message}</div>`;
     return;
   }
 
-  // ── Paso 2: descripción (si hay) ──
+  // 2. Descripción
   if(desc){
     const bodyD = JSON.stringify({ plain_text: desc });
-    console.log('[applyOptBoth] desc body (primeros 120):', bodyD.slice(0, 120));
+    console.log('[ML] both — desc primeros 150:', desc.slice(0,150));
     try{
       const rd = await fetch(WORKER + '/api/items/' + optCurrentItemId + '/description', {
         method: 'PUT',
@@ -2034,11 +2046,11 @@ async function applyOptBoth(){
         body: bodyD
       });
       const dd = await rd.json();
-      console.log('[applyOptBoth] desc respuesta:', JSON.stringify(dd).slice(0, 200));
-    } catch(e){ console.warn('[applyOptBoth] desc error (no crítico):', e); }
+      console.log('[ML] both — desc resp:', JSON.stringify(dd).slice(0,200));
+    } catch(e){ console.warn('[ML] desc (no crítico):', e); }
   }
 
-  if(res) res.innerHTML = '<div class="alert a-success">🚀 Título' + (desc ? ' y descripción' : '') + ' actualizados en ML. Los cambios pueden tardar unos minutos en verse.</div>';
+  if(res) res.innerHTML = `<div class="alert a-success">🚀 Actualizado en ML: "${titulo}"${desc?' + descripción':''}</div>`;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -2126,7 +2138,7 @@ Título: "${item.title}"
 Precio: $${item.price}
 Stock: ${item.available_quantity}
 
-Producto: taza cerámica con diseño ya definido (compra impulsiva, regalo, identificación emocional).
+Producto: "${item.title}" — diseño ya definido (compra impulsiva, regalo, identificación emocional).
 
 Analizá el potencial y dá 3 sugerencias MUY concretas para mejorar (título, fotos, descripción, precio, keywords).
 Respondé SOLO JSON:
@@ -2732,10 +2744,10 @@ ALGORITMO ML (PRIORIDADES): 1) Palabras clave exactas en el título 2) CTR (que 
 
 REGLAS: Escribí en español argentino. Sé claro, directo y vendedor. No repitas palabras innecesariamente. No uses lenguaje genérico sin contexto. Pensá como un comprador real.
 
-OPTIMIZACIÓN DE TÍTULO: Máximo 60-70 caracteres. Incluir: tipo de producto (taza cerámica), temática (Messi, meme, anime, frase), intención (regalo, divertido, fan). Ejemplo: "Taza Cerámica Messi Argentina Campeón Mundial Regalo"
+OPTIMIZACIÓN DE TÍTULO: Máximo 60 caracteres ESTRICTO · SIN puntuación ni emojis · tipo de producto real + temática + intención · ejemplo: "Botella Deportiva Airbag Banda Rock Regalo Viajero"
 
-Respondé siempre en español argentino, de forma concisa y práctica con ejemplos concretos aplicados a tazas con diseño.`},
-    {role:'assistant',content:'¡Perfecto! Soy tu experto en posicionamiento de tazas con diseño en ML Argentina 2026. Puedo ayudarte con títulos, descripciones, keywords, estrategia de precios y análisis de competencia. ¿Por dónde empezamos?'}
+Respondé siempre en español argentino. Aplicá los mismos principios a todos los productos de la tienda (tazas, botellas, termos, regalos, etc.), no solo a tazas.`},
+    {role:'assistant',content:'¡Hola! Soy tu experto en ventas y SEO para ML Argentina 2026. Trabajamos con tazas, botellas, termos y regalos con diseño. ¿En qué te ayudo?'}
   ];
   const win=document.getElementById('ai-chat');
   win.innerHTML=`<div class="msg msg-ai"><div class="msg-lbl">🤖 Experto ML Argentina — Tazas</div>¡Hola! Estoy especializado en <b>tazas con diseño para ML Argentina 2026</b>. Sé qué títulos rankean, qué keywords buscan los compradores y cómo convertir más con compra impulsiva. ¿En qué te ayudo hoy?</div>`;
