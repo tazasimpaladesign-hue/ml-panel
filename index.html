@@ -1872,13 +1872,13 @@ Respondé SOLO JSON válido (sin markdown, sin backticks):
           📦 <strong>Publicación seleccionada:</strong> ${itemName}
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn btn-primary" onclick="applyOptTitle('${tOpt.replace(/'/g,"\\'")}')">
+          <button class="btn btn-primary" onclick="applyOptTitle()">
             ✏️ Aplicar título en ML
           </button>
           ${dOpt?`<button class="btn btn-ghost" onclick="applyOptDesc()">
             📝 Aplicar descripción en ML
           </button>`:''}
-          <button class="btn btn-primary" style="background:#166534" onclick="applyOptBoth('${tOpt.replace(/'/g,"\\'")}')">
+          <button class="btn btn-primary" style="background:#166534" onclick="applyOptBoth()">
             🚀 Aplicar título + descripción
           </button>
         </div>
@@ -1889,25 +1889,31 @@ Respondé SOLO JSON válido (sin markdown, sin backticks):
         </div>`}
       </div>
     `;
-    // Guardar descripción sugerida para los botones de aplicar
+    // Guardar título y descripción en variables globales — NO en atributos onclick
+    window._optTituloSugerido = tOpt;
     window._optDescSugerida = dOpt;
   }catch(e){console.error(e);el.innerHTML='<div class="alert a-red">⚠️ Error al procesar. Revisá la conexión.</div>';}
 }
 
-// Aplicar solo título
-async function applyOptTitle(titulo){
+// Aplicar solo título — lee de window._optTituloSugerido (evita problemas de encoding en onclick)
+async function applyOptTitle(){
   if(!optCurrentItemId){alert('No hay publicación seleccionada');return;}
+  const titulo=window._optTituloSugerido||document.getElementById('opt-in')?.value?.trim();
+  if(!titulo){alert('No hay título generado');return;}
   const res=document.getElementById('opt-apply-res');
   if(res)res.innerHTML='<div class="loading"><div class="spin"></div>Aplicando título en ML...</div>';
   try{
     const r=await mlPut('/items/'+optCurrentItemId,{title:titulo});
-    if(r.error||r.message){if(res)res.innerHTML=`<div class="alert a-red">❌ ${r.message||r.error}</div>`;return;}
-    if(res)res.innerHTML='<div class="alert a-success">✅ Título actualizado en ML. Los cambios pueden tardar unos minutos.</div>';
+    if(r.error||r.message){
+      if(res)res.innerHTML=`<div class="alert a-red">❌ ${r.message||r.error}</div>`;
+      return;
+    }
+    if(res)res.innerHTML='<div class="alert a-success">✅ Título actualizado correctamente en ML.</div>';
     const item=allItems.find(i=>i.id===optCurrentItemId);if(item)item.title=titulo;
   }catch(e){if(res)res.innerHTML=`<div class="alert a-red">❌ ${e.message}</div>`;}
 }
 
-// Aplicar solo descripción
+// Aplicar solo descripción — usa PUT si ya existe, POST si es nueva
 async function applyOptDesc(){
   if(!optCurrentItemId){alert('No hay publicación seleccionada');return;}
   const desc=window._optDescSugerida||'';
@@ -1915,32 +1921,67 @@ async function applyOptDesc(){
   const res=document.getElementById('opt-apply-res');
   if(res)res.innerHTML='<div class="loading"><div class="spin"></div>Aplicando descripción en ML...</div>';
   try{
-    await mlPost('/items/'+optCurrentItemId+'/description',{plain_text:desc});
-    if(res)res.innerHTML='<div class="alert a-success">✅ Descripción actualizada en ML.</div>';
+    // Intentar PUT primero (actualizar descripción existente)
+    let r=await fetch(WORKER+'/api/items/'+optCurrentItemId+'/description',{
+      method:'PUT',
+      headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
+      body:JSON.stringify({plain_text:desc})
+    });
+    let data=await r.json();
+    // Si falla con 404 (no existe), crear con POST
+    if(r.status===404||data.error==='not_found'){
+      r=await fetch(WORKER+'/api/items/'+optCurrentItemId+'/description',{
+        method:'POST',
+        headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
+        body:JSON.stringify({plain_text:desc})
+      });
+      data=await r.json();
+    }
+    if(data.error||data.message){
+      if(res)res.innerHTML=`<div class="alert a-red">❌ ${data.message||data.error}</div>`;
+      return;
+    }
+    if(res)res.innerHTML='<div class="alert a-success">✅ Descripción actualizada correctamente en ML.</div>';
   }catch(e){if(res)res.innerHTML=`<div class="alert a-red">❌ ${e.message}</div>`;}
 }
 
 // Aplicar título + descripción juntos
-async function applyOptBoth(titulo){
+async function applyOptBoth(){
   if(!optCurrentItemId){alert('No hay publicación seleccionada');return;}
+  const titulo=window._optTituloSugerido||document.getElementById('opt-in')?.value?.trim();
   const desc=window._optDescSugerida||'';
+  if(!titulo){alert('No hay título generado');return;}
   const res=document.getElementById('opt-apply-res');
   if(res)res.innerHTML='<div class="loading"><div class="spin"></div>Aplicando cambios en ML...</div>';
   try{
-    const r=await mlPut('/items/'+optCurrentItemId,{title:titulo});
-    if(r.error||r.message){if(res)res.innerHTML=`<div class="alert a-red">❌ ${r.message||r.error}</div>`;return;}
-    if(desc) await mlPost('/items/'+optCurrentItemId+'/description',{plain_text:desc}).catch(()=>{});
-    if(res)res.innerHTML='<div class="alert a-success">🚀 Título y descripción actualizados en ML. Los cambios pueden tardar unos minutos en verse.</div>';
+    // 1. Aplicar título
+    const rt=await mlPut('/items/'+optCurrentItemId,{title:titulo});
+    if(rt.error||rt.message){
+      if(res)res.innerHTML=`<div class="alert a-red">❌ Error en título: ${rt.message||rt.error}</div>`;
+      return;
+    }
     const item=allItems.find(i=>i.id===optCurrentItemId);if(item)item.title=titulo;
-  }catch(e){if(res)res.innerHTML=`<div class="alert a-red">❌ ${e.message}</div>`;}
-}
 
-async function applyDescripcion(desc){
-  if(!optCurrentItemId){alert('No hay publicación seleccionada');return;}
-  try{
-    await mlPost('/items/'+optCurrentItemId+'/description',{plain_text:desc});
-    alert('✅ Descripción actualizada en ML');
-  }catch(e){alert('Error al actualizar descripción: '+e.message);}
+    // 2. Aplicar descripción si hay (PUT, fallback a POST)
+    if(desc){
+      try{
+        let rd=await fetch(WORKER+'/api/items/'+optCurrentItemId+'/description',{
+          method:'PUT',
+          headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
+          body:JSON.stringify({plain_text:desc})
+        });
+        let dd=await rd.json();
+        if(rd.status===404||dd.error==='not_found'){
+          await fetch(WORKER+'/api/items/'+optCurrentItemId+'/description',{
+            method:'POST',
+            headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
+            body:JSON.stringify({plain_text:desc})
+          });
+        }
+      }catch(e){console.warn('desc update:',e);}
+    }
+    if(res)res.innerHTML='<div class="alert a-success">🚀 Título'+(desc?' y descripción':'')+' actualizados en ML. Los cambios pueden tardar unos minutos en verse.</div>';
+  }catch(e){if(res)res.innerHTML=`<div class="alert a-red">❌ ${e.message}</div>`;}
 }
 
 // ═══════════════════════════════════════════════════════════
