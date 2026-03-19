@@ -493,6 +493,7 @@ input::placeholder,textarea::placeholder{color:#9ca3af}
   <div class="sb-sec">Gestión</div>
   <button class="nav" onclick="showSection('ventas')" id="nav-ventas"><span class="ni">🛍️</span>Ventas / Pedidos</button>
   <button class="nav" onclick="showSection('preguntas')" id="nav-preguntas"><span class="ni">💬</span>Preguntas<span class="nb nb-red" id="nb-q">0</span></button>
+  <button class="nav" onclick="showSection('mensajes')" id="nav-mensajes"><span class="ni">📬</span>Mensajes post-venta</button>
   <button class="nav" onclick="showSection('reputacion')" id="nav-reputacion"><span class="ni">⭐</span>Reputación</button>
   <button class="nav" onclick="showSection('stock')" id="nav-stock"><span class="ni">📋</span>Stock</button>
   <button class="nav" onclick="showSection('reclamos')" id="nav-reclamos"><span class="ni">🚨</span>Reclamos</button>
@@ -720,14 +721,33 @@ input::placeholder,textarea::placeholder{color:#9ca3af}
   <div class="g60">
     <div class="card">
       <div class="card-hd"><div class="card-title">✨ Optimizador de título y descripción</div></div>
-      <div class="ff"><label>Título actual</label><input type="text" id="opt-in" placeholder="Pegá tu título actual..." oninput="liveScore(this.value)"></div>
-      <div class="ff"><label>Descripción actual (opcional)</label><textarea id="opt-desc" rows="3" placeholder="Descripción..."></textarea></div>
-      <div class="ff"><label>Categoría</label><input type="text" id="opt-cat" placeholder="Ej: Hogar > Tazas"></div>
-      <div class="ff"><label>Keywords extra a incluir (opcional)</label><input type="text" id="opt-kws" placeholder="Ej: sublimada, regalo, personalizada"></div>
+
+      <!-- Buscador de mis publicaciones -->
+      <div class="ff" style="position:relative">
+        <label>Buscar en mis publicaciones</label>
+        <input type="text" id="opt-search" placeholder="Escribí parte del título..." oninput="filterOptItems()" autocomplete="off">
+        <div id="opt-search-results" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:50;background:#fff;border:1px solid #d1d5db;border-radius:0 0 8px 8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);max-height:220px;overflow-y:auto"></div>
+      </div>
+      <div id="opt-selected" style="margin-bottom:8px"></div>
+
+      <div class="ff"><label>Título actual</label><input type="text" id="opt-in" placeholder="O pegá un título manualmente..." oninput="liveScore(this.value)"></div>
+
+      <div class="ff">
+        <label style="display:flex;justify-content:space-between">
+          <span>Descripción actual</span>
+          <span id="opt-desc-chars" style="color:#9ca3af;font-weight:400;font-size:11px"></span>
+        </label>
+        <textarea id="opt-desc" rows="4" placeholder="Se carga automáticamente al elegir una publicación, o pegá la descripción..." oninput="document.getElementById('opt-desc-chars').textContent=this.value.length+' chars'"></textarea>
+      </div>
+
+      <div class="fr">
+        <div><label>Categoría</label><input type="text" id="opt-cat" placeholder="Ej: Tazas, Hogar..."></div>
+        <div><label>Keywords extra</label><input type="text" id="opt-kws" placeholder="Ej: regalo, sublimada"></div>
+      </div>
       <button class="btn btn-primary" style="width:100%;margin-bottom:8px" onclick="doOptimize()">🤖 Optimizar con IA</button>
-      <button class="btn btn-ghost" style="width:100%" onclick="loadMyItems()">📦 Elegir de mis publicaciones</button>
       <div id="opt-out" style="margin-top:14px"></div>
     </div>
+
     <div>
       <div class="card mb">
         <div class="card-hd"><div class="card-title">Score SEO en tiempo real</div></div>
@@ -750,7 +770,7 @@ input::placeholder,textarea::placeholder{color:#9ca3af}
           <div>✅ Sin signos de puntuación</div>
           <div>✅ Sin palabras repetidas</div>
           <div>✅ Sin mayúsculas completas</div>
-          <div>✅ Atributo diferenciador (color, material)</div>
+          <div>✅ Atributo diferenciador (material, uso)</div>
           <div>❌ No spamear palabras clave</div>
           <div>❌ No usar emojis ni símbolos</div>
         </div>
@@ -854,20 +874,40 @@ input::placeholder,textarea::placeholder{color:#9ca3af}
 <!-- ═══════════════════════ VENTAS / PEDIDOS ═══════════════════════ -->
 <div id="section-ventas" class="section fade-in">
   <div class="mgt">
-    <div class="mc c-green"><div class="mc-label">Ventas mes</div><div class="mc-val" id="v-mes">—</div></div>
+    <div class="mc c-green"><div class="mc-label">Ventas mes actual</div><div class="mc-val" id="v-mes">—</div></div>
     <div class="mc c-blue"><div class="mc-label">Ticket promedio</div><div class="mc-val" id="v-ticket">—</div></div>
     <div class="mc c-amber"><div class="mc-label">Envíos en camino</div><div class="mc-val" id="v-ship">—</div></div>
     <div class="mc c-teal"><div class="mc-label">Entregados</div><div class="mc-val" id="v-delivered">—</div></div>
   </div>
   <div class="card mb">
-    <div class="card-hd"><div class="card-title">Ventas diarias</div></div>
+    <div class="card-hd">
+      <div class="card-title">Ventas diarias</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="ven-period" style="font-size:12px;padding:4px 8px" onchange="renderVentas()">
+          <option value="30">Últimos 30 días</option>
+          <option value="90">Últimos 90 días</option>
+          <option value="180">Últimos 6 meses</option>
+          <option value="540" selected>Últimos 18 meses</option>
+        </select>
+      </div>
+    </div>
     <div style="position:relative;height:200px"><canvas id="chart-ven"></canvas></div>
   </div>
   <div class="card">
-    <div class="card-hd"><div class="card-title">Historial de pedidos</div></div>
+    <div class="card-hd">
+      <div class="card-title">Historial de pedidos</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="text" id="ven-search" placeholder="Buscar comprador o producto..." style="width:200px;font-size:12px;padding:5px 9px" oninput="renderVentasTable()">
+        <select id="ven-status" style="font-size:12px;padding:5px 9px" onchange="renderVentasTable()">
+          <option value="">Todos los estados</option>
+          <option value="paid">Pagados</option>
+          <option value="cancelled">Cancelados</option>
+        </select>
+      </div>
+    </div>
     <div class="tw">
       <table>
-        <thead><tr><th>#Orden</th><th>Producto</th><th>Comprador</th><th>Monto</th><th>Envío</th><th>Estado</th><th>Fecha</th></tr></thead>
+        <thead><tr><th>#Orden</th><th>Producto</th><th>Comprador</th><th>Monto total</th><th>Monto neto</th><th>Estado</th><th>Fecha y hora</th><th>Ver en ML</th></tr></thead>
         <tbody id="orders-tbody"></tbody>
       </table>
     </div>
@@ -933,13 +973,43 @@ input::placeholder,textarea::placeholder{color:#9ca3af}
     <div id="stock-list"></div>
   </div>
   <div class="card">
-    <div class="card-hd"><div class="card-title">Stock completo por publicación</div></div>
+    <div class="card-hd">
+      <div class="card-title">Stock completo por publicación</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="text" id="stock-search" placeholder="Buscar título o SKU..." style="width:200px;padding:5px 9px;font-size:12px" oninput="renderStock()">
+        <select id="stock-sort" style="width:150px;padding:5px 9px;font-size:12px" onchange="renderStock()">
+          <option value="asc">Stock ↑ menor</option>
+          <option value="desc">Stock ↓ mayor</option>
+          <option value="sold">Más vendidos</option>
+          <option value="alpha">Nombre A-Z</option>
+        </select>
+      </div>
+    </div>
     <div class="tw">
       <table>
-        <thead><tr><th>Publicación</th><th>Stock actual</th><th>Vendidas</th><th>Alerta</th><th>Actualizar</th></tr></thead>
+        <thead><tr><th>Publicación</th><th>SKU</th><th>Stock actual</th><th>Vendidas</th><th>Alerta</th><th>Actualizar</th><th>ML</th></tr></thead>
         <tbody id="stock-tbody"></tbody>
       </table>
     </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════ MENSAJES POST-VENTA ═══════════════════════ -->
+<div id="section-mensajes" class="section fade-in">
+  <div class="mgt mgt-3">
+    <div class="mc c-amber"><div class="mc-label">Sin leer</div><div class="mc-val" id="msg-unread">—</div></div>
+    <div class="mc c-blue"><div class="mc-label">Total packs</div><div class="mc-val" id="msg-total">—</div></div>
+    <div class="mc c-green"><div class="mc-label">Última actividad</div><div class="mc-val" id="msg-last" style="font-size:14px">—</div></div>
+  </div>
+  <div class="card">
+    <div class="card-hd">
+      <div class="card-title">📬 Mensajes post-venta</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost btn-sm" onclick="renderMensajes()">↻ Actualizar</button>
+        <a href="https://www.mercadolibre.com.ar/mensajes" target="_blank" class="btn btn-primary btn-sm" style="text-decoration:none">📬 Abrir en ML</a>
+      </div>
+    </div>
+    <div id="mensajes-list"><div class="loading"><div class="spin"></div>Cargando mensajes...</div></div>
   </div>
 </div>
 
@@ -1037,9 +1107,9 @@ input::placeholder,textarea::placeholder{color:#9ca3af}
     <div class="card">
       <div class="card-hd"><div class="card-title">Reglas activas</div></div>
       <div id="rules-list">
-        <div class="rule-card"><div class="rule-icon" style="background:var(--amber-g)">📈</div><div style="flex:1"><div style="font-size:12.5px;font-weight:500">Subir precio si stock bajo</div><div style="font-size:11px;color:var(--text3)">Stock ≤ 3 → Subir 10%</div></div><span class="badge bg-green">Activa</span></div>
-        <div class="rule-card"><div class="rule-icon" style="background:var(--red-g)">📉</div><div style="flex:1"><div style="font-size:12.5px;font-weight:500">Bajar precio sin ventas</div><div style="font-size:11px;color:var(--text3)">Sin ventas 7 días → Bajar 5%</div></div><span class="badge bg-green">Activa</span></div>
-        <div class="rule-card"><div class="rule-icon" style="background:var(--blue-g)">🤖</div><div style="flex:1"><div style="font-size:12.5px;font-weight:500">Auto-responder preguntas</div><div style="font-size:11px;color:var(--text3)">Pregunta nueva → IA responde</div></div><span class="badge bg-amber">Pendiente</span></div>
+        <div class="rule-card" id="rule-def-1"><div class="rule-icon" style="background:var(--amber-g)">📈</div><div style="flex:1"><div style="font-size:12.5px;font-weight:500">Subir precio si stock bajo</div><div style="font-size:11px;color:var(--text3)">Stock ≤ 3 → Subir 10%</div></div><span class="badge bg-green">Activa</span><button class="btn btn-ghost btn-xs" style="margin-left:6px" onclick="toggleRule('rule-def-1',this)">⏸ Pausar</button><button class="btn btn-danger btn-xs" style="margin-left:4px" onclick="deleteRule('rule-def-1')">✕</button></div>
+        <div class="rule-card" id="rule-def-2"><div class="rule-icon" style="background:var(--red-g)">📉</div><div style="flex:1"><div style="font-size:12.5px;font-weight:500">Bajar precio sin ventas</div><div style="font-size:11px;color:var(--text3)">Sin ventas 7 días → Bajar 5%</div></div><span class="badge bg-green">Activa</span><button class="btn btn-ghost btn-xs" style="margin-left:6px" onclick="toggleRule('rule-def-2',this)">⏸ Pausar</button><button class="btn btn-danger btn-xs" style="margin-left:4px" onclick="deleteRule('rule-def-2')">✕</button></div>
+        <div class="rule-card" id="rule-def-3"><div class="rule-icon" style="background:var(--accent-g)">🤖</div><div style="flex:1"><div style="font-size:12.5px;font-weight:500">Auto-responder preguntas</div><div style="font-size:11px;color:var(--text3)">Pregunta nueva → IA responde</div></div><span class="badge bg-amber">Pendiente</span><button class="btn btn-ghost btn-xs" style="margin-left:6px" onclick="toggleRule('rule-def-3',this)">⏸ Pausar</button><button class="btn btn-danger btn-xs" style="margin-left:4px" onclick="deleteRule('rule-def-3')">✕</button></div>
       </div>
     </div>
   </div>
@@ -1296,19 +1366,46 @@ async function loadItems(){
 async function loadOrders(){
   try{
     const now=new Date();
-    const from=new Date(now.getFullYear(),now.getMonth(),1).toISOString();
-    const r=await mlGet(`/orders/search?seller=${userId}&order.date_created.from=${from}&limit=50`);
-    allOrders=r.results||[];
-    const total=allOrders.reduce((s,o)=>s+(o.total_amount||0),0);
-    const ticket=allOrders.length?Math.round(total/allOrders.length):0;
-    document.getElementById('d-billing').textContent='$'+total.toLocaleString('es-AR');
-    document.getElementById('d-sales').textContent=allOrders.length;
-    document.getElementById('d-ticket').textContent='$'+ticket.toLocaleString('es-AR');
-    document.getElementById('fac-mes').textContent='$'+total.toLocaleString('es-AR');
-    document.getElementById('v-mes').textContent=allOrders.length;
-    document.getElementById('v-ticket').textContent='$'+ticket.toLocaleString('es-AR');
-    document.getElementById('v-ship').textContent=allOrders.filter(o=>o.shipping?.status==='shipped').length;
-    document.getElementById('v-delivered').textContent=allOrders.filter(o=>o.shipping?.status==='delivered').length;
+    // Mes actual para métricas rápidas
+    const fromMonth=new Date(now.getFullYear(),now.getMonth(),1).toISOString();
+    // 18 meses atrás para histórico
+    const from18=new Date(now);from18.setMonth(from18.getMonth()-18);
+    const from18Str=from18.toISOString();
+
+    // Cargamos en lotes: primero mes actual para tener las métricas rápido
+    const rMonth=await mlGet(`/orders/search?seller=${userId}&order.date_created.from=${fromMonth}&sort=date_desc&limit=50`);
+    const monthOrders=rMonth.results||[];
+    allOrders=monthOrders;
+
+    // Actualizar métricas del mes
+    const totalMes=monthOrders.reduce((s,o)=>s+(o.total_amount||0),0);
+    const ticket=monthOrders.length?Math.round(totalMes/monthOrders.length):0;
+    const safeSet=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
+    safeSet('d-billing','$'+totalMes.toLocaleString('es-AR'));
+    safeSet('d-sales',monthOrders.length);
+    safeSet('d-ticket','$'+ticket.toLocaleString('es-AR'));
+    safeSet('fac-mes','$'+totalMes.toLocaleString('es-AR'));
+    safeSet('v-mes',monthOrders.length);
+    safeSet('v-ticket','$'+ticket.toLocaleString('es-AR'));
+    safeSet('v-ship',monthOrders.filter(o=>o.shipping?.status==='shipped').length);
+    safeSet('v-delivered',monthOrders.filter(o=>o.shipping?.status==='delivered').length);
+
+    // Ahora cargamos el histórico completo de 18 meses en background
+    let allHist=[];
+    for(let offset=0;offset<2000;offset+=50){
+      try{
+        const r=await mlGet(`/orders/search?seller=${userId}&order.date_created.from=${from18Str}&sort=date_desc&limit=50&offset=${offset}`);
+        const res=r.results||[];
+        allHist.push(...res);
+        if(res.length<50)break;
+        await new Promise(r=>setTimeout(r,120));
+      }catch(e){break;}
+    }
+    // Dedup y ordenar más reciente primero
+    const seen=new Set();
+    allOrders=[...allHist].filter(o=>{if(seen.has(o.id))return false;seen.add(o.id);return true;});
+    allOrders.sort((a,b)=>new Date(b.date_created)-new Date(a.date_created));
+    console.log('[loadOrders] Histórico 18m cargado:',allOrders.length,'órdenes');
   }catch(e){console.error('orders',e);}
 }
 
@@ -1357,8 +1454,8 @@ function makeChart(id,config){
 
 function chartDefaults(){return{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}};}
 
-function tOpts(){return{ticks:{color:'#4a5268',font:{size:10}},grid:{color:'rgba(255,255,255,0.04)'},border:{color:'transparent'}};}
-function tXOpts(){return{ticks:{color:'#4a5268',font:{size:10},maxRotation:0,maxTicksLimit:8},grid:{display:false},border:{color:'transparent'}};}
+function tOpts(){return{ticks:{color:'#6b7280',font:{size:10}},grid:{color:'rgba(0,0,0,0.05)'},border:{color:'transparent'}};}
+function tXOpts(){return{ticks:{color:'#6b7280',font:{size:10},maxRotation:0,maxTicksLimit:8},grid:{display:false},border:{color:'transparent'}};}
 
 function renderMainChart(mode){
   const labels=[],data={};
@@ -1630,35 +1727,71 @@ async function doOptimize(){
   const desc=document.getElementById('opt-desc').value.trim();
   const cat=document.getElementById('opt-cat').value.trim();
   const kws=document.getElementById('opt-kws').value.trim();
-  if(!title){alert('Ingresá un título');return;}
+  if(!title){alert('Ingresá o seleccioná un título');return;}
   const el=document.getElementById('opt-out');
   el.innerHTML='<div class="loading"><div class="spin"></div>Optimizando con IA...</div>';
   try{
-    const r=await callClaude(`Sos un experto SEO en Mercado Libre Argentina 2025-2026. El algoritmo actual prioriza títulos naturales (40-60 chars), sin puntuación, keyword principal al inicio, atributos diferenciadores, sin spam.
+    const r=await callClaude(`Actuá como experto en ventas y posicionamiento en MercadoLibre Argentina 2026, especializado en tazas con diseño impreso.
 
-Optimizá:
-Título actual: "${title}"
-${cat?'Categoría: '+cat:''}
-${desc?'Descripción actual: '+desc.slice(0,300):''}
-${kws?'Keywords a incluir: '+kws:''}
+Producto: taza cerámica con diseño ya definido (NO personalizable). Compra impulsiva, regalo, identificación emocional.
 
-Respondé SOLO en JSON válido (sin markdown ni backticks):
-{"titulo_optimizado":"...","titulo_alternativo":"...","descripcion_optimizada":"...","keywords":["k1","k2","k3"],"cambios":["c1","c2"],"explicacion":"..."}`);
+TÍTULO ACTUAL: "${title}"
+${cat?'CATEGORÍA: '+cat:''}
+${desc?'DESCRIPCIÓN ACTUAL:\n'+desc.slice(0,400):''}
+${kws?'KEYWORDS A INCLUIR: '+kws:''}
+
+REGLAS TÍTULO: 60-70 chars · keyword al inicio · sin puntuación · sin palabras repetidas · temática + intención (regalo, fan, divertido) · pensar como comprador impulsivo
+
+Respondé SOLO JSON válido (sin markdown, sin backticks):
+{
+  "titulo_optimizado": "...",
+  "titulo_alternativo": "...",
+  "descripcion_optimizada": "...",
+  "keywords": ["k1","k2","k3","k4","k5"],
+  "mejoras_recomendadas": ["m1","m2","m3"],
+  "enfoque_venta": "...",
+  "score_seo": 0
+}`);
     const result=JSON.parse(r.replace(/```json|```/g,'').trim());
+    // Actualizar campo de título
     document.getElementById('opt-in').value=result.titulo_optimizado||title;
     liveScore(result.titulo_optimizado||title);
+    const sc=result.score_seo||seoScore(result.titulo_optimizado||title);
+    const scColor=sc>=70?'var(--green)':sc>=40?'var(--amber)':'var(--red)';
     el.innerHTML=`
-      <div class="card" style="background:var(--bg3);margin-bottom:10px">
-        <div style="font-size:11px;color:var(--text3);margin-bottom:5px">✅ TÍTULO OPTIMIZADO</div>
-        <div style="font-size:15px;font-weight:600;color:var(--text);padding-bottom:8px;border-bottom:1px solid var(--border)">${result.titulo_optimizado}</div>
-        <div style="font-size:10px;color:var(--text3);margin-top:6px">${(result.titulo_optimizado||'').length} caracteres · <span class="${(result.titulo_optimizado||'').length<=60?'':'badge bg-red'}">${(result.titulo_optimizado||'').length<=60?'✓ Longitud óptima':'! Muy largo'}</span></div>
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:var(--r);padding:14px;margin-bottom:10px">
+        <div style="font-size:10px;color:#166534;margin-bottom:5px;text-transform:uppercase;font-weight:700">✅ TÍTULO OPTIMIZADO</div>
+        <div style="font-size:15px;font-weight:600;color:#111827;padding-bottom:8px;border-bottom:1px solid #bbf7d0">${result.titulo_optimizado}</div>
+        <div style="display:flex;gap:10px;margin-top:7px;align-items:center">
+          <span style="font-size:11px;color:#6b7280">${(result.titulo_optimizado||'').length} chars</span>
+          <span style="font-size:11px;font-weight:700;color:${scColor}">Score: ${sc}/100</span>
+          ${optCurrentItemId?`<button class="btn btn-primary btn-sm" onclick="applyOptimization()" style="margin-left:auto">📝 Aplicar en ML</button>`:''}
+        </div>
       </div>
-      ${result.titulo_alternativo?`<div class="card" style="background:var(--bg3);margin-bottom:10px"><div style="font-size:11px;color:var(--text3);margin-bottom:4px">💡 ALTERNATIVA</div><div style="font-size:13.5px;color:var(--text2)">${result.titulo_alternativo}</div></div>`:''}
-      ${result.descripcion_optimizada?`<div class="card" style="background:var(--bg3);margin-bottom:10px"><div style="font-size:11px;color:var(--text3);margin-bottom:6px">📝 DESCRIPCIÓN SUGERIDA</div><div style="font-size:12.5px;color:var(--text2);line-height:1.7">${result.descripcion_optimizada.replace(/\n/g,'<br>')}</div></div>`:''}
-      ${result.keywords?.length?`<div style="margin-bottom:10px"><div style="font-size:11px;color:var(--text3);margin-bottom:6px">🔑 Keywords identificadas</div><div class="chips">${result.keywords.map(k=>`<span class="badge bg-blue">${k}</span>`).join('')}</div></div>`:''}
-      ${result.cambios?.length?`<div><div style="font-size:11px;color:var(--text3);margin-bottom:6px">Cambios aplicados</div>${result.cambios.map(c=>`<div style="font-size:12px;color:var(--text2);margin-bottom:4px">✅ ${c}</div>`).join('')}</div>`:''}
+      ${result.titulo_alternativo?`<div style="background:var(--bg3);border-radius:var(--rs);padding:10px;margin-bottom:10px">
+        <div style="font-size:10px;color:var(--text3);margin-bottom:4px;font-weight:700">💡 ALTERNATIVA</div>
+        <div style="font-size:13px">${result.titulo_alternativo}</div>
+        <button class="btn btn-ghost btn-xs" style="margin-top:5px" onclick="document.getElementById('opt-in').value='${(result.titulo_alternativo||'').replace(/'/g,"\\'")}';liveScore('${(result.titulo_alternativo||'').replace(/'/g,"\\'")}')">Usar esta</button>
+      </div>`:''}
+      ${result.descripcion_optimizada?`<div style="background:var(--bg3);border-radius:var(--rs);padding:12px;margin-bottom:10px">
+        <div style="font-size:10px;color:var(--text3);margin-bottom:6px;font-weight:700">📝 DESCRIPCIÓN RECOMENDADA</div>
+        <div style="font-size:12.5px;color:var(--text2);line-height:1.75">${result.descripcion_optimizada.replace(/\n/g,'<br>')}</div>
+        <button class="btn btn-ghost btn-xs" style="margin-top:7px" onclick="navigator.clipboard.writeText(this.previousElementSibling.innerText)">📋 Copiar</button>
+        ${optCurrentItemId?`<button class="btn btn-ghost btn-xs" style="margin-top:7px;margin-left:5px" onclick="applyDescripcion('${(result.descripcion_optimizada||'').replace(/'/g,"\\'").replace(/\n/g,'\\n')}')">📝 Aplicar en ML</button>`:''}
+      </div>`:''}
+      ${result.keywords?.length?`<div style="margin-bottom:10px"><div style="font-size:10px;color:var(--text3);margin-bottom:5px;font-weight:700">🔑 KEYWORDS</div><div class="chips">${result.keywords.map(k=>`<span class="badge bg-blue">${k}</span>`).join('')}</div></div>`:''}
+      ${result.mejoras_recomendadas?.length?`<div style="margin-bottom:10px"><div style="font-size:10px;color:var(--text3);margin-bottom:5px;font-weight:700">🎯 MEJORAS CLAVE</div>${result.mejoras_recomendadas.map(m=>`<div style="font-size:12px;color:var(--text2);margin-bottom:4px">→ ${m}</div>`).join('')}</div>`:''}
+      ${result.enfoque_venta?`<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:var(--rs);padding:10px"><div style="font-size:10px;color:#1d4ed8;margin-bottom:3px;font-weight:700">💡 ENFOQUE DE VENTA</div><div style="font-size:12px;color:#1e40af">${result.enfoque_venta}</div></div>`:''}
     `;
-  }catch(e){el.innerHTML='<div class="alert a-red">⚠️ Error al procesar. Revisá la conexión.</div>';}
+  }catch(e){console.error(e);el.innerHTML='<div class="alert a-red">⚠️ Error al procesar. Revisá la conexión.</div>';}
+}
+
+async function applyDescripcion(desc){
+  if(!optCurrentItemId){alert('No hay publicación seleccionada');return;}
+  try{
+    await mlPost('/items/'+optCurrentItemId+'/description',{plain_text:desc});
+    alert('✅ Descripción actualizada en ML');
+  }catch(e){alert('Error al actualizar descripción: '+e.message);}
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1670,48 +1803,53 @@ async function doGenProduct(){
   const kw=document.getElementById('gen2-kw').value.trim();
   const cat=document.getElementById('gen2-cat').value||'Tazas personalizadas';
   const price=document.getElementById('gen2-price').value||'12999';
-  const extra=document.getElementById('gen2-extra').value||'cerámica mágica';
+  const extra=document.getElementById('gen2-extra').value||'cerámica';
   if(!kw){alert('Ingresá una keyword');return;}
   const el=document.getElementById('gen2-out');
-  el.innerHTML='<div class="card" style="height:200px;display:flex;align-items:center;justify-content:center"><div class="loading"><div class="spin"></div>Generando producto completo...</div></div>';
+  el.innerHTML='<div class="card" style="height:200px;display:flex;align-items:center;justify-content:center"><div class="loading"><div class="spin"></div>Generando producto completo con IA...</div></div>';
   try{
-    const r=await callClaude(`Sos un experto en crear publicaciones para Mercado Libre Argentina. 
-Generá un producto completo para una tienda de ${cat} basado en la keyword: "${kw}"
-Material/estilo: ${extra}
-Precio: $${price}
+    const r=await callClaude(`Actuá como experto en ventas en MercadoLibre Argentina 2026, especializado en tazas con diseño impreso.
 
-Reglas ML Argentina: título 40-60 chars, sin puntuación, keyword al inicio, atributos diferenciadores.
+Creá una publicación completa para: "${kw}"
+Categoría: ${cat} | Material: ${extra} | Precio: $${price}
+
+IMPORTANTE: Es un diseño YA DEFINIDO (no personalizable). Enfoque: compra impulsiva, regalo, identificación emocional.
+Título: 60-70 chars · keyword al inicio · sin puntuación · temática + intención de compra
 
 Respondé SOLO JSON válido (sin markdown):
-{"titulo":"...","titulo_alt":"...","descripcion":"...","descripcion_corta":"...","tags":["t1","t2","t3","t4","t5"],"prompt_imagen":"...","categoria_sugerida":"...","precio_sugerido":${price},"keywords_seo":["k1","k2","k3"],"ventajas":["v1","v2","v3"],"empaques":["e1","e2"]}`);
+{"titulo":"...","titulo_alt":"...","descripcion":"...","descripcion_corta":"...","tags":["t1","t2","t3","t4","t5"],"prompt_imagen":"...","categoria_sugerida":"...","precio_sugerido":${price},"keywords_seo":["k1","k2","k3","k4","k5"],"ventajas":["v1","v2","v3"],"enfoque_venta":"...","score_seo":0}`);
     const d=JSON.parse(r.replace(/```json|```/g,'').trim());
     el.innerHTML=`<div class="card fade-in">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-        <div style="font-size:15px;font-weight:600;color:var(--green)">✅ Producto generado</div>
-        <span class="badge bg-blue">$${Number(d.precio_sugerido||price).toLocaleString('es-AR')}</span>
+        <div style="font-size:15px;font-weight:600;color:#166534">✅ Producto generado</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span class="badge bg-blue">Score SEO: ${d.score_seo||'—'}</span>
+          <span class="badge bg-green">$${Number(d.precio_sugerido||price).toLocaleString('es-AR')}</span>
+        </div>
       </div>
-      <div style="background:var(--bg3);border-radius:var(--rs);padding:12px;margin-bottom:10px">
-        <div style="font-size:10px;color:var(--text3);margin-bottom:4px;text-transform:uppercase">TÍTULO PRINCIPAL</div>
-        <div style="font-size:14px;font-weight:600">${d.titulo}</div>
-        <div style="font-size:10px;color:var(--text3);margin-top:4px">${(d.titulo||'').length} chars</div>
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:var(--rs);padding:12px;margin-bottom:10px">
+        <div style="font-size:10px;color:#166534;margin-bottom:4px;text-transform:uppercase;font-weight:700">TÍTULO PRINCIPAL</div>
+        <div style="font-size:14px;font-weight:600;color:#111827">${d.titulo}</div>
+        <div style="font-size:10px;color:#6b7280;margin-top:4px">${(d.titulo||'').length} chars</div>
       </div>
-      ${d.titulo_alt?`<div style="font-size:12px;color:var(--text2);padding:8px;background:var(--bg3);border-radius:var(--rs);margin-bottom:10px"><span style="color:var(--text3);font-size:10px">ALT: </span>${d.titulo_alt}</div>`:''}
-      <div style="background:var(--bg3);border-radius:var(--rs);padding:12px;margin-bottom:10px">
-        <div style="font-size:10px;color:var(--text3);margin-bottom:6px;text-transform:uppercase">DESCRIPCIÓN</div>
-        <div style="font-size:12.5px;color:var(--text2);line-height:1.7">${(d.descripcion||'').replace(/\n/g,'<br>').slice(0,400)}...</div>
+      ${d.titulo_alt?`<div style="font-size:12px;color:#374151;padding:8px;background:#f3f4f6;border-radius:var(--rs);margin-bottom:10px"><span style="color:#6b7280;font-size:10px;font-weight:700">💡 ALT: </span>${d.titulo_alt}</div>`:''}
+      <div style="background:#f3f4f6;border-radius:var(--rs);padding:12px;margin-bottom:10px">
+        <div style="font-size:10px;color:#6b7280;margin-bottom:6px;text-transform:uppercase;font-weight:700">DESCRIPCIÓN</div>
+        <div style="font-size:12.5px;color:#374151;line-height:1.75">${(d.descripcion||'').replace(/\n/g,'<br>').slice(0,500)}...</div>
+        <button class="btn btn-ghost btn-xs" style="margin-top:8px" onclick="navigator.clipboard.writeText('${(d.descripcion||'').replace(/'/g,"\\'")}')">📋 Copiar descripción</button>
       </div>
-      ${d.tags?.length?`<div style="margin-bottom:10px"><div style="font-size:10px;color:var(--text3);margin-bottom:5px">TAGS</div><div class="chips">${d.tags.map(t=>`<span class="badge bg-purple">${t}</span>`).join('')}</div></div>`:''}
-      ${d.keywords_seo?.length?`<div style="margin-bottom:10px"><div style="font-size:10px;color:var(--text3);margin-bottom:5px">SEO KEYWORDS</div><div class="chips">${d.keywords_seo.map(k=>`<span class="badge bg-blue">${k}</span>`).join('')}</div></div>`:''}
-      ${d.ventajas?.length?`<div style="margin-bottom:10px"><div style="font-size:10px;color:var(--text3);margin-bottom:5px">VENTAJAS A DESTACAR</div>${d.ventajas.map(v=>`<div style="font-size:12px;color:var(--text2);margin-bottom:3px">✓ ${v}</div>`).join('')}</div>`:''}
-      <div style="background:var(--purple-g);border:1px solid rgba(157,123,234,0.2);border-radius:var(--rs);padding:12px">
-        <div style="font-size:10px;color:var(--purple);margin-bottom:5px;text-transform:uppercase">🖼️ PROMPT PARA IMAGEN IA</div>
-        <div style="font-size:12px;color:var(--text2);font-family:var(--mono);line-height:1.5">${d.prompt_imagen}</div>
+      ${d.enfoque_venta?`<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:var(--rs);padding:10px;margin-bottom:10px"><div style="font-size:10px;color:#1d4ed8;margin-bottom:3px;font-weight:700">💡 ENFOQUE DE VENTA</div><div style="font-size:12px;color:#1e40af">${d.enfoque_venta}</div></div>`:''}
+      ${d.tags?.length?`<div style="margin-bottom:10px"><div style="font-size:10px;color:#6b7280;margin-bottom:5px;font-weight:700">TAGS</div><div class="chips">${d.tags.map(t=>`<span class="badge bg-purple">${t}</span>`).join('')}</div></div>`:''}
+      ${d.keywords_seo?.length?`<div style="margin-bottom:10px"><div style="font-size:10px;color:#6b7280;margin-bottom:5px;font-weight:700">SEO KEYWORDS</div><div class="chips">${d.keywords_seo.map(k=>`<span class="badge bg-blue">${k}</span>`).join('')}</div></div>`:''}
+      ${d.ventajas?.length?`<div style="margin-bottom:10px"><div style="font-size:10px;color:#6b7280;margin-bottom:5px;font-weight:700">VENTAJAS A DESTACAR</div>${d.ventajas.map(v=>`<div style="font-size:12px;color:#374151;margin-bottom:3px">✓ ${v}</div>`).join('')}</div>`:''}
+      <div style="background:#f5f3ff;border:1px solid #e9d5ff;border-radius:var(--rs);padding:12px">
+        <div style="font-size:10px;color:#7c3aed;margin-bottom:5px;text-transform:uppercase;font-weight:700">🖼️ PROMPT PARA IMAGEN IA</div>
+        <div style="font-size:11.5px;color:#374151;font-family:var(--mono);line-height:1.5">${d.prompt_imagen}</div>
         <button class="btn btn-ghost btn-xs" style="margin-top:8px" onclick="navigator.clipboard.writeText('${(d.prompt_imagen||'').replace(/'/g,"\\'")}')">📋 Copiar prompt</button>
       </div>
     </div>`;
-  }catch(e){el.innerHTML='<div class="alert a-red">Error al generar. Revisá conexión.</div>';}
+  }catch(e){console.error(e);el.innerHTML='<div class="alert a-red">⚠️ Error al generar. Revisá conexión.</div>';}
 }
-
 async function generateProduct(){
   document.getElementById('gen2-kw').value=document.getElementById('gen-kw').value;
   document.getElementById('gen2-cat').value=document.getElementById('gen-cat').value||'Tazas';
@@ -1735,14 +1873,17 @@ async function analyzePotential(){
     const potential=Math.max(0,100-sc-(item.sold_quantity||0)*2);
     if(potential<20) continue;
     try{
-      const r=await callClaude(`Sos experto ML Argentina. Esta publicación tiene ${item.sold_quantity||0} ventas y score SEO ${sc}/100.
+      const r=await callClaude(`Sos experto en posicionamiento de tazas con diseño en ML Argentina 2026. Esta publicación tiene ${item.sold_quantity||0} ventas y score SEO ${sc}/100.
+
 Título: "${item.title}"
 Precio: $${item.price}
 Stock: ${item.available_quantity}
 
-Analizá el potencial y dá 3 sugerencias concretas de mejora (título, fotos, descripción, precio).
+Producto: taza cerámica con diseño ya definido (compra impulsiva, regalo, identificación emocional).
+
+Analizá el potencial y dá 3 sugerencias MUY concretas para mejorar (título, fotos, descripción, precio, keywords).
 Respondé SOLO JSON:
-{"potencial":"alto|medio","problema_principal":"...","sugerencias":["s1","s2","s3"],"titulo_mejorado":"..."}`);
+{"potencial":"alto|medio","problema_principal":"...","sugerencias":["s1","s2","s3"],"titulo_mejorado":"...","enfoque_venta":"..."}`);
       const d=JSON.parse(r.replace(/```json|```/g,'').trim());
       el.innerHTML+=`<div class="pot-card">
         <div class="pot-hd">
@@ -1753,12 +1894,13 @@ Respondé SOLO JSON:
           </div>
           <span class="badge ${d.potencial==='alto'?'bg-red':'bg-amber'}" style="flex-shrink:0">${d.potencial==='alto'?'🔥 Alto potencial':'💡 Potencial medio'}</span>
         </div>
-        <div style="font-size:12px;color:var(--amber);margin-bottom:8px">⚠️ ${d.problema_principal}</div>
-        <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:10px">${d.sugerencias.map(s=>`<div style="font-size:12px;color:var(--text2)">→ ${s}</div>`).join('')}</div>
-        ${d.titulo_mejorado?`<div style="background:var(--green-g);border:1px solid rgba(35,209,139,0.2);border-radius:var(--rs);padding:10px">
-          <div style="font-size:10px;color:var(--green);margin-bottom:4px">✅ TÍTULO SUGERIDO</div>
-          <div style="font-size:13px;font-weight:500">${d.titulo_mejorado}</div>
-          <button class="btn btn-ghost btn-xs" style="margin-top:7px" onclick="document.getElementById('opt-in').value='${d.titulo_mejorado.replace(/'/g,"\\'")}';showSection('optimizar');liveScore('${d.titulo_mejorado.replace(/'/g,"\\'")}')">✨ Optimizar más</button>
+        <div style="font-size:12px;color:#92400e;margin-bottom:8px;padding:6px 10px;background:#fffbeb;border-radius:6px;border-left:3px solid #f5a623">⚠️ ${d.problema_principal}</div>
+        <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:10px">${(d.sugerencias||[]).map(s=>`<div style="font-size:12px;color:var(--text2)">→ ${s}</div>`).join('')}</div>
+        ${d.enfoque_venta?`<div style="font-size:12px;color:#1d4ed8;padding:6px 10px;background:#eff6ff;border-radius:6px;margin-bottom:8px">💡 ${d.enfoque_venta}</div>`:''}
+        ${d.titulo_mejorado?`<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:var(--rs);padding:10px">
+          <div style="font-size:10px;color:#166534;margin-bottom:4px;font-weight:700">✅ TÍTULO SUGERIDO</div>
+          <div style="font-size:13px;font-weight:500;color:#111827">${d.titulo_mejorado}</div>
+          <button class="btn btn-ghost btn-xs" style="margin-top:7px" onclick="document.getElementById('opt-in').value='${(d.titulo_mejorado||'').replace(/'/g,"\\'")}';showSection('optimizar');liveScore('${(d.titulo_mejorado||'').replace(/'/g,"\\'")}')">✨ Optimizar más</button>
         </div>`:''}
       </div>`;
     }catch(e){console.error(e);}
@@ -1772,61 +1914,77 @@ Respondé SOLO JSON:
 async function loadTrends(){
   const el = document.getElementById('trend-list');
   if(el) el.innerHTML = '<div class="loading"><div class="spin"></div>Cargando tendencias...</div>';
+  // API de tendencias ML: /trends/MLA (global) o /trends/MLA/{category_id}
+  // Primero intentamos el endpoint global, luego por categorías relevantes
   const cats = [
-    {id:'MLA1276', name:'🏠 Hogar, Muebles y Jardín'},
+    {id:'MLA1276', name:'🏠 Hogar y Muebles'},
+    {id:'MLA109027', name:'🎁 Regalos y Souvenirs'},
+    {id:'MLA1182', name:'🛒 Ropa y Accesorios'},
     {id:'MLA1000', name:'⚡ Electrónica'},
-    {id:'MLA1144', name:'⚽ Deportes'},
-    {id:'MLA1132', name:'👕 Ropa'},
-    {id:'MLA1459', name:'💊 Salud y Belleza'},
-    {id:'MLA1367', name:'🧸 Juguetes'},
+    {id:'MLA1144', name:'⚽ Deportes y Fitness'},
+    {id:'MLA1367', name:'🧸 Juguetes y Bebés'},
   ];
   const results = [];
+  // Intentar endpoint global primero
+  try{
+    const global = await mlGet('/trends/MLA');
+    if(Array.isArray(global)&&global.length){
+      results.push({id:'global',name:'🔥 Tendencias generales Argentina',items:global.slice(0,8)});
+    }
+  }catch(e){console.warn('trends global',e);}
+
+  // Luego por categoría
   for(const cat of cats){
     try{
       const r = await mlGet('/trends/MLA/' + cat.id);
       if(Array.isArray(r) && r.length) results.push({...cat, items: r.slice(0,6)});
+      await new Promise(r => setTimeout(r, 100));
     }catch(e){}
-    await new Promise(r => setTimeout(r, 100));
   }
+
   if(!el) return;
   if(!results.length){
-    el.innerHTML = '<div class="alert a-warn">⚠️ Sin datos de tendencias. Reintentá en unos minutos.</div>';
+    el.innerHTML = '<div class="alert a-warn">⚠️ Sin datos de tendencias. El endpoint puede requerir permisos adicionales.<br><button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="loadTrends()">↻ Reintentar</button></div>';
     return;
   }
   el.innerHTML = '';
   results.forEach(function(cat){
     const div = document.createElement('div');
-    div.style.cssText = 'background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px;margin-bottom:10px';
+    div.style.cssText = 'background:#fff;border:1px solid #e3e7ef;border-radius:10px;padding:14px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,0.04)';
     const title = document.createElement('div');
-    title.style.cssText = 'font-size:13px;font-weight:600;margin-bottom:8px';
+    title.style.cssText = 'font-size:13px;font-weight:600;color:#111827;margin-bottom:10px';
     title.textContent = cat.name;
     div.appendChild(title);
     cat.items.forEach(function(item, i){
-      const kw = item.keyword || item;
+      const kw = typeof item === 'string' ? item : (item.keyword || item.id || JSON.stringify(item));
       const row = document.createElement('div');
-      row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #f3f4f6';
+      row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f3f4f6';
       const num = document.createElement('span');
-      num.style.cssText = 'font-size:11px;font-weight:700;color:#9ca3af;width:20px';
-      num.textContent = '#' + (i+1);
+      num.style.cssText = 'font-size:11px;font-weight:700;color:#9ca3af;width:22px;flex-shrink:0';
+      num.textContent = '#'+(i+1);
       const kwtxt = document.createElement('div');
-      kwtxt.style.cssText = 'flex:1;font-size:12.5px;font-weight:500';
+      kwtxt.style.cssText = 'flex:1;font-size:12.5px;font-weight:500;color:#111827';
       kwtxt.textContent = kw;
       const btn = document.createElement('button');
       btn.textContent = '🔍 Ver';
-      btn.style.cssText = 'background:#f3f4f6;border:none;padding:3px 8px;border-radius:4px;cursor:pointer;font-size:11px';
-      btn.onclick = function(){ 
+      btn.style.cssText = 'background:#f3f4f6;border:1px solid #e5e7eb;padding:3px 9px;border-radius:5px;cursor:pointer;font-size:11px;color:#374151;flex-shrink:0';
+      btn.onclick = function(){
         var qEl = document.getElementById('comp-q');
-        if(qEl) qEl.value = kw;
-        if(typeof showSection === 'function') showSection('competidores');
-        doComp();
+        if(qEl){qEl.value = kw; showSection('competencia'); doComp();}
       };
-      row.appendChild(num);
-      row.appendChild(kwtxt);
-      row.appendChild(btn);
+      row.appendChild(num); row.appendChild(kwtxt); row.appendChild(btn);
       div.appendChild(row);
     });
     el.appendChild(div);
   });
+
+  // Gráfico de barras con categorías
+  if(results.length>1){
+    makeChart('chart-trends',{type:'bar',data:{
+      labels:results.slice(0,6).map(c=>c.name.replace(/^[^\s]+\s/,'')),
+      datasets:[{data:results.slice(0,6).map(c=>c.items.length),backgroundColor:'rgba(79,142,247,0.7)',borderRadius:4}]
+    },options:{...chartDefaults(),scales:{y:{...tOpts(),ticks:{...tOpts().ticks,stepSize:2}},x:{...tXOpts()}}}});
+  }
 }
 
 async function doComp(){
@@ -1864,13 +2022,17 @@ async function doComp(){
 }
 
 async function aiAnswerQ(id,text,btn){
-  btn.textContent='⏳...';btn.disabled=true;
+  btn.textContent='⏳ Generando...';btn.disabled=true;
   try{
-    const r=await callClaude(`Sos vendedor de tazas personalizadas en ML Argentina. Un comprador preguntó: "${text}". Respondé breve, amable, en español argentino. Max 2 oraciones, sin saludos ni despedidas.`);
-    document.getElementById('ans-txt-'+id).value=r;
-    document.getElementById('ans-form-'+id).style.display='block';
-    btn.textContent='✅ IA respondió';
-  }catch(e){btn.textContent='🤖 Responder IA';btn.disabled=false;}
+    const r=await callClaude(`Sos vendedor de tazas con diseño en ML Argentina. Un comprador preguntó sobre tu publicación: "${text}".
+
+Respondé de forma breve, amable y directa en español argentino. Máximo 2-3 oraciones. No uses saludos formales ni despedidas largas. Sé natural y vendedor. Si preguntan por personalización aclará que el diseño ya está definido y es tal cual se ve en las fotos.`);
+    const el=document.getElementById('ans-txt-'+id);
+    if(el)el.value=r;
+    const form=document.getElementById('ans-form-'+id);
+    if(form)form.style.display='block';
+    btn.textContent='✅ Sugerencia lista';btn.disabled=false;
+  }catch(e){btn.textContent='🤖 Sugerir con IA';btn.disabled=false;}
 }
 
 async function submitAns(id){
@@ -1888,7 +2050,7 @@ async function bulkAnswerIA(){
   if(!confirm(`¿Respondér las ${pend.length} preguntas pendientes con IA?`))return;
   for(const q of pend.slice(0,5)){
     try{
-      const r=await callClaude(`Sos vendedor de tazas en ML Argentina. Pregunta: "${q.text}". Respondé breve y amable en español argentino.`);
+      const r=await callClaude(`Sos vendedor de tazas con diseño en ML Argentina. Pregunta del comprador: "${q.text}". Respondé breve, amable y directo en español argentino. Si preguntan por personalización: el diseño ya está definido. Sin saludos largos.`);
       await mlPost('/answers',{question_id:q.id,text:r});
     }catch(e){console.error(e);}
   }
@@ -1929,22 +2091,34 @@ async function renderReputacion(){
 // STOCK
 // ═══════════════════════════════════════════════════════════
 function renderStock(){
+  const search=(document.getElementById('stock-search')?.value||'').toLowerCase();
+  const sortMode=document.getElementById('stock-sort')?.value||'asc';
   const zero=allItems.filter(i=>(i.available_quantity||0)===0);
   const low=allItems.filter(i=>(i.available_quantity||0)>0&&(i.available_quantity||0)<=3);
   const ok=allItems.filter(i=>(i.available_quantity||0)>3);
   document.getElementById('s-zero').textContent=zero.length;
   document.getElementById('s-low').textContent=low.length;
   document.getElementById('s-ok').textContent=ok.length;
-  const alerts=[...zero.map(i=>({item:i,type:'red',msg:'Sin stock'})),...low.map(i=>({item:i,type:'amber',msg:`Stock bajo: ${i.available_quantity}`}))];
+  const alerts=[...zero.map(i=>({item:i,type:'red',msg:'⛔ Sin stock'})),...low.map(i=>({item:i,type:'amber',msg:`⚠️ Stock bajo: ${i.available_quantity}`}))];
   document.getElementById('stock-list').innerHTML=!alerts.length?'<div class="alert a-success">✅ Todo el stock está en buen estado</div>':
-    alerts.map(a=>`<div class="alert ${a.type==='red'?'a-red':'a-warn'}">${a.type==='red'?'⛔':'⚠️'} ${a.msg} — ${a.item.title.slice(0,50)}</div>`).join('');
+    alerts.map(a=>`<div class="alert ${a.type==='red'?'a-red':'a-warn'}" style="margin-bottom:6px">${a.msg} — <a href="${a.item.permalink||'#'}" target="_blank" style="color:inherit;font-weight:600">${a.item.title.slice(0,50)}</a></div>`).join('');
+
+  let items=[...allItems];
+  if(search) items=items.filter(i=>i.title?.toLowerCase().includes(search)||(i.seller_custom_field||'').toLowerCase().includes(search));
+  if(sortMode==='asc') items.sort((a,b)=>(a.available_quantity||0)-(b.available_quantity||0));
+  else if(sortMode==='desc') items.sort((a,b)=>(b.available_quantity||0)-(a.available_quantity||0));
+  else if(sortMode==='sold') items.sort((a,b)=>(b.sold_quantity||0)-(a.sold_quantity||0));
+  else if(sortMode==='alpha') items.sort((a,b)=>(a.title||'').localeCompare(b.title||''));
+
   const tbody=document.getElementById('stock-tbody');
-  tbody.innerHTML=allItems.map(i=>`<tr>
-    <td style="max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${i.title}</td>
+  tbody.innerHTML=items.map(i=>`<tr>
+    <td style="max-width:200px"><a href="${i.permalink||'#'}" target="_blank" style="color:var(--accent);font-weight:500;text-decoration:none" title="${i.title}">${i.title.slice(0,45)}${i.title.length>45?'…':''}</a></td>
+    <td style="font-family:var(--mono);font-size:11px;color:var(--text3)">${i.seller_custom_field||'—'}</td>
     <td><span class="badge ${(i.available_quantity||0)===0?'bg-red':(i.available_quantity||0)<=3?'bg-amber':'bg-green'}">${i.available_quantity??'—'}</span></td>
-    <td>${i.sold_quantity||0}</td>
+    <td style="color:var(--text3)">${i.sold_quantity||0}</td>
     <td>${(i.available_quantity||0)<=3?`<span class="badge bg-amber">⚠️ Reponer</span>`:'<span class="badge bg-green">OK</span>'}</td>
-    <td><input type="number" style="width:80px;font-size:11px" placeholder="Nuevo stock" id="stk-${i.id}"><button class="btn btn-ghost btn-xs" style="margin-left:4px" onclick="updateStock('${i.id}')">✓</button></td>
+    <td><div style="display:flex;gap:5px;align-items:center"><input type="number" style="width:75px;font-size:11px;padding:4px 7px" placeholder="Nuevo" id="stk-${i.id}"><button class="btn btn-ghost btn-xs" onclick="updateStock('${i.id}')">✓</button></div></td>
+    <td><a href="${i.permalink||'#'}" target="_blank" class="btn btn-ghost btn-xs" style="text-decoration:none">🔗</a></td>
   </tr>`).join('');
 }
 
@@ -2050,10 +2224,36 @@ function addRule(){
   const cond=document.getElementById('rule-cond').value;
   const action=document.getElementById('rule-action').value;
   if(!name)return;
-  activeRules.push({name,cond,action,active:true});
+  const id='rule-'+Date.now();
+  activeRules.push({id,name,cond,action,active:true});
   const el=document.getElementById('rules-list');
-  el.innerHTML+=`<div class="rule-card"><div class="rule-icon" style="background:var(--accent-g)">⚙️</div><div style="flex:1"><div style="font-size:12.5px;font-weight:500">${name}</div><div style="font-size:11px;color:var(--text3)">${cond} → ${action}</div></div><span class="badge bg-green">Activa</span></div>`;
+  const div=document.createElement('div');
+  div.className='rule-card';div.id=id;
+  div.innerHTML=`<div class="rule-icon" style="background:var(--accent-g)">⚙️</div><div style="flex:1"><div style="font-size:12.5px;font-weight:500">${name}</div><div style="font-size:11px;color:var(--text3)">${cond} → ${action}</div></div><span class="badge bg-green" id="badge-${id}">Activa</span><button class="btn btn-ghost btn-xs" style="margin-left:6px" onclick="toggleRule('${id}',this)">⏸ Pausar</button><button class="btn btn-danger btn-xs" style="margin-left:4px" onclick="deleteRule('${id}')">✕</button>`;
+  el.appendChild(div);
   document.getElementById('rule-name').value='';
+}
+
+function toggleRule(id,btn){
+  const badge=document.getElementById('badge-'+id);
+  const rule=activeRules.find(r=>r.id===id);
+  const isActive=badge?badge.classList.contains('bg-green'):true;
+  if(isActive){
+    if(badge){badge.textContent='Pausada';badge.className='badge bg-amber';}
+    btn.textContent='▶ Activar';
+    if(rule)rule.active=false;
+  }else{
+    if(badge){badge.textContent='Activa';badge.className='badge bg-green';}
+    btn.textContent='⏸ Pausar';
+    if(rule)rule.active=true;
+  }
+}
+
+function deleteRule(id){
+  if(!confirm('¿Eliminar esta regla?'))return;
+  const el=document.getElementById(id);
+  if(el)el.remove();
+  activeRules=activeRules.filter(r=>r.id!==id);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -2135,7 +2335,7 @@ async function bulkOptimizeTitles(){
   const results=[];
   for(const item of active){
     try{
-      const r=await callClaude(`Optimizá este título para ML Argentina 2026 (40-60 chars, sin puntuación, keyword al inicio): "${item.title}". Respondé SOLO el título optimizado, sin explicación.`);
+      const r=await callClaude(`Sos experto en tazas con diseño para ML Argentina 2026. Optimizá este título para compra impulsiva y regalo: "${item.title}". Reglas: 60-70 chars, keyword principal al inicio, temática + intención (regalo, fan, divertido), sin puntuación, sin mayúsculas. Respondé SOLO el título optimizado, sin explicación ni comillas.`);
       results.push({original:item.title,optimizado:r.trim()});
     }catch(e){results.push({original:item.title,optimizado:'Error'});}
   }
@@ -2148,15 +2348,150 @@ async function bulkOptimizeTitles(){
 }
 
 // ═══════════════════════════════════════════════════════════
-// AI CHAT
+// VENTAS
 // ═══════════════════════════════════════════════════════════
+const ORDER_STATES = {
+  paid:'✅ Pagado', confirmed:'✅ Confirmado', payment_required:'⏳ Pendiente pago',
+  payment_in_process:'⏳ Pago en proceso', shipped:'📦 Enviado', delivered:'✅ Entregado',
+  cancelled:'❌ Cancelado', invalid:'⚠️ Inválido', reverted:'↩ Revertido'
+};
+const ML_FEE = 0.12; // 12% comisión estimada ML Argentina
+
+function renderVentas(){
+  const days=parseInt(document.getElementById('ven-period')?.value||540);
+  const now=new Date();
+  const labels=[],data={};
+  // Para 30 días → etiquetas diarias; más → mensuales
+  if(days<=90){
+    for(let i=days-1;i>=0;i--){
+      const d=new Date(now);d.setDate(d.getDate()-i);
+      const k=d.toISOString().slice(0,10);
+      labels.push(d.getDate()+'/'+(d.getMonth()+1));
+      data[k]=0;
+    }
+    allOrders.forEach(o=>{
+      const k=(o.date_created||'').slice(0,10);
+      if(data[k]!==undefined) data[k]+=o.total_amount||0;
+    });
+  } else {
+    // Agrupar por mes
+    for(let i=Math.ceil(days/30)-1;i>=0;i--){
+      const d=new Date(now);d.setMonth(d.getMonth()-i);
+      const k=d.getFullYear()+'-'+(d.getMonth()+1).toString().padStart(2,'0');
+      labels.push(d.toLocaleDateString('es-AR',{month:'short',year:'2-digit'}));
+      data[k]=0;
+    }
+    allOrders.forEach(o=>{
+      const d=new Date(o.date_created||'');
+      const k=d.getFullYear()+'-'+(d.getMonth()+1).toString().padStart(2,'0');
+      if(data[k]!==undefined) data[k]+=o.total_amount||0;
+    });
+  }
+  makeChart('chart-ven',{type:'bar',data:{labels,datasets:[{data:Object.values(data),backgroundColor:'rgba(79,142,247,0.7)',borderRadius:4,hoverBackgroundColor:'#4f8ef7'}]},options:{...chartDefaults(),scales:{y:{...tOpts(),ticks:{...tOpts().ticks,callback:v=>'$'+(v>=1000?(v/1000).toFixed(0)+'k':v)}},x:{...tXOpts()}}}});
+  renderVentasTable();
+}
+
+function renderVentasTable(){
+  const search=(document.getElementById('ven-search')?.value||'').toLowerCase();
+  const statusFilter=document.getElementById('ven-status')?.value||'';
+  let orders=[...allOrders];
+  if(search) orders=orders.filter(o=>(o.buyer?.nickname||'').toLowerCase().includes(search)||(o.order_items?.[0]?.item?.title||'').toLowerCase().includes(search));
+  if(statusFilter) orders=orders.filter(o=>o.status===statusFilter);
+  // Más recientes primero
+  orders.sort((a,b)=>new Date(b.date_created)-new Date(a.date_created));
+  const tbody=document.getElementById('orders-tbody');
+  if(!tbody)return;
+  if(!orders.length){tbody.innerHTML='<tr><td colspan="8" style="text-align:center;padding:22px;color:var(--text3)">Sin pedidos para mostrar</td></tr>';return;}
+  tbody.innerHTML=orders.map(o=>{
+    const stateLabel=ORDER_STATES[o.status]||o.status||'—';
+    const stateClass=o.status==='paid'||o.status==='delivered'||o.status==='confirmed'?'bg-green':o.status==='cancelled'?'bg-red':'bg-amber';
+    const total=o.total_amount||0;
+    const neto=Math.round(total*(1-ML_FEE));
+    const dt=o.date_created?new Date(o.date_created):null;
+    const dateStr=dt?dt.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'2-digit'})+' '+dt.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}):'—';
+    const productTitle=o.order_items?.[0]?.item?.title||'—';
+    const mlUrl=`https://www.mercadolibre.com.ar/ventas/${o.id}/detalle`;
+    return `<tr>
+      <td style="font-family:var(--mono);font-size:10.5px;color:var(--text3)">#${o.id}</td>
+      <td style="max-width:170px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px">${productTitle.slice(0,45)}</td>
+      <td style="font-size:12px">${o.buyer?.nickname||'—'}</td>
+      <td style="font-weight:600">$${total.toLocaleString('es-AR')}</td>
+      <td style="color:var(--green);font-weight:500">$${neto.toLocaleString('es-AR')}</td>
+      <td><span class="badge ${stateClass}">${stateLabel}</span></td>
+      <td style="font-size:11px;white-space:nowrap;color:var(--text3)">${dateStr}</td>
+      <td><a href="${mlUrl}" target="_blank" class="btn btn-ghost btn-xs" style="text-decoration:none">🔗</a></td>
+    </tr>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════════════
+// PREGUNTAS
+// ═══════════════════════════════════════════════════════════
+function filterQs(status,btn){
+  qFilter=status;
+  document.querySelectorAll('#section-preguntas .tab').forEach(t=>t.classList.remove('active'));
+  btn.classList.add('active');
+  renderQuestions();
+}
+
+function renderQuestions(){
+  let qs=[...allQuestions];
+  if(qFilter!=='all') qs=qs.filter(q=>q.status===qFilter);
+  // Más recientes primero
+  qs.sort((a,b)=>new Date(b.date_created)-new Date(a.date_created));
+  const el=document.getElementById('q-list');
+  if(!el)return;
+  if(!qs.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:16px 0">Sin preguntas en esta categoría</div>';return;}
+  el.innerHTML=qs.map(q=>{
+    const dt=q.date_created?new Date(q.date_created):null;
+    const dateStr=dt?dt.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit'})+' '+dt.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}):'—';
+    const isPend=q.status==='UNANSWERED';
+    return `<div style="padding:12px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">
+        <div style="flex:1">
+          <div style="font-size:12.5px;font-weight:500;margin-bottom:4px">${q.text}</div>
+          <div style="font-size:10.5px;color:var(--text3);display:flex;gap:8px;align-items:center;margin-bottom:6px">
+            <span class="badge ${isPend?'bg-amber':'bg-green'}">${isPend?'⏳ Pendiente':'✅ Respondida'}</span>
+            <span>${dateStr}</span>
+            ${q.item_id?`<a href="https://www.mercadolibre.com.ar/ventas" target="_blank" style="color:var(--accent);font-size:10px">Ver pub</a>`:''}
+          </div>
+          ${q.answer?.text?`<div style="font-size:12px;color:var(--text3);padding:6px 10px;background:var(--bg3);border-radius:6px;border-left:2px solid var(--green)">↩ ${q.answer.text.slice(0,120)}</div>`:''}
+          ${isPend?`<div style="margin-top:8px">
+            <button class="btn btn-ghost btn-sm" onclick="aiAnswerQ(${q.id},'${q.text.replace(/'/g,"\\'").replace(/\n/g,' ')}',this)" style="margin-bottom:6px">🤖 Sugerir con IA</button>
+            <div id="ans-form-${q.id}" style="display:none;margin-top:6px">
+              <textarea id="ans-txt-${q.id}" rows="2" style="font-size:12px;margin-bottom:6px" placeholder="Respuesta sugerida..."></textarea>
+              <div style="display:flex;gap:6px">
+                <button class="btn btn-primary btn-sm" onclick="submitAns(${q.id})">✓ Enviar respuesta</button>
+                <button class="btn btn-ghost btn-sm" onclick="document.getElementById('ans-form-${q.id}').style.display='none'">Cancelar</button>
+              </div>
+            </div>
+          </div>`:''}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
 function initAI(){
   aiHistory=[
-    {role:'user',content:'Sistema: Sos un experto consultor certificado en Mercado Libre Argentina 2025-2026. Conocés en profundidad el algoritmo de relevancia que prioriza: 1) Contenido natural - títulos 40-60 chars, sin spam de keywords 2) Calidad visual - mínimo 10 fotos HD 1080x1080, videos 3) Reputación del vendedor - nivel verde o superior 4) Velocidad de respuesta - preguntas < 2 minutos 5) Historial de ventas y conversión 6) Precios competitivos con pequeños descensos periódicos activan el ranking 7) Atributos completos en ficha técnica 8) Categoría correcta desde el inicio 9) Publicación Premium o Catálogo 10) Envíos rápidos (flex o mismo día). La tienda es de tazas personalizadas. Respondé siempre en español argentino, de forma concisa y práctica con ejemplos concretos.'},
-    {role:'assistant',content:'¡Perfecto! Estoy listo para ayudarte a potenciar tu tienda de tazas en ML Argentina 2025-2026. ¿Por dónde empezamos?'}
+    {role:'user',content:`Sistema: Actuá como un experto en ventas y posicionamiento en MercadoLibre Argentina (2026), especializado en productos con diseños impresos (tazas, regalos, merchandising).
+
+OBJETIVO: Optimizar publicaciones para aumentar visibilidad, clics y conversiones.
+
+IMPORTANTE: Este producto NO es personalizado. Es un diseño ya definido listo para comprar.
+
+ENFOQUE DE VENTA: Compra impulsiva · Regalo original · Identificación emocional (humor, frases, famosos, hobbies)
+
+ALGORITMO ML (PRIORIDADES): 1) Palabras clave exactas en el título 2) CTR (que hagan clic) 3) Conversión 4) Precio competitivo 5) Envío rápido 6) Calidad de publicación (atributos + claridad) 7) Historial de ventas
+
+REGLAS: Escribí en español argentino. Sé claro, directo y vendedor. No repitas palabras innecesariamente. No uses lenguaje genérico sin contexto. Pensá como un comprador real.
+
+OPTIMIZACIÓN DE TÍTULO: Máximo 60-70 caracteres. Incluir: tipo de producto (taza cerámica), temática (Messi, meme, anime, frase), intención (regalo, divertido, fan). Ejemplo: "Taza Cerámica Messi Argentina Campeón Mundial Regalo"
+
+Respondé siempre en español argentino, de forma concisa y práctica con ejemplos concretos aplicados a tazas con diseño.`},
+    {role:'assistant',content:'¡Perfecto! Soy tu experto en posicionamiento de tazas con diseño en ML Argentina 2026. Puedo ayudarte con títulos, descripciones, keywords, estrategia de precios y análisis de competencia. ¿Por dónde empezamos?'}
   ];
   const win=document.getElementById('ai-chat');
-  win.innerHTML=`<div class="msg msg-ai"><div class="msg-lbl">🤖 Experto ML Argentina</div>¡Hola! Soy tu consultor especializado en el algoritmo de ML Argentina 2025-2026. Puedo ayudarte con posicionamiento, SEO de títulos, estrategia de precios, análisis de competencia y mucho más. ¿En qué te ayudo hoy?</div>`;
+  win.innerHTML=`<div class="msg msg-ai"><div class="msg-lbl">🤖 Experto ML Argentina — Tazas</div>¡Hola! Estoy especializado en <b>tazas con diseño para ML Argentina 2026</b>. Sé qué títulos rankean, qué keywords buscan los compradores y cómo convertir más con compra impulsiva. ¿En qué te ayudo hoy?</div>`;
 }
 
 async function sendAI(){
@@ -2223,7 +2558,29 @@ async function callClaude(prompt, history){
 // ═══════════════════════════════════════════════════════════
 // NAVIGATION
 // ═══════════════════════════════════════════════════════════
-const titles={dashboard:['Dashboard','Resumen general de tu tienda'],publicaciones:['Publicaciones','Gestión de tu catálogo'],bulk:['Edición masiva','Modificá múltiples publicaciones a la vez'],seo:['Analizador SEO','Score y optimización de títulos'],ia:['Asistente IA','Experto en ML Argentina 2025-2026'],optimizar:['Optimizador','Título y descripción con IA'],generador:['Generador de producto','Creá publicaciones completas desde una keyword'],rank:['Rank Tracker','Seguimiento de posición por keyword'],potencial:['Potencial oculto','Publicaciones con oportunidades de mejora'],tendencias:['Tendencias','Productos en auge en ML Argentina'],competencia:['Competencia','Análisis de competidores y precios'],ventas:['Ventas / Pedidos','Historial y métricas de órdenes'],preguntas:['Preguntas','Gestión y respuesta con IA'],reputacion:['Reputación','Indicadores oficiales de ML'],stock:['Control de stock','Alertas y actualización de inventario'],reclamos:['Reclamos','Gestión de disputas'],publicidad:['Publicidad','Product Ads, ACOS y ROI'],facturacion:['Facturación','Ingresos y órdenes'],reglas:['Reglas automáticas','Automatizaciones de precios y respuestas'],alertas:['Alertas','Centro de notificaciones']};
+const titles={
+  dashboard:['Dashboard','Resumen general de tu tienda'],
+  publicaciones:['📦 Publicaciones','Gestión de tu catálogo'],
+  bulk:['✏️ Edición masiva','Modificá múltiples publicaciones a la vez'],
+  seo:['🔍 Analizador SEO','Score y optimización de títulos'],
+  ia:['🤖 Asistente IA','Experto en ML Argentina 2026 · Tazas con diseño'],
+  optimizar:['✨ Optimizador','Título, descripción y keywords con IA'],
+  generador:['🎯 Generador de producto','Creá publicaciones completas desde una keyword'],
+  rank:['📈 Rank Tracker','Seguimiento de posición por keyword'],
+  potencial:['💡 Potencial oculto','Publicaciones con oportunidades de mejora'],
+  tendencias:['🔥 Tendencias','Productos en auge en ML Argentina'],
+  competencia:['🎯 Competencia','Análisis de competidores y precios'],
+  ventas:['🛍️ Ventas / Pedidos','Historial completo · 18 meses'],
+  preguntas:['💬 Preguntas','Gestión y respuesta con IA'],
+  mensajes:['📬 Mensajes post-venta','Comunicación con compradores'],
+  reputacion:['⭐ Reputación','Indicadores oficiales de ML'],
+  stock:['📋 Control de stock','Alertas y actualización de inventario'],
+  reclamos:['🚨 Reclamos','Gestión de disputas'],
+  publicidad:['📢 Publicidad','Product Ads, ACOS y ROI'],
+  facturacion:['💰 Facturación','Ingresos y órdenes'],
+  reglas:['⚙️ Reglas automáticas','Automatizaciones de precios y respuestas'],
+  alertas:['🔔 Alertas','Centro de notificaciones']
+};
 
 function showSection(id){
   document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
@@ -2240,13 +2597,14 @@ function showSection(id){
   if(id==='seo') renderSEOSection();
   if(id==='ventas') renderVentas();
   if(id==='preguntas') renderQuestions();
+  if(id==='mensajes') renderMensajes();
   if(id==='reputacion') renderReputacion();
   if(id==='stock') renderStock();
   if(id==='reclamos') renderReclamos();
   if(id==='facturacion') renderFacturacion();
   if(id==='alertas') refreshAlerts();
   if(id==='tendencias') loadTrends();
-  if(id==='publicidad') calcAds();
+  if(id==='publicidad'){calcAds();populateAdsSelect();}
   if(id==='bulk') renderPubs();
 }
 
@@ -2322,19 +2680,57 @@ async function renderMensajes(){
   if(!el)return;
   el.innerHTML='<div class="loading"><div class="spin"></div>Cargando mensajes...</div>';
   try{
-    const r=await mlGet('/messages/packs?tag=post_sale&status=unread&role=seller&limit=20');
-    const packs=r.data||[];
-    if(packs.length){renderMsgPacks(packs,el);return;}
-    const r2=await mlGet('/messages/packs?role=seller&limit=20');
-    const p2=r2.data||[];
-    if(p2.length){renderMsgPacks(p2,el);return;}
-    el.innerHTML='<div class="alert a-ok">✅ Sin mensajes sin leer.</div><div style="margin-top:8px"><a href="https://www.mercadolibre.com.ar/mensajes" target="_blank" style="background:#3b82f6;color:#fff;padding:8px 16px;border-radius:6px;text-decoration:none;font-size:12px;display:inline-flex">📬 Ver mensajes en ML</a></div>';
+    // Intentar mensajes post-venta sin leer
+    let packs=[];
+    try{
+      const r=await mlGet('/messages/packs?tag=post_sale&role=seller&limit=50');
+      packs=r.data||[];
+    }catch(e){}
+    if(!packs.length){
+      try{
+        const r2=await mlGet('/messages/packs?role=seller&limit=50');
+        packs=r2.data||[];
+      }catch(e){}
+    }
+    const unread=packs.filter(p=>p.status==='unread').length;
+    const safeSet=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
+    safeSet('msg-unread',unread||'0');
+    safeSet('msg-total',packs.length||'0');
+    if(packs.length){
+      const last=packs[0]?.last_message?.date;
+      safeSet('msg-last',last?new Date(last).toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'—');
+      renderMsgPacks(packs,el);
+    } else {
+      el.innerHTML='<div class="alert a-success">✅ Sin mensajes sin leer.</div><div style="margin-top:10px"><a href="https://www.mercadolibre.com.ar/mensajes" target="_blank" style="background:#3b82f6;color:#fff;padding:8px 16px;border-radius:6px;text-decoration:none;font-size:12px;display:inline-flex;align-items:center;gap:6px">📬 Abrir bandeja en ML</a></div>';
+    }
   }catch(e){
-    el.innerHTML='<div class="alert a-info">ℹ️ Los mensajes requieren permiso especial en la app ML.<br><div style="margin-top:8px"><a href="https://www.mercadolibre.com.ar/mensajes" target="_blank" style="background:#3b82f6;color:#fff;padding:8px 16px;border-radius:6px;text-decoration:none;font-size:12px;display:inline-flex">📬 Ver en ML →</a></div></div>';
+    el.innerHTML='<div class="alert a-info">ℹ️ Los mensajes requieren permiso especial de lectura de mensajes en la app ML. <a href="https://www.mercadolibre.com.ar/mensajes" target="_blank" style="color:#1d4ed8;font-weight:500">Ver directamente en ML →</a></div>';
   }
 }
 function renderMsgPacks(packs,el){
-  el.innerHTML=packs.map(p=>'<div style="padding:10px 0;border-bottom:1px solid #e5e7eb"><div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px"><div style="flex:1"><div style="font-size:12.5px;font-weight:500">'+(p.subject||'Mensaje')+'</div><div style="font-size:11px;color:#6b7280;margin-top:2px">'+(p.participants?.map(x=>x.nickname).join(', ')||'—')+' · '+(p.last_message?.date?new Date(p.last_message.date).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'—')+(p.status==='unread'?' <span style="background:#fee2e2;color:#991b1b;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:600">No leído</span>':'')+'</div>'+(p.last_message?.text?'<div style="font-size:12px;color:#374151;margin-top:4px;padding:5px 8px;background:#f9fafb;border-radius:6px;font-style:italic">"'+p.last_message.text.slice(0,100)+'"</div>':'')+'</div><a href="https://www.mercadolibre.com.ar/mensajes" target="_blank" style="background:#f3f4f6;color:#374151;padding:5px 10px;border-radius:6px;font-size:11px;text-decoration:none;flex-shrink:0;white-space:nowrap">Ver →</a></div></div>').join('')||'<div class="alert a-ok">✅ Sin mensajes</div>';
+  // Ordenar: no leídos primero, luego por fecha
+  const sorted=[...packs].sort((a,b)=>{
+    if(a.status==='unread'&&b.status!=='unread')return -1;
+    if(b.status==='unread'&&a.status!=='unread')return 1;
+    return new Date(b.last_message?.date||0)-new Date(a.last_message?.date||0);
+  });
+  el.innerHTML=sorted.map(p=>`
+    <div style="padding:12px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">
+        <div style="flex:1">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
+            ${p.status==='unread'?'<span class="badge bg-red">● No leído</span>':'<span class="badge bg-gray">Leído</span>'}
+            <span style="font-size:12.5px;font-weight:500">${p.subject||'Mensaje post-venta'}</span>
+          </div>
+          <div style="font-size:11px;color:var(--text3);margin-bottom:5px">
+            ${(p.participants||[]).map(x=>x.nickname).filter(Boolean).join(', ')||'—'}
+            · ${p.last_message?.date?new Date(p.last_message.date).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'—'}
+          </div>
+          ${p.last_message?.text?`<div style="font-size:12px;color:var(--text2);padding:6px 10px;background:var(--bg3);border-radius:6px;font-style:italic">"${p.last_message.text.slice(0,120)}"</div>`:''}
+        </div>
+        <a href="https://www.mercadolibre.com.ar/mensajes" target="_blank" style="background:var(--bg3);color:var(--text2);border:1px solid var(--border2);padding:5px 10px;border-radius:6px;font-size:11px;text-decoration:none;flex-shrink:0;white-space:nowrap">Ver →</a>
+      </div>
+    </div>`).join('')||'<div class="alert a-success">✅ Sin mensajes</div>';
 }
 
 // ── Precios automáticos ──
