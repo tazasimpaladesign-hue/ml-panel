@@ -1346,72 +1346,110 @@ async function initApp(){
   const switchBtn = document.getElementById('switch-account-btn');
   if(switchBtn) switchBtn.style.display = 'flex';
   stamp();
-
-  // ── CARGA RÁPIDA: datos del mes actual + preguntas en paralelo ──
-  // El dashboard muestra datos útiles en 2-3 segundos
-  await Promise.all([loadItemsFast(), loadOrdersMonth(), loadQuestions()]);
+  // CARGA RAPIDA: dashboard listo en ~2s
+  await Promise.all([loadItemsFast(), loadOrdersRecent(), loadQuestions()]);
   renderDashboard();
   initAI();
   buildAlgoFactors();
   buildAdsChart();
-
-  // ── CARGA COMPLETA EN BACKGROUND: no bloquea la UI ──
-  loadItemsFull();        // carga publicaciones pausadas/moderadas
-  loadOrdersHistory();    // carga histórico 18 meses + estados de envío
+  // BACKGROUND: historico + estados de envio
+  loadItemsFull();
+  loadOrdersHistory();
   loadTrends();
+  // POLLING: auto-actualizar cada 60s
+  startPolling();
 }
 
-// Carga rápida: solo publicaciones activas (un scroll)
+let _pollingInterval=null;
+function startPolling(){
+  if(_pollingInterval)clearInterval(_pollingInterval);
+  _pollingInterval=setInterval(pollNewData,60000);
+}
+function stopPolling(){if(_pollingInterval){clearInterval(_pollingInterval);_pollingInterval=null;}}
+
+async function pollNewData(){
+  if(!token||!userId)return;
+  try{
+    // Ordenes de las ultimas 2 horas
+    const from2h=new Date(Date.now()-2*60*60*1000).toISOString();
+    const r=await mlGet();
+    const fresh=r.results||[];
+    let hasNew=false;
+    fresh.forEach(o=>{
+      const idx=allOrders.findIndex(e=>e.id===o.id);
+      if(idx<0){allOrders.unshift(o);hasNew=true;}
+      else allOrders[idx]={...allOrders[idx],...o};
+    });
+    if(hasNew){
+      const n=fresh[0];
+      showToast('🛍️ Nueva venta: '+(n.order_items?.[0]?.item?.title||'').slice(0,40)+' $'+(n.total_amount||0).toLocaleString('es-AR'),'success');
+    }
+    // Actualizar shipping de las frescas
+    await loadShippingStatuses(fresh.filter(o=>o.shipping?.id));
+    _updateVentasBadge();
+    const now=new Date();
+    const mesOrders=allOrders.filter(o=>new Date(o.date_created)>=new Date(now.getFullYear(),now.getMonth(),1));
+    _updateOrdersUI(mesOrders);
+    if(document.getElementById('section-ventas')?.classList.contains('active'))renderVentasTable();
+    if(document.getElementById('section-dashboard')?.classList.contains('active'))renderDashboard();
+    // Preguntas
+    const uq=await mlGet();
+    const pend=(uq.questions||[]).length;
+    const prev=parseInt(document.getElementById('nb-q')?.textContent)||0;
+    if(pend>prev)showToast('💬 Nueva pregunta ('+pend+' pendientes)','warn');
+    document.getElementById('nb-q').textContent=pend;
+    if(pend!==prev&&document.getElementById('section-preguntas')?.classList.contains('active'))renderQuestions();
+    stamp();
+  }catch(e){console.warn('[Poll]',e.message);}
+}
+
+function showToast(msg,type){
+  const cfg={success:['#f0fdf4','#166534','#bbf7d0'],warn:['#fffbeb','#78350f','#fde68a'],info:['#eff6ff','#1e40af','#bfdbfe']};
+  const[bg,col,bdr]=cfg[type]||cfg.info;
+  const t=document.createElement('div');
+  t.style.position='fixed';t.style.bottom='24px';t.style.right='24px';
+  t.style.zIndex='9999';t.style.background=bg;t.style.color=col;
+  t.style.border='1px solid '+bdr;t.style.borderRadius='10px';
+  t.style.padding='12px 18px';t.style.fontSize='13px';t.style.fontWeight='500';
+  t.style.boxShadow='0 4px 16px rgba(0,0,0,.12)';t.style.maxWidth='340px';
+  t.style.lineHeight='1.4';t.style.fontFamily='inherit';
+  t.textContent=msg;
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(),5000);
+}
+
 async function loadItemsFast(){
   try{
     const first=await mlGet('/users/'+userId+'/items/search?search_type=scan&limit=100');
     const ids=first.results||[];
     if(!ids.length)return;
-    const r=await mlGet('/items?ids='+ids.slice(0,100).join(',')+'&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,category_id,listing_type_id,permalink,seller_custom_field');
-    allItems=[];
-    r.forEach(x=>{if(x.code===200)allItems.push(x.body);});
+    const r=await mlGet('/items?ids='+ids.join(',')+'&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,category_id,listing_type_id,permalink,seller_custom_field');
+    allItems=[];r.forEach(x=>{if(x.code===200)allItems.push(x.body);});
     _updateItemsUI();
   }catch(e){console.warn('[loadItemsFast]',e);}
 }
 
-// Carga completa: todas las páginas + pausadas + moderadas
 async function loadItemsFull(){
   try{
-    let allIds=[];
-    let scrollId=null;
+    let allIds=[];let scrollId=null;
     while(true){
-      const ep=scrollId
-        ?'/users/'+userId+'/items/search?search_type=scan&scroll_id='+encodeURIComponent(scrollId)+'&limit=100'
-        :'/users/'+userId+'/items/search?search_type=scan&limit=100';
-      const s=await mlGet(ep);
-      const ids=s.results||[];
-      if(!ids.length)break;
-      allIds.push(...ids);
-      scrollId=s.scroll_id||null;
-      if(!scrollId)break;
-      await new Promise(r=>setTimeout(r,100));
+      const ep=scrollId?'/users/'+userId+'/items/search?search_type=scan&scroll_id='+encodeURIComponent(scrollId)+'&limit=100':'/users/'+userId+'/items/search?search_type=scan&limit=100';
+      const s=await mlGet(ep);const ids=s.results||[];
+      if(!ids.length)break;allIds.push(...ids);scrollId=s.scroll_id||null;
+      if(!scrollId)break;await new Promise(r=>setTimeout(r,100));
     }
     for(const status of ['paused','under_review']){
       for(let offset=0;offset<500;offset+=50){
-        try{
-          const s=await mlGet('/users/'+userId+'/items/search?limit=50&offset='+offset+'&status='+status);
-          const ids=s.results||[];allIds.push(...ids);if(ids.length<50)break;
-        }catch(e){break;}
+        try{const s=await mlGet('/users/'+userId+'/items/search?limit=50&offset='+offset+'&status='+status);const ids=s.results||[];allIds.push(...ids);if(ids.length<50)break;}catch(e){break;}
       }
     }
-    allIds=[...new Set(allIds)];
-    const full=[];
+    allIds=[...new Set(allIds)];const full=[];
     for(let i=0;i<allIds.length;i+=20){
-      const chunk=allIds.slice(i,i+20);
-      try{
-        const r=await mlGet('/items?ids='+chunk.join(',')+'&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,category_id,listing_type_id,permalink,seller_custom_field');
-        r.forEach(x=>{if(x.code===200)full.push(x.body);});
-      }catch(e){}
+      try{const r=await mlGet('/items?ids='+allIds.slice(i,i+20).join(',')+'&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,category_id,listing_type_id,permalink,seller_custom_field');r.forEach(x=>{if(x.code===200)full.push(x.body);});}catch(e){}
       if(i>0&&i%200===0)await new Promise(r=>setTimeout(r,100));
     }
-    allItems=full;
-    _updateItemsUI();
-    console.log('[loadItemsFull]',allItems.length,'ítems');
+    allItems=full;_updateItemsUI();
+    console.log('[loadItemsFull]',allItems.length);
   }catch(e){console.error('[loadItemsFull]',e);}
 }
 
@@ -1421,90 +1459,85 @@ function _updateItemsUI(){
   const review=allItems.filter(i=>i.status==='under_review').length;
   const z=allItems.filter(i=>(i.available_quantity||0)===0).length;
   const l=allItems.filter(i=>(i.available_quantity||0)>0&&(i.available_quantity||0)<=3).length;
-  const safe=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
-  safe('nb-pub',active);safe('d-items',active);safe('nb-stock',z+l);
-  safe('s-zero',z);safe('s-low',l);safe('s-ok',allItems.length-z-l);
-  safe('tab-active','✅ Activas ('+active+')');
-  safe('tab-paused','⏸ Pausadas ('+paused+')');
-  safe('tab-review','🔍 Moderadas ('+review+')');
-  safe('tab-all','📋 Todas ('+allItems.length+')');
+  const s=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
+  s('nb-pub',active);s('d-items',active);s('nb-stock',z+l);
+  s('s-zero',z);s('s-low',l);s('s-ok',allItems.length-z-l);
+  s('tab-active','✅ Activas ('+active+')');s('tab-paused','⏸ Pausadas ('+paused+')');
+  s('tab-review','🔍 Moderadas ('+review+')');s('tab-all','📋 Todas ('+allItems.length+')');
 }
 
-// ── Órdenes del mes: 1 sola llamada, rápido ──────────────────
-async function loadOrdersMonth(){
+// Carga inicial rapida: ordenes del mes actual
+async function loadOrdersRecent(){
   try{
     const now=new Date();
-    const fromMonth=new Date(now.getFullYear(),now.getMonth(),1).toISOString();
-    const r=await mlGet(`/orders/search?seller=${userId}&order.date_created.from=${fromMonth}&sort=date_desc&limit=50`);
-    const orders=r.results||[];
-    allOrders=orders;
-    _updateOrdersUI(orders);
-  }catch(e){console.warn('[loadOrdersMonth]',e);}
+    const from=new Date(now.getFullYear(),now.getMonth(),1).toISOString();
+    const r=await mlGet();
+    allOrders=r.results||[];
+    _updateOrdersUI(allOrders);
+    // Shipments en paralelo, sin bloquear
+    loadShippingStatuses(allOrders.filter(o=>o.shipping?.id)).then(()=>{
+      _updateVentasBadge();
+      if(document.getElementById('section-ventas')?.classList.contains('active'))renderVentasTable();
+    });
+  }catch(e){console.warn('[loadOrdersRecent]',e);}
 }
 
-// ── Histórico 18 meses + estados de envío en background ──────
+// Historico 18 meses en background
 async function loadOrdersHistory(){
   try{
-    const now=new Date();
-    const from18=new Date(now);from18.setMonth(from18.getMonth()-18);
-    let allHist=[];
+    const from18=new Date();from18.setMonth(from18.getMonth()-18);
+    let hist=[];
     for(let offset=0;offset<2000;offset+=50){
       try{
-        const r=await mlGet(`/orders/search?seller=${userId}&order.date_created.from=${from18.toISOString()}&sort=date_desc&limit=50&offset=${offset}`);
-        const res=r.results||[];
-        allHist.push(...res);
+        const r=await mlGet();
+        const res=r.results||[];hist.push(...res);
         if(res.length<50)break;
         await new Promise(r=>setTimeout(r,80));
       }catch(e){break;}
     }
     const seen=new Set();
-    allOrders=[...allHist].filter(o=>{if(seen.has(o.id))return false;seen.add(o.id);return true;});
+    allOrders=[...hist].filter(o=>{if(seen.has(o.id))return false;seen.add(o.id);return true;});
     allOrders.sort((a,b)=>new Date(b.date_created)-new Date(a.date_created));
-    console.log('[loadOrdersHistory]',allOrders.length,'órdenes');
-
-    // Cargar estados de envío para órdenes recientes (último mes, máx 30)
-    // Solo las que tienen shipping.id pero sin status en el objeto orden
-    await loadShippingStatuses();
-
-    _updateOrdersUI(allOrders);
-    // Actualizar badge y tabla si la sección está activa
+    console.log('[loadOrdersHistory]',allOrders.length);
+    // Cargar envios del ultimo mes
+    const recent=allOrders.filter(o=>o.shipping?.id&&!o.shipping._statusLoaded&&new Date(o.date_created)>new Date(Date.now()-30*24*3600*1000));
+    await loadShippingStatuses(recent);
+    const now=new Date();
+    _updateOrdersUI(allOrders.filter(o=>new Date(o.date_created)>=new Date(now.getFullYear(),now.getMonth(),1)));
     _updateVentasBadge();
-    if(document.getElementById('section-ventas')?.classList.contains('active')) renderVentasTable();
+    if(document.getElementById('section-ventas')?.classList.contains('active'))renderVentasTable();
   }catch(e){console.error('[loadOrdersHistory]',e);}
 }
 
-// Cargar status real de envíos desde /shipments/{id}
-async function loadShippingStatuses(){
-  const recent=allOrders.filter(o=>o.shipping?.id&&!o.shipping?.status).slice(0,40);
-  if(!recent.length) return;
-  await Promise.allSettled(recent.map(async o=>{
-    try{
-      const s=await mlGet('/shipments/'+o.shipping.id);
-      if(s&&s.status) o.shipping.status=s.status;
-      if(s&&s.substatus) o.shipping.substatus=s.substatus;
-    }catch(e){}
-  }));
+// Cargar status real desde /shipments/{id}, en lotes de 5
+async function loadShippingStatuses(orders){
+  const toLoad=(orders||[]).filter(o=>o.shipping?.id&&!o.shipping._statusLoaded).slice(0,60);
+  if(!toLoad.length)return;
+  for(let i=0;i<toLoad.length;i+=5){
+    await Promise.allSettled(toLoad.slice(i,i+5).map(async o=>{
+      try{
+        const s=await mlGet('/shipments/'+o.shipping.id);
+        if(s?.status)o.shipping.status=s.status;
+        if(s?.substatus)o.shipping.substatus=s.substatus;
+        o.shipping._statusLoaded=true;
+      }catch(e){}
+    }));
+  }
 }
 
-function _updateOrdersUI(orders){
-  const totalMes=orders.reduce((s,o)=>s+(o.total_amount||0),0);
-  const ticket=orders.length?Math.round(totalMes/orders.length):0;
-  const safeSet=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
-  safeSet('d-billing','$'+totalMes.toLocaleString('es-AR'));
-  safeSet('d-sales',orders.length);
-  safeSet('d-ticket','$'+ticket.toLocaleString('es-AR'));
-  safeSet('fac-mes','$'+totalMes.toLocaleString('es-AR'));
-  safeSet('v-mes',orders.length);
-  safeSet('v-ticket','$'+ticket.toLocaleString('es-AR'));
+function _updateOrdersUI(mesOrders){
+  const mes=mesOrders||[];
+  const totalMes=mes.reduce((s,o)=>s+(o.total_amount||0),0);
+  const ticket=mes.length?Math.round(totalMes/mes.length):0;
+  const ss=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
+  ss('d-billing','$'+totalMes.toLocaleString('es-AR'));ss('d-sales',mes.length);
+  ss('d-ticket','$'+ticket.toLocaleString('es-AR'));ss('fac-mes','$'+totalMes.toLocaleString('es-AR'));
+  ss('v-mes',mes.length);ss('v-ticket','$'+ticket.toLocaleString('es-AR'));
 }
 
 function _updateVentasBadge(){
-  // Contar órdenes pagadas con envío pendiente de imprimir etiqueta
-  const toPrint=allOrders.filter(o=>
-    o.status!=='cancelled'&&
-    o.shipping?.id&&
-    (o.shipping?.status==='ready_to_ship'||o.shipping?.status==='pending'||(!o.shipping?.status))
-  ).length;
+  // Solo ordenes paid con shipping.status=ready_to_ship (etiqueta sin imprimir)
+  const toPrint=allOrders.filter(o=>o.status==='paid'&&o.shipping?.status==='ready_to_ship').length;
   const nb=document.getElementById('nb-ventas');
   if(nb){nb.textContent=toPrint;nb.style.display=toPrint>0?'inline-flex':'none';}
 }
@@ -1513,12 +1546,9 @@ function stamp(){
   document.getElementById('last-upd').textContent='Actualizado '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
 }
 
-// ═══════════════════════════════════════════════════════════
-// LOAD
-// ═══════════════════════════════════════════════════════════
-// ── loadItems / loadOrders: compatibilidad con refreshAll ────
-async function loadItems(){ await loadItemsFull(); }
-async function loadOrders(){ await loadOrdersMonth(); loadOrdersHistory(); }
+// LOAD — compatibilidad con refreshAll y otras llamadas
+async function loadItems(){await loadItemsFull();}
+async function loadOrders(){await loadOrdersRecent();loadOrdersHistory();}
 
 async function loadQuestions(){
   try{
