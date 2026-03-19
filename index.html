@@ -1783,23 +1783,25 @@ async function doOptimize(){
   const el=document.getElementById('opt-out');
   el.innerHTML='<div class="loading"><div class="spin"></div>Optimizando con IA...</div>';
   try{
-    const r=await callClaude(`Sos un experto en ventas y SEO para MercadoLibre Argentina 2026.
+    const r=await callClaude(`Sos un experto en SEO para MercadoLibre Argentina 2026.
 
 TÍTULO ACTUAL: "${title}"
 ${cat?'CATEGORÍA: '+cat:''}
 ${desc?'DESCRIPCIÓN ACTUAL:\n'+desc.slice(0,400):''}
 ${kws?'KEYWORDS A INCLUIR: '+kws:''}
 
+MENTALIDAD: El título NO es publicidad. El título ES una búsqueda. Escribilo como si fuera lo que el comprador tipearía en el buscador de ML.
+
 REGLAS CRÍTICAS:
 1. Respetá el tipo de producto y la temática del título original — no los cambies
-2. Identificá la palabra CLAVE más fuerte del título (ej: FOTOGRAFA, FUTBOL, AIRBAG, CHEF) y ponela en posición destacada
-3. La descripción debe coincidir con lo que muestra el título y el producto real
-4. PROHIBIDO usar estas palabras: "Regalo Original", "Diseño Exclusivo", "Fan", "Personalizada", "Personalizado", "Personalizable" — no aportan nada y bajan el SEO
-5. Usá palabras que el comprador real buscaría en ML
-6. Máximo 60 chars en el título — ESTRICTO, contá los caracteres
-7. SIN puntuación ni emojis en el título (nada de , . ( ) : ; ! ? / -)
+2. La palabra CLAVE más fuerte del título (ej: FOTOGRAFA, AIRBAG, CHEF) debe estar en posición destacada
+3. La descripción debe corresponder al producto real del título
+4. PROHIBIDO en el título: "Regalo Original", "Diseño Exclusivo", "Fan", "Personalizada", "Personalizado", "Personalizable", "Alta calidad", "El mejor", "Imperdible", "No pierdas", "Aprovechá", frases tipo slogan o publicidad
+5. Sin puntuación ni emojis en el título — nada de , . ( ) : ; ! ? / -
+6. Máximo 60 chars ESTRICTO — contá los caracteres antes de responder
+7. Palabras que el comprador real buscaría, no frases armadas para vender
 
-REGLAS DESCRIPCIÓN: 300-450 chars · describí el producto real y su diseño · apelar a emoción/identificación · cerrar con frase de acción · saltos de línea para escanear fácil
+REGLAS DESCRIPCIÓN: 300-450 chars · describí el producto real · apelar a emoción/identificación · sin "personalizada" ni "personalizable" · sin frases de venta genéricas · cerrar con frase útil · saltos de línea
 
 Respondé SOLO JSON válido (sin markdown, sin backticks):
 {
@@ -1963,28 +1965,42 @@ async function applyOptTitle(){
       body: body
     });
     const data = await response.json();
-    console.log('[ML] respuesta completa:', JSON.stringify(data));
+    const rawResp = JSON.stringify(data);
+    console.log('[ML] respuesta completa:', rawResp);
 
     if(data.error || (data.status && data.status !== 200)){
-      let msg = data.message || data.error || ('HTTP ' + response.status);
-      // data.cause puede ser array, objeto, o string — manejo seguro
+      // Evitar duplicar mensaje: data.message y data.error a veces son iguales
+      const errCode  = data.error   || '';
+      const errMsg   = data.message || '';
+      // Mostrar solo el más informativo
+      let msg = (errMsg && errMsg !== errCode) ? errMsg : (errCode || ('HTTP ' + response.status));
+
+      // Extraer causa (puede ser array, objeto o string)
       let detail = '';
       if(data.cause){
-        if(Array.isArray(data.cause)){
-          detail = data.cause.map(c=>(c&&(c.message||c.code||JSON.stringify(c)))||'').filter(Boolean).join(' · ');
-        } else if(typeof data.cause === 'string'){
-          detail = data.cause;
-        } else if(typeof data.cause === 'object'){
-          detail = data.cause.message || data.cause.code || JSON.stringify(data.cause);
-        }
+        try{
+          if(Array.isArray(data.cause)){
+            detail = data.cause.map(c=>c&&(c.message||c.code||JSON.stringify(c))||'').filter(Boolean).join(' | ');
+          } else if(typeof data.cause==='string'){
+            detail = data.cause;
+          } else if(typeof data.cause==='object'){
+            detail = data.cause.message || data.cause.code || JSON.stringify(data.cause);
+          }
+        }catch(ex){}
       }
-      const causeStr = (msg + ' ' + detail).toLowerCase();
-      const isCatalog = causeStr.includes('catalog');
-      if(isCatalog){
-        msg = 'Publicación de catálogo — ML no permite cambiar el título por API. Modificala directamente en ML.';
+      // Si no hay cause útil, mostrar respuesta cruda para debugging
+      if(!detail && rawResp.length < 300) detail = rawResp;
+
+      const causeStr = (msg+' '+detail).toLowerCase();
+      if(causeStr.includes('catalog')){
+        msg = 'Publicación de catálogo — ML no permite cambiar el título por API. Modificala en ML directamente.';
         detail = '';
       }
-      if(res) res.innerHTML = `<div class="alert a-red">❌ ${msg}${detail?'<br><small style="opacity:.75">'+detail+'</small>':''}<br><small>Enviado: "${titulo}" (${titulo.length} chars)</small></div>`;
+      if(res) res.innerHTML = `<div class="alert a-red" style="line-height:1.6">
+        ❌ <strong>${msg}</strong>
+        ${detail?`<br><small style="font-family:monospace;font-size:10px;opacity:.75;word-break:break-all">${detail}</small>`:''}
+        <br><small>Enviado: "${titulo}" (${titulo.length} chars)</small>
+      </div>`;
       return;
     }
     if(res) res.innerHTML = `<div class="alert a-success">✅ Título actualizado: "${titulo}"</div>`;
@@ -2054,18 +2070,25 @@ async function applyOptBoth(){
       body: bodyT
     });
     const dt = await rt.json();
-    console.log('[ML] both — título resp:', JSON.stringify(dt));
+    const rawRespT = JSON.stringify(dt);
+    console.log('[ML] both — título resp:', rawRespT);
     if(dt.error || (dt.status && dt.status !== 200)){
-      let msg = dt.message || dt.error || ('HTTP '+rt.status);
+      const ec = dt.error||''; const em = dt.message||'';
+      let msg = (em&&em!==ec)?em:(ec||('HTTP '+rt.status));
       let detail = '';
       if(dt.cause){
-        if(Array.isArray(dt.cause)) detail = dt.cause.map(c=>(c&&(c.message||c.code||''))||'').filter(Boolean).join(' · ');
-        else if(typeof dt.cause==='string') detail = dt.cause;
-        else if(typeof dt.cause==='object') detail = dt.cause.message||dt.cause.code||JSON.stringify(dt.cause);
+        try{
+          if(Array.isArray(dt.cause)) detail=dt.cause.map(c=>c&&(c.message||c.code||'')||'').filter(Boolean).join(' | ');
+          else if(typeof dt.cause==='string') detail=dt.cause;
+          else if(typeof dt.cause==='object') detail=dt.cause.message||dt.cause.code||JSON.stringify(dt.cause);
+        }catch(ex){}
       }
-      const isCatalog = (msg+' '+detail).toLowerCase().includes('catalog');
-      if(isCatalog) msg = 'Publicación de catálogo — ML no permite cambiar el título por API. Modificala en ML directamente.';
-      if(res) res.innerHTML = `<div class="alert a-red">❌ ${msg}${detail&&!isCatalog?'<br><small>'+detail+'</small>':''}<br><small>"${titulo}" (${titulo.length} chars)</small></div>`;
+      if(!detail && rawRespT.length<300) detail=rawRespT;
+      if((msg+' '+detail).toLowerCase().includes('catalog')){
+        msg='Publicación de catálogo — ML no permite cambiar el título por API. Modificala en ML directamente.';
+        detail='';
+      }
+      if(res) res.innerHTML = `<div class="alert a-red" style="line-height:1.6">❌ <strong>${msg}</strong>${detail?`<br><small style="font-family:monospace;font-size:10px;opacity:.75;word-break:break-all">${detail}</small>`:''}<br><small>"${titulo}" (${titulo.length} chars)</small></div>`;
       return;
     }
     const item = allItems.find(i => i.id === optCurrentItemId);
@@ -2784,7 +2807,7 @@ ALGORITMO ML (PRIORIDADES): 1) Palabras clave exactas en el título 2) CTR (que 
 
 REGLAS: Escribí en español argentino. Sé claro, directo y vendedor. No repitas palabras innecesariamente. No uses lenguaje genérico sin contexto. Pensá como un comprador real.
 
-OPTIMIZACIÓN DE TÍTULO: Máximo 60 caracteres ESTRICTO · SIN puntuación ni emojis · tipo de producto real + temática + intención · PROHIBIDO: "Regalo Original", "Diseño Exclusivo", "Fan", "Personalizada", "Personalizable" · ejemplo: "Botella Deportiva Airbag Banda Rock Regalo Viajero"
+OPTIMIZACIÓN DE TÍTULO: Máximo 60 caracteres ESTRICTO · SIN puntuación ni emojis · El título ES una búsqueda, NO publicidad · palabra clave fuerte al inicio · PROHIBIDO: "Regalo Original", "Diseño Exclusivo", "Fan", "Personalizada", "Personalizable", "Alta calidad", "Imperdible", "El mejor", frases tipo slogan · ejemplo: "Taza Fotografa Profesional Lente Camara Regalo"
 
 Respondé siempre en español argentino. Aplicá los mismos principios a todos los productos de la tienda (tazas, botellas, termos, regalos, etc.), no solo a tazas.`},
     {role:'assistant',content:'¡Hola! Soy tu experto en ventas y SEO para ML Argentina 2026. Trabajamos con tazas, botellas, termos y regalos con diseño. ¿En qué te ayudo?'}
