@@ -169,6 +169,23 @@ label{font-size:11.5px;color:var(--text2);display:block;margin-bottom:4px;font-w
 .a-success{background:var(--green-g);color:var(--green);border:1px solid rgba(35,209,139,0.2)}
 .a-red{background:var(--red-g);color:var(--red);border:1px solid rgba(244,100,95,0.2)}
 
+/* ── ALERT ACTION CARDS ── */
+.alert-action-card{background:#fff;border:1px solid #e3e7ef;border-radius:10px;padding:12px 14px;display:flex;align-items:center;gap:12px;transition:box-shadow .15s,border-color .15s;cursor:default}
+.alert-action-card:hover{box-shadow:0 2px 12px rgba(0,0,0,0.08);border-color:#c9d2e3}
+.alert-action-card.priority-critical{border-left:3px solid #f4645f}
+.alert-action-card.priority-warn{border-left:3px solid #f5a623}
+.alert-action-card.priority-info{border-left:3px solid #4f8ef7}
+.alert-icon{font-size:22px;flex-shrink:0;line-height:1;width:32px;text-align:center}
+.alert-body{flex:1;min-width:0}
+.alert-head{display:flex;align-items:center;gap:6px;margin-bottom:2px;flex-wrap:wrap}
+.alert-title{font-size:13px;font-weight:600;color:#0f172a}
+.alert-sub{font-size:12px;color:#374151;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:420px}
+.alert-detail{font-size:11px;color:#6b7280;margin-top:2px}
+.alert-summary-bar{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;align-items:center}
+.alert-count-pill{display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;font-size:12px;font-weight:600}
+.alert-count-critical{background:#fef2f2;border:1px solid #fecaca;color:#991b1b}
+.alert-count-warn{background:#fffbeb;border:1px solid #fde68a;color:#78350f}
+
 /* ── LOADING ── */
 .loading{display:flex;align-items:center;justify-content:center;gap:7px;color:var(--text3);font-size:12.5px;padding:36px}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -1169,9 +1186,20 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
 <!-- ═══════════════════════ ALERTAS ═══════════════════════ -->
 <div id="section-alertas" class="section fade-in">
+  <div class="mgt mgt-3" id="alerts-metrics" style="display:none">
+    <div class="mc c-red"><div class="mc-label">Críticas</div><div class="mc-val" id="alm-critical">0</div></div>
+    <div class="mc c-amber"><div class="mc-label">Importantes</div><div class="mc-val" id="alm-warn">0</div></div>
+    <div class="mc c-blue"><div class="mc-label">Total</div><div class="mc-val" id="alm-total">0</div></div>
+  </div>
   <div class="card">
-    <div class="card-hd"><div class="card-title">🔔 Centro de alertas</div><button class="btn btn-ghost btn-sm" onclick="refreshAlerts()">↻ Actualizar</button></div>
-    <div id="alerts-list"><div class="loading"><div class="spin"></div>Verificando...</div></div>
+    <div class="card-hd">
+      <div>
+        <div class="card-title">🔔 Alertas activas</div>
+        <div class="card-sub">Cada alerta lleva directo al módulo correcto — resolvé en 1 clic</div>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="refreshAlerts()">↻ Actualizar</button>
+    </div>
+    <div id="alerts-list"><div class="loading"><div class="spin"></div>Verificando alertas...</div></div>
   </div>
 </div>
 
@@ -1661,12 +1689,23 @@ function renderDashAlerts(){
     else if((i.available_quantity||0)<=2) alerts.push({icon:'⚠️',msg:`Stock bajo (${i.available_quantity}): ${i.title.slice(0,30)}...`,type:'amber'});
     const seo=seoScore(i.title);
     if(seo<30) alerts.push({icon:'🔍',msg:`SEO crítico (${seo}): ${i.title.slice(0,30)}...`,type:'amber'});
+    if(i.status==='paused') alerts.push({icon:'⏸',msg:`Pausada: ${i.title.slice(0,30)}...`,type:'amber'});
   });
   const pend=allQuestions.filter(q=>q.status==='UNANSWERED');
   if(pend.length>0) alerts.push({icon:'💬',msg:`${pend.length} pregunta${pend.length>1?'s':''} sin responder`,type:'amber'});
   document.getElementById('nb-alerts').textContent=alerts.length;
   if(!alerts.length){el.innerHTML='<div class="alert a-success">✅ Todo en orden</div>';return;}
-  el.innerHTML=alerts.slice(0,6).map(a=>`<div class="alert ${a.type==='red'?'a-red':'a-warn'}" style="margin-bottom:6px">${a.icon} ${a.msg}</div>`).join('');
+  const critCount=alerts.filter(a=>a.type==='red').length;
+  el.innerHTML=alerts.slice(0,5).map(a=>`
+    <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;border-radius:6px;background:${a.type==='red'?'#fef2f2':'#fffbeb'};border:1px solid ${a.type==='red'?'#fecaca':'#fde68a'}">
+      <span style="flex-shrink:0">${a.icon}</span>
+      <span style="font-size:11.5px;color:${a.type==='red'?'#991b1b':'#78350f'};flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${a.msg}</span>
+    </div>`).join('')+
+    `<div style="margin-top:8px;text-align:center">
+      <button onclick="showSection('alertas')" class="btn btn-ghost btn-xs" style="font-size:11px;width:100%">
+        🔔 Ver ${alerts.length} alerta${alerts.length>1?'s':''} · Resolver →
+      </button>
+    </div>`;
 }
 
 function renderDashConv(){
@@ -2528,7 +2567,10 @@ function renderStock(){
   document.getElementById('s-ok').textContent=ok.length;
   const alerts=[...zero.map(i=>({item:i,type:'red',msg:'⛔ Sin stock'})),...low.map(i=>({item:i,type:'amber',msg:`⚠️ Stock bajo: ${i.available_quantity}`}))];
   document.getElementById('stock-list').innerHTML=!alerts.length?'<div class="alert a-success">✅ Todo el stock está en buen estado</div>':
-    alerts.map(a=>`<div class="alert ${a.type==='red'?'a-red':'a-warn'}" style="margin-bottom:6px">${a.msg} — <a href="${a.item.permalink||'#'}" target="_blank" style="color:inherit;font-weight:600">${a.item.title.slice(0,50)}</a></div>`).join('');
+    alerts.map(a=>`<div class="alert ${a.type==='red'?'a-red':'a-warn'}" style="margin-bottom:6px;cursor:pointer" onclick="focusStockInput('${a.item.id}')">
+      ${a.msg} — <span style="color:inherit;font-weight:600">${a.item.title.slice(0,50)}</span>
+      <span style="margin-left:auto;flex-shrink:0;font-size:11px;text-decoration:underline;opacity:.75">Editar stock →</span>
+    </div>`).join('');
 
   let items=[...allItems];
   if(search) items=items.filter(i=>i.title?.toLowerCase().includes(search)||(i.seller_custom_field||'').toLowerCase().includes(search));
@@ -2554,6 +2596,16 @@ async function updateStock(id){
   if(!val)return;
   try{await mlPut(`/items/${id}`,{available_quantity:parseInt(val)});await loadItems();renderStock();}
   catch(e){alert('Error al actualizar stock');}
+}
+
+function focusStockInput(id){
+  const input=document.getElementById('stk-'+id);
+  if(!input)return;
+  input.scrollIntoView({behavior:'smooth',block:'center'});
+  input.focus();
+  input.style.border='2px solid #f5a623';
+  input.style.background='#fffbeb';
+  setTimeout(()=>{ input.style.border=''; input.style.background=''; }, 2800);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -2686,23 +2738,350 @@ function deleteRule(id){
 // ═══════════════════════════════════════════════════════════
 // ALERTAS
 // ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// ALERTAS ACTIVAS v2 — accionables, navegación inteligente
+// ═══════════════════════════════════════════════════════════
+
 function refreshAlerts(){
-  const alerts=[];
-  allItems.forEach(i=>{
-    if((i.available_quantity||0)===0) alerts.push({icon:'⛔',msg:`Sin stock: ${i.title.slice(0,50)}`,type:'red',time:'Ahora'});
-    else if((i.available_quantity||0)<=2) alerts.push({icon:'⚠️',msg:`Stock bajo (${i.available_quantity}): ${i.title.slice(0,45)}`,type:'amber',time:'Ahora'});
-    if(i.status==='paused') alerts.push({icon:'⏸',msg:`Publicación pausada: ${i.title.slice(0,45)}`,type:'amber',time:'Verificar'});
-    if(seoScore(i.title)<30) alerts.push({icon:'🔍',msg:`SEO crítico (${seoScore(i.title)}): ${i.title.slice(0,40)}`,type:'amber',time:'Mejorar'});
+  const alerts = [];
+
+  // ── Analizar cada publicación ──────────────────────────
+  allItems.forEach(i => {
+    const id     = i.id;
+    const title  = i.title || 'Sin título';
+    const qty    = i.available_quantity ?? 0;
+    const sold   = i.sold_quantity || 0;
+    const price  = i.price || 0;
+    const score  = (typeof seoScore === 'function') ? seoScore(title) : 50;
+
+    // Sin stock → CRÍTICO
+    if (qty === 0 && i.status === 'active') {
+      alerts.push({
+        uid: 'sinstock_' + id,
+        priority: 1,
+        category: 'stock',
+        icon: '⛔',
+        title: 'Sin stock',
+        subtitle: title.slice(0, 60),
+        detail: `Stock: 0 unidades · Vendidas totales: ${sold}`,
+        actionLabel: 'Corregir stock',
+        item_id: id,
+        item_title: title,
+        item_stock: qty,
+      });
+    }
+    // Stock bajo (≤2) → IMPORTANTE
+    else if (qty > 0 && qty <= 2 && i.status === 'active') {
+      alerts.push({
+        uid: 'bajstock_' + id,
+        priority: 2,
+        category: 'stock',
+        icon: '⚠️',
+        title: 'Stock bajo',
+        subtitle: title.slice(0, 60),
+        detail: `Solo ${qty} unidad${qty !== 1 ? 'es' : ''} disponible${qty !== 1 ? 's' : ''} · Vendidas: ${sold}`,
+        actionLabel: 'Actualizar stock',
+        item_id: id,
+        item_title: title,
+        item_stock: qty,
+      });
+    }
+
+    // Publicación pausada → IMPORTANTE
+    if (i.status === 'paused') {
+      alerts.push({
+        uid: 'paused_' + id,
+        priority: 2,
+        category: 'paused',
+        icon: '⏸',
+        title: 'Publicación pausada',
+        subtitle: title.slice(0, 60),
+        detail: 'No está visible en ML · Perdés ventas mientras está pausada',
+        actionLabel: 'Reactivar',
+        item_id: id,
+        item_title: title,
+      });
+    }
+
+    // SEO crítico (< 20) → CRÍTICO
+    if (score < 20) {
+      alerts.push({
+        uid: 'seocrit_' + id,
+        priority: 1,
+        category: 'seo',
+        icon: '🔴',
+        title: 'SEO crítico',
+        subtitle: title.slice(0, 60),
+        detail: `Score: ${score}/100 · Título muy corto o sin palabras clave relevantes`,
+        actionLabel: 'Optimizar SEO',
+        item_id: id,
+        item_title: title,
+        item_score: score,
+      });
+    }
+    // SEO bajo (20–39) → IMPORTANTE
+    else if (score < 40 && i.status === 'active') {
+      alerts.push({
+        uid: 'seowarn_' + id,
+        priority: 2,
+        category: 'seo',
+        icon: '🔍',
+        title: 'SEO bajo',
+        subtitle: title.slice(0, 60),
+        detail: `Score: ${score}/100 · Mejorá el título para más visibilidad`,
+        actionLabel: 'Mejorar título',
+        item_id: id,
+        item_title: title,
+        item_score: score,
+      });
+    }
   });
-  const pend=allQuestions.filter(q=>q.status==='UNANSWERED');
-  if(pend.length) alerts.push({icon:'💬',msg:`${pend.length} pregunta${pend.length>1?'s':''} sin responder`,type:'amber',time:'Urgente'});
-  document.getElementById('nb-alerts').textContent=alerts.length;
-  const el=document.getElementById('alerts-list');
-  if(!alerts.length){el.innerHTML='<div class="alert a-success">✅ No hay alertas activas. Todo en orden.</div>';return;}
-  el.innerHTML=`<div style="display:flex;flex-direction:column;gap:6px">${alerts.map(a=>`<div class="alert ${a.type==='red'?'a-red':'a-warn'}">
-    <div style="flex:1">${a.icon} ${a.msg}</div>
-    <span class="badge ${a.type==='red'?'bg-red':'bg-amber'}" style="flex-shrink:0">${a.time}</span>
-  </div>`).join('')}</div>`;
+
+  // ── Preguntas sin responder ────────────────────────────
+  const pend = allQuestions.filter(q => q.status === 'UNANSWERED');
+  if (pend.length >= 3) {
+    alerts.push({
+      uid: 'preguntas_urgente',
+      priority: 1,
+      category: 'preguntas',
+      icon: '💬',
+      title: `${pend.length} preguntas sin responder`,
+      subtitle: 'Respuesta tardía perjudica tu reputación en ML',
+      detail: `${pend.length} comprador${pend.length > 1 ? 'es esperan' : ' espera'} respuesta · Afecta ranking`,
+      actionLabel: 'Responder ahora',
+      item_id: null,
+      item_title: null,
+    });
+  } else if (pend.length > 0) {
+    alerts.push({
+      uid: 'preguntas_pend',
+      priority: 2,
+      category: 'preguntas',
+      icon: '💬',
+      title: `${pend.length} pregunta${pend.length > 1 ? 's' : ''} sin responder`,
+      subtitle: 'Respondé para mantener tu reputación',
+      detail: `${pend.length} pregunta${pend.length > 1 ? 's esperan' : ' espera'} respuesta`,
+      actionLabel: 'Ver preguntas',
+      item_id: null,
+      item_title: null,
+    });
+  }
+
+  // ── Ordenar: primero críticas, luego importantes ───────
+  alerts.sort((a, b) => a.priority - b.priority);
+
+  // ── Actualizar badge del sidebar ───────────────────────
+  const nbEl = document.getElementById('nb-alerts');
+  if (nbEl) nbEl.textContent = alerts.length;
+
+  // ── Métricas superiores ────────────────────────────────
+  const critCount = alerts.filter(a => a.priority === 1).length;
+  const warnCount = alerts.filter(a => a.priority === 2).length;
+  const metricsRow = document.getElementById('alerts-metrics');
+  if (metricsRow) {
+    metricsRow.style.display = alerts.length ? '' : 'none';
+    const ce = document.getElementById('alm-critical');
+    const we = document.getElementById('alm-warn');
+    const te = document.getElementById('alm-total');
+    if (ce) ce.textContent = critCount;
+    if (we) we.textContent = warnCount;
+    if (te) te.textContent = alerts.length;
+  }
+
+  // ── Log de diagnóstico ─────────────────────────────────
+  console.log(`[Alertas] ${alerts.length} alertas generadas (${critCount} críticas, ${warnCount} importantes):`,
+    alerts.map(a => ({
+      prioridad: a.priority === 1 ? 'CRÍTICA' : 'IMPORTANTE',
+      tipo: a.category,
+      item_id: a.item_id || '(global)',
+      titulo: (a.item_title || a.subtitle || '').slice(0, 40),
+      datos: a.item_stock !== undefined ? `stock:${a.item_stock}` : (a.item_score !== undefined ? `seo:${a.item_score}` : ''),
+    }))
+  );
+
+  const el = document.getElementById('alerts-list');
+  if (!el) return;
+
+  // ── Sin alertas ────────────────────────────────────────
+  if (!alerts.length) {
+    el.innerHTML = '<div class="alert a-success" style="margin-bottom:0">✅ No hay alertas activas. ¡Todo en orden!</div>';
+    return;
+  }
+
+  // ── Barra de resumen ───────────────────────────────────
+  const summaryBar = `
+    <div class="alert-summary-bar">
+      ${critCount ? `<div class="alert-count-pill alert-count-critical">⛔ ${critCount} crítica${critCount > 1 ? 's' : ''}</div>` : ''}
+      ${warnCount ? `<div class="alert-count-pill alert-count-warn">⚠️ ${warnCount} importante${warnCount > 1 ? 's' : ''}</div>` : ''}
+      <div style="margin-left:auto;font-size:11px;color:var(--text3)">${alerts.length} alerta${alerts.length > 1 ? 's' : ''} en total · ordenadas por prioridad</div>
+    </div>`;
+
+  // ── Configuración visual por prioridad ────────────────
+  const PRI = {
+    1: { label:'CRÍTICA',    badgeCls:'bg-red',   borderColor:'#f4645f', btnBg:'#fef2f2', btnColor:'#991b1b', btnBorder:'#fecaca' },
+    2: { label:'IMPORTANTE', badgeCls:'bg-amber', borderColor:'#f5a623', btnBg:'#fffbeb', btnColor:'#78350f', btnBorder:'#fde68a' },
+    3: { label:'INFO',       badgeCls:'bg-blue',  borderColor:'#4f8ef7', btnBg:'#eff6ff', btnColor:'#1e40af', btnBorder:'#bfdbfe' },
+  };
+
+  // ── Render cards ───────────────────────────────────────
+  const cards = alerts.map(a => {
+    const p = PRI[a.priority] || PRI[3];
+    const safeId    = (a.item_id    || '').replace(/'/g, "\\'");
+    const safeTitle = (a.item_title || '').replace(/'/g, "\\'");
+    return `
+      <div class="alert-action-card priority-${a.priority === 1 ? 'critical' : a.priority === 2 ? 'warn' : 'info'}"
+           id="alertcard-${a.uid}"
+           style="border-left-color:${p.borderColor}">
+        <div class="alert-icon">${a.icon}</div>
+        <div class="alert-body">
+          <div class="alert-head">
+            <span class="badge ${p.badgeCls}" style="font-size:9px;letter-spacing:.04em">${p.label}</span>
+            <span class="alert-title">${a.title}</span>
+          </div>
+          <div class="alert-sub" title="${a.subtitle}">${a.subtitle}</div>
+          <div class="alert-detail">${a.detail}</div>
+        </div>
+        <button class="btn btn-sm"
+                onclick="alertGoTo('${a.category}','${safeId}','${safeTitle}',this,'${a.uid}')"
+                style="flex-shrink:0;background:${p.btnBg};color:${p.btnColor};border:1px solid ${p.btnBorder};font-weight:600;white-space:nowrap">
+          ${a.actionLabel} →
+        </button>
+      </div>`;
+  }).join('');
+
+  el.innerHTML = summaryBar + `<div style="display:flex;flex-direction:column;gap:8px">${cards}</div>`;
+}
+
+// ── Dispatcher principal de acciones ──────────────────────
+function alertGoTo(category, itemId, itemTitle, btnEl, uid){
+  console.log('[Alerta→Acción]', { category, itemId, itemTitle: (itemTitle||'').slice(0,40), uid });
+
+  // Feedback de loading en el botón
+  if(btnEl){
+    const orig = btnEl.innerHTML;
+    btnEl.disabled = true;
+    btnEl.innerHTML = '<span class="spin" style="display:inline-block;width:12px;height:12px;border-width:2px;margin-right:4px"></span>...';
+    setTimeout(()=>{ if(btnEl){ btnEl.innerHTML = orig; btnEl.disabled = false; } }, 900);
+  }
+
+  switch(category){
+    case 'stock':     alertGoToStock(itemId, itemTitle); break;
+    case 'seo':       alertGoToSEO(itemId, itemTitle); break;
+    case 'paused':    alertGoToPaused(itemId, itemTitle, btnEl, uid); break;
+    case 'preguntas': showSection('preguntas'); break;
+    default:          showSection('publicaciones');
+  }
+}
+
+// ── Navegar a Stock y resaltar el producto ─────────────────
+function alertGoToStock(itemId, itemTitle){
+  console.log('[Alertas→Stock] item:', itemId);
+  showSection('stock');
+
+  // Intentar tras renderizado
+  function tryFocus(){
+    const input = document.getElementById('stk-' + itemId);
+    if(input){
+      input.scrollIntoView({ behavior:'smooth', block:'center' });
+      input.focus();
+      const origBorder = input.style.border;
+      const origBg = input.style.background;
+      input.style.border = '2px solid #f5a623';
+      input.style.background = '#fffbeb';
+      setTimeout(()=>{ input.style.border = origBorder; input.style.background = origBg; }, 2800);
+      return true;
+    }
+    return false;
+  }
+
+  setTimeout(()=>{
+    if(!tryFocus() && itemTitle){
+      // El item no está visible — filtrar por nombre
+      const sb = document.getElementById('stock-search');
+      if(sb){ sb.value = itemTitle.slice(0, 25); renderStock(); }
+      setTimeout(tryFocus, 250);
+    }
+  }, 380);
+}
+
+// ── Navegar a SEO y precargar el producto ──────────────────
+function alertGoToSEO(itemId, itemTitle){
+  console.log('[Alertas→SEO] item:', itemId, '/', (itemTitle||'').slice(0,40));
+  showSection('optimizar');
+
+  setTimeout(()=>{
+    if(itemId && itemTitle && typeof selectOptItem === 'function'){
+      // Pre-llenar el buscador y seleccionar el ítem
+      const searchEl = document.getElementById('opt-search');
+      if(searchEl) searchEl.value = itemTitle.slice(0, 50);
+      selectOptItem(itemId, itemTitle);
+
+      // Scroll al panel de optimización
+      const optPanel = document.getElementById('opt-selected') || document.getElementById('opt-in');
+      if(optPanel) optPanel.scrollIntoView({ behavior:'smooth', block:'start' });
+
+      // Resaltar el campo de título
+      setTimeout(()=>{
+        const tf = document.getElementById('opt-in');
+        if(tf){
+          tf.style.border = '2px solid #4f8ef7';
+          tf.style.background = '#eff6ff';
+          setTimeout(()=>{ tf.style.border = ''; tf.style.background = ''; }, 2500);
+        }
+      }, 600);
+    }
+  }, 420);
+}
+
+// ── Reactivar publicación pausada directamente ─────────────
+function alertGoToPaused(itemId, itemTitle, btnEl, uid){
+  console.log('[Alertas→Pausada] item:', itemId);
+  if(!itemId){ showSection('publicaciones'); return; }
+
+  const displayTitle = (itemTitle || 'esta publicación').slice(0, 65);
+  if(!confirm(`¿Reactivar la publicación?\n\n"${displayTitle}"\n\nEsto la volverá a publicar en Mercado Libre.`)) return;
+
+  const card = uid ? document.getElementById('alertcard-' + uid) : null;
+  if(card){ card.style.opacity = '0.5'; card.style.pointerEvents = 'none'; }
+  if(btnEl){ btnEl.disabled = true; }
+
+  mlPut('/items/' + itemId, { status: 'active' })
+    .then(r => {
+      if(r.error || r.message){
+        const msg = r.message || JSON.stringify(r);
+        console.warn('[Alertas] Error al reactivar:', msg);
+        alert('No se pudo reactivar: ' + msg);
+        if(card){ card.style.opacity = ''; card.style.pointerEvents = ''; }
+        if(btnEl){ btnEl.disabled = false; }
+        return;
+      }
+      // Actualizar estado local
+      const item = allItems.find(i => i.id === itemId);
+      if(item) item.status = 'active';
+      console.log('[Alertas] ✅ Publicación reactivada:', itemId);
+
+      // Feedback visual en la card
+      if(card){
+        card.style.opacity = '1';
+        card.style.pointerEvents = 'auto';
+        card.style.background = '#f0fdf4';
+        card.style.borderLeftColor = '#23d18b';
+        card.innerHTML = `
+          <div class="alert-icon">✅</div>
+          <div class="alert-body">
+            <div class="alert-head"><span class="badge bg-green">REACTIVADA</span><span class="alert-title">Publicación activa</span></div>
+            <div class="alert-sub">${displayTitle}</div>
+          </div>`;
+        // Refrescar alertas completas en 1.5s
+        setTimeout(refreshAlerts, 1500);
+      }
+    })
+    .catch(e => {
+      console.error('[Alertas] Error:', e);
+      alert('Error al reactivar: ' + e.message);
+      if(card){ card.style.opacity = ''; card.style.pointerEvents = ''; }
+      if(btnEl){ btnEl.disabled = false; }
+    });
 }
 
 // ═══════════════════════════════════════════════════════════
