@@ -682,37 +682,27 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
 <!-- ═══════════════════════ EDICIÓN MASIVA ═══════════════════════ -->
 <div id="section-bulk" class="section fade-in">
-  <div class="g2">
-    <div class="card">
-      <div class="card-hd"><div class="card-title">✏️ Cambio masivo de precios</div></div>
-      <div class="ff"><label>Seleccionar publicaciones</label>
-        <select id="bulk-sel-price" multiple style="height:160px">
-          <option value="all">Todas las activas</option>
-        </select>
+  <div class="card mb">
+    <div class="card-hd"><div class="card-title">✏️ Cambio masivo de precios</div></div>
+    <div class="fr">
+      <div>
+        <div class="ff"><label>Seleccionar publicaciones</label>
+          <select id="bulk-sel-price" multiple style="height:160px">
+            <option value="all">Todas las activas</option>
+          </select>
+        </div>
       </div>
-      <div class="fr">
-        <div><label>Tipo</label><select id="bpm-type"><option value="pct_up">Subir %</option><option value="pct_down">Bajar %</option><option value="fixed">Precio fijo</option></select></div>
-        <div><label>Valor</label><input type="number" id="bpm-val" placeholder="Ej: 10"></div>
+      <div>
+        <div class="fr">
+          <div><label>Tipo</label><select id="bpm-type"><option value="pct_up">Subir %</option><option value="pct_down">Bajar %</option><option value="fixed">Precio fijo</option></select></div>
+          <div><label>Valor</label><input type="number" id="bpm-val" placeholder="Ej: 10"></div>
+        </div>
+        <button class="btn btn-primary" style="width:100%;margin-top:4px" onclick="executeBulkPrice()">Aplicar cambio de precios</button>
+        <div id="bpm-result" style="margin-top:10px"></div>
       </div>
-      <button class="btn btn-primary" style="width:100%" onclick="executeBulkPrice()">Aplicar cambio de precios</button>
-      <div id="bpm-result" style="margin-top:10px"></div>
-    </div>
-    <div class="card">
-      <div class="card-hd"><div class="card-title">📝 Cambio masivo de títulos con IA</div></div>
-      <div class="ff"><label>Tipo de optimización</label>
-        <select id="bulk-title-mode">
-          <option value="seo">Optimizar para SEO ML 2026</option>
-          <option value="prefix">Agregar prefijo</option>
-          <option value="suffix">Agregar sufijo</option>
-        </select>
-      </div>
-      <div class="ff" id="bulk-title-extra"><label>Prefijo/Sufijo</label><input type="text" id="bulk-title-text" placeholder="Texto a agregar..."></div>
-      <div class="alert a-warn">⚠️ La optimización IA procesará cada título individualmente. Para catálogos grandes puede tomar varios minutos.</div>
-      <button class="btn btn-primary" style="width:100%" onclick="bulkOptimizeTitles()">🤖 Optimizar títulos con IA</button>
-      <div id="bulk-title-result" style="margin-top:10px"></div>
     </div>
   </div>
-  <div class="card" style="margin-top:14px">
+  <div class="card">
     <div class="card-hd"><div class="card-title">📋 Duplicar publicaciones</div></div>
     <div class="alert a-info">ℹ️ Seleccioná publicaciones de la tabla y usá esta función para duplicarlas como borrador.</div>
     <div id="dup-list"></div>
@@ -3132,27 +3122,6 @@ function executeBulkPrice(){
   el.innerHTML=`<div class="alert a-success">✅ Cambio de precio ${type==='pct_up'?'subido':type==='pct_down'?'bajado':'fijado'} en ${val} — ${allItems.filter(i=>i.status==='active').length} publicaciones afectadas</div>`;
 }
 
-async function bulkOptimizeTitles(){
-  const mode=document.getElementById('bulk-title-mode').value;
-  const el=document.getElementById('bulk-title-result');
-  const active=allItems.filter(i=>i.status==='active').slice(0,3);
-  if(!active.length){el.innerHTML='<div class="alert a-warn">Sin publicaciones activas</div>';return;}
-  el.innerHTML='<div class="loading"><div class="spin"></div>Optimizando los primeros 3 títulos con IA...</div>';
-  const results=[];
-  for(const item of active){
-    try{
-      const r=await callClaude(`Sos experto en tazas con diseño para ML Argentina 2026. Optimizá este título para compra impulsiva y regalo: "${item.title}". Reglas: 60-70 chars, keyword principal al inicio, temática + intención (regalo, fan, divertido), sin puntuación, sin mayúsculas. Respondé SOLO el título optimizado, sin explicación ni comillas.`);
-      results.push({original:item.title,optimizado:r.trim()});
-    }catch(e){results.push({original:item.title,optimizado:'Error'});}
-  }
-  el.innerHTML=results.map(r=>`<div style="padding:10px;background:var(--bg3);border-radius:var(--rs);margin-bottom:8px">
-    <div style="font-size:11px;color:var(--text3);margin-bottom:3px">ORIGINAL</div>
-    <div style="font-size:12px;color:var(--text2);margin-bottom:6px">${r.original}</div>
-    <div style="font-size:11px;color:var(--green);margin-bottom:3px">OPTIMIZADO</div>
-    <div style="font-size:12.5px;font-weight:500">${r.optimizado}</div>
-  </div>`).join('');
-}
-
 // ═══════════════════════════════════════════════════════════
 // VENTAS
 // ═══════════════════════════════════════════════════════════
@@ -3645,21 +3614,6 @@ function selectOptItem(id,title){
   }).catch(function(){
     if(descEl){descEl.value='';descEl.disabled=false;}
   });
-}
-async function applyOptimization(){
-  if(!optCurrentItemId){alert('Seleccioná una publicación con el buscador primero');return;}
-  const title=document.getElementById('opt-final-title')?.value?.trim();
-  const desc=document.getElementById('opt-final-desc')?.value?.trim();
-  const resEl=document.getElementById('opt-apply-res');
-  if(!title){alert('El título no puede estar vacío');return;}
-  if(resEl)resEl.innerHTML='<div class="loading"><div class="spin"></div>Aplicando en ML...</div>';
-  try{
-    const r=await mlPut('/items/'+optCurrentItemId,{title});
-    if(r.error&&r.message){if(resEl)resEl.innerHTML='<div class="alert a-err">❌ '+r.message+'</div>';return;}
-    if(desc)await mlPost('/items/'+optCurrentItemId+'/description',{plain_text:desc}).catch(()=>{});
-    if(resEl)resEl.innerHTML='<div class="alert a-ok">✅ Publicación actualizada en ML. Los cambios pueden tardar unos minutos en verse.</div>';
-    const item=allItems.find(i=>i.id===optCurrentItemId);if(item)item.title=title;
-  }catch(e){if(resEl)resEl.innerHTML='<div class="alert a-err">❌ '+e.message+'</div>';}
 }
 
 (async function boot(){
