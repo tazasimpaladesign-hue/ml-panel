@@ -1022,35 +1022,136 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
 <!-- ═══════════════════════ STOCK ═══════════════════════ -->
 <div id="section-stock" class="section fade-in">
-  <div class="mgt mgt-3">
-    <div class="mc c-red"><div class="mc-label">Sin stock</div><div class="mc-val" id="s-zero">—</div></div>
+
+  <!-- Métricas -->
+  <div class="mgt" style="grid-template-columns:repeat(5,1fr)">
+    <div class="mc c-red"><div class="mc-label">Sin stock</div><div class="mc-val" id="s-zero">—</div><div class="mc-sub" id="s-zero-pct" style="font-size:10px"></div></div>
     <div class="mc c-amber"><div class="mc-label">Stock bajo (≤3)</div><div class="mc-val" id="s-low">—</div></div>
-    <div class="mc c-green"><div class="mc-label">OK</div><div class="mc-val" id="s-ok">—</div></div>
+    <div class="mc c-green"><div class="mc-label">En orden (>3)</div><div class="mc-val" id="s-ok">—</div></div>
+    <div class="mc c-blue"><div class="mc-label">Total publicaciones</div><div class="mc-val" id="s-total">—</div></div>
+    <div class="mc c-purple"><div class="mc-label">Unidades totales</div><div class="mc-val" id="s-units">—</div></div>
   </div>
+
+  <!-- Filtros avanzados -->
   <div class="card mb">
-    <div class="card-hd"><div class="card-title">Alertas de stock</div></div>
-    <div id="stock-list"></div>
-  </div>
-  <div class="card">
-    <div class="card-hd">
-      <div class="card-title">Stock completo por publicación</div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <input type="text" id="stock-search" placeholder="Buscar título o SKU..." style="width:200px;padding:5px 9px;font-size:12px" oninput="renderStock()">
-        <select id="stock-sort" style="width:150px;padding:5px 9px;font-size:12px" onchange="renderStock()">
-          <option value="asc">Stock ↑ menor</option>
-          <option value="desc">Stock ↓ mayor</option>
-          <option value="sold">Más vendidos</option>
-          <option value="alpha">Nombre A-Z</option>
+    <div class="card-hd" style="margin-bottom:10px">
+      <div><div class="card-title">🔍 Filtros y búsqueda</div><div class="card-sub">Filtrá por cualquier campo de MercadoLibre</div></div>
+      <button class="btn btn-ghost btn-sm" onclick="stockResetFilters()">✕ Limpiar filtros</button>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+
+      <!-- Tipo de búsqueda -->
+      <div style="min-width:160px">
+        <label style="font-size:11px;margin-bottom:4px;display:block">Tipo de búsqueda</label>
+        <select id="stk-filter-type" onchange="stockFilterTypeChanged()" style="padding:7px 9px;font-size:12.5px">
+          <option value="title">Por título</option>
+          <option value="sku">Por SKU</option>
+          <option value="id">Por ID publicación</option>
+          <option value="status">Por estado</option>
+          <option value="stock_range">Stock (rango)</option>
+          <option value="price_range">Precio (rango)</option>
         </select>
+      </div>
+
+      <!-- Inputs dinámicos según tipo -->
+      <div id="stk-input-text" style="flex:1;min-width:180px">
+        <label style="font-size:11px;margin-bottom:4px;display:block" id="stk-input-label">Buscar texto</label>
+        <input type="text" id="stk-filter-text" placeholder="Escribí para filtrar..." oninput="stockDebounceFilter()" style="padding:7px 9px;font-size:12.5px">
+      </div>
+
+      <div id="stk-input-status" style="min-width:150px;display:none">
+        <label style="font-size:11px;margin-bottom:4px;display:block">Estado</label>
+        <select id="stk-filter-status" onchange="renderStock()" style="padding:7px 9px;font-size:12.5px">
+          <option value="">Todos</option>
+          <option value="active">Activas</option>
+          <option value="paused">Pausadas</option>
+          <option value="closed">Cerradas</option>
+        </select>
+      </div>
+
+      <div id="stk-input-range" style="display:none;gap:6px;align-items:flex-end">
+        <div>
+          <label style="font-size:11px;margin-bottom:4px;display:block" id="stk-range-label-min">Mínimo</label>
+          <input type="number" id="stk-filter-min" placeholder="0" oninput="stockDebounceFilter()" style="width:90px;padding:7px 9px;font-size:12.5px">
+        </div>
+        <div style="padding-bottom:8px;color:#6b7280;font-size:13px">—</div>
+        <div>
+          <label style="font-size:11px;margin-bottom:4px;display:block" id="stk-range-label-max">Máximo</label>
+          <input type="number" id="stk-filter-max" placeholder="∞" oninput="stockDebounceFilter()" style="width:90px;padding:7px 9px;font-size:12.5px">
+        </div>
+      </div>
+
+      <!-- Ordenamiento -->
+      <div style="min-width:190px">
+        <label style="font-size:11px;margin-bottom:4px;display:block">Ordenar por</label>
+        <select id="stock-sort" onchange="renderStock()" style="padding:7px 9px;font-size:12.5px">
+          <optgroup label="Stock">
+            <option value="stock_asc">Stock ↑ menor primero</option>
+            <option value="stock_desc">Stock ↓ mayor primero</option>
+            <option value="zero_first">Sin stock primero</option>
+          </optgroup>
+          <optgroup label="Ventas">
+            <option value="sold_desc">Más vendidos</option>
+            <option value="sold_asc">Menos vendidos</option>
+          </optgroup>
+          <optgroup label="Precio">
+            <option value="price_asc">Precio ↑ menor</option>
+            <option value="price_desc">Precio ↓ mayor</option>
+          </optgroup>
+          <optgroup label="Otros">
+            <option value="alpha">Nombre A-Z</option>
+            <option value="active_first">Activas primero</option>
+            <option value="updated">Última actualización</option>
+          </optgroup>
+        </select>
+      </div>
+
+      <!-- Resultados por página -->
+      <div style="min-width:110px">
+        <label style="font-size:11px;margin-bottom:4px;display:block">Mostrar</label>
+        <select id="stk-per-page" onchange="stockResetPage();renderStock()" style="padding:7px 9px;font-size:12.5px">
+          <option value="25">25 por página</option>
+          <option value="50">50 por página</option>
+          <option value="100">100 por página</option>
+          <option value="0">Todos</option>
+        </select>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Tabla principal -->
+  <div class="card">
+    <div class="card-hd" style="flex-wrap:wrap;gap:8px">
+      <div>
+        <div class="card-title">📦 Publicaciones</div>
+        <div class="card-sub" id="stk-result-count">—</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
+        <button class="btn btn-ghost btn-sm" onclick="renderStock()">↻ Actualizar</button>
       </div>
     </div>
     <div class="tw">
       <table>
-        <thead><tr><th>Publicación</th><th>SKU</th><th>Stock actual</th><th>Vendidas</th><th>Alerta</th><th>Actualizar</th><th>ML</th></tr></thead>
+        <thead>
+          <tr>
+            <th style="width:36%">Publicación</th>
+            <th>SKU</th>
+            <th>Precio</th>
+            <th>Stock</th>
+            <th>Vendidas</th>
+            <th>Estado</th>
+            <th>Nuevo stock</th>
+            <th>ML</th>
+          </tr>
+        </thead>
         <tbody id="stock-tbody"></tbody>
       </table>
     </div>
+    <!-- Paginación -->
+    <div id="stk-pagination" style="display:flex;align-items:center;justify-content:space-between;padding:12px 0 0;gap:8px;flex-wrap:wrap"></div>
   </div>
+
 </div>
 
 <!-- ═══════════════════════ MENSAJES POST-VENTA ═══════════════════════ -->
@@ -2544,58 +2645,389 @@ async function renderReputacion(){
 }
 
 // ═══════════════════════════════════════════════════════════
-// STOCK
+// STOCK — módulo avanzado
 // ═══════════════════════════════════════════════════════════
+
+// Estado de filtros persistente
+const stockState = {
+  page: 1,
+  perPage: 25,
+  _debounceTimer: null,
+};
+
+function stockDebounceFilter(){
+  clearTimeout(stockState._debounceTimer);
+  stockState._debounceTimer = setTimeout(() => { stockState.page = 1; renderStock(); }, 260);
+}
+
+function stockResetPage(){ stockState.page = 1; }
+
+function stockResetFilters(){
+  const tt = document.getElementById('stk-filter-type');
+  const tx = document.getElementById('stk-filter-text');
+  const st = document.getElementById('stk-filter-status');
+  const mn = document.getElementById('stk-filter-min');
+  const mx = document.getElementById('stk-filter-max');
+  const so = document.getElementById('stock-sort');
+  const pp = document.getElementById('stk-per-page');
+  if(tt) tt.value = 'title';
+  if(tx) tx.value = '';
+  if(st) st.value = '';
+  if(mn) mn.value = '';
+  if(mx) mx.value = '';
+  if(so) so.value = 'stock_asc';
+  if(pp) pp.value = '25';
+  stockState.page = 1;
+  stockFilterTypeChanged();
+  renderStock();
+}
+
+// Adaptar inputs al tipo seleccionado
+function stockFilterTypeChanged(){
+  const type = document.getElementById('stk-filter-type')?.value || 'title';
+  const inputText  = document.getElementById('stk-input-text');
+  const inputStat  = document.getElementById('stk-input-status');
+  const inputRange = document.getElementById('stk-input-range');
+  const label      = document.getElementById('stk-input-label');
+  const lMin       = document.getElementById('stk-range-label-min');
+  const lMax       = document.getElementById('stk-range-label-max');
+  const tx         = document.getElementById('stk-filter-text');
+
+  // Ocultar todo
+  if(inputText)  inputText.style.display  = 'none';
+  if(inputStat)  inputStat.style.display  = 'none';
+  if(inputRange) inputRange.style.display = 'none';
+
+  if(type === 'status'){
+    if(inputStat) inputStat.style.display = 'block';
+  } else if(type === 'stock_range'){
+    if(inputRange){ inputRange.style.display = 'flex'; }
+    if(lMin) lMin.textContent = 'Stock mín';
+    if(lMax) lMax.textContent = 'Stock máx';
+  } else if(type === 'price_range'){
+    if(inputRange){ inputRange.style.display = 'flex'; }
+    if(lMin) lMin.textContent = 'Precio mín ($)';
+    if(lMax) lMax.textContent = 'Precio máx ($)';
+  } else {
+    // text, sku, id
+    if(inputText) inputText.style.display = 'flex';
+    const labels = { title:'Buscar por título (parcial)', sku:'Buscar por SKU exacto o parcial', id:'ID de publicación' };
+    if(label) label.textContent = labels[type] || 'Buscar texto';
+    if(tx){
+      tx.placeholder = type === 'id' ? 'MLA1234567890' : type === 'sku' ? 'Ej: TAZ-001' : 'Escribí parte del título...';
+    }
+  }
+  stockState.page = 1;
+  renderStock();
+}
+
 function renderStock(){
-  const search=(document.getElementById('stock-search')?.value||'').toLowerCase();
-  const sortMode=document.getElementById('stock-sort')?.value||'asc';
-  const zero=allItems.filter(i=>(i.available_quantity||0)===0);
-  const low=allItems.filter(i=>(i.available_quantity||0)>0&&(i.available_quantity||0)<=3);
-  const ok=allItems.filter(i=>(i.available_quantity||0)>3);
-  document.getElementById('s-zero').textContent=zero.length;
-  document.getElementById('s-low').textContent=low.length;
-  document.getElementById('s-ok').textContent=ok.length;
-  const alerts=[...zero.map(i=>({item:i,type:'red',msg:'⛔ Sin stock'})),...low.map(i=>({item:i,type:'amber',msg:`⚠️ Stock bajo: ${i.available_quantity}`}))];
-  document.getElementById('stock-list').innerHTML=!alerts.length?'<div class="alert a-success">✅ Todo el stock está en buen estado</div>':
-    alerts.map(a=>`<div class="alert ${a.type==='red'?'a-red':'a-warn'}" style="margin-bottom:6px;cursor:pointer" onclick="focusStockInput('${a.item.id}')">
-      ${a.msg} — <span style="color:inherit;font-weight:600">${a.item.title.slice(0,50)}</span>
-      <span style="margin-left:auto;flex-shrink:0;font-size:11px;text-decoration:underline;opacity:.75">Editar stock →</span>
-    </div>`).join('');
+  const type     = document.getElementById('stk-filter-type')?.value   || 'title';
+  const textVal  = (document.getElementById('stk-filter-text')?.value  || '').trim().toLowerCase();
+  const statusVal= document.getElementById('stk-filter-status')?.value || '';
+  const minVal   = parseFloat(document.getElementById('stk-filter-min')?.value || '') || null;
+  const maxVal   = parseFloat(document.getElementById('stk-filter-max')?.value || '') || null;
+  const sortMode = document.getElementById('stock-sort')?.value        || 'stock_asc';
+  const perPage  = parseInt(document.getElementById('stk-per-page')?.value || '25') || 0;
 
-  let items=[...allItems];
-  if(search) items=items.filter(i=>i.title?.toLowerCase().includes(search)||(i.seller_custom_field||'').toLowerCase().includes(search));
-  if(sortMode==='asc') items.sort((a,b)=>(a.available_quantity||0)-(b.available_quantity||0));
-  else if(sortMode==='desc') items.sort((a,b)=>(b.available_quantity||0)-(a.available_quantity||0));
-  else if(sortMode==='sold') items.sort((a,b)=>(b.sold_quantity||0)-(a.sold_quantity||0));
-  else if(sortMode==='alpha') items.sort((a,b)=>(a.title||'').localeCompare(b.title||''));
+  // ── Métricas globales (siempre sobre allItems completo) ──
+  const zero  = allItems.filter(i => (i.available_quantity||0) === 0);
+  const low   = allItems.filter(i => (i.available_quantity||0) > 0 && (i.available_quantity||0) <= 3);
+  const ok    = allItems.filter(i => (i.available_quantity||0) > 3);
+  const units = allItems.reduce((s,i) => s + (i.available_quantity||0), 0);
 
-  const tbody=document.getElementById('stock-tbody');
-  tbody.innerHTML=items.map(i=>`<tr>
-    <td style="max-width:200px"><a href="${i.permalink||'#'}" target="_blank" style="color:var(--accent);font-weight:500;text-decoration:none" title="${i.title}">${i.title.slice(0,45)}${i.title.length>45?'…':''}</a></td>
-    <td style="font-family:var(--mono);font-size:11px;color:var(--text3)">${i.seller_custom_field||'—'}</td>
-    <td><span class="badge ${(i.available_quantity||0)===0?'bg-red':(i.available_quantity||0)<=3?'bg-amber':'bg-green'}">${i.available_quantity??'—'}</span></td>
-    <td style="color:var(--text3)">${i.sold_quantity||0}</td>
-    <td>${(i.available_quantity||0)<=3?`<span class="badge bg-amber">⚠️ Reponer</span>`:'<span class="badge bg-green">OK</span>'}</td>
-    <td><div style="display:flex;gap:5px;align-items:center"><input type="number" style="width:75px;font-size:11px;padding:4px 7px" placeholder="Nuevo" id="stk-${i.id}"><button class="btn btn-ghost btn-xs" onclick="updateStock('${i.id}')">✓</button></div></td>
-    <td><a href="${i.permalink||'#'}" target="_blank" class="btn btn-ghost btn-xs" style="text-decoration:none">🔗</a></td>
-  </tr>`).join('');
+  const sZero  = document.getElementById('s-zero');
+  const sLow   = document.getElementById('s-low');
+  const sOk    = document.getElementById('s-ok');
+  const sTotal = document.getElementById('s-total');
+  const sUnits = document.getElementById('s-units');
+  const sZeroPct = document.getElementById('s-zero-pct');
+
+  if(sZero)  sZero.textContent  = zero.length;
+  if(sLow)   sLow.textContent   = low.length;
+  if(sOk)    sOk.textContent    = ok.length;
+  if(sTotal) sTotal.textContent = allItems.length;
+  if(sUnits) sUnits.textContent = units.toLocaleString('es-AR');
+  if(sZeroPct && allItems.length){
+    sZeroPct.textContent = Math.round(zero.length / allItems.length * 100) + '% del catálogo';
+  }
+
+  // ── Filtrar ──────────────────────────────────────────────
+  let items = [...allItems];
+
+  if(type === 'title' && textVal){
+    items = items.filter(i => (i.title||'').toLowerCase().includes(textVal));
+  } else if(type === 'sku' && textVal){
+    items = items.filter(i => (i.seller_custom_field||'').toLowerCase().includes(textVal));
+  } else if(type === 'id' && textVal){
+    items = items.filter(i => (i.id||'').toLowerCase().includes(textVal));
+  } else if(type === 'status' && statusVal){
+    items = items.filter(i => i.status === statusVal);
+  } else if(type === 'stock_range'){
+    if(minVal !== null) items = items.filter(i => (i.available_quantity||0) >= minVal);
+    if(maxVal !== null) items = items.filter(i => (i.available_quantity||0) <= maxVal);
+  } else if(type === 'price_range'){
+    if(minVal !== null) items = items.filter(i => (i.price||0) >= minVal);
+    if(maxVal !== null) items = items.filter(i => (i.price||0) <= maxVal);
+  }
+
+  // ── Ordenar ──────────────────────────────────────────────
+  switch(sortMode){
+    case 'stock_asc':    items.sort((a,b) => (a.available_quantity||0)-(b.available_quantity||0)); break;
+    case 'stock_desc':   items.sort((a,b) => (b.available_quantity||0)-(a.available_quantity||0)); break;
+    case 'zero_first':   items.sort((a,b) => (a.available_quantity||0)-(b.available_quantity||0)); break;
+    case 'sold_desc':    items.sort((a,b) => (b.sold_quantity||0)-(a.sold_quantity||0)); break;
+    case 'sold_asc':     items.sort((a,b) => (a.sold_quantity||0)-(b.sold_quantity||0)); break;
+    case 'price_asc':    items.sort((a,b) => (a.price||0)-(b.price||0)); break;
+    case 'price_desc':   items.sort((a,b) => (b.price||0)-(a.price||0)); break;
+    case 'alpha':        items.sort((a,b) => (a.title||'').localeCompare(b.title||'')); break;
+    case 'active_first': items.sort((a,b) => (a.status==='active'?0:1)-(b.status==='active'?0:1)); break;
+    case 'updated':      items.sort((a,b) => new Date(b.last_updated||0)-new Date(a.last_updated||0)); break;
+  }
+
+  // ── Log de diagnóstico ────────────────────────────────────
+  console.log('[Stock] Filtro:', { type, textVal, statusVal, minVal, maxVal, sort: sortMode },
+    '→', items.length, 'de', allItems.length, 'resultados');
+
+  // ── Paginación ────────────────────────────────────────────
+  const total    = items.length;
+  const maxPages = perPage > 0 ? Math.ceil(total / perPage) : 1;
+  if(stockState.page > maxPages) stockState.page = Math.max(1, maxPages);
+
+  const slice = perPage > 0
+    ? items.slice((stockState.page - 1) * perPage, stockState.page * perPage)
+    : items;
+
+  // ── Resultado count ───────────────────────────────────────
+  const countEl = document.getElementById('stk-result-count');
+  if(countEl){
+    countEl.textContent = total === allItems.length
+      ? `${total} publicaciones`
+      : `${total} resultado${total !== 1 ? 's' : ''} de ${allItems.length} publicaciones`;
+  }
+
+  // ── Render tabla ─────────────────────────────────────────
+  const tbody = document.getElementById('stock-tbody');
+  if(!tbody) return;
+
+  if(!slice.length){
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:28px;color:var(--text3);font-size:12.5px">
+      Sin resultados para los filtros actuales. <button class="btn btn-ghost btn-xs" onclick="stockResetFilters()">Limpiar filtros</button>
+    </td></tr>`;
+    stockRenderPagination(total, perPage);
+    return;
+  }
+
+  tbody.innerHTML = slice.map(i => {
+    const qty      = i.available_quantity ?? 0;
+    const isZero   = qty === 0;
+    const isLow    = qty > 0 && qty <= 3;
+    const isPaused = i.status === 'paused';
+    const isClosed = i.status === 'closed';
+
+    const stockBadge = isZero
+      ? `<span class="badge bg-red">⛔ 0</span>`
+      : isLow
+        ? `<span class="badge bg-amber">⚠️ ${qty}</span>`
+        : `<span class="badge bg-green">${qty}</span>`;
+
+    const statusBadge = isPaused
+      ? `<span class="badge bg-amber">⏸ Pausada</span>`
+      : isClosed
+        ? `<span class="badge bg-gray">✕ Cerrada</span>`
+        : `<span class="badge bg-green">● Activa</span>`;
+
+    const safeId    = i.id.replace(/'/g, '');
+    const safeTitle = (i.title||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;').slice(0,55);
+    const sku       = i.seller_custom_field || '—';
+    const price     = (i.price||0).toLocaleString('es-AR', {minimumFractionDigits:0});
+    const sold      = i.sold_quantity || 0;
+    const link      = i.permalink || `https://www.mercadolibre.com.ar/p/${i.id}`;
+
+    return `<tr id="stock-row-${safeId}">
+      <td style="max-width:0;width:36%">
+        <div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500;font-size:12.5px;color:#0f172a" title="${safeTitle}">${safeTitle}</div>
+        <div style="font-size:10px;color:#6b7280;margin-top:1px;font-family:var(--mono)">${safeId}</div>
+      </td>
+      <td style="font-family:var(--mono);font-size:11px;color:#6b7280;white-space:nowrap">${sku}</td>
+      <td style="white-space:nowrap;font-size:12px;font-weight:500">$${price}</td>
+      <td id="stk-cell-${safeId}">${stockBadge}</td>
+      <td style="color:#374151;font-size:12px">${sold}</td>
+      <td>${statusBadge}</td>
+      <td>
+        <div style="display:flex;gap:5px;align-items:center">
+          <input type="number" min="0" style="width:72px;font-size:12px;padding:4px 7px;border:1px solid #d1d5db;border-radius:5px;background:#fff" placeholder="Cant." id="stk-inp-${safeId}">
+          <button class="btn btn-ghost btn-xs" onclick="updateStock('${safeId}')" id="stk-btn-${safeId}" title="Actualizar stock">✓</button>
+        </div>
+        <div id="stk-msg-${safeId}" style="font-size:10px;margin-top:3px;min-height:14px"></div>
+      </td>
+      <td>
+        <a href="${link}" target="_blank" rel="noopener" class="btn btn-ghost btn-xs" style="text-decoration:none;white-space:nowrap" title="Ver en MercadoLibre">🔗 Ver en ML</a>
+      </td>
+    </tr>`;
+  }).join('');
+
+  stockRenderPagination(total, perPage);
+}
+
+function stockRenderPagination(total, perPage){
+  const el = document.getElementById('stk-pagination');
+  if(!el) return;
+  if(!perPage || total <= perPage){ el.innerHTML = ''; return; }
+
+  const maxPages = Math.ceil(total / perPage);
+  const cur      = stockState.page;
+
+  // Botones de páginas — mostrar hasta 7
+  let pages = [];
+  if(maxPages <= 7){
+    for(let p = 1; p <= maxPages; p++) pages.push(p);
+  } else {
+    pages = [1];
+    if(cur > 3) pages.push('…');
+    for(let p = Math.max(2, cur-1); p <= Math.min(maxPages-1, cur+1); p++) pages.push(p);
+    if(cur < maxPages - 2) pages.push('…');
+    pages.push(maxPages);
+  }
+
+  const pageButtons = pages.map(p => p === '…'
+    ? `<span style="padding:0 4px;color:#9ca3af">…</span>`
+    : `<button class="btn btn-xs ${p===cur ? 'btn-primary' : 'btn-ghost'}"
+        onclick="stockGoPage(${p})" style="min-width:32px">${p}</button>`
+  ).join('');
+
+  const showing = Math.min(total, cur * perPage);
+  const from    = (cur - 1) * perPage + 1;
+
+  el.innerHTML = `
+    <div style="font-size:11.5px;color:#6b7280">Mostrando ${from}–${showing} de ${total}</div>
+    <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">
+      <button class="btn btn-ghost btn-xs" onclick="stockGoPage(${cur-1})" ${cur===1?'disabled':''}>← Ant</button>
+      ${pageButtons}
+      <button class="btn btn-ghost btn-xs" onclick="stockGoPage(${cur+1})" ${cur===maxPages?'disabled':''}>Sig →</button>
+    </div>`;
+}
+
+function stockGoPage(p){
+  const perPage  = parseInt(document.getElementById('stk-per-page')?.value || '25') || 0;
+  const maxPages = perPage > 0 ? Math.ceil(allItems.length / perPage) : 1;
+  stockState.page = Math.max(1, Math.min(p, maxPages));
+  renderStock();
+  // Scroll al inicio de la tabla
+  const card = document.getElementById('stock-tbody');
+  if(card) card.closest('.card')?.scrollIntoView({behavior:'smooth', block:'start'});
 }
 
 async function updateStock(id){
-  const val=document.getElementById('stk-'+id)?.value;
-  if(!val)return;
-  try{await mlPut(`/items/${id}`,{available_quantity:parseInt(val)});await loadItems();renderStock();}
-  catch(e){alert('Error al actualizar stock');}
+  const inp = document.getElementById('stk-inp-' + id);
+  const btn = document.getElementById('stk-btn-' + id);
+  const msg = document.getElementById('stk-msg-' + id);
+  const cell= document.getElementById('stk-cell-' + id);
+
+  const val = inp?.value?.trim();
+  if(!val && val !== '0'){
+    if(msg){ msg.textContent = '⚠️ Ingresá una cantidad'; msg.style.color = '#f59e0b'; }
+    setTimeout(() => { if(msg) msg.textContent = ''; }, 2000);
+    return;
+  }
+  const qty = parseInt(val);
+  if(isNaN(qty) || qty < 0){
+    if(msg){ msg.textContent = '⚠️ Número inválido'; msg.style.color = '#f59e0b'; }
+    setTimeout(() => { if(msg) msg.textContent = ''; }, 2000);
+    return;
+  }
+
+  // Confirmación
+  const item  = allItems.find(i => i.id === id);
+  const label = item ? item.title.slice(0, 50) : id;
+  const current = item ? (item.available_quantity ?? '?') : '?';
+  if(!confirm(`Actualizar stock de:\n"${label}"\n\nStock actual: ${current} → Nuevo: ${qty}`)) return;
+
+  console.log('[Stock] Actualizando', id, '→', qty, 'unidades');
+
+  // UI loading
+  if(btn){ btn.disabled = true; btn.textContent = '⏳'; }
+  if(msg){ msg.textContent = 'Actualizando...'; msg.style.color = '#6b7280'; }
+
+  try{
+    const r = await mlPut(`/items/${id}`, { available_quantity: qty });
+    if(r.error || r.message){
+      throw new Error(r.message || r.error);
+    }
+
+    // Actualizar dato local sin recargar toda la lista
+    if(item) item.available_quantity = qty;
+
+    // Feedback inline en la celda de stock
+    if(cell){
+      const badge = qty === 0
+        ? `<span class="badge bg-red">⛔ 0</span>`
+        : qty <= 3
+          ? `<span class="badge bg-amber">⚠️ ${qty}</span>`
+          : `<span class="badge bg-green">${qty}</span>`;
+      cell.innerHTML = badge;
+    }
+
+    if(inp)  inp.value = '';
+    if(btn){ btn.disabled = false; btn.textContent = '✓'; }
+    if(msg){ msg.textContent = '✅ Actualizado'; msg.style.color = '#16a34a'; }
+
+    console.log('[Stock] ✅ OK — item', id, '→', qty);
+
+    // Actualizar métricas superiores sin re-renderizar tabla
+    const zero  = allItems.filter(i => (i.available_quantity||0) === 0).length;
+    const low   = allItems.filter(i => (i.available_quantity||0) > 0 && (i.available_quantity||0) <= 3).length;
+    const ok2   = allItems.filter(i => (i.available_quantity||0) > 3).length;
+    const units = allItems.reduce((s,i) => s+(i.available_quantity||0), 0);
+    const z = document.getElementById('s-zero'); if(z) z.textContent = zero;
+    const l = document.getElementById('s-low');  if(l) l.textContent = low;
+    const o = document.getElementById('s-ok');   if(o) o.textContent = ok2;
+    const u = document.getElementById('s-units'); if(u) u.textContent = units.toLocaleString('es-AR');
+
+    setTimeout(() => { if(msg) msg.textContent = ''; }, 3500);
+
+  } catch(e){
+    console.error('[Stock] Error:', e);
+    if(btn){ btn.disabled = false; btn.textContent = '✓'; }
+    if(msg){ msg.textContent = '❌ ' + (e.message||'Error'); msg.style.color = '#dc2626'; }
+    setTimeout(() => { if(msg) msg.textContent = ''; }, 5000);
+  }
 }
 
 function focusStockInput(id){
-  const input=document.getElementById('stk-'+id);
-  if(!input)return;
-  input.scrollIntoView({behavior:'smooth',block:'center'});
-  input.focus();
-  input.style.border='2px solid #f5a623';
-  input.style.background='#fffbeb';
-  setTimeout(()=>{ input.style.border=''; input.style.background=''; }, 2800);
+  // Asegurarse que el item sea visible en la página actual
+  const item = allItems.find(i => i.id === id);
+  if(!item) return;
+
+  const inp = document.getElementById('stk-inp-' + id);
+  if(inp){
+    inp.scrollIntoView({ behavior:'smooth', block:'center' });
+    inp.focus();
+    inp.style.border = '2px solid #f5a623';
+    inp.style.background = '#fffbeb';
+    setTimeout(() => { inp.style.border = ''; inp.style.background = ''; }, 2800);
+    return;
+  }
+
+  // El item no está en la página visible — cambiar filtro y reintentar
+  console.log('[Stock] Item no visible, buscando por ID:', id);
+  const tt = document.getElementById('stk-filter-type');
+  const tx = document.getElementById('stk-filter-text');
+  if(tt) tt.value = 'id';
+  stockFilterTypeChanged();
+  if(tx){ tx.value = id; }
+  stockState.page = 1;
+  renderStock();
+  setTimeout(() => {
+    const inp2 = document.getElementById('stk-inp-' + id);
+    if(inp2){
+      inp2.scrollIntoView({ behavior:'smooth', block:'center' });
+      inp2.focus();
+      inp2.style.border = '2px solid #f5a623';
+      inp2.style.background = '#fffbeb';
+      setTimeout(() => { inp2.style.border = ''; inp2.style.background = ''; }, 2800);
+    }
+  }, 300);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -2967,31 +3399,8 @@ function alertGoTo(category, itemId, itemTitle, btnEl, uid){
 function alertGoToStock(itemId, itemTitle){
   console.log('[Alertas→Stock] item:', itemId);
   showSection('stock');
-
-  // Intentar tras renderizado
-  function tryFocus(){
-    const input = document.getElementById('stk-' + itemId);
-    if(input){
-      input.scrollIntoView({ behavior:'smooth', block:'center' });
-      input.focus();
-      const origBorder = input.style.border;
-      const origBg = input.style.background;
-      input.style.border = '2px solid #f5a623';
-      input.style.background = '#fffbeb';
-      setTimeout(()=>{ input.style.border = origBorder; input.style.background = origBg; }, 2800);
-      return true;
-    }
-    return false;
-  }
-
-  setTimeout(()=>{
-    if(!tryFocus() && itemTitle){
-      // El item no está visible — filtrar por nombre
-      const sb = document.getElementById('stock-search');
-      if(sb){ sb.value = itemTitle.slice(0, 25); renderStock(); }
-      setTimeout(tryFocus, 250);
-    }
-  }, 380);
+  // focusStockInput ya maneja paginación y búsqueda — delegar a él
+  setTimeout(() => focusStockInput(itemId), 400);
 }
 
 // ── Navegar a SEO y precargar el producto ──────────────────
