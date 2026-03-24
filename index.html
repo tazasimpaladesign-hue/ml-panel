@@ -787,7 +787,6 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <input type="text" id="opt-search" placeholder="Escribí parte del título..." oninput="filterOptItems()" autocomplete="off">
         <div id="opt-search-results" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:50;background:#fff;border:1px solid #d1d5db;border-radius:0 0 8px 8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);max-height:220px;overflow-y:auto"></div>
       </div>
-      <div id="opt-selected" style="margin-bottom:8px"></div>
 
       <div class="ff"><label>Título actual</label><input type="text" id="opt-in" placeholder="O pegá un título manualmente..." oninput="liveScore(this.value)"></div>
 
@@ -2022,6 +2021,12 @@ async function doOptimize(){
   const cat=document.getElementById('opt-cat').value.trim();
   const kws=document.getElementById('opt-kws').value.trim();
   if(!title){alert('Ingresá o seleccioná un título');return;}
+
+  // ── RESET TOTAL: capturar ID actual y limpiar globals ANTES de async ──
+  const renderItemId = optCurrentItemId || null;   // captura local, inmune a cambios posteriores
+  window._optTituloSugerido = null;
+  window._optDescSugerida   = null;
+
   const el=document.getElementById('opt-out');
   el.innerHTML='<div class="loading"><div class="spin"></div>Optimizando con IA...</div>';
   try{
@@ -2098,13 +2103,17 @@ Respondé SOLO JSON válido (sin markdown, sin backticks):
     const scBg=sc>=70?'#f0fdf4':sc>=40?'#fffbeb':'#fef2f2';
 
     // ── Preview de lo que se va a aplicar ──
-    const hasItem=!!optCurrentItemId;
-    const itemName=hasItem?(allItems.find(i=>i.id===optCurrentItemId)?.title||'publicación seleccionada').slice(0,50):'';
+    // Usar renderItemId (capturado al inicio) — NO optCurrentItemId (puede haber cambiado)
+    const hasItem=!!renderItemId;
+    const itemName=hasItem?(allItems.find(i=>i.id===renderItemId)?.title||'publicación seleccionada').slice(0,50):'';
 
-    // Obtener URL de edición (panel ML, no vista pública)
-    const mlEditUrl = mlEditLink(optCurrentItemId);
+    // URL de edición basada en el ID capturado localmente
+    const mlEditUrl = mlEditLink(renderItemId);
 
     el.innerHTML=`
+      <!-- ID de sesión ligado a ESTE render — usado por applyOpt* para evitar mezcla de datos -->
+      <span id="opt-session-id" data-id="${renderItemId||''}" style="display:none"></span>
+
       <!-- PREVIEW TÍTULO — editable + COPIAR -->
       <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:14px;margin-bottom:12px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:6px">
@@ -2262,9 +2271,20 @@ function cleanForML(str, isTitle){
   return s;
 }
 
+// ── Helper: obtener el ID de la sesión de optimización activa ──
+// Lee desde el elemento DOM inyectado por doOptimize en el render actual.
+// Esto garantiza que aplica siempre al producto que se está MOSTRANDO,
+// independientemente de lo que haya en el global optCurrentItemId.
+function _getSessionItemId(){
+  const el = document.getElementById('opt-session-id');
+  const id = el ? el.dataset.id : '';
+  return (id && id.length >= 5) ? id : (optCurrentItemId || null);
+}
+
 // ── Actualizar SOLO el título ────────────────────────────────
 async function applyOptTitle(){
-  if(!optCurrentItemId){ alert('No hay publicación seleccionada'); return; }
+  const itemId = _getSessionItemId();
+  if(!itemId){ alert('No hay publicación seleccionada'); return; }
   // Leer del input editable si existe, sino de la variable global
   const editT = document.getElementById('opt-title-editable');
   const raw = (editT ? editT.value : null) || window._optTituloSugerido || document.getElementById('opt-in')?.value || '';
@@ -2273,14 +2293,14 @@ async function applyOptTitle(){
   if(titulo.length < 5){ alert('El título quedó muy corto (' + titulo.length + ' chars) luego de limpiar. Revisalo.'); return; }
 
   const body = JSON.stringify({ title: titulo });
-  console.log('[ML] PUT título — item:', optCurrentItemId);
+  console.log('[ML] PUT título — item:', itemId);
   console.log('[ML] body exacto:', body);
   console.log('[ML] chars:', titulo.length);
 
   const res = document.getElementById('opt-apply-res');
   if(res) res.innerHTML = '<div class="loading"><div class="spin"></div>Aplicando: "' + titulo.slice(0,50) + '"...</div>';
   try{
-    const response = await fetch(WORKER + '/api/items/' + optCurrentItemId, {
+    const response = await fetch(WORKER + '/api/items/' + itemId, {
       method: 'PUT',
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: body
@@ -2290,13 +2310,9 @@ async function applyOptTitle(){
     console.log('[ML] respuesta completa:', rawResp);
 
     if(data.error || (data.status && data.status !== 200)){
-      // Evitar duplicar mensaje: data.message y data.error a veces son iguales
       const errCode  = data.error   || '';
       const errMsg   = data.message || '';
-      // Mostrar solo el más informativo
       let msg = (errMsg && errMsg !== errCode) ? errMsg : (errCode || ('HTTP ' + response.status));
-
-      // Extraer causa (puede ser array, objeto o string)
       let detail = '';
       if(data.cause){
         try{
@@ -2309,9 +2325,7 @@ async function applyOptTitle(){
           }
         }catch(ex){}
       }
-      // Si no hay cause útil, mostrar respuesta cruda para debugging
       if(!detail && rawResp.length < 300) detail = rawResp;
-
       const causeStr = (msg+' '+detail).toLowerCase();
       if(causeStr.includes('catalog')){
         msg = 'Publicación de catálogo — ML no permite cambiar el título por API. Modificala en ML directamente.';
@@ -2325,7 +2339,7 @@ async function applyOptTitle(){
       return;
     }
     if(res) res.innerHTML = `<div class="alert a-success">✅ Título actualizado: "${titulo}"</div>`;
-    const item = allItems.find(i => i.id === optCurrentItemId);
+    const item = allItems.find(i => i.id === itemId);
     if(item) item.title = titulo;
   } catch(e){
     console.error('[ML] error:', e);
@@ -2335,21 +2349,21 @@ async function applyOptTitle(){
 
 // ── Actualizar SOLO la descripción ──────────────────────────
 async function applyOptDesc(){
-  if(!optCurrentItemId){ alert('No hay publicación seleccionada'); return; }
-  // Leer del textarea editable si existe, sino de la variable global
+  const itemId = _getSessionItemId();
+  if(!itemId){ alert('No hay publicación seleccionada'); return; }
   const editEl = document.getElementById('opt-desc-editable');
   const raw = (editEl ? editEl.value : null) || window._optDescSugerida || '';
   const desc = cleanForML(raw, false);
   if(!desc){ alert('No hay descripción para aplicar'); return; }
 
   const body = JSON.stringify({ plain_text: desc });
-  console.log('[ML] PUT descripción — item:', optCurrentItemId);
+  console.log('[ML] PUT descripción — item:', itemId);
   console.log('[ML] desc primeros 200 chars:', desc.slice(0, 200));
 
   const res = document.getElementById('opt-apply-res');
   if(res) res.innerHTML = '<div class="loading"><div class="spin"></div>Aplicando descripción...</div>';
   try{
-    const response = await fetch(WORKER + '/api/items/' + optCurrentItemId + '/description', {
+    const response = await fetch(WORKER + '/api/items/' + itemId + '/description', {
       method: 'PUT',
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: body
@@ -2370,7 +2384,8 @@ async function applyOptDesc(){
 
 // ── Aplicar título + descripción juntos ─────────────────────
 async function applyOptBoth(){
-  if(!optCurrentItemId){ alert('No hay publicación seleccionada'); return; }
+  const itemId = _getSessionItemId();
+  if(!itemId){ alert('No hay publicación seleccionada'); return; }
   const editTB = document.getElementById('opt-title-editable');
   const titulo = cleanForML((editTB ? editTB.value : null) || window._optTituloSugerido || document.getElementById('opt-in')?.value || '', true);
   const editEl2 = document.getElementById('opt-desc-editable');
@@ -2383,9 +2398,9 @@ async function applyOptBoth(){
 
   // 1. Título
   const bodyT = JSON.stringify({ title: titulo });
-  console.log('[ML] both — título body:', bodyT);
+  console.log('[ML] both — título body:', bodyT, '— item:', itemId);
   try{
-    const rt = await fetch(WORKER + '/api/items/' + optCurrentItemId, {
+    const rt = await fetch(WORKER + '/api/items/' + itemId, {
       method: 'PUT',
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: bodyT
@@ -2412,7 +2427,7 @@ async function applyOptBoth(){
       if(res) res.innerHTML = `<div class="alert a-red" style="line-height:1.6">❌ <strong>${msg}</strong>${detail?`<br><small style="font-family:monospace;font-size:10px;opacity:.75;word-break:break-all">${detail}</small>`:''}<br><small>"${titulo}" (${titulo.length} chars)</small></div>`;
       return;
     }
-    const item = allItems.find(i => i.id === optCurrentItemId);
+    const item = allItems.find(i => i.id === itemId);
     if(item) item.title = titulo;
   } catch(e){
     if(res) res.innerHTML = `<div class="alert a-red">❌ ${e.message}</div>`;
@@ -2424,7 +2439,7 @@ async function applyOptBoth(){
     const bodyD = JSON.stringify({ plain_text: desc });
     console.log('[ML] both — desc primeros 150:', desc.slice(0,150));
     try{
-      const rd = await fetch(WORKER + '/api/items/' + optCurrentItemId + '/description', {
+      const rd = await fetch(WORKER + '/api/items/' + itemId + '/description', {
         method: 'PUT',
         headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: bodyD
@@ -3502,7 +3517,7 @@ function alertGoToSEO(itemId, itemTitle){
       selectOptItem(itemId, itemTitle);
 
       // Scroll al panel de optimización
-      const optPanel = document.getElementById('opt-selected') || document.getElementById('opt-in');
+      const optPanel = document.getElementById('opt-in');
       if(optPanel) optPanel.scrollIntoView({ behavior:'smooth', block:'start' });
 
       // Resaltar el campo de título
@@ -4048,11 +4063,31 @@ let optCurrentItemId=null;
 let _optTimer=null;
 function filterOptItems(){
   clearTimeout(window._optTimer);
+  // Limpiar resultados de IA anteriores al comenzar nueva búsqueda
   window._optTimer = setTimeout(function(){
     var q = (document.getElementById('opt-search') || {value:''}).value.toLowerCase();
     var res = document.getElementById('opt-search-results');
     if(!res) return;
-    if(!q || q.length < 2){ res.style.display = 'none'; return; }
+
+    // Si el campo de búsqueda se limpia o cambia, limpiar estado previo
+    if(!q || q.length < 2){
+      res.style.display = 'none';
+      // Si el usuario borró la búsqueda, resetear estado de optimización
+      if(!q){
+        optCurrentItemId = null;
+        window._optTituloSugerido = null;
+        window._optDescSugerida   = null;
+        var optOut = document.getElementById('opt-out');
+        if(optOut) optOut.innerHTML = '';
+        var optIn = document.getElementById('opt-in');
+        if(optIn){ optIn.value = ''; optIn.style.border = ''; optIn.style.background = ''; }
+        var descEl = document.getElementById('opt-desc');
+        if(descEl){ descEl.value = ''; descEl.disabled = false; }
+        var ch = document.getElementById('opt-desc-chars');
+        if(ch) ch.textContent = '';
+      }
+      return;
+    }
     var matches = allItems.filter(function(i){ return i.status==='active' && i.title && i.title.toLowerCase().indexOf(q) > -1; }).slice(0, 12);
     if(!matches.length){ res.style.display = 'none'; return; }
     res.innerHTML = '';
@@ -4081,33 +4116,47 @@ function stripLeadingEmoji(str){
 }
 
 function selectOptItem(id,title){
-  optCurrentItemId=id;
-  const s=document.getElementById('opt-search');
-  const r=document.getElementById('opt-search-results');
-  const d=document.getElementById('opt-selected');
-  if(s)s.value=title.slice(0,50);
-  if(r)r.style.display='none';
+  // ── RESET TOTAL: limpiar todo estado anterior ──────────────
+  optCurrentItemId = null;
+  window._optTituloSugerido = null;
+  window._optDescSugerida   = null;
 
-  // Poner título limpio (sin emoji inicial) en el campo de edición
-  const titleClean=stripLeadingEmoji(title);
-  const optIn=document.getElementById('opt-in');
-  if(optIn){optIn.value=titleClean;if(typeof liveScore==='function')liveScore(titleClean);}
+  // Limpiar resultados anteriores de IA
+  const optOut = document.getElementById('opt-out');
+  if(optOut) optOut.innerHTML = '';
 
-  // Mostrar publicación seleccionada
-  if(d)d.innerHTML='<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:7px 11px;font-size:12px;margin-bottom:6px;color:#1e40af">📦 <b>'+titleClean.slice(0,55)+'</b></div>';
+  // Limpiar campos de texto
+  const optIn = document.getElementById('opt-in');
+  if(optIn){ optIn.value = ''; optIn.style.border = ''; optIn.style.background = ''; }
+  const descEl = document.getElementById('opt-desc');
+  if(descEl){ descEl.value = ''; descEl.disabled = false; }
+  const charsEl = document.getElementById('opt-desc-chars');
+  if(charsEl) charsEl.textContent = '';
 
-  // Cargar descripción actual en el textarea correcto
-  const descEl=document.getElementById('opt-desc');
-  if(descEl){descEl.value='Cargando descripción...';descEl.disabled=true;}
-  mlGet('/items/'+id+'/description').then(function(d2){
+  // Cerrar dropdown de búsqueda
+  const r = document.getElementById('opt-search-results');
+  if(r) r.style.display = 'none';
+
+  // ── Ahora cargar el nuevo ítem ─────────────────────────────
+  optCurrentItemId = id;
+  const s = document.getElementById('opt-search');
+  if(s) s.value = title.slice(0, 50);
+
+  // Poner título limpio en el campo de edición
+  const titleClean = stripLeadingEmoji(title);
+  if(optIn){ optIn.value = titleClean; if(typeof liveScore === 'function') liveScore(titleClean); }
+
+  // Cargar descripción actual
+  if(descEl){ descEl.value = 'Cargando descripción...'; descEl.disabled = true; }
+  mlGet('/items/' + id + '/description').then(function(d2){
     if(descEl){
-      descEl.value=d2.plain_text||d2.text||'';
-      descEl.disabled=false;
-      const ch=document.getElementById('opt-desc-chars');
-      if(ch)ch.textContent=descEl.value.length+' chars';
+      descEl.value = d2.plain_text || d2.text || '';
+      descEl.disabled = false;
+      const ch = document.getElementById('opt-desc-chars');
+      if(ch) ch.textContent = descEl.value.length + ' chars';
     }
   }).catch(function(){
-    if(descEl){descEl.value='';descEl.disabled=false;}
+    if(descEl){ descEl.value = ''; descEl.disabled = false; }
   });
 }
 
