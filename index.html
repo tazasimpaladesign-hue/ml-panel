@@ -2016,34 +2016,63 @@ async function doOptimize(){
   const el=document.getElementById('opt-out');
   el.innerHTML='<div class="loading"><div class="spin"></div>Optimizando con IA...</div>';
   try{
-    const r=await callClaude(`Sos un experto en SEO para MercadoLibre Argentina 2026.
+    const r=await callClaude(`Sos un experto en SEO para MercadoLibre Argentina 2026. Tu objetivo es optimizar títulos y descripciones basándote en INTENCIÓN DE BÚSQUEDA REAL del comprador.
 
 TÍTULO ACTUAL: "${title}"
 ${cat?'CATEGORÍA: '+cat:''}
-${desc?'DESCRIPCIÓN ACTUAL:\n'+desc.slice(0,400):''}
-${kws?'KEYWORDS A INCLUIR: '+kws:''}
+${desc?'DESCRIPCIÓN ACTUAL:\n'+desc.slice(0,500):''}
+${kws?'KEYWORDS EXTRA A INCLUIR: '+kws:''}
 
-MENTALIDAD: El título NO es publicidad. El título ES una búsqueda. Escribilo como si fuera lo que el comprador tipearía en el buscador de ML.
+═══ MENTALIDAD BASE ═══
+Simulá cómo busca un comprador dentro de un marketplace. El título ES una búsqueda, NO publicidad. Preguntate: ¿Qué tipearía un comprador real en ML para encontrar este producto?
 
-REGLAS CRÍTICAS:
-1. Respetá el tipo de producto y la temática del título original — no los cambies
-2. La palabra CLAVE más fuerte del título (ej: FOTOGRAFA, AIRBAG, CHEF) debe estar en posición destacada
-3. La descripción debe corresponder al producto real del título
-4. PROHIBIDO en el título: "Regalo Original", "Diseño Exclusivo", "Fan", "Personalizada", "Personalizado", "Personalizable", "Alta calidad", "El mejor", "Imperdible", "No pierdas", "Aprovechá", frases tipo slogan o publicidad
-5. Sin puntuación ni emojis en el título — nada de , . ( ) : ; ! ? / -
-6. Máximo 60 chars ESTRICTO — contá los caracteres antes de responder
-7. Palabras que el comprador real buscaría, no frases armadas para vender
+═══ REGLAS TÍTULO (ESTRICTAS) ═══
+1. Estructura: [Producto] + [Marca/Temática] + [Modelo/Diseño] + [Características clave] + [Atributos relevantes]
+2. Keyword principal AL INICIO — la palabra con mayor intención de compra primero
+3. Ordenar de más importante a menos importante
+4. Máximo 60 caracteres ESTRICTO — contá antes de responder
+5. Sin puntuación ni emojis — prohibido: , . ( ) : ; ! ? / - + & @ # * % $ " ' =
+6. Sin mayúsculas excesivas — solo primera letra de palabras clave si corresponde
+7. Sin palabras repetidas innecesariamente
 
-REGLAS DESCRIPCIÓN: 300-450 chars · describí el producto real · apelar a emoción/identificación · sin "personalizada" ni "personalizable" · sin frases de venta genéricas · cerrar con frase útil · saltos de línea · AL FINAL agregá exactamente este texto como párrafo separado:
+PALABRAS ABSOLUTAMENTE PROHIBIDAS EN TÍTULO Y VARIANTES (nunca usarlas, ni siquiera como sugerencia):
+- Nombres de tienda/marca propia: "Impala", "Design", "Tienda", "Oficial", "Taza Impala"
+- Palabras de venta genéricas: "Regalo", "Oferta", "Promo", "Gratis", "Envío gratis"
+- Cualquier variación de: "Personalizado", "Personalizada", "Personalizable", "Custom"
+- Claims vacíos: "Alta calidad", "El mejor", "Único", "Exclusivo", "Original"
+- Frases tipo slogan o publicidad de cualquier tipo
+
+═══ REGLAS DESCRIPCIÓN ═══
+- Longitud: entre 800 y 2000 caracteres (OBLIGATORIO)
+- Priorizar la información más importante en los primeros 300-500 caracteres
+- Estructura obligatoria:
+  1) Resumen inicial del producto (qué es, para quién, por qué comprarlo)
+  2) Beneficios clave (no solo características)
+  3) Especificaciones técnicas en formato ordenado
+  4) Casos de uso y ocasiones
+- Evitar relleno innecesario, repeticiones ni frases de venta genéricas
+- Sin "Personalizado/a/able" ni nombres de tienda
+- Saltos de línea para escanear rápido
+- AL FINAL agregar exactamente este párrafo separado:
 Accedé a todas nuestras publicaciones acá:
 https://listado.mercadolibre.com.ar/_DisplayType_G_eshop_IMPALA+DESIGN
+
+═══ BUENAS PRÁCTICAS SEO ═══
+- No repetir palabras para forzar SEO
+- Priorizar claridad y legibilidad
+- Lenguaje natural alineado a cómo buscan los usuarios
+- No inventar datos ni agregar claims falsos
+- No incluir precios, envíos, promociones ni condiciones comerciales
 
 Respondé SOLO JSON válido (sin markdown, sin backticks):
 {
   "titulo_optimizado": "...",
   "titulo_alternativo": "...",
+  "variantes": ["variante A para testing", "variante B para testing", "variante C para testing"],
   "descripcion_optimizada": "...",
-  "keywords": ["k1","k2","k3","k4","k5"],
+  "keywords": ["kw1","kw2","kw3","kw4","kw5","kw6"],
+  "keywords_secundarias": ["ks1","ks2","ks3"],
+  "sinonimos": ["sin1","sin2","sin3"],
   "mejoras_recomendadas": ["m1","m2","m3"],
   "enfoque_venta": "...",
   "score_seo": 0
@@ -2063,20 +2092,49 @@ Respondé SOLO JSON válido (sin markdown, sin backticks):
     const hasItem=!!optCurrentItemId;
     const itemName=hasItem?(allItems.find(i=>i.id===optCurrentItemId)?.title||'publicación seleccionada').slice(0,50):'';
 
+    // Obtener permalink para botón "Editar en ML"
+    const currentItem = optCurrentItemId ? allItems.find(i => i.id === optCurrentItemId) : null;
+    const mlEditUrl = optCurrentItemId
+      ? (currentItem?.permalink || ('https://www.mercadolibre.com.ar/ventas/publicaciones/' + optCurrentItemId + '/editar'))
+      : null;
+
     el.innerHTML=`
-      <!-- PREVIEW TÍTULO — editable -->
+      <!-- PREVIEW TÍTULO — editable + COPIAR -->
       <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:14px;margin-bottom:12px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:6px">
           <div style="font-size:10px;color:#166534;text-transform:uppercase;font-weight:700;letter-spacing:.05em">✅ TÍTULO OPTIMIZADO — editá si querés</div>
-          <div style="display:flex;align-items:center;gap:8px">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
             <span id="opt-title-chars" style="font-size:10px;padding:2px 7px;border-radius:4px;background:#e5e7eb;color:#374151">${tOpt.length} chars</span>
             <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;background:${scBg};color:${scColor}">Score SEO: ${sc}/100</span>
+            <button id="opt-copy-btn" class="btn btn-ghost btn-xs"
+              onclick="var tb=document.getElementById('opt-title-editable');var t=tb?tb.value:window._optTituloSugerido||'';navigator.clipboard.writeText(t).then(()=>{var b=document.getElementById('opt-copy-btn');b.textContent='✔ Copiado';b.style.background='#dcfce7';b.style.color='#166534';setTimeout(()=>{b.textContent='📋 Copiar título';b.style.background='';b.style.color='';},2000);}).catch(()=>{});"
+              style="font-size:11px;border-color:#bbf7d0">📋 Copiar título</button>
           </div>
         </div>
         <input type="text" id="opt-title-editable" value="${tOpt.replace(/"/g,'&quot;')}" maxlength="60"
           style="width:100%;font-size:15px;font-weight:700;border:1px solid #bbf7d0;border-radius:6px;padding:8px 11px;background:#fff;color:#0f172a;font-family:inherit"
           oninput="window._optTituloSugerido=this.value;var l=this.value.length;document.getElementById('opt-title-chars').textContent=l+' chars';document.getElementById('opt-title-chars').style.background=l>60?'#fee2e2':l<20?'#fef3c7':'#dcfce7';document.getElementById('opt-title-chars').style.color=l>60?'#991b1b':l<20?'#78350f':'#166534';liveScore(this.value)">
       </div>
+
+      <!-- VARIANTES A/B/C -->
+      ${(result.variantes?.length)?`
+      <div style="background:#f8f9fc;border:1px solid #e3e7ef;border-radius:8px;padding:12px;margin-bottom:12px">
+        <div style="font-size:10px;color:#374151;margin-bottom:8px;font-weight:700;text-transform:uppercase;display:flex;align-items:center;gap:6px">
+          🧪 VARIANTES PARA TESTING A/B
+          <span style="font-size:9px;font-weight:400;color:#6b7280;text-transform:none">Probá distintos enfoques para ver cuál convierte mejor</span>
+        </div>
+        ${result.variantes.map((v,i)=>{
+          const vClean=stripLeadingEmoji(v||'');
+          const labels=['A','B','C'];
+          return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:7px;padding:7px 10px;background:#fff;border:1px solid #e5e7eb;border-radius:6px">
+            <span style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:3px;background:#e0e7ff;color:#3730a3;flex-shrink:0">VAR ${labels[i]||i+1}</span>
+            <span style="font-size:12.5px;font-weight:500;color:#111827;flex:1">${vClean}</span>
+            <span style="font-size:10px;color:#9ca3af;flex-shrink:0">${vClean.length}c</span>
+            <button class="btn btn-ghost btn-xs" style="flex-shrink:0"
+              onclick="(function(){var t='${vClean.replace(/'/g,"\\'")}';document.getElementById('opt-in').value=t;var el=document.getElementById('opt-title-editable');if(el){el.value=t;window._optTituloSugerido=t;document.getElementById('opt-title-chars').textContent=t.length+' chars';}liveScore(t);})()">Usar</button>
+          </div>`;
+        }).join('')}
+      </div>`:''}
 
       ${result.titulo_alternativo?`
       <div style="background:#f8f9fc;border:1px solid #e3e7ef;border-radius:8px;padding:10px;margin-bottom:12px">
@@ -2088,18 +2146,35 @@ Respondé SOLO JSON válido (sin markdown, sin backticks):
       ${dOpt?`
       <!-- PREVIEW DESCRIPCIÓN — editable -->
       <div style="background:#f8f9fc;border:1px solid #e3e7ef;border-radius:10px;padding:14px;margin-bottom:12px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <div style="font-size:10px;color:#374151;text-transform:uppercase;font-weight:700;letter-spacing:.05em">📝 DESCRIPCIÓN RECOMENDADA — editá antes de aplicar</div>
-          <span id="opt-desc-rec-chars" style="font-size:10px;color:#6b7280">${dOpt.length} chars</span>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:6px">
+          <div style="font-size:10px;color:#374151;text-transform:uppercase;font-weight:700;letter-spacing:.05em">📝 DESCRIPCIÓN OPTIMIZADA — editá antes de aplicar</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span id="opt-desc-rec-chars" style="font-size:10px;color:${dOpt.length<800?'#92400e':dOpt.length>2000?'#991b1b':'#166534'};font-weight:600">${dOpt.length} chars</span>
+            <button class="btn btn-ghost btn-xs" onclick="navigator.clipboard.writeText(document.getElementById('opt-desc-editable').value).then(()=>{this.textContent='✔ Copiado';this.style.background='#dcfce7';this.style.color='#166534';setTimeout(()=>{this.textContent='📋 Copiar';this.style.background='';this.style.color='';},2000);}).catch(()=>{})">📋 Copiar</button>
+          </div>
         </div>
-        <textarea id="opt-desc-editable" rows="6" style="width:100%;font-size:12.5px;line-height:1.7;resize:vertical;border:1px solid #cbd5e1;border-radius:6px;padding:10px;background:#fff;color:#1e293b;font-family:inherit" oninput="window._optDescSugerida=this.value;document.getElementById('opt-desc-rec-chars').textContent=this.value.length+' chars'">${dOpt.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
-        <button class="btn btn-ghost btn-xs" style="margin-top:6px" onclick="navigator.clipboard.writeText(document.getElementById('opt-desc-editable').value).then(()=>this.textContent='✅ Copiado!').catch(()=>{})">📋 Copiar</button>
+        <textarea id="opt-desc-editable" rows="8" style="width:100%;font-size:12.5px;line-height:1.7;resize:vertical;border:1px solid #cbd5e1;border-radius:6px;padding:10px;background:#fff;color:#1e293b;font-family:inherit" oninput="window._optDescSugerida=this.value;var n=this.value.length;var el=document.getElementById('opt-desc-rec-chars');el.textContent=n+' chars';el.style.color=n<800?'#92400e':n>2000?'#991b1b':'#166534'">${dOpt.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
+        <div style="font-size:10px;color:#6b7280;margin-top:5px">Objetivo: 800–2000 caracteres · Priorizar info clave en los primeros 300-500 chars</div>
       </div>`:''}
 
-      ${result.keywords?.length?`
+      <!-- KEYWORDS COMPLETO -->
+      ${(result.keywords?.length||result.keywords_secundarias?.length||result.sinonimos?.length)?`
       <div style="margin-bottom:12px">
-        <div style="font-size:10px;color:#374151;margin-bottom:6px;font-weight:700;text-transform:uppercase">🔑 KEYWORDS</div>
-        <div class="chips">${result.keywords.map(k=>`<span class="badge bg-blue">${k}</span>`).join('')}</div>
+        ${result.keywords?.length?`
+        <div style="margin-bottom:8px">
+          <div style="font-size:10px;color:#374151;margin-bottom:5px;font-weight:700;text-transform:uppercase">🔑 KEYWORDS PRINCIPALES</div>
+          <div class="chips">${result.keywords.map(k=>`<span class="badge bg-blue">${k}</span>`).join('')}</div>
+        </div>`:''}
+        ${result.keywords_secundarias?.length?`
+        <div style="margin-bottom:8px">
+          <div style="font-size:10px;color:#374151;margin-bottom:5px;font-weight:700;text-transform:uppercase">🔎 KEYWORDS SECUNDARIAS</div>
+          <div class="chips">${result.keywords_secundarias.map(k=>`<span class="badge bg-purple">${k}</span>`).join('')}</div>
+        </div>`:''}
+        ${result.sinonimos?.length?`
+        <div style="margin-bottom:8px">
+          <div style="font-size:10px;color:#374151;margin-bottom:5px;font-weight:700;text-transform:uppercase">🔁 SINÓNIMOS RELEVANTES</div>
+          <div class="chips">${result.sinonimos.map(k=>`<span class="badge bg-teal">${k}</span>`).join('')}</div>
+        </div>`:''}
       </div>`:''}
 
       ${result.mejoras_recomendadas?.length?`
@@ -2114,13 +2189,13 @@ Respondé SOLO JSON válido (sin markdown, sin backticks):
         <div style="font-size:12px;color:#1e40af">${result.enfoque_venta}</div>
       </div>`:''}
 
-      <!-- ── BOTÓN MODIFICAR ── -->
+      <!-- ── BOTONES APLICAR + EDITAR EN ML ── -->
       <div style="border-top:2px solid #e3e7ef;padding-top:14px;margin-top:4px">
         ${hasItem?`
         <div style="font-size:11px;color:#374151;margin-bottom:10px;padding:8px 12px;background:#f3f4f6;border-radius:6px;border-left:3px solid #3b82f6">
           📦 <strong>Publicación seleccionada:</strong> ${itemName}
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
           <button class="btn btn-primary" onclick="applyOptTitle()">
             ✏️ Aplicar título en ML
           </button>
@@ -2130,6 +2205,11 @@ Respondé SOLO JSON válido (sin markdown, sin backticks):
           <button class="btn btn-primary" style="background:#166534" onclick="applyOptBoth()">
             🚀 Aplicar título + descripción
           </button>
+          <a href="${mlEditUrl}" target="_blank" rel="noopener"
+            style="display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:var(--rs);font-size:12.5px;font-weight:600;background:#ffe600;color:#1a1000;border:none;text-decoration:none;cursor:pointer;transition:background .15s;white-space:nowrap"
+            onmouseover="this.style.background='#ffd000'" onmouseout="this.style.background='#ffe600'">
+            🔗 Editar en MercadoLibre
+          </a>
         </div>
         <div id="opt-apply-res" style="margin-top:10px"></div>
         `:`
