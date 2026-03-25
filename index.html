@@ -41,6 +41,9 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 .nav:hover{background:var(--bg3);color:var(--text)}
 .nav.active{background:var(--accent-g);color:var(--accent2)}
 a.nav{text-decoration:none;}
+a.nav:link,a.nav:visited{color:var(--text2);}
+a.nav:hover{color:var(--text);}
+a.nav.active{color:var(--accent2);}
 .nav .ni{width:15px;text-align:center;font-size:13px;flex-shrink:0}
 .nb{margin-left:auto;font-size:9px;padding:2px 6px;border-radius:10px;font-weight:700;color:#fff}
 .nb-blue{background:var(--accent)}
@@ -876,6 +879,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       </div>
       <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
         <input type="text" id="seo-search" placeholder="Buscar por título..." style="max-width:200px;font-size:12px;padding:5px 9px" oninput="seoGoPage(1)">
+        <button class="btn btn-ghost btn-sm" onclick="loadSEOMetrics()" id="seo-metrics-btn" title="Cargar visitas reales de los últimos 7 días desde ML">📊 Cargar métricas</button>
         <button class="btn btn-ghost btn-sm" onclick="analyzeSEOAll()">↻ Actualizar</button>
       </div>
     </div>
@@ -887,6 +891,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <th onclick="seoSort('seo')"     style="cursor:pointer;user-select:none;white-space:nowrap">Score SEO <span id="seo-sort-seo" style="font-size:10px"></span></th>
           <th onclick="seoSort('quality')" style="cursor:pointer;user-select:none;white-space:nowrap">Calidad pub. <span id="seo-sort-quality" style="font-size:10px"></span></th>
           <th>Problemas detectados</th>
+          <th style="white-space:nowrap">Métricas 7d <span style="font-size:9px;color:var(--text3)" title="Cargadas bajo demanda">ⓘ</span></th>
           <th>Acciones</th>
         </tr></thead>
         <tbody id="seo-tbody"></tbody>
@@ -1470,6 +1475,7 @@ let currentAccount = null; // { id, name, color }
 let token=null, userId=null, userData=null;
 let allItems=[], allOrders=[], allQuestions=[];
 let selectedItems=new Set();
+let itemMetrics={};  // itemId → {visits, sales, conv} — cargado bajo demanda
 let pubFilter='active', qFilter='UNANSWERED';
 let chartInstances={};
 let trackedKws=[];
@@ -1698,7 +1704,7 @@ async function loadItemsFast(){
     const first=await mlGet('/users/'+userId+'/items/search?search_type=scan&limit=100');
     const ids=first.results||[];
     if(!ids.length)return;
-    const r=await mlGet('/items?ids='+ids.join(',')+'&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,category_id,listing_type_id,permalink,seller_custom_field');
+    const r=await mlGet('/items?ids='+ids.join(',')+'&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping');
     allItems=[];r.forEach(x=>{if(x.code===200)allItems.push(x.body);});
     _updateItemsUI();
   }catch(e){console.warn('[loadItemsFast]',e);}
@@ -1720,7 +1726,7 @@ async function loadItemsFull(){
     }
     allIds=[...new Set(allIds)];const full=[];
     for(let i=0;i<allIds.length;i+=20){
-      try{const r=await mlGet('/items?ids='+allIds.slice(i,i+20).join(',')+'&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,category_id,listing_type_id,permalink,seller_custom_field');r.forEach(x=>{if(x.code===200)full.push(x.body);});}catch(e){}
+      try{const r=await mlGet('/items?ids='+allIds.slice(i,i+20).join(',')+'&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping');r.forEach(x=>{if(x.code===200)full.push(x.body);});}catch(e){}
       if(i>0&&i%200===0)await new Promise(r=>setTimeout(r,100));
     }
     allItems=full;_updateItemsUI();
@@ -1849,6 +1855,48 @@ function stamp(){
 
 // LOAD — compatibilidad con refreshAll y otras llamadas
 async function loadItems(){await loadItemsFull();}
+
+// ── Cargar métricas de visitas/ventas para publicaciones (7 días) ──
+// Endpoint: GET /items/{id}/visits?date_from=...&date_to=...
+// Se llama bajo demanda para la vista SEO (en lotes para evitar rate limit)
+async function loadPubMetricsBatch(ids){
+  const today = new Date();
+  const from  = new Date(today - 7*86400000);
+  const dateTo   = today.toISOString().slice(0,10);
+  const dateFrom = from.toISOString().slice(0,10);
+
+  // Calcular ventas por ítem desde allOrders (últimos 7 días)
+  const cutoff = from;
+  const salesMap = {};
+  allOrders.forEach(o => {
+    if(o.status === 'cancelled' || o.status === 'invalid') return;
+    if(new Date(o.date_created||0) < cutoff) return;
+    (o.order_items||[]).forEach(oi => {
+      const id = oi.item?.id;
+      if(id) salesMap[id] = (salesMap[id]||0) + (oi.quantity||1);
+    });
+  });
+
+  // Cargar visitas en paralelo (lotes de 5 para no saturar la API)
+  const todo = ids.filter(id => !itemMetrics[id]);
+  for(let i=0; i<todo.length; i+=5){
+    const batch = todo.slice(i, i+5);
+    await Promise.allSettled(batch.map(async id => {
+      try{
+        const r = await mlGet('/items/'+id+'/visits?date_from='+dateFrom+'&date_to='+dateTo);
+        const visits = r.total_visits || r.visits || 0;
+        const sales  = salesMap[id] || 0;
+        const conv   = visits > 0 ? ((sales / visits)*100).toFixed(1) : '—';
+        itemMetrics[id] = { visits, sales, conv };
+        console.log('[Métricas]', id, '→ visitas:', visits, 'ventas:', sales, 'conv:', conv+'%');
+      }catch(e){
+        itemMetrics[id] = { visits:'—', sales: salesMap[id]||0, conv:'—' };
+        console.warn('[Métricas]', id, e.message);
+      }
+    }));
+    if(i>0) await new Promise(r=>setTimeout(r,150)); // pequeña pausa entre lotes
+  }
+}
 async function loadOrders(){await loadOrdersRecent();loadOrdersHistory();}
 
 async function loadQuestions(){
@@ -2573,13 +2621,20 @@ function renderPubs(){
     const sku=item.seller_custom_field||'—';
     return `<tr>
       <td><input type="checkbox" class="row-check" value="${item.id}" onchange="toggleItem(this,'${item.id}')"></td>
-      <td><div style="display:flex;align-items:center;gap:9px">
-        <div class="item-thumb">${item.thumbnail?`<img src="${item.thumbnail}" onerror="this.parentElement.textContent='☕'">`:'☕'}</div>
-        <div><div style="font-size:12px;font-weight:500;max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${item.title}</div>
-        <div style="font-size:10px;color:var(--text3)">${item.id}</div></div>
+      <td><div style="display:flex;align-items:flex-start;gap:9px">
+        <div class="item-thumb" style="flex-shrink:0">${item.thumbnail?`<img src="${item.thumbnail}" onerror="this.parentElement.textContent='☕'">`:'☕'}</div>
+        <div style="min-width:0">
+          <div style="font-size:12px;font-weight:500;max-width:200px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.35" title="${item.title}">${item.title}</div>
+          <div style="font-size:10px;color:var(--text3);margin-top:2px">${item.id}</div>
+        </div>
       </div></td>
       <td style="font-weight:600;color:var(--text)">$${(item.price||0).toLocaleString('es-AR')}</td>
-      <td><span class="${(item.available_quantity||0)===0?'badge bg-red':(item.available_quantity||0)<=3?'badge bg-amber':'badge bg-green'}">${item.available_quantity??'—'}</span></td>
+      <td>
+        <div id="stock-cell-${item.id}" style="display:flex;align-items:center;gap:4px">
+          <span class="${(item.available_quantity||0)===0?'badge bg-red':(item.available_quantity||0)<=3?'badge bg-amber':'badge bg-green'}" style="cursor:pointer" title="Clic para editar stock" onclick="startStockEdit('${item.id}',${item.available_quantity??0})">${item.available_quantity??'—'}</span>
+          <button class="btn btn-ghost btn-xs" style="padding:2px 5px;font-size:10px;opacity:.5" title="Editar stock" onclick="startStockEdit('${item.id}',${item.available_quantity??0})">✎</button>
+        </div>
+      </td>
       <td>${item.sold_quantity||0}</td>
       <td style="font-size:11px;color:var(--text2)">
         <div style="display:flex;align-items:center;gap:4px">
@@ -2691,6 +2746,76 @@ async function saveSKU(itemId){
   }
 }
 
+// ─── Inline Stock editing ──────────────────────────────────
+function startStockEdit(itemId, currentQty){
+  const cell = document.getElementById('stock-cell-'+itemId);
+  if(!cell) return;
+  cell.innerHTML = `
+    <div style="display:flex;align-items:center;gap:4px">
+      <input id="stk-inp-${itemId}" type="number" value="${currentQty}" min="0" max="9999"
+        style="width:65px;font-size:12px;padding:3px 6px;border-radius:4px;border:1px solid var(--accent);background:var(--bg3);color:var(--text);outline:none"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();saveStock('${itemId}');}if(event.key==='Escape')renderPubs();">
+      <button class="btn btn-primary btn-xs" style="padding:2px 7px" onclick="saveStock('${itemId}')">✓</button>
+      <button class="btn btn-ghost btn-xs" style="padding:2px 5px" onclick="renderPubs()">✕</button>
+      <span id="stk-msg-${itemId}" style="font-size:10px"></span>
+    </div>`;
+  const inp = document.getElementById('stk-inp-'+itemId);
+  if(inp){ inp.focus(); inp.select(); }
+}
+
+async function saveStock(itemId){
+  const inp    = document.getElementById('stk-inp-'+itemId);
+  const msgEl  = document.getElementById('stk-msg-'+itemId);
+  if(!inp) return;
+
+  const val = parseInt(inp.value, 10);
+  if(isNaN(val) || val < 0){
+    inp.style.borderColor = 'var(--red)';
+    if(msgEl){ msgEl.textContent='⚠️ Valor inválido'; msgEl.style.color='var(--red)'; }
+    return;
+  }
+
+  inp.disabled = true;
+  if(msgEl){ msgEl.textContent='Guardando...'; msgEl.style.color='var(--text3)'; }
+
+  try{
+    const res = await fetch(WORKER+'/api/items/'+itemId, {
+      method: 'PUT',
+      headers: {
+        'Authorization': 'Bearer '+token,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({ available_quantity: val })
+    });
+    const data = await res.json();
+    console.log('[Stock] PUT', itemId, '→', JSON.stringify(data).slice(0,200));
+
+    if(res.status === 401 || data.error === 'unauthorized'){
+      inp.disabled = false;
+      if(msgEl){ msgEl.textContent='❌ Token vencido'; msgEl.style.color='var(--red)'; }
+      return;
+    }
+    if(data.error){
+      inp.disabled = false;
+      inp.style.borderColor = 'var(--red)';
+      if(msgEl){ msgEl.textContent='❌ '+(data.message||data.error).slice(0,40); msgEl.style.color='var(--red)'; }
+      return;
+    }
+
+    // Éxito — actualizar local
+    const item = allItems.find(i=>i.id===itemId);
+    if(item) item.available_quantity = val;
+    if(msgEl){ msgEl.textContent='✅ Stock actualizado'; msgEl.style.color='var(--green)'; }
+    setTimeout(()=>renderPubs(), 900);
+
+  }catch(e){
+    inp.disabled = false;
+    inp.style.borderColor = 'var(--red)';
+    if(msgEl){ msgEl.textContent='❌ '+(e.message||'Sin conexión').slice(0,40); msgEl.style.color='var(--red)'; }
+  }
+}
+
 function toggleItem(cb,id){
   if(cb.checked) selectedItems.add(id); else selectedItems.delete(id);
   updateBulkBar();
@@ -2751,6 +2876,70 @@ function mlEditLink(id){
 // CALIDAD DE PUBLICACIÓN
 // ═══════════════════════════════════════════════════════════
 
+// ── Detección correcta de EAN/GTIN desde attributes de ML ──
+function itemHasEAN(item){
+  const attrs = item.attributes || [];
+  // GTIN es el campo oficial de ML para códigos universales
+  const gtin = attrs.find(a => a.id === 'GTIN');
+  if(gtin && gtin.value_name && gtin.value_name.trim() && gtin.value_name !== '0') return true;
+  // Fallback: EAN, UPC, ISBN
+  const alt = attrs.find(a => ['EAN','UPC','ISBN','MPN'].includes(a.id));
+  if(alt && alt.value_name && alt.value_name.trim()) return true;
+  return false;
+}
+
+// ── Detección correcta de video desde item.video_id ────────
+function itemHasVideo(item){
+  // video_id es el campo oficial de ML para clips
+  if(item.video_id && item.video_id.trim() && item.video_id !== 'null') return true;
+  // Fallback: attributes VIDEO_URL
+  const va = (item.attributes||[]).find(a => a.id === 'VIDEO_URL');
+  if(va && va.value_name && va.value_name.trim()) return true;
+  return false;
+}
+
+// ── Sistema de objetivos de calidad (basado en datos reales) ─
+// Retorna { goals: [{id, label, achieved}], score: 0-100 }
+function qualityGoals(item){
+  const goals = [];
+
+  // 1. Título optimizado (SEO score >= 60)
+  const sc = seoScore(item.title || '');
+  goals.push({ id:'titulo', label:'Título optimizado', achieved: sc >= 60 });
+
+  // 2. Fotos suficientes (≥ 2 imágenes)
+  const pics = item.pictures || [];
+  const hasPics = pics.length >= 2 || (pics.length === 0 && !!item.thumbnail);
+  goals.push({ id:'fotos', label:'Fotos suficientes (≥2)', achieved: hasPics && pics.length >= 2 });
+
+  // 3. Video / clip
+  goals.push({ id:'video', label:'Video / clip', achieved: itemHasVideo(item) });
+
+  // 4. Código universal (GTIN/EAN)
+  goals.push({ id:'ean', label:'Código universal (EAN)', achieved: itemHasEAN(item) });
+
+  // 5. Stock disponible
+  const qty = item.available_quantity ?? 0;
+  goals.push({ id:'stock', label:'Stock disponible', achieved: qty > 0 });
+
+  // 6. Tipo de publicación (Gold/Premium = mayor visibilidad)
+  const lt = (item.listing_type_id || '').toLowerCase();
+  const goodListing = lt === 'gold_special' || lt === 'gold_premium' || lt === 'gold_pro';
+  goals.push({ id:'listing', label:'Publicación Gold/Premium', achieved: goodListing });
+
+  // 7. Envío competitivo (free shipping o ML envíos)
+  const freeShip = !!(item.shipping?.free_shipping) || !!(item.tags||[]).includes('free_shipping');
+  goals.push({ id:'envio', label:'Envío gratis o competitivo', achieved: freeShip });
+
+  // 8. Atributos completos (al menos 3 atributos con valor)
+  const filledAttrs = (item.attributes||[]).filter(a => a.value_name && a.value_name.trim() && a.value_name !== 'N/A').length;
+  goals.push({ id:'attrs', label:'Atributos completos (≥3)', achieved: filledAttrs >= 3 });
+
+  const achieved = goals.filter(g => g.achieved).length;
+  const score = Math.round((achieved / goals.length) * 100);
+  return { goals, achieved, total: goals.length, score };
+}
+
 function qualityChecks(item){
   const problems=[];
   const sc=seoScore(item.title||'');
@@ -2759,9 +2948,9 @@ function qualityChecks(item){
   // Título con SEO bajo
   if(sc<40) problems.push({id:'titulo',label:'Mejorar título',sev:2});
 
-  // Fotos: pictures array si está cargado, sino thumbnail ausente
-  const pics=item.pictures||item.images||[];
-  const noPics=pics.length>0?pics.length<2:!item.thumbnail;
+  // Fotos
+  const pics = item.pictures || [];
+  const noPics = pics.length >= 1 ? pics.length < 2 : !item.thumbnail;
   if(noPics) problems.push({id:'fotos',label:'Sin fotos suficientes',sev:2});
 
   // Stock
@@ -2770,20 +2959,17 @@ function qualityChecks(item){
   else if(qty>0&&qty<=3)
     problems.push({id:'stock',label:'Poco stock ('+qty+')',sev:1});
 
-  // Promoción: listing_type_id free/bronce no incluye ML Plus/Gold/Premium
+  // Promoción
   const lt=(item.listing_type_id||'').toLowerCase();
   const noPromo=lt===''||lt==='free'||lt==='bronze'||lt==='silver';
   if(noPromo) problems.push({id:'promo',label:'Sin promoción activa',sev:1});
 
-  // Video/clip: si el campo existe pero está vacío
-  const hasVideo=!!(item.video_id||item.clip_id||(item.attributes||[]).find(a=>a.id==='VIDEO_URL'||a.id==='CLIP_ID'));
-  if(!hasVideo) problems.push({id:'clip',label:'Sin video/clip',sev:1});
+  // Video/clip — usa detección correcta por video_id
+  if(!itemHasVideo(item)) problems.push({id:'clip',label:'Sin video/clip',sev:1});
 
-  // EAN/GTIN: seller_custom_field es el SKU interno; EAN viene en attributes
-  const eanAttr=(item.attributes||[]).find(a=>a.id==='GTIN'||a.id==='EAN'||a.id==='ISBN');
-  const hasEAN=!!(eanAttr&&eanAttr.value_name&&eanAttr.value_name.trim());
-  const hasSKU=!!(item.seller_custom_field);
-  if(!hasEAN&&!hasSKU) problems.push({id:'ean',label:'Falta código EAN/SKU',sev:1});
+  // EAN/GTIN — usa detección correcta por attributes.GTIN
+  if(!itemHasEAN(item) && !item.seller_custom_field)
+    problems.push({id:'ean',label:'Falta código EAN/SKU',sev:1});
 
   // Pausada
   if(item.status==='paused') problems.push({id:'pausada',label:'Publicación pausada',sev:2});
@@ -2792,9 +2978,8 @@ function qualityChecks(item){
 }
 
 function qualityScore(item){
-  const issues=qualityChecks(item);
-  const penalty=issues.reduce((s,c)=>s+(c.sev===2?20:10),0);
-  return Math.max(0,Math.min(100,100-penalty));
+  // Usar el nuevo sistema de objetivos para consistencia
+  return qualityGoals(item).score;
 }
 
 // ── Ordenamiento SEO ─────────────────────────────────────────
@@ -3036,32 +3221,74 @@ function renderSEOTable(){
   const tbody=document.getElementById('seo-tbody');
   if(!tbody) return;
   if(!paged.length){
-    tbody.innerHTML='<tr><td colspan="6" style="text-align:center;padding:22px;color:var(--text3)">Sin resultados para este filtro</td></tr>';
+    tbody.innerHTML='<tr><td colspan="7" style="text-align:center;padding:22px;color:var(--text3)">Sin resultados para este filtro</td></tr>';
     const pg=document.getElementById('seo-pagination');if(pg)pg.innerHTML='';
     return;
   }
   tbody.innerHTML=paged.map(item=>{
-    const sc=seoScore(item.title),qs=qualityScore(item),ch=qualityChecks(item);
-    const scC=sc>=70?'var(--green)':sc>=40?'var(--amber)':'var(--red)';
-    const qsC=qs>=70?'#16a34a':qs>=40?'#92400e':'#dc2626';
-    const qsBg=qs>=70?'#f0fdf4':qs>=40?'#fffbeb':'#fef2f2';
-    const qE=qs>=70?'🟢':qs>=40?'🟡':'🔴';
+    const sc  = seoScore(item.title);
+    const qg  = qualityGoals(item);
+    const qs  = qg.score;
+    const ch  = qualityChecks(item);
+    const scC = sc>=70?'var(--green)':sc>=40?'var(--amber)':'var(--red)';
+    const qsC = qs>=70?'#16a34a':qs>=40?'#92400e':'#dc2626';
+    const qsBg= qs>=70?'#f0fdf4':qs>=40?'#fffbeb':'#fef2f2';
+    const qE  = qs>=70?'🟢':qs>=40?'🟡':'🔴';
+
+    // Title issues
     const tI=[];
-    if(item.title.length<30)            tI.push('Corto');
-    if(/[.!?,;:]/.test(item.title))     tI.push('Puntuación');
+    if(item.title.length<30)              tI.push('Corto');
+    if(/[.!?,;:]/.test(item.title))       tI.push('Puntuación');
     if(item.title===item.title.toUpperCase()) tI.push('Mayúsculas');
     const ws=item.title.split(' '),u=new Set(ws.map(w=>w.toLowerCase()));
-    if(u.size<ws.length)                tI.push('Repetidas');
-    const eanP=ch.find(c=>c.id==='ean');
-    const editUrl=mlEditLink(item.id);
-    const sT=item.title.replace(/'/g,"\\'");
-    const eanArg=eanP?"'faltante'":'null';
+    if(u.size<ws.length)                  tI.push('Repetidas');
+
+    const eanP   = ch.find(c=>c.id==='ean');
+    const hasClip= itemHasVideo(item);
+    const editUrl= mlEditLink(item.id);
+    const sT     = item.title.replace(/'/g,"\\'");
+    const eanArg = eanP?"'faltante'":'null';
+    const m      = itemMetrics[item.id];
+
+    // Clip badge (solo si NO tiene video)
+    const clipBadge = !hasClip
+      ? '<span style="display:inline-flex;align-items:center;gap:3px;font-size:9px;padding:1px 5px;border-radius:3px;background:#fef3c7;color:#92400e;border:1px solid #fde68a">▶ Sin clip</span>'
+      : '';
+
+    // Métricas 7d
+    const metricsHtml = m
+      ? `<div style="font-size:11px;line-height:1.7;color:var(--text2)">
+           <div>👁️ <b>${m.visits}</b> visitas</div>
+           <div>🛒 <b>${m.sales}</b> ventas</div>
+           <div style="color:${m.conv!=='—'&&parseFloat(m.conv)>=5?'var(--green)':m.conv!=='—'&&parseFloat(m.conv)>=2?'var(--amber)':'var(--red)'}">📊 <b>${m.conv}${m.conv!=='—'?'%':''}</b> conv.</div>
+         </div>`
+      : '<span style="font-size:10px;color:var(--text3)">—</span>';
+
     return `<tr>
-      <td style="max-width:190px"><div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px;font-weight:500" title="${item.title}">${item.title}</div><div style="font-size:10px;color:var(--text3)">${item.id}</div></td>
+      <td style="max-width:210px">
+        <div style="font-size:12px;font-weight:500;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.4" title="${item.title.replace(/"/g,'&quot;')}">${item.title}</div>
+        <div style="font-size:10px;color:var(--text3);margin-top:2px;display:flex;gap:5px;flex-wrap:wrap">
+          <span>${item.id}</span>
+          ${clipBadge}
+        </div>
+      </td>
       <td><span class="${item.title.length>60?'badge bg-red':item.title.length<30?'badge bg-amber':'badge bg-green'}">${item.title.length}</span></td>
       <td><div style="display:flex;align-items:center;gap:5px"><div class="pbar" style="width:48px"><div class="pfill" style="width:${sc}%;background:${scC}"></div></div><span style="font-size:11px;font-weight:700;color:${scC}">${sc}</span></div></td>
-      <td><div style="display:flex;align-items:center;gap:6px"><span style="font-size:14px">${qE}</span><div><span style="font-size:11px;font-weight:700;padding:2px 6px;border-radius:4px;background:${qsBg};color:${qsC}">${qs}/100</span><div style="font-size:10px;color:var(--text3);margin-top:2px">${ch.length?ch.length+' problema'+(ch.length!==1?'s':''):' ✓ OK'}</div></div></div></td>
-      <td style="max-width:180px"><div style="display:flex;flex-wrap:wrap;gap:3px">${tI.map(i=>`<span class="badge bg-amber" style="font-size:9px">${i}</span>`).join('')}${ch.map(p=>`<span class="badge ${p.sev===2?'bg-red':'bg-amber'}" style="font-size:9px">${p.label}</span>`).join('')}${(!tI.length&&!ch.length)?'<span class="badge bg-green" style="font-size:9px">✓ Sin problemas</span>':''}</div></td>
+      <td>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:13px">${qE}</span>
+          <div>
+            <span style="font-size:11px;font-weight:700;padding:2px 6px;border-radius:4px;background:${qsBg};color:${qsC}">${qg.achieved}/${qg.total} objetivos</span>
+            <div style="font-size:10px;color:var(--text3);margin-top:2px">${qs}/100 calidad</div>
+          </div>
+        </div>
+      </td>
+      <td style="max-width:190px"><div style="display:flex;flex-wrap:wrap;gap:3px">
+        ${tI.map(i=>`<span class="badge bg-amber" style="font-size:9px">${i}</span>`).join('')}
+        ${ch.map(p=>`<span class="badge ${p.sev===2?'bg-red':'bg-amber'}" style="font-size:9px">${p.label}</span>`).join('')}
+        ${(!tI.length&&!ch.length)?'<span class="badge bg-green" style="font-size:9px">✓ Sin problemas</span>':''}
+      </div></td>
+      <td>${metricsHtml}</td>
       <td><div style="display:flex;gap:4px;flex-wrap:wrap">
         <button class="btn btn-ghost btn-xs" style="font-size:10px;white-space:nowrap" onclick="goToOptimizerWith('${item.id}','${sT}',${eanArg})">✨ Optimizar</button>
         ${editUrl?`<a href="${editUrl}" target="_blank" rel="noopener" class="btn btn-ghost btn-xs" style="text-decoration:none;background:#fffbeb;color:#78350f;border-color:#fde68a;font-size:10px;white-space:nowrap" title="Editar en MercadoLibre">✏️ Editar ML</a>`:''}
@@ -3097,6 +3324,17 @@ function renderKWDensity(){
   </div>`).join('');
   const catEl=document.getElementById('catalog-keywords');
   if(catEl) catEl.innerHTML=`<div class="chips">${top.slice(0,12).map(([w,c])=>`<div class="chip">${w} <span style="opacity:.5">${c}</span></div>`).join('')}</div>`;
+}
+
+// ── Cargar métricas reales (visitas 7d) para la tabla SEO ───
+async function loadSEOMetrics(){
+  const btn = document.getElementById('seo-metrics-btn');
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Cargando...'; }
+  const ids = allItems.map(i=>i.id).slice(0,50); // máx 50 para no saturar
+  await loadPubMetricsBatch(ids);
+  renderSEOTable(); // re-render con métricas cargadas
+  if(btn){ btn.disabled=false; btn.textContent='📊 Métricas ✓'; }
+  console.log('[SEO] Métricas cargadas para', ids.length, 'ítems');
 }
 
 async function analyzeSEOAll(){ renderSEOSection(); }
@@ -4996,7 +5234,7 @@ function showSection(id){
   // Update URL hash for browser back/forward and right-click "open in new tab"
   if(history.replaceState) history.replaceState(null,'','#'+id);
 
-  if(id==='dashboard') renderDashboard();
+  if(id==='dashboard' && token) renderDashboard();
   if(id==='publicaciones') renderPubs();
   if(id==='seo') renderSEOSection();
   if(id==='ventas') renderVentas();
@@ -5038,8 +5276,14 @@ function switchAccount(){
   localStorage.removeItem('ml_active_app');
   document.getElementById('login-screen').style.display = 'flex';
   document.getElementById('switch-account-btn').style.display = 'none';
-  // Reset nav
-  showSection('dashboard');
+  // Reset nav — solo activar dashboard visualmente, SIN renderizar (no hay datos)
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.nav').forEach(n=>n.classList.remove('active'));
+  const dashSec = document.getElementById('section-dashboard');
+  const dashNav = document.getElementById('nav-dashboard');
+  if(dashSec) dashSec.classList.add('active');
+  if(dashNav) dashNav.classList.add('active');
+  if(history.replaceState) history.replaceState(null,'',window.location.pathname);
 }
 
 // ═══════════════════════════════════════════════════════════
