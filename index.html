@@ -598,48 +598,113 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
 <!-- ═══════════════════════ DASHBOARD ═══════════════════════ -->
 <div id="section-dashboard" class="section active fade-in">
-  <div class="mgt" id="dash-metrics">
-    <div class="mc c-blue"><div class="mc-label">Facturación del mes</div><div class="mc-val" id="d-billing">—</div><div class="mc-sub"><span class="delta up" id="d-bdelta">+0%</span> vs mes ant.</div></div>
-    <div class="mc c-green"><div class="mc-label">Ventas</div><div class="mc-val" id="d-sales">—</div><div class="mc-sub">Este mes</div></div>
-    <div class="mc c-amber"><div class="mc-label">Ticket promedio</div><div class="mc-val" id="d-ticket">—</div><div class="mc-sub">Por orden</div></div>
-    <div class="mc c-purple"><div class="mc-label">Publicaciones</div><div class="mc-val" id="d-items">—</div><div class="mc-sub">Activas</div></div>
+
+  <!-- ── Periodo selector ── -->
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+    <div class="tabs">
+      <button class="tab active" onclick="dashSetPeriod(7,this)">7 días</button>
+      <button class="tab" onclick="dashSetPeriod(30,this)">30 días</button>
+      <button class="tab" onclick="dashSetPeriod(90,this)">90 días</button>
+    </div>
+    <span style="font-size:11px;color:var(--text3)" id="dash-period-label">Últimos 30 días</span>
+    <div id="dash-inconsistency-warn" style="display:none;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:4px 10px;font-size:11px;color:#991b1b">⚠️ Inconsistencia detectada en métricas</div>
+    <div style="margin-left:auto;display:flex;gap:8px">
+      <button class="btn btn-ghost btn-sm" onclick="renderDashboard()">↻ Actualizar vista</button>
+    </div>
   </div>
+
+  <!-- ── Score de negocio ── -->
+  <div id="dash-biz-score" class="card mb" style="cursor:default"></div>
+
+  <!-- ── KPI Cards (5 métricas con delta) ── -->
+  <div class="mgt mgt-5" id="dash-metrics" style="margin-bottom:14px">
+    <div class="mc c-blue" style="cursor:pointer" onclick="showSection('ventas')" title="Ver detalle de ventas">
+      <div class="mc-label">Facturación</div>
+      <div class="mc-val" id="d-billing">—</div>
+      <div class="mc-sub"><span class="delta flat" id="d-bdelta">—</span> vs período ant.</div>
+    </div>
+    <div class="mc c-green" style="cursor:pointer" onclick="showSection('ventas')" title="Solo órdenes pagadas">
+      <div class="mc-label">Ventas (pagadas)</div>
+      <div class="mc-val" id="d-sales">—</div>
+      <div class="mc-sub"><span class="delta flat" id="d-sdelta">—</span> vs período ant.</div>
+    </div>
+    <div class="mc c-amber" title="Facturación / ventas reales">
+      <div class="mc-label">Ticket promedio</div>
+      <div class="mc-val" id="d-ticket">—</div>
+      <div class="mc-sub"><span class="delta flat" id="d-tdelta">—</span> vs período ant.</div>
+    </div>
+    <div class="mc c-teal" style="cursor:pointer" onclick="showSection('publicaciones')" title="Publicaciones activas">
+      <div class="mc-label">Publicaciones</div>
+      <div class="mc-val" id="d-items">—</div>
+      <div class="mc-sub">Activas en ML</div>
+    </div>
+    <div class="mc c-purple" style="cursor:pointer" onclick="showSection('preguntas')" title="Preguntas sin responder">
+      <div class="mc-label">Preguntas pend.</div>
+      <div class="mc-val" id="d-qpend">—</div>
+      <div class="mc-sub" id="d-qsub">Del período</div>
+    </div>
+  </div>
+
+  <!-- ── Alertas inteligentes ── -->
+  <div id="dash-smart-alerts" class="mb"></div>
+
+  <!-- ── Gráfico evolución + categorías ── -->
   <div class="g60 mb">
     <div class="card">
-      <div class="card-hd"><div><div class="card-title">Ingresos — últimos 30 días</div></div>
-        <div class="tabs"><button class="tab active" onclick="switchMainChart('revenue',this)">Ingresos</button><button class="tab" onclick="switchMainChart('units',this)">Unidades</button></div>
+      <div class="card-hd">
+        <div>
+          <div class="card-title">Evolución de ventas</div>
+          <div class="card-sub" id="dash-chart-sub">Últimos 30 días + período anterior</div>
+        </div>
+        <div class="tabs">
+          <button class="tab active" onclick="switchMainChart('revenue',this)">Ingresos</button>
+          <button class="tab" onclick="switchMainChart('units',this)">Unidades</button>
+        </div>
       </div>
-      <div style="position:relative;height:200px"><canvas id="chart-main"></canvas></div>
+      <div style="position:relative;height:210px"><canvas id="chart-main"></canvas></div>
+      <div id="dash-peak-info" style="font-size:11px;color:var(--text3);margin-top:6px;min-height:16px"></div>
     </div>
     <div class="card">
       <div class="card-hd"><div class="card-title">Distribución por categoría</div></div>
-      <div style="position:relative;height:200px"><canvas id="chart-cats"></canvas></div>
+      <div style="position:relative;height:180px"><canvas id="chart-cats"></canvas></div>
+      <div id="dash-cat-names" style="margin-top:8px"></div>
     </div>
   </div>
+
+  <!-- ── Top productos + Insights IA ── -->
   <div class="g2 mb">
     <div class="card">
-      <div class="card-hd"><div class="card-title">Top publicaciones</div><button class="btn btn-ghost btn-sm" onclick="showSection('publicaciones')">Ver todas →</button></div>
+      <div class="card-hd">
+        <div class="card-title">🏆 Top publicaciones</div>
+        <button class="btn btn-ghost btn-sm" onclick="showSection('publicaciones')">Ver todas →</button>
+      </div>
       <div id="dash-top-pubs"><div class="loading"><div class="spin"></div>Cargando...</div></div>
     </div>
     <div class="card">
-      <div class="card-hd"><div class="card-title">Alertas activas</div></div>
-      <div id="dash-alerts"><div class="loading"><div class="spin"></div>Analizando...</div></div>
+      <div class="card-hd">
+        <div class="card-title">🧠 Insights automáticos</div>
+        <span style="font-size:10px;padding:2px 6px;border-radius:10px;background:linear-gradient(90deg,var(--purple),var(--accent));color:#fff;font-weight:700">IA</span>
+      </div>
+      <div id="dash-insights"></div>
     </div>
   </div>
+
+  <!-- ── Stock + Conversión + Reputación ── -->
   <div class="g3">
-    <div class="card">
-      <div class="card-hd"><div class="card-title">Conversión estimada</div></div>
-      <div id="dash-conv"></div>
-    </div>
-    <div class="card">
-      <div class="card-hd"><div class="card-title">Estado de stock</div></div>
+    <div class="card" style="cursor:pointer" onclick="showSection('stock')">
+      <div class="card-hd"><div class="card-title">📦 Estado de stock</div></div>
       <div id="dash-stock-status"></div>
     </div>
     <div class="card">
-      <div class="card-hd"><div class="card-title">Preguntas recientes</div><button class="btn btn-ghost btn-sm" onclick="showSection('preguntas')">Ver →</button></div>
-      <div id="dash-questions"></div>
+      <div class="card-hd"><div class="card-title">🎯 Conversión estimada</div></div>
+      <div id="dash-conv"></div>
+    </div>
+    <div class="card" style="cursor:pointer" onclick="showSection('reputacion')">
+      <div class="card-hd"><div class="card-title">⭐ Reputación</div></div>
+      <div id="dash-rep-mini"></div>
     </div>
   </div>
+
 </div>
 
 <!-- ═══════════════════════ PUBLICACIONES ═══════════════════════ -->
@@ -1734,6 +1799,18 @@ async function loadShippingStatuses(orders){
   }
 }
 
+function makeChart(id,config){
+  const prev=chartInstances[id];
+  if(prev)prev.destroy();
+  const ctx=document.getElementById(id);
+  if(!ctx)return;
+  chartInstances[id]=new Chart(ctx,config);
+}
+
+function chartDefaults(){return{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}};}
+function tOpts(){return{ticks:{color:'#6b7280',font:{size:10}},grid:{color:'rgba(0,0,0,0.05)'},border:{color:'transparent'}};}
+function tXOpts(){return{ticks:{color:'#6b7280',font:{size:10},maxRotation:0,maxTicksLimit:8},grid:{display:false},border:{color:'transparent'}};}
+
 function _updateOrdersUI(mesOrders){
   const mes=mesOrders||[];
   const totalMes=mes.reduce((s,o)=>s+(o.total_amount||0),0);
@@ -1798,132 +1875,463 @@ function calcAvgRT(){
 // ═══════════════════════════════════════════════════════════
 // DASHBOARD
 // ═══════════════════════════════════════════════════════════
-function renderDashboard(){
-  renderMainChart('revenue');
-  renderCatChart();
-  renderDashTopPubs();
-  renderDashAlerts();
-  renderDashConv();
-  renderDashStock();
-  renderDashQuestions();
+// ═══════════════════════════════════════════════════════════
+// DASHBOARD — enhanced v2
+// ═══════════════════════════════════════════════════════════
+
+let dashPeriodDays = 30;
+let _catNameCache = {};  // category_id → name cache
+
+function dashSetPeriod(days, btn){
+  dashPeriodDays = days;
+  document.querySelectorAll('#section-dashboard .tabs .tab').forEach(t=>t.classList.remove('active'));
+  if(btn) btn.classList.add('active');
+  const lbl = document.getElementById('dash-period-label');
+  if(lbl) lbl.textContent = 'Últimos '+days+' días';
+  renderDashboard();
 }
 
-function makeChart(id,config){
-  const prev=chartInstances[id];
-  if(prev)prev.destroy();
-  const ctx=document.getElementById(id);
-  if(!ctx)return;
-  chartInstances[id]=new Chart(ctx,config);
+// ── Filtrar órdenes por período y excluir canceladas ────────
+function dashOrders(days){
+  const cutoff = new Date(Date.now() - days*86400000);
+  return allOrders.filter(o=>
+    o.status !== 'cancelled' &&
+    o.status !== 'invalid' &&
+    new Date(o.date_created||0) >= cutoff
+  );
+}
+function dashOrdersPrev(days){
+  const cutoff = new Date(Date.now() - days*86400000);
+  const cutoffPrev = new Date(Date.now() - 2*days*86400000);
+  return allOrders.filter(o=>
+    o.status !== 'cancelled' &&
+    o.status !== 'invalid' &&
+    new Date(o.date_created||0) >= cutoffPrev &&
+    new Date(o.date_created||0) < cutoff
+  );
 }
 
-function chartDefaults(){return{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}};}
+function dashDelta(curr, prev){
+  if(!prev) return null;
+  const pct = Math.round((curr-prev)/prev*100);
+  return pct;
+}
+function deltaHtml(pct){
+  if(pct===null) return '<span class="delta flat">—</span>';
+  const cls = pct>2?'up':pct<-2?'down':'flat';
+  const arrow = pct>0?'▲':pct<0?'▼':'';
+  return `<span class="delta ${cls}">${arrow}${Math.abs(pct)}%</span>`;
+}
 
-function tOpts(){return{ticks:{color:'#6b7280',font:{size:10}},grid:{color:'rgba(0,0,0,0.05)'},border:{color:'transparent'}};}
-function tXOpts(){return{ticks:{color:'#6b7280',font:{size:10},maxRotation:0,maxTicksLimit:8},grid:{display:false},border:{color:'transparent'}};}
+// ── Calcular business health score ────────────────────────
+function calcBizScore(){
+  const orders = dashOrders(dashPeriodDays);
+  const paid = orders.filter(o=>o.status==='paid'||o.status==='confirmed'||o.status==='delivered'||o.status==='shipped');
+  const activeItems = allItems.filter(i=>i.status==='active');
+  const seoAvg = activeItems.length ? Math.round(activeItems.reduce((s,i)=>s+seoScore(i.title),0)/activeItems.length) : 0;
+  const pend = allQuestions.filter(q=>q.status==='UNANSWERED').length;
+  const zeroStock = allItems.filter(i=>i.status==='active'&&(i.available_quantity||0)===0).length;
+  const zeroRatio = activeItems.length ? zeroStock/activeItems.length : 0;
 
+  let score = 50;
+  // Ventas: más ventas mejor (normalizado a ~50 ventas = máximo)
+  score += Math.min(20, Math.round(paid.length / Math.max(1, dashPeriodDays/30) * 2));
+  // SEO
+  score += Math.round(seoAvg/100*15);
+  // Preguntas sin responder (penaliza)
+  score -= Math.min(15, pend*3);
+  // Stock sin unidades (penaliza)
+  score -= Math.round(zeroRatio*20);
+
+  score = Math.max(0, Math.min(100, score));
+  const state = score>=70?['🟢','Saludable','#16a34a','#f0fdf4']:score>=45?['🟡','En riesgo','#92400e','#fffbeb']:['🔴','Crítico','#991b1b','#fef2f2'];
+  return {score, state, seoAvg, pend, zeroStock};
+}
+
+function renderBizScore(){
+  const el = document.getElementById('dash-biz-score');
+  if(!el) return;
+  const {score, state, seoAvg, pend, zeroStock} = calcBizScore();
+  const [emoji, label, color, bg] = state;
+  const arc = Math.round(226 - (226*score/100));
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;gap:22px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:14px">
+        <div class="seo-ring">
+          <svg width="80" height="80" viewBox="0 0 90 90">
+            <circle cx="45" cy="45" r="36" fill="none" stroke="var(--bg4)" stroke-width="9"/>
+            <circle cx="45" cy="45" r="36" fill="none" stroke="${color}" stroke-width="9" stroke-dasharray="226" stroke-dashoffset="${arc}" stroke-linecap="round"/>
+          </svg>
+          <div class="seo-center"><div style="font-size:22px;font-weight:700;color:${color}">${score}</div><div class="seo-lbl">Score</div></div>
+        </div>
+        <div>
+          <div style="font-size:16px;font-weight:700;color:${color}">${emoji} Estado ${label}</div>
+          <div style="font-size:12px;color:var(--text2);margin-top:4px">Salud general del negocio</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-left:auto">
+        <div style="text-align:center;padding:10px 16px;background:var(--bg3);border-radius:var(--r);border:1px solid var(--border)">
+          <div style="font-size:20px;font-weight:700">${seoAvg}</div>
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em">SEO promedio</div>
+        </div>
+        <div style="text-align:center;padding:10px 16px;background:${pend>0?'#fffbeb':'var(--bg3)'};border-radius:var(--r);border:1px solid ${pend>0?'#fde68a':'var(--border)'};cursor:${pend>0?'pointer':'default'}" ${pend>0?'onclick="showSection(\'preguntas\')"':''}>
+          <div style="font-size:20px;font-weight:700;color:${pend>0?'#92400e':'var(--text)'}">${pend}</div>
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em">Sin responder</div>
+        </div>
+        <div style="text-align:center;padding:10px 16px;background:${zeroStock>0?'#fef2f2':'var(--bg3)'};border-radius:var(--r);border:1px solid ${zeroStock>0?'#fecaca':'var(--border)'};cursor:${zeroStock>0?'pointer':'default'}" ${zeroStock>0?'onclick="showSection(\'stock\')"':''}>
+          <div style="font-size:20px;font-weight:700;color:${zeroStock>0?'#991b1b':'var(--text)'}">${zeroStock}</div>
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em">Sin stock</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ── Alertas inteligentes + accionables ─────────────────────
+function renderSmartAlerts(){
+  const el = document.getElementById('dash-smart-alerts');
+  if(!el) return;
+  const orders = dashOrders(dashPeriodDays);
+  const ordersPrev = dashOrdersPrev(dashPeriodDays);
+  const paid = orders.filter(o=>o.status==='paid'||o.status==='confirmed'||o.status==='delivered'||o.status==='shipped');
+  const paidPrev = ordersPrev.filter(o=>o.status==='paid'||o.status==='confirmed'||o.status==='delivered'||o.status==='shipped');
+  const pend = allQuestions.filter(q=>q.status==='UNANSWERED');
+
+  const alerts = [];
+
+  // Caída de ventas
+  if(paidPrev.length>0){
+    const delta = dashDelta(paid.length, paidPrev.length);
+    if(delta !== null && delta < -20)
+      alerts.push({icon:'📉',color:'#991b1b',bg:'#fef2f2',bdr:'#fecaca',title:`Caída fuerte en ventas (${delta}%)`,desc:'Tus ventas bajaron significativamente vs el período anterior.',action:'Ver ventas →',fn:"showSection('ventas')",sev:1});
+  }
+
+  // Muchas preguntas sin responder
+  if(pend.length>=3)
+    alerts.push({icon:'💬',color:'#78350f',bg:'#fffbeb',bdr:'#fde68a',title:`${pend.length} preguntas sin responder`,desc:'Las respuestas tardías penalizan tu reputación en ML.',action:'Responder →',fn:"showSection('preguntas')",sev:1});
+
+  // Sin stock activo
+  const zeroActive = allItems.filter(i=>i.status==='active'&&(i.available_quantity||0)===0);
+  if(zeroActive.length>0)
+    alerts.push({icon:'⛔',color:'#991b1b',bg:'#fef2f2',bdr:'#fecaca',title:`${zeroActive.length} publicación${zeroActive.length>1?'es':''} sin stock`,desc:`Perdés ventas mientras no haya stock disponible.`,action:'Ver stock →',fn:"showSection('stock')",sev:1});
+
+  // SEO crítico
+  const seoLow = allItems.filter(i=>i.status==='active'&&seoScore(i.title)<30);
+  if(seoLow.length>0)
+    alerts.push({icon:'🔍',color:'#1e40af',bg:'#eff6ff',bdr:'#bfdbfe',title:`${seoLow.length} publicación${seoLow.length>1?'es':''} con SEO crítico`,desc:'Títulos muy cortos o con errores reducen la visibilidad en búsquedas.',action:'Optimizar →',fn:"showSection('seo')",sev:2});
+
+  // Conversión baja (muchas visitas relativo a ventas — aproximación)
+  const totalItems = allItems.filter(i=>i.status==='active').length;
+  if(paid.length>0 && totalItems>0){
+    const approxConvRate = paid.length / totalItems;
+    if(approxConvRate < 0.5 && totalItems>10)
+      alerts.push({icon:'👁️',color:'#374151',bg:'#f9fafb',bdr:'#e5e7eb',title:'Conversión posiblemente baja',desc:'Tenés muchas publicaciones activas pero pocas ventas. Mejorá fotos, títulos o agregá envío gratis.',action:'Ver SEO →',fn:"showSection('seo')",sev:2});
+  }
+
+  if(!alerts.length){el.innerHTML='';return;}
+
+  const criticals = alerts.filter(a=>a.sev===1);
+  const infos = alerts.filter(a=>a.sev===2);
+  const sorted = [...criticals,...infos].slice(0,4);
+
+  el.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-bottom:14px">
+    ${sorted.map(a=>`
+      <div style="background:${a.bg};border:1px solid ${a.bdr};border-left:3px solid ${a.color};border-radius:var(--rs);padding:11px 13px;display:flex;flex-direction:column;gap:6px">
+        <div style="display:flex;align-items:center;gap:7px">
+          <span style="font-size:16px">${a.icon}</span>
+          <span style="font-size:12.5px;font-weight:600;color:${a.color}">${a.title}</span>
+        </div>
+        <div style="font-size:11.5px;color:#4b5563;line-height:1.45">${a.desc}</div>
+        <button onclick="${a.fn}" class="btn btn-xs" style="align-self:flex-start;background:${a.color};color:#fff;border:none;margin-top:2px">${a.action}</button>
+      </div>`).join('')}
+  </div>`;
+}
+
+// ── Métricas KPI con delta ─────────────────────────────────
+function renderDashKPIs(){
+  const orders = dashOrders(dashPeriodDays);
+  const ordersPrev = dashOrdersPrev(dashPeriodDays);
+  const paid = orders.filter(o=>o.status==='paid'||o.status==='confirmed'||o.status==='delivered'||o.status==='shipped');
+  const paidPrev = ordersPrev.filter(o=>o.status==='paid'||o.status==='confirmed'||o.status==='delivered'||o.status==='shipped');
+
+  const billing = paid.reduce((s,o)=>s+(o.total_amount||0),0);
+  const billingPrev = paidPrev.reduce((s,o)=>s+(o.total_amount||0),0);
+  const ticket = paid.length ? Math.round(billing/paid.length) : 0;
+  const ticketPrev = paidPrev.length ? Math.round(billingPrev/paidPrev.length) : 0;
+  const active = allItems.filter(i=>i.status==='active').length;
+  const pend = allQuestions.filter(q=>q.status==='UNANSWERED').length;
+
+  const ss=(id,v)=>{const e=document.getElementById(id);if(e)e.innerHTML=v;};
+  ss('d-billing','$'+billing.toLocaleString('es-AR'));
+  ss('d-bdelta', deltaHtml(dashDelta(billing,billingPrev)));
+  ss('d-sales', paid.length.toString());
+  ss('d-sdelta', deltaHtml(dashDelta(paid.length,paidPrev.length)));
+  ss('d-ticket','$'+ticket.toLocaleString('es-AR'));
+  ss('d-tdelta', deltaHtml(dashDelta(ticket,ticketPrev)));
+  ss('d-items', active.toString());
+  ss('d-qpend', pend.toString());
+  ss('d-qsub', pend>0?`<span style="color:var(--amber)">${pend} sin responder</span>`:'✅ Al día');
+
+  // Actualizar también los valores del módulo facturación
+  const ssT=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
+  ssT('fac-mes','$'+billing.toLocaleString('es-AR'));
+
+  // Verificar inconsistencia: si ticket > billing/sales hay bug
+  const warn = document.getElementById('dash-inconsistency-warn');
+  if(warn) warn.style.display = (paid.length>0 && ticket > billing) ? '' : 'none';
+}
+
+// ── Gráfico principal con comparación período anterior ──────
+let _dashChartMode = 'revenue';
 function renderMainChart(mode){
-  const labels=[],data={};
-  const now=new Date();
-  for(let i=29;i>=0;i--){
-    const d=new Date(now);d.setDate(d.getDate()-i);
+  _dashChartMode = mode || _dashChartMode;
+  const days = dashPeriodDays;
+  const labels=[], dataCurr={}, dataPrev={};
+  const now = new Date();
+  for(let i=days-1;i>=0;i--){
+    const d=new Date(now); d.setDate(d.getDate()-i);
     const k=d.toISOString().slice(0,10);
     labels.push(d.getDate()+'/'+(d.getMonth()+1));
-    data[k]=0;
+    dataCurr[k]=0; dataPrev[k]=0;
   }
+
+  const currCutoff = new Date(Date.now()-days*86400000);
+  const prevCutoff = new Date(Date.now()-2*days*86400000);
+
   allOrders.forEach(o=>{
-    const k=(o.date_created||'').slice(0,10);
-    if(data[k]!==undefined) data[k]+=mode==='revenue'?(o.total_amount||0):1;
+    if(o.status==='cancelled'||o.status==='invalid') return;
+    const ts = new Date(o.date_created||0);
+    const val = _dashChartMode==='revenue'?(o.total_amount||0):1;
+    // Período actual
+    const kCurr = o.date_created?.slice(0,10);
+    if(kCurr && dataCurr[kCurr]!==undefined) dataCurr[kCurr]+=val;
+    // Período anterior → desplazar al rango actual para comparación visual
+    if(ts>=prevCutoff && ts<currCutoff){
+      const shifted = new Date(ts.getTime()+days*86400000);
+      const kPrev = shifted.toISOString().slice(0,10);
+      if(kPrev && dataPrev[kPrev]!==undefined) dataPrev[kPrev]+=val;
+    }
   });
-  makeChart('chart-main',{type:'line',data:{labels,datasets:[{data:Object.values(data),borderColor:'#4f8ef7',backgroundColor:'rgba(79,142,247,0.08)',borderWidth:2,fill:true,tension:.4,pointRadius:2,pointBackgroundColor:'#4f8ef7'}]},options:{...chartDefaults(),scales:{y:{...tOpts(),ticks:{...tOpts().ticks,callback:v=>mode==='revenue'?'$'+(v>=1000?(v/1000).toFixed(0)+'k':v):v}},x:tXOpts()}}});
+
+  // Detectar pico
+  const vals = Object.values(dataCurr);
+  const maxVal = Math.max(...vals);
+  const maxDay = labels[vals.indexOf(maxVal)];
+  const peakEl = document.getElementById('dash-peak-info');
+  if(peakEl && maxVal>0)
+    peakEl.textContent = `📍 Mejor día: ${maxDay} — ${_dashChartMode==='revenue'?'$'+maxVal.toLocaleString('es-AR'):maxVal+' ventas'}`;
+
+  const subEl = document.getElementById('dash-chart-sub');
+  if(subEl) subEl.textContent = `Últimos ${days} días vs período anterior`;
+
+  makeChart('chart-main',{
+    type:'line',
+    data:{
+      labels,
+      datasets:[
+        {label:'Período actual',data:Object.values(dataCurr),borderColor:'#4f8ef7',backgroundColor:'rgba(79,142,247,0.1)',borderWidth:2,fill:true,tension:.4,pointRadius:2,pointBackgroundColor:'#4f8ef7'},
+        {label:'Período anterior',data:Object.values(dataPrev),borderColor:'rgba(157,123,234,0.7)',backgroundColor:'transparent',borderWidth:1.5,borderDash:[4,3],fill:false,tension:.4,pointRadius:0}
+      ]
+    },
+    options:{
+      ...chartDefaults(),
+      plugins:{
+        legend:{display:true,position:'top',labels:{color:'#8892a8',font:{size:10},boxWidth:8,padding:8}},
+        tooltip:{
+          callbacks:{
+            label:(ctx)=>{
+              const v=ctx.raw;
+              return ctx.dataset.label+': '+(_dashChartMode==='revenue'?'$'+v.toLocaleString('es-AR'):v+' ventas');
+            }
+          }
+        }
+      },
+      scales:{y:{...tOpts(),ticks:{...tOpts().ticks,callback:v=>_dashChartMode==='revenue'?'$'+(v>=1000?(v/1000).toFixed(0)+'k':v):v}},x:tXOpts()}
+    }
+  });
 }
 
 function switchMainChart(mode,btn){
   document.querySelectorAll('#section-dashboard .tabs .tab').forEach(t=>t.classList.remove('active'));
-  btn.classList.add('active');
+  if(btn) btn.classList.add('active');
   renderMainChart(mode);
 }
 
-function renderCatChart(){
+// ── Categorías con nombres reales ─────────────────────────
+async function renderCatChart(){
   const cats={};
-  allItems.forEach(i=>{const c=i.category_id||'Otras';cats[c]=(cats[c]||0)+1;});
-  if(!Object.keys(cats).length)return;
-  makeChart('chart-cats',{type:'doughnut',data:{labels:Object.keys(cats),datasets:[{data:Object.values(cats),backgroundColor:['#4f8ef7','#23d18b','#f5a623','#9d7bea','#29d4c5','#f4645f'],borderWidth:0,hoverOffset:3}]},options:{...chartDefaults(),cutout:'66%',plugins:{legend:{display:true,position:'bottom',labels:{color:'#8892a8',font:{size:10},boxWidth:8,padding:8}}}}});
+  allItems.forEach(i=>{ const c=i.category_id||'Otras'; cats[c]=(cats[c]||0)+1; });
+  if(!Object.keys(cats).length) return;
+
+  // Intentar resolver nombres desde caché o API
+  const ids = Object.keys(cats).filter(id=>id!=='Otras'&&!_catNameCache[id]);
+  await Promise.allSettled(ids.slice(0,8).map(async id=>{
+    try{
+      const r = await mlGet('/categories/'+id);
+      if(r.name) _catNameCache[id]=r.name;
+    }catch(e){}
+  }));
+
+  const labels = Object.keys(cats).map(id=>_catNameCache[id]||id);
+  const colors = ['#4f8ef7','#23d18b','#f5a623','#9d7bea','#29d4c5','#f4645f','#f472b6','#60a5fa'];
+
+  makeChart('chart-cats',{type:'doughnut',data:{labels,datasets:[{data:Object.values(cats),backgroundColor:colors.slice(0,labels.length),borderWidth:0,hoverOffset:4}]},options:{...chartDefaults(),cutout:'66%',plugins:{legend:{display:true,position:'bottom',labels:{color:'#8892a8',font:{size:10},boxWidth:8,padding:8}}}}});
+
+  const el = document.getElementById('dash-cat-names');
+  if(el) el.innerHTML=`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">
+    ${Object.entries(cats).slice(0,6).map(([id,n],i)=>`
+      <div style="display:flex;align-items:center;gap:4px;font-size:10.5px;color:var(--text2)">
+        <span style="width:8px;height:8px;border-radius:2px;background:${colors[i]||'#999'};display:inline-block;flex-shrink:0"></span>
+        ${_catNameCache[id]||id} <span style="color:var(--text3)">(${n})</span>
+      </div>`).join('')}
+  </div>`;
 }
 
+// ── Top publicaciones ──────────────────────────────────────
 function renderDashTopPubs(){
   const el=document.getElementById('dash-top-pubs');
-  if(!allItems.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:10px 0">Sin publicaciones</div>';return;}
+  if(!allItems.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:10px 0">Sin publicaciones cargadas</div>';return;}
   const top=[...allItems].sort((a,b)=>(b.sold_quantity||0)-(a.sold_quantity||0)).slice(0,5);
-  el.innerHTML=top.map(i=>`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
-    <div class="item-thumb">${i.thumbnail?`<img src="${i.thumbnail}" onerror="this.parentElement.textContent='☕'">`:'☕'}</div>
-    <div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${i.title}</div>
-    <div style="font-size:10px;color:var(--text3)">${i.sold_quantity||0} vendidas · $${(i.price||0).toLocaleString('es-AR')}</div></div>
-    <span class="badge ${i.status==='active'?'bg-green':'bg-amber'}">${i.status==='active'?'● Activa':'⏸'}</span>
-  </div>`).join('');
-}
-
-function renderDashAlerts(){
-  const el=document.getElementById('dash-alerts');
-  const alerts=[];
-  allItems.forEach(i=>{
-    if((i.available_quantity||0)===0) alerts.push({icon:'⛔',msg:`Sin stock: ${i.title.slice(0,35)}...`,type:'red'});
-    else if((i.available_quantity||0)<=2) alerts.push({icon:'⚠️',msg:`Stock bajo (${i.available_quantity}): ${i.title.slice(0,30)}...`,type:'amber'});
-    const seo=seoScore(i.title);
-    if(seo<30) alerts.push({icon:'🔍',msg:`SEO crítico (${seo}): ${i.title.slice(0,30)}...`,type:'amber'});
-    if(i.status==='paused') alerts.push({icon:'⏸',msg:`Pausada: ${i.title.slice(0,30)}...`,type:'amber'});
-  });
-  const pend=allQuestions.filter(q=>q.status==='UNANSWERED');
-  if(pend.length>0) alerts.push({icon:'💬',msg:`${pend.length} pregunta${pend.length>1?'s':''} sin responder`,type:'amber'});
-  document.getElementById('nb-alerts').textContent=alerts.length;
-  if(!alerts.length){el.innerHTML='<div class="alert a-success">✅ Todo en orden</div>';return;}
-  const critCount=alerts.filter(a=>a.type==='red').length;
-  el.innerHTML=alerts.slice(0,5).map(a=>`
-    <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;border-radius:6px;background:${a.type==='red'?'#fef2f2':'#fffbeb'};border:1px solid ${a.type==='red'?'#fecaca':'#fde68a'}">
-      <span style="flex-shrink:0">${a.icon}</span>
-      <span style="font-size:11.5px;color:${a.type==='red'?'#991b1b':'#78350f'};flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${a.msg}</span>
-    </div>`).join('')+
-    `<div style="margin-top:8px;text-align:center">
-      <button onclick="showSection('alertas')" class="btn btn-ghost btn-xs" style="font-size:11px;width:100%">
-        🔔 Ver ${alerts.length} alerta${alerts.length>1?'s':''} · Resolver →
-      </button>
-    </div>`;
-}
-
-function renderDashConv(){
-  const el=document.getElementById('dash-conv');
-  el.innerHTML=allItems.slice(0,5).map(i=>{
-    const cv=(Math.random()*14+1).toFixed(1);
-    return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-      <div style="font-size:11px;color:var(--text2);width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${i.title.slice(0,20)}...</div>
-      <div class="pbar" style="flex:1"><div class="pfill" style="width:${cv*5}%;background:${cv>8?'var(--green)':cv>4?'var(--amber)':'var(--red)'}"></div></div>
-      <div style="font-size:11px;font-weight:600;width:32px;text-align:right">${cv}%</div>
+  el.innerHTML=top.map((i,idx)=>{
+    const sc=seoScore(i.title);
+    const scC=sc>=70?'var(--green)':sc>=40?'var(--amber)':'var(--red)';
+    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="quickOptimize('${i.id}','${i.title.replace(/'/g,"\\'")}')">
+      <span style="font-size:13px;font-weight:700;color:var(--text3);width:16px;text-align:center">${idx+1}</span>
+      <div class="item-thumb">${i.thumbnail?`<img src="${i.thumbnail}" onerror="this.parentElement.textContent='☕'">`:'☕'}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${i.title}</div>
+        <div style="font-size:10px;color:var(--text3);display:flex;gap:8px;margin-top:2px">
+          <span>${i.sold_quantity||0} vendidas</span>
+          <span>$${(i.price||0).toLocaleString('es-AR')}</span>
+          <span style="color:${scC}">SEO ${sc}</span>
+        </div>
+      </div>
+      <span class="badge ${i.status==='active'?'bg-green':'bg-amber'}">${i.status==='active'?'● Activa':'⏸'}</span>
     </div>`;
   }).join('');
 }
 
+// ── Insights automáticos IA ────────────────────────────────
+function renderDashInsights(){
+  const el = document.getElementById('dash-insights');
+  if(!el) return;
+  const orders = dashOrders(dashPeriodDays);
+  const ordersPrev = dashOrdersPrev(dashPeriodDays);
+  const paid = orders.filter(o=>o.status==='paid'||o.status==='confirmed'||o.status==='delivered'||o.status==='shipped');
+  const paidPrev = ordersPrev.filter(o=>o.status==='paid'||o.status==='confirmed'||o.status==='delivered'||o.status==='shipped');
+  const active = allItems.filter(i=>i.status==='active');
+  const seoAvg = active.length ? Math.round(active.reduce((s,i)=>s+seoScore(i.title),0)/active.length) : 0;
+  const delta = dashDelta(paid.length, paidPrev.length);
+  const insights = [];
+
+  if(delta!==null && delta<-15)
+    insights.push({icon:'📉',color:'#991b1b',text:`Las ventas bajaron un ${Math.abs(delta)}% vs el período anterior. Revisá si hay publicaciones pausadas o con stock cero que puedan estar afectando.`});
+  else if(delta!==null && delta>20)
+    insights.push({icon:'🚀',color:'#16a34a',text:`Excelente: las ventas subieron un ${delta}% vs el período anterior. Considerá aumentar el stock de los productos más vendidos.`});
+
+  if(seoAvg<50)
+    insights.push({icon:'🔍',color:'#1e40af',text:`El SEO promedio de tus publicaciones es ${seoAvg}/100. Optimizá los títulos con palabras clave reales para mejorar la visibilidad.`});
+
+  const zeroStock = active.filter(i=>(i.available_quantity||0)===0).length;
+  if(zeroStock>0)
+    insights.push({icon:'📦',color:'#92400e',text:`${zeroStock} publicación${zeroStock>1?'es':''} activa${zeroStock>1?'s':''} sin stock. ML penaliza el ranking de publicaciones sin disponibilidad.`});
+
+  const pend = allQuestions.filter(q=>q.status==='UNANSWERED').length;
+  if(pend>=2)
+    insights.push({icon:'💬',color:'#78350f',text:`Tenés ${pend} preguntas sin responder. Responder rápido mejora tu reputación y conversión.`});
+
+  const paused = allItems.filter(i=>i.status==='paused').length;
+  if(paused>active.length*0.3 && paused>5)
+    insights.push({icon:'⏸',color:'#6b7280',text:`${paused} publicaciones pausadas (${Math.round(paused/(active.length+paused)*100)}% del catálogo). Reactivar las de mejor desempeño puede aumentar tus ventas.`});
+
+  if(!insights.length)
+    insights.push({icon:'✅',color:'#16a34a',text:'Todo indica que tu tienda está funcionando bien. Seguí monitoreando los indicadores para detectar oportunidades de mejora.'});
+
+  el.innerHTML = insights.map(ins=>`
+    <div style="display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)">
+      <span style="font-size:16px;flex-shrink:0;margin-top:1px">${ins.icon}</span>
+      <span style="font-size:12px;color:var(--text2);line-height:1.55">${ins.text}</span>
+    </div>`).join('');
+}
+
+// ── Stock resumen ──────────────────────────────────────────
 function renderDashStock(){
   const el=document.getElementById('dash-stock-status');
-  const zero=allItems.filter(i=>(i.available_quantity||0)===0).length;
-  const low=allItems.filter(i=>(i.available_quantity||0)>0&&(i.available_quantity||0)<=3).length;
-  const ok=allItems.length-zero-low;
+  if(!el) return;
+  const zero=allItems.filter(i=>i.status==='active'&&(i.available_quantity||0)===0).length;
+  const low=allItems.filter(i=>i.status==='active'&&(i.available_quantity||0)>0&&(i.available_quantity||0)<=3).length;
+  const ok=allItems.filter(i=>i.status==='active'&&(i.available_quantity||0)>3).length;
+  const total=Math.max(ok+low+zero,1);
   el.innerHTML=`
-    <div style="display:flex;flex-direction:column;gap:8px">
-      <div style="display:flex;align-items:center;gap:8px"><div class="pbar" style="flex:1"><div class="pfill" style="width:${ok/Math.max(allItems.length,1)*100}%;background:var(--green)"></div></div><span style="font-size:11px;color:var(--green)">${ok} OK</span></div>
-      <div style="display:flex;align-items:center;gap:8px"><div class="pbar" style="flex:1"><div class="pfill" style="width:${low/Math.max(allItems.length,1)*100}%;background:var(--amber)"></div></div><span style="font-size:11px;color:var(--amber)">${low} bajo</span></div>
-      <div style="display:flex;align-items:center;gap:8px"><div class="pbar" style="flex:1"><div class="pfill" style="width:${zero/Math.max(allItems.length,1)*100}%;background:var(--red)"></div></div><span style="font-size:11px;color:var(--red)">${zero} sin stock</span></div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="pbar" style="flex:1"><div class="pfill" style="width:${ok/total*100}%;background:var(--green)"></div></div>
+        <span style="font-size:11px;color:var(--green);min-width:52px">${ok} OK ✓</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="pbar" style="flex:1"><div class="pfill" style="width:${low/total*100}%;background:var(--amber)"></div></div>
+        <span style="font-size:11px;color:var(--amber);min-width:52px">${low} bajo ⚠️</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="pbar" style="flex:1"><div class="pfill" style="width:${zero/total*100}%;background:var(--red)"></div></div>
+        <span style="font-size:11px;color:var(--red);min-width:52px">${zero} cero ⛔</span>
+      </div>
+    </div>
+    <div style="margin-top:10px;text-align:center">
+      <button onclick="showSection('stock')" class="btn btn-ghost btn-xs" style="font-size:11px;width:100%">📋 Ver todo el stock →</button>
     </div>`;
 }
 
-function renderDashQuestions(){
-  const el=document.getElementById('dash-questions');
-  const recent=allQuestions.slice(0,4);
-  if(!recent.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Sin preguntas</div>';return;}
-  el.innerHTML=recent.map(q=>`<div style="padding:7px 0;border-bottom:1px solid var(--border)">
-    <div style="font-size:12px;font-weight:500">${q.text.slice(0,60)}${q.text.length>60?'...':''}</div>
-    <div style="font-size:10px;color:var(--text3);margin-top:3px;display:flex;gap:6px">
-      <span class="badge ${q.status==='UNANSWERED'?'bg-amber':'bg-green'}">${q.status==='UNANSWERED'?'Pendiente':'Respondida'}</span>
-    </div>
-  </div>`).join('');
+// ── Conversión estimada ────────────────────────────────────
+function renderDashConv(){
+  const el=document.getElementById('dash-conv');
+  if(!el) return;
+  const orders = dashOrders(dashPeriodDays);
+  const paid = orders.filter(o=>o.status==='paid'||o.status==='confirmed'||o.status==='delivered'||o.status==='shipped');
+  // Agrupamos ventas por ítem
+  const soldMap={};
+  paid.forEach(o=>{ (o.order_items||[]).forEach(oi=>{ const id=oi.item?.id; if(id) soldMap[id]=(soldMap[id]||0)+1; }); });
+  const top = allItems.filter(i=>i.status==='active').sort((a,b)=>(b.sold_quantity||0)-(a.sold_quantity||0)).slice(0,5);
+  if(!top.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Sin datos</div>';return;}
+  el.innerHTML=top.map(i=>{
+    // Conversión estimada: ventas del período / total ventas históricas × factor
+    const periodSales = soldMap[i.id]||0;
+    const totalSales = i.sold_quantity||0;
+    // Si no hay datos de visitas de ML, estimamos basado en score SEO + ventas
+    const sc = seoScore(i.title);
+    const estConv = totalSales>0 ? Math.min(25, (sc/100*10 + Math.min(10, totalSales/10))).toFixed(1) : '—';
+    const cv = parseFloat(estConv)||0;
+    return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <div style="font-size:11px;color:var(--text2);width:115px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${i.title}">${i.title.slice(0,18)}…</div>
+      <div class="pbar" style="flex:1"><div class="pfill" style="width:${Math.min(100,cv*5)}%;background:${cv>8?'var(--green)':cv>4?'var(--amber)':'var(--red)'}"></div></div>
+      <div style="font-size:11px;font-weight:600;width:36px;text-align:right;color:${cv>8?'var(--green)':cv>4?'var(--amber)':'var(--red)'}">${estConv}%</div>
+    </div>`;
+  }).join('')+`<div style="margin-top:4px;font-size:10px;color:var(--text3)">* Estimación basada en historial y score SEO</div>`;
+}
+
+// ── Reputación mini ────────────────────────────────────────
+function renderDashRepMini(){
+  const el = document.getElementById('dash-rep-mini');
+  if(!el) return;
+  // Usamos datos cargados previamente si existen
+  el.innerHTML=`<div style="text-align:center;padding:10px 0">
+    <div style="font-size:32px;margin-bottom:6px">⭐</div>
+    <div style="font-size:13px;color:var(--text2);margin-bottom:10px">Ver reputación detallada</div>
+    <button onclick="showSection('reputacion')" class="btn btn-ghost btn-xs" style="width:100%;font-size:11px">Ver reputación →</button>
+  </div>`;
+}
+
+// ── Entry point del dashboard ──────────────────────────────
+function renderDashboard(){
+  renderBizScore();
+  renderSmartAlerts();
+  renderDashKPIs();
+  renderMainChart(_dashChartMode);
+  renderCatChart();
+  renderDashTopPubs();
+  renderDashInsights();
+  renderDashStock();
+  renderDashConv();
+  renderDashRepMini();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -2003,7 +2411,13 @@ function renderPubs(){
       <td style="font-weight:600;color:var(--text)">$${(item.price||0).toLocaleString('es-AR')}</td>
       <td><span class="${(item.available_quantity||0)===0?'badge bg-red':(item.available_quantity||0)<=3?'badge bg-amber':'badge bg-green'}">${item.available_quantity??'—'}</span></td>
       <td>${item.sold_quantity||0}</td>
-      <td style="font-size:11px;color:var(--text2);font-family:var(--mono)">${sku}</td>
+      <td style="font-size:11px;color:var(--text2)">
+        <div style="display:flex;align-items:center;gap:4px">
+          <span id="sku-val-${item.id}" style="font-family:var(--mono);font-size:11px">${sku}</span>
+          <button class="btn btn-ghost btn-xs" style="padding:2px 5px;font-size:10px;opacity:.6" title="Editar SKU"
+            onclick="startSKUEdit('${item.id}','${sku.replace(/'/g,"\\'")}')">✎</button>
+        </div>
+      </td>
       <td><div style="display:flex;align-items:center;gap:6px">
         <div class="pbar" style="width:50px"><div class="pfill" style="width:${sc}%;background:${scColor}"></div></div>
         <span style="font-size:11px;font-weight:700;color:${scColor}">${sc}</span>
@@ -2022,6 +2436,49 @@ function renderPubs(){
       </td>
     </tr>`;
   }).join('');
+}
+
+// ─── Inline SKU editing ────────────────────────────────────
+function startSKUEdit(itemId, currentSku){
+  const span = document.getElementById('sku-val-'+itemId);
+  if(!span) return;
+  const parent = span.parentElement;
+  parent.innerHTML = `
+    <input id="sku-inp-${itemId}" type="text" value="${currentSku==='—'?'':currentSku}"
+      maxlength="40" style="font-family:var(--mono);font-size:11px;padding:3px 6px;width:110px;border-radius:4px;border:1px solid var(--accent)"
+      onkeydown="if(event.key==='Enter')saveSKU('${itemId}');if(event.key==='Escape')renderPubs();">
+    <button class="btn btn-primary btn-xs" style="padding:2px 7px" onclick="saveSKU('${itemId}')">✓</button>
+    <button class="btn btn-ghost btn-xs" style="padding:2px 5px" onclick="renderPubs()">✕</button>`;
+  document.getElementById('sku-inp-'+itemId)?.focus();
+}
+
+async function saveSKU(itemId){
+  const inp = document.getElementById('sku-inp-'+itemId);
+  if(!inp) return;
+  const val = inp.value.trim().slice(0,40);
+  // Validar: solo alfanumérico, guiones, puntos
+  if(val && !/^[a-zA-Z0-9\-_.]+$/.test(val)){
+    inp.style.borderColor='var(--red)';
+    inp.title='Solo letras, números, guiones y puntos';
+    return;
+  }
+  inp.disabled=true;
+  try{
+    const r = await fetch(WORKER+'/api/items/'+itemId, {
+      method:'PUT',
+      headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
+      body: JSON.stringify({seller_custom_field: val||null})
+    });
+    const d = await r.json();
+    if(d.error){throw new Error(d.message||d.error);}
+    const item = allItems.find(i=>i.id===itemId);
+    if(item) item.seller_custom_field = val||null;
+    renderPubs();
+  }catch(e){
+    inp.disabled=false;
+    inp.style.borderColor='var(--red)';
+    inp.title='Error: '+e.message;
+  }
 }
 
 function toggleItem(cb,id){
@@ -4326,7 +4783,10 @@ function showSection(id){
   const t=titles[id]||[id,id];
   document.getElementById('topbar-title').textContent=t[0];
   document.getElementById('topbar-sub').textContent=t[1];
+  // Update URL hash for browser back/forward and right-click "open in new tab"
+  if(history.replaceState) history.replaceState(null,'','#'+id);
 
+  if(id==='dashboard') renderDashboard();
   if(id==='publicaciones') renderPubs();
   if(id==='seo') renderSEOSection();
   if(id==='ventas') renderVentas();
@@ -4584,15 +5044,20 @@ function selectOptItem(id,title){
   const activeApp = localStorage.getItem('ml_active_app');
 
   if(code){
-    // Volvemos del OAuth de ML con un código nuevo
     await exchangeCode(code);
   } else if(activeApp && localStorage.getItem('ml_token_' + activeApp)){
-    // Ya hay sesión guardada → cargar directamente
     token = localStorage.getItem('ml_token_' + activeApp);
     currentAccount = ACCOUNTS.find(a => a.id === activeApp) || ACCOUNTS[0];
     await initApp();
+    // Restore section from URL hash
+    const hash = window.location.hash.replace('#','');
+    if(hash && document.getElementById('section-'+hash)) showSection(hash);
   }
-  // else: pantalla de login visible con selector de cuentas
+  // Handle browser back/forward
+  window.addEventListener('popstate', ()=>{
+    const h = window.location.hash.replace('#','');
+    if(h && document.getElementById('section-'+h)) showSection(h);
+  });
 })();
 </script>
 </body>
