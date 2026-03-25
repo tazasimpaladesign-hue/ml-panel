@@ -671,8 +671,14 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <table>
         <thead><tr>
           <th class="th-check"><input type="checkbox" id="check-all" onchange="toggleAll(this)"></th>
-          <th>Publicación</th><th>Precio</th><th>Stock</th><th>Vendidas</th>
-          <th>Score SEO</th><th>Estado</th><th>Acciones</th>
+          <th>Publicación</th>
+          <th onclick="pubSort('price')" style="cursor:pointer;user-select:none;white-space:nowrap">Precio <span id="pub-sort-price" style="font-size:10px"></span></th>
+          <th onclick="pubSort('stock')" style="cursor:pointer;user-select:none;white-space:nowrap">Stock <span id="pub-sort-stock" style="font-size:10px"></span></th>
+          <th onclick="pubSort('sold')"  style="cursor:pointer;user-select:none;white-space:nowrap">Vendidas <span id="pub-sort-sold" style="font-size:10px"></span></th>
+          <th onclick="pubSort('sku')"   style="cursor:pointer;user-select:none;white-space:nowrap">SKU <span id="pub-sort-sku" style="font-size:10px"></span></th>
+          <th onclick="pubSort('seo')"   style="cursor:pointer;user-select:none;white-space:nowrap">Score SEO <span id="pub-sort-seo" style="font-size:10px"></span></th>
+          <th onclick="pubSort('quality')" style="cursor:pointer;user-select:none;white-space:nowrap">Calidad <span id="pub-sort-quality" style="font-size:10px"></span></th>
+          <th>Estado</th><th>Acciones</th>
         </tr></thead>
         <tbody id="pubs-tbody"></tbody>
       </table>
@@ -771,18 +777,26 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     </div>
   </div>
 
-  <!-- Filtros de problema -->
+  <!-- Filtros de problema + estado -->
   <div class="card mb" id="seo-filter-bar">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      <span style="font-size:11px;color:var(--text3);font-weight:600;white-space:nowrap">Estado:</span>
+      <div class="chips" style="margin:0;gap:5px">
+        <div class="chip" id="chip-st-all"    onclick="seoSetStatus(null)"      style="font-size:11px;background:var(--accent);color:#fff;border-color:var(--accent)">Todas</div>
+        <div class="chip" id="chip-st-active" onclick="seoSetStatus('active')"  style="font-size:11px">✅ Activas</div>
+        <div class="chip" id="chip-st-paused" onclick="seoSetStatus('paused')"  style="font-size:11px">⏸ Pausadas</div>
+      </div>
+    </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-      <span style="font-size:11px;color:var(--text3);font-weight:600;white-space:nowrap">Filtrar por problema:</span>
+      <span style="font-size:11px;color:var(--text3);font-weight:600;white-space:nowrap">Problema:</span>
       <div class="chips" style="margin:0;gap:5px">
         <div class="chip" id="chip-titulo"   onclick="seoSetFilter('titulo')"   style="font-size:11px">✏️ Mejorar título</div>
-        <div class="chip" id="chip-fotos"    onclick="seoSetFilter('fotos')"    style="font-size:11px">📷 Mejorar fotos</div>
+        <div class="chip" id="chip-fotos"    onclick="seoSetFilter('fotos')"    style="font-size:11px">📷 Sin fotos</div>
         <div class="chip" id="chip-stock"    onclick="seoSetFilter('stock')"    style="font-size:11px">📦 Poco stock</div>
         <div class="chip" id="chip-promo"    onclick="seoSetFilter('promo')"    style="font-size:11px">📢 Sin promoción</div>
-        <div class="chip" id="chip-ean"      onclick="seoSetFilter('ean')"      style="font-size:11px">🔢 Sin código EAN</div>
+        <div class="chip" id="chip-ean"      onclick="seoSetFilter('ean')"      style="font-size:11px">🔢 Sin EAN</div>
         <div class="chip" id="chip-pausada"  onclick="seoSetFilter('pausada')"  style="font-size:11px">⏸ Pausadas</div>
-        <button class="btn btn-ghost btn-xs" onclick="seoSetFilter(null)" id="seo-clear-btn" style="display:none;font-size:11px">✕ Limpiar filtro</button>
+        <button class="btn btn-ghost btn-xs" onclick="seoSetFilter(null)" id="seo-clear-btn" style="display:none;font-size:11px">✕ Limpiar</button>
       </div>
     </div>
   </div>
@@ -804,8 +818,8 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <thead><tr>
           <th>Publicación</th>
           <th>Chars</th>
-          <th>Score SEO</th>
-          <th>Calidad de publicación</th>
+          <th onclick="seoSort('seo')"     style="cursor:pointer;user-select:none;white-space:nowrap">Score SEO <span id="seo-sort-seo" style="font-size:10px"></span></th>
+          <th onclick="seoSort('quality')" style="cursor:pointer;user-select:none;white-space:nowrap">Calidad pub. <span id="seo-sort-quality" style="font-size:10px"></span></th>
           <th>Problemas detectados</th>
           <th>Acciones</th>
         </tr></thead>
@@ -1922,35 +1936,81 @@ function filterPubs(f,btn){
   renderPubs();
 }
 
+// ── Helper: indicador de dirección de sort ──
+function sortArrow(col, stateCol, stateDir){
+  if(col!==stateCol) return '<span style="opacity:.25">↕</span>';
+  return stateDir>0?'↓':'↑';
+}
+
+// ── Ordenamiento Publicaciones (clic en encabezado) ──────────
+function pubSort(col){
+  if(pubState.sortCol===col) pubState.sortDir*=-1;
+  else{ pubState.sortCol=col; pubState.sortDir=-1; }
+  // actualizar flechas
+  ['price','stock','sold','sku','seo','quality'].forEach(c=>{
+    const el=document.getElementById('pub-sort-'+c);
+    if(el) el.innerHTML=sortArrow(c,pubState.sortCol,pubState.sortDir);
+  });
+  renderPubs();
+}
+
 function renderPubs(){
   const search=(document.getElementById('pub-search')?.value||'').toLowerCase();
-  const sortBy=document.getElementById('pub-sort')?.value||'sold';
+  // Filtro legacy del select (mantener compatibilidad)
+  const legacySort=document.getElementById('pub-sort')?.value||'';
+
   let items=[...allItems];
   if(pubFilter!=='all') items=items.filter(i=>i.status===pubFilter);
   if(search) items=items.filter(i=>i.title.toLowerCase().includes(search));
-  if(sortBy==='sold') items.sort((a,b)=>(b.sold_quantity||0)-(a.sold_quantity||0));
-  if(sortBy==='price-asc') items.sort((a,b)=>(a.price||0)-(b.price||0));
-  if(sortBy==='price-desc') items.sort((a,b)=>(b.price||0)-(a.price||0));
-  if(sortBy==='stock') items.sort((a,b)=>(a.available_quantity||0)-(b.available_quantity||0));
-  if(sortBy==='seo') items.sort((a,b)=>seoScore(a.title)-seoScore(b.title));
+
+  // Ordenar: pubState tiene prioridad sobre el select legacy
+  const col=pubState.sortCol, dir=pubState.sortDir;
+  items.sort((a,b)=>{
+    let va,vb;
+    if(col==='price')   { va=a.price||0;                       vb=b.price||0; }
+    else if(col==='stock')   { va=a.available_quantity??0;          vb=b.available_quantity??0; }
+    else if(col==='sold')    { va=a.sold_quantity||0;               vb=b.sold_quantity||0; }
+    else if(col==='sku')     { va=(a.seller_custom_field||'').toLowerCase(); vb=(b.seller_custom_field||'').toLowerCase(); return dir*(va<vb?-1:va>vb?1:0); }
+    else if(col==='seo')     { va=seoScore(a.title);               vb=seoScore(b.title); }
+    else if(col==='quality') { va=qualityScore(a);                 vb=qualityScore(b); }
+    else if(legacySort==='sold')       { va=b.sold_quantity||0;       vb=a.sold_quantity||0; return va-vb; }
+    else if(legacySort==='price-asc')  { return (a.price||0)-(b.price||0); }
+    else if(legacySort==='price-desc') { return (b.price||0)-(a.price||0); }
+    else if(legacySort==='stock')      { return (a.available_quantity||0)-(b.available_quantity||0); }
+    else if(legacySort==='seo')        { return seoScore(a.title)-seoScore(b.title); }
+    else { va=b.sold_quantity||0; vb=a.sold_quantity||0; return va-vb; }
+    return dir*(vb-va);
+  });
+
   const tbody=document.getElementById('pubs-tbody');
-  if(!items.length){tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:22px">Sin resultados</td></tr>';return;}
+  if(!tbody) return;
+  if(!items.length){tbody.innerHTML='<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:22px">Sin resultados</td></tr>';return;}
   tbody.innerHTML=items.map(item=>{
     const sc=seoScore(item.title);
+    const qs=qualityScore(item);
     const scColor=sc>=70?'var(--green)':sc>=40?'var(--amber)':'var(--red)';
+    const qsC=qs>=70?'#16a34a':qs>=40?'#92400e':'#dc2626';
+    const qsBg=qs>=70?'#f0fdf4':qs>=40?'#fffbeb':'#fef2f2';
+    const qE=qs>=70?'🟢':qs>=40?'🟡':'🔴';
+    const sku=item.seller_custom_field||'—';
     return `<tr>
       <td><input type="checkbox" class="row-check" value="${item.id}" onchange="toggleItem(this,'${item.id}')"></td>
       <td><div style="display:flex;align-items:center;gap:9px">
         <div class="item-thumb">${item.thumbnail?`<img src="${item.thumbnail}" onerror="this.parentElement.textContent='☕'">`:'☕'}</div>
-        <div><div style="font-size:12px;font-weight:500;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${item.title}</div>
+        <div><div style="font-size:12px;font-weight:500;max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${item.title}</div>
         <div style="font-size:10px;color:var(--text3)">${item.id}</div></div>
       </div></td>
       <td style="font-weight:600;color:var(--text)">$${(item.price||0).toLocaleString('es-AR')}</td>
       <td><span class="${(item.available_quantity||0)===0?'badge bg-red':(item.available_quantity||0)<=3?'badge bg-amber':'badge bg-green'}">${item.available_quantity??'—'}</span></td>
       <td>${item.sold_quantity||0}</td>
+      <td style="font-size:11px;color:var(--text2);font-family:var(--mono)">${sku}</td>
       <td><div style="display:flex;align-items:center;gap:6px">
         <div class="pbar" style="width:50px"><div class="pfill" style="width:${sc}%;background:${scColor}"></div></div>
         <span style="font-size:11px;font-weight:700;color:${scColor}">${sc}</span>
+      </div></td>
+      <td><div style="display:flex;align-items:center;gap:5px">
+        <span style="font-size:12px">${qE}</span>
+        <span style="font-size:11px;font-weight:700;padding:1px 5px;border-radius:4px;background:${qsBg};color:${qsC}">${qs}</span>
       </div></td>
       <td><span class="badge ${item.status==='active'?'bg-green':'bg-amber'}">${item.status==='active'?'● Activa':'⏸ Pausada'}</span></td>
       <td>
@@ -2028,21 +2088,74 @@ function qualityChecks(item){
   const problems=[];
   const sc=seoScore(item.title||'');
   const qty=item.available_quantity??0;
+
+  // Título con SEO bajo
+  if(sc<40) problems.push({id:'titulo',label:'Mejorar título',sev:2});
+
+  // Fotos: pictures array si está cargado, sino thumbnail ausente
+  const pics=item.pictures||item.images||[];
+  const noPics=pics.length>0?pics.length<2:!item.thumbnail;
+  if(noPics) problems.push({id:'fotos',label:'Sin fotos suficientes',sev:2});
+
+  // Stock
+  if(qty===0&&item.status==='active')
+    problems.push({id:'stock',label:'Sin stock',sev:2});
+  else if(qty>0&&qty<=3)
+    problems.push({id:'stock',label:'Poco stock ('+qty+')',sev:1});
+
+  // Promoción: listing_type_id free/bronce no incluye ML Plus/Gold/Premium
   const lt=(item.listing_type_id||'').toLowerCase();
-  if(sc<40)                             problems.push({id:'titulo', label:'Mejorar título',       sev:2});
-  if(!item.thumbnail)                   problems.push({id:'fotos',  label:'Mejorar fotos',        sev:2});
-  if(qty===0&&item.status==='active')   problems.push({id:'stock',  label:'Sin stock',            sev:2});
-  else if(qty>0&&qty<=3)                problems.push({id:'stock',  label:'Poco stock ('+qty+')', sev:1});
-  if(lt==='free'||lt==='bronze')        problems.push({id:'promo',  label:'Sin promoción activa', sev:1});
-  if(!item.seller_custom_field)         problems.push({id:'ean',    label:'Falta código EAN/SKU', sev:1});
-  if(item.status==='paused')            problems.push({id:'pausada',label:'Publicación pausada',  sev:2});
+  const noPromo=lt===''||lt==='free'||lt==='bronze'||lt==='silver';
+  if(noPromo) problems.push({id:'promo',label:'Sin promoción activa',sev:1});
+
+  // Video/clip: si el campo existe pero está vacío
+  const hasVideo=!!(item.video_id||item.clip_id||(item.attributes||[]).find(a=>a.id==='VIDEO_URL'||a.id==='CLIP_ID'));
+  if(!hasVideo) problems.push({id:'clip',label:'Sin video/clip',sev:1});
+
+  // EAN/GTIN: seller_custom_field es el SKU interno; EAN viene en attributes
+  const eanAttr=(item.attributes||[]).find(a=>a.id==='GTIN'||a.id==='EAN'||a.id==='ISBN');
+  const hasEAN=!!(eanAttr&&eanAttr.value_name&&eanAttr.value_name.trim());
+  const hasSKU=!!(item.seller_custom_field);
+  if(!hasEAN&&!hasSKU) problems.push({id:'ean',label:'Falta código EAN/SKU',sev:1});
+
+  // Pausada
+  if(item.status==='paused') problems.push({id:'pausada',label:'Publicación pausada',sev:2});
+
   return problems;
 }
 
 function qualityScore(item){
   const issues=qualityChecks(item);
-  const penalty=issues.reduce((s,c)=>s+(c.sev===2?22:11),0);
+  const penalty=issues.reduce((s,c)=>s+(c.sev===2?20:10),0);
   return Math.max(0,Math.min(100,100-penalty));
+}
+
+// ── Ordenamiento SEO ─────────────────────────────────────────
+function seoSort(col){
+  if(seoState.sortCol===col) seoState.sortDir*=-1;
+  else{ seoState.sortCol=col; seoState.sortDir=-1; }
+  seoState.page=1;
+  // actualizar indicadores
+  ['seo','quality'].forEach(c=>{
+    const el=document.getElementById('seo-sort-'+c);
+    if(el) el.innerHTML=sortArrow(c,seoState.sortCol,seoState.sortDir);
+  });
+  renderSEOTable();
+}
+
+// ── Filtro de estado SEO ─────────────────────────────────────
+function seoSetStatus(st){
+  seoState.statusFilter=st;
+  seoState.page=1;
+  ['all','active','paused'].forEach(s=>{
+    const chip=document.getElementById('chip-st-'+s);
+    if(!chip) return;
+    const isActive=(s==='all'&&st===null)||(s===st);
+    chip.style.background=isActive?'var(--accent)':'';
+    chip.style.color=isActive?'#fff':'';
+    chip.style.borderColor=isActive?'var(--accent)':'';
+  });
+  renderSEOTable();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -2201,7 +2314,10 @@ function renderSEOSection(){
 
 function seoSetFilter(f){
   seoState.filter=f; seoState.page=1;
-  document.querySelectorAll('[id^="chip-"]').forEach(c=>{c.style.background='';c.style.color='';c.style.borderColor='';});
+  // Solo resetear chips de problema (no los de estado)
+  document.querySelectorAll('[id^="chip-"]:not([id^="chip-st-"])').forEach(c=>{
+    c.style.background=''; c.style.color=''; c.style.borderColor='';
+  });
   if(f){const chip=document.getElementById('chip-'+f);if(chip){chip.style.background='var(--accent)';chip.style.color='#fff';chip.style.borderColor='var(--accent)';}}
   const cb=document.getElementById('seo-clear-btn');if(cb)cb.style.display=f?'':'none';
   renderSEOTable();
@@ -2212,8 +2328,12 @@ function seoGoPage(n){seoState.page=n;renderSEOTable();}
 function renderSEOTable(){
   const searchQ=(document.getElementById('seo-search')?.value||'').toLowerCase();
   const f=seoState.filter;
+  const st=seoState.statusFilter;
+
+  // 1. FILTRAR
   let items=allItems.filter(i=>{
     if(searchQ&&!i.title.toLowerCase().includes(searchQ)) return false;
+    if(st&&i.status!==st) return false;
     if(!f) return true;
     const sc=seoScore(i.title),qs=qualityScore(i),ch=qualityChecks(i);
     const hasErr=/[.!?,;:()]/.test(i.title)||i.title===i.title.toUpperCase();
@@ -2227,17 +2347,31 @@ function renderSEOTable(){
     if(f==='q_err')    return ch.some(p=>p.sev===2);
     return ch.some(c=>c.id===f);
   });
+
+  // 2. ORDENAR (mantiene orden después de filtrar)
+  if(seoState.sortCol){
+    items.sort((a,b)=>{
+      const va=seoState.sortCol==='seo'?seoScore(a.title):qualityScore(a);
+      const vb=seoState.sortCol==='seo'?seoScore(b.title):qualityScore(b);
+      return seoState.sortDir*(vb-va);
+    });
+  }
+
+  // 3. PAGINAR
   const total=items.length;
   const pages=Math.max(1,Math.ceil(total/seoState.perPage));
   seoState.page=Math.min(seoState.page,pages);
   const paged=items.slice((seoState.page-1)*seoState.perPage,seoState.page*seoState.perPage);
+
   const countEl=document.getElementById('seo-result-count');
   if(countEl) countEl.textContent=total+' publicación'+(total!==1?'es':'')+' · pág '+seoState.page+'/'+pages;
+
   const tbody=document.getElementById('seo-tbody');
   if(!tbody) return;
   if(!paged.length){
-    tbody.innerHTML='<tr><td colspan="6" style="text-align:center;padding:22px;color:var(--text3)">Sin resultados</td></tr>';
-    const pg=document.getElementById('seo-pagination');if(pg)pg.innerHTML='';return;
+    tbody.innerHTML='<tr><td colspan="6" style="text-align:center;padding:22px;color:var(--text3)">Sin resultados para este filtro</td></tr>';
+    const pg=document.getElementById('seo-pagination');if(pg)pg.innerHTML='';
+    return;
   }
   tbody.innerHTML=paged.map(item=>{
     const sc=seoScore(item.title),qs=qualityScore(item),ch=qualityChecks(item);
@@ -2246,11 +2380,11 @@ function renderSEOTable(){
     const qsBg=qs>=70?'#f0fdf4':qs>=40?'#fffbeb':'#fef2f2';
     const qE=qs>=70?'🟢':qs>=40?'🟡':'🔴';
     const tI=[];
-    if(item.title.length<30) tI.push('Corto');
-    if(/[.!?,;:]/.test(item.title)) tI.push('Puntuación');
+    if(item.title.length<30)            tI.push('Corto');
+    if(/[.!?,;:]/.test(item.title))     tI.push('Puntuación');
     if(item.title===item.title.toUpperCase()) tI.push('Mayúsculas');
     const ws=item.title.split(' '),u=new Set(ws.map(w=>w.toLowerCase()));
-    if(u.size<ws.length) tI.push('Repetidas');
+    if(u.size<ws.length)                tI.push('Repetidas');
     const eanP=ch.find(c=>c.id==='ean');
     const editUrl=mlEditLink(item.id);
     const sT=item.title.replace(/'/g,"\\'");
@@ -2267,6 +2401,7 @@ function renderSEOTable(){
       </div></td>
     </tr>`;
   }).join('');
+
   const pgEl=document.getElementById('seo-pagination');
   if(pgEl){
     if(pages<=1){pgEl.innerHTML='';return;}
@@ -3040,7 +3175,16 @@ async function renderReputacion(){
 const seoState = {
   page: 1,
   perPage: 25,
-  filter: null,
+  filter: null,       // problema específico o categoría
+  statusFilter: null, // null | 'active' | 'paused'
+  sortCol: null,      // null | 'seo' | 'quality'
+  sortDir: 1,         // 1=desc, -1=asc
+};
+
+// Estado de ordenamiento Publicaciones
+const pubState = {
+  sortCol: 'sold',    // campo activo
+  sortDir: -1,        // -1=desc, 1=asc (negativo=mayor primero)
 };
 
 // Estado de filtros persistente
