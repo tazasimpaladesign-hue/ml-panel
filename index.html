@@ -1592,7 +1592,12 @@ let currentAccount = null; // { id, name, color }
 let token=null, userId=null, userData=null;
 let allItems=[], allOrders=[], allQuestions=[];
 let selectedItems=new Set();
-let itemMetrics={};  // itemId → {visits, sales, conv} — cargado bajo demanda
+let itemMetrics={};  // itemId -> {visits, sales, conv}
+
+// Publicaciones visibles: excluye cerradas y eliminadas en TODOS los módulos
+function visibleItems(){
+  return allItems.filter(i => i.status !== 'closed' && i.status !== 'deleted' && i.status !== 'inactive');
+} -> {visits, sales, conv} — cargado bajo demanda
 let pubFilter='active', qFilter='UNANSWERED';
 let chartInstances={};
 let trackedKws=[];
@@ -1821,7 +1826,7 @@ async function loadItemsFast(){
     const first=await mlGet('/users/'+userId+'/items/search?search_type=scan&limit=100');
     const ids=first.results||[];
     if(!ids.length)return;
-    const r=await mlGet('/items?ids='+ids.join(',')+'&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping');
+    const r=await mlGet('/items?ids='+ids.join(',')+'&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations');
     allItems=[];r.forEach(x=>{if(x.code===200)allItems.push(x.body);});
     _updateItemsUI();
   }catch(e){console.warn('[loadItemsFast]',e);}
@@ -1843,7 +1848,7 @@ async function loadItemsFull(){
     }
     allIds=[...new Set(allIds)];const full=[];
     for(let i=0;i<allIds.length;i+=20){
-      try{const r=await mlGet('/items?ids='+allIds.slice(i,i+20).join(',')+'&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping');r.forEach(x=>{if(x.code===200)full.push(x.body);});}catch(e){}
+      try{const r=await mlGet('/items?ids='+allIds.slice(i,i+20).join(',')+'&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations');r.forEach(x=>{if(x.code===200)full.push(x.body);});}catch(e){}
       if(i>0&&i%200===0)await new Promise(r=>setTimeout(r,100));
     }
     allItems=full;_updateItemsUI();
@@ -1852,9 +1857,11 @@ async function loadItemsFull(){
 }
 
 function _updateItemsUI(){
-  const active=allItems.filter(i=>i.status==='active').length;
-  const paused=allItems.filter(i=>i.status==='paused').length;
-  const review=allItems.filter(i=>i.status==='under_review').length;
+  // Excluir closed/deleted de los conteos
+  const vis   = visibleItems();
+  const active = vis.filter(i=>i.status==='active').length;
+  const paused = vis.filter(i=>i.status==='paused').length;
+  const review = vis.filter(i=>i.status==='under_review').length;
   const z=allItems.filter(i=>(i.available_quantity||0)===0).length;
   const l=allItems.filter(i=>(i.available_quantity||0)>0&&(i.available_quantity||0)<=3).length;
   const s=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
@@ -1980,61 +1987,59 @@ async function loadItems(){await loadItemsFull();}
 // Endpoint: GET /users/{USER_ID}/items_visits?date_from=...&date_to=...
 // Este endpoint es el correcto para obtener visitas por ítem del vendedor.
 async function loadPubMetricsBatch(ids){
-  if(!userId){ console.warn('[Métricas] userId no disponible'); return; }
+  if(!userId || !ids || !ids.length){ console.warn('[Métricas] userId o ids no disponible'); return; }
 
   const today    = new Date();
-  const from     = new Date(today - 7*86400000);
+  const from7    = new Date(today - 7*86400000);
   const dateTo   = today.toISOString().slice(0,10);
-  const dateFrom = from.toISOString().slice(0,10);
+  const dateFrom = from7.toISOString().slice(0,10);
 
-  // 1. Visitas: GET /users/{USER_ID}/items_visits
-  let visitsMap = {};
-  try{
-    const vr = await mlGet(`/users/${userId}/items_visits?date_from=${dateFrom}&date_to=${dateTo}&limit=50`);
-    console.log('[Métricas] items_visits raw:', JSON.stringify(vr).slice(0,300));
-    // Respuesta puede ser: { data: [{item_id, total_visits}] } o { results: [...] }
-    const rows = vr.data || vr.results || vr.visits || [];
-    rows.forEach(row => {
-      const id = row.item_id || row.id;
-      if(id) visitsMap[id] = row.total_visits || row.visits || 0;
-    });
-    console.log('[Métricas] visitsMap keys:', Object.keys(visitsMap).length);
-  }catch(e){
-    console.warn('[Métricas] /items_visits falló:', e.message);
-    // Fallback: intentar por ítem individual en lotes de 5
-    const todo = ids.filter(id => !itemMetrics[id]).slice(0,25);
-    for(let i=0; i<todo.length; i+=5){
-      await Promise.allSettled(todo.slice(i,i+5).map(async id=>{
-        try{
-          const r = await mlGet(`/items/${id}/visits?date_from=${dateFrom}&date_to=${dateTo}`);
-          visitsMap[id] = r.total_visits || r.visits || 0;
-        }catch(e2){ visitsMap[id] = 0; }
-      }));
-      if(i>0) await new Promise(r=>setTimeout(r,200));
-    }
-  }
+  console.log('[Métricas] Cargando para', ids.length, 'ítems:', dateFrom, '->', dateTo);
 
-  // 2. Ventas: calcular desde allOrders (más confiable y sin llamadas extra)
+  // Ventas desde allOrders (sin llamadas extra, ya cargado)
   const salesMap = {};
   allOrders.forEach(o => {
     if(o.status === 'cancelled' || o.status === 'invalid') return;
-    if(new Date(o.date_created||0) < from) return;
+    if(new Date(o.date_created||0) < from7) return;
     (o.order_items||[]).forEach(oi => {
       const id = oi.item?.id;
       if(id) salesMap[id] = (salesMap[id]||0) + (oi.quantity||1);
     });
   });
 
-  // 3. Calcular conversión y guardar en caché
-  ids.forEach(id => {
-    if(itemMetrics[id]) return; // ya cargado
-    const visits = visitsMap[id] ?? 0;
-    const sales  = salesMap[id] || 0;
-    const conv   = (visits > 0 && sales > 0)
-      ? ((sales / visits) * 100).toFixed(1)
-      : visits > 0 ? '0.0' : '—';
-    itemMetrics[id] = { visits: visits || '—', sales, conv };
-    console.log('[Métricas]', id, '→', itemMetrics[id]);
+  // Visitas: GET /items/{ITEM_ID}/visits — lotes de 5 para respetar rate limits
+  const todo = ids.filter(id => !itemMetrics[id]);
+  for(let i=0; i<todo.length; i+=5){
+    const batch = todo.slice(i, i+5);
+    await Promise.allSettled(batch.map(async id => {
+      try{
+        const r = await mlGet('/items/'+id+'/visits?date_from='+dateFrom+'&date_to='+dateTo);
+        console.log('[Métricas] '+id+' visits raw:', JSON.stringify(r).slice(0,150));
+        // El endpoint devuelve: { total_visits: N } o { visits: N } o array
+        let visits = 0;
+        if(typeof r === 'number') visits = r;
+        else if(r && typeof r.total_visits === 'number') visits = r.total_visits;
+        else if(r && typeof r.visits === 'number') visits = r.visits;
+        else if(Array.isArray(r)) visits = r.reduce((s,d)=>s+(d.total||d.visits||0),0);
+        const sales = salesMap[id] || 0;
+        const conv  = visits > 0 ? ((sales / visits)*100).toFixed(1) : (sales > 0 ? '100+' : '—');
+        itemMetrics[id] = { visits, sales, conv };
+        console.log('[Métricas]', id, '-> visitas:', visits, '| ventas:', sales, '| conv:', conv+'%');
+      }catch(e){
+        const sales = salesMap[id] || 0;
+        itemMetrics[id] = { visits: '—', sales, conv: '—' };
+        console.warn('[Métricas] '+id+' error:', e.message);
+      }
+    }));
+    // Pausa entre lotes para respetar rate limits
+    if(i + 5 < todo.length) await new Promise(r => setTimeout(r, 350));
+  }
+
+  // Para ítems ya en salesMap pero sin visitas cargadas
+  Object.keys(salesMap).forEach(id => {
+    if(!itemMetrics[id]){
+      itemMetrics[id] = { visits: '—', sales: salesMap[id], conv: '—' };
+    }
   });
 }
 async function loadOrders(){await loadOrdersRecent();loadOrdersHistory();}
@@ -2069,7 +2074,7 @@ function calcAvgRT(){
 // ═══════════════════════════════════════════════════════════
 
 let dashPeriodDays = 30;
-let _catNameCache = {};  // category_id → name cache
+let _catNameCache = {};  // category_id -> name cache
 
 function dashSetPeriod(days, btn){
   dashPeriodDays = days;
@@ -2194,25 +2199,25 @@ function renderSmartAlerts(){
       alerts.push({icon:'📉',color:'#991b1b',bg:'#fef2f2',bdr:'#fecaca',
         title:`Caída fuerte en ventas (${delta}%)`,
         desc:`Ventas: ${paid.length} en ${curr.label} vs ${paidPrev.length} en ${prev.label}.`,
-        action:'Ver ventas →',fn:"showSection('ventas')",sev:1});
+        action:'Ver ventas ->',fn:"showSection('ventas')",sev:1});
   }
   if(pend.length>=3)
     alerts.push({icon:'💬',color:'#78350f',bg:'#fffbeb',bdr:'#fde68a',
       title:`${pend.length} preguntas sin responder`,
       desc:'Las respuestas tardías penalizan tu reputación en ML.',
-      action:'Responder →',fn:"showSection('preguntas')",sev:1});
+      action:'Responder ->',fn:"showSection('preguntas')",sev:1});
   const zeroActive = allItems.filter(i=>i.status==='active'&&(i.available_quantity||0)===0);
   if(zeroActive.length>0)
     alerts.push({icon:'⛔',color:'#991b1b',bg:'#fef2f2',bdr:'#fecaca',
       title:`${zeroActive.length} publicación${zeroActive.length>1?'es':''} sin stock`,
       desc:'Perdés ventas mientras no haya stock disponible.',
-      action:'Ver stock →',fn:"insightGoToStock()",sev:1});
+      action:'Ver stock ->',fn:"insightGoToStock()",sev:1});
   const seoLow = allItems.filter(i=>i.status==='active'&&seoScore(i.title)<30);
   if(seoLow.length>0)
     alerts.push({icon:'🔍',color:'#1e40af',bg:'#eff6ff',bdr:'#bfdbfe',
       title:`${seoLow.length} publicación${seoLow.length>1?'es':''} con SEO crítico`,
       desc:'Títulos muy cortos o con errores reducen la visibilidad.',
-      action:'Optimizar →',fn:"insightGoToSEO('seo_low')",sev:2});
+      action:'Optimizar ->',fn:"insightGoToSEO('seo_low')",sev:2});
   if(!alerts.length){el.innerHTML='';return;}
   const sorted=[...alerts.filter(a=>a.sev===1),...alerts.filter(a=>a.sev===2)].slice(0,4);
   el.innerHTML=`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-bottom:14px">
@@ -2283,7 +2288,7 @@ function renderMainChart(mode){
     // Período actual
     const kCurr = o.date_created?.slice(0,10);
     if(kCurr && dataCurr[kCurr]!==undefined) dataCurr[kCurr]+=val;
-    // Período anterior → desplazar al rango actual para comparación visual
+    // Período anterior -> desplazar al rango actual para comparación visual
     if(ts>=prevCutoff && ts<currCutoff){
       const shifted = new Date(ts.getTime()+days*86400000);
       const kPrev = shifted.toISOString().slice(0,10);
@@ -2571,7 +2576,7 @@ function renderDashInsights(){
     });
   }
 
-  // Ordenar: critical → medium → low → ok
+  // Ordenar: critical -> medium -> low -> ok
   const order = {critical:0,medium:1,low:2,ok:3};
   insights.sort((a,b)=>(order[a.level]||3)-(order[b.level]||3));
 
@@ -2591,7 +2596,7 @@ function renderDashInsights(){
         <div style="flex:1;min-width:0">
           <div style="font-size:12.5px;font-weight:600;color:${cfg.titleC};margin-bottom:2px">${ins.title}</div>
           <div style="font-size:11.5px;color:${cfg.textC};line-height:1.5;margin-bottom:${ins.action?'7px':'0'}">${ins.text}</div>
-          ${ins.action?`<button onclick="${ins.fn}" class="btn btn-xs" style="background:${cfg.border};color:${cfg.titleC};border:1px solid ${cfg.border};font-size:10.5px;padding:3px 9px">${ins.action} →</button>`:''}
+          ${ins.action?`<button onclick="${ins.fn}" class="btn btn-xs" style="background:${cfg.border};color:${cfg.titleC};border:1px solid ${cfg.border};font-size:10.5px;padding:3px 9px">${ins.action} -></button>`:''}
         </div>
         <span style="font-size:12px;flex-shrink:0">${cfg.dot}</span>
       </div>
@@ -2599,7 +2604,7 @@ function renderDashInsights(){
   }).join('');
 }
 
-// Helper para insights → pausadas
+// Helper para insights -> pausadas
 function insightGoToPausadas(){
   pubFilter='paused';
   showSection('publicaciones');
@@ -2635,7 +2640,7 @@ function renderDashStock(){
       </div>
     </div>
     <div style="margin-top:10px;text-align:center">
-      <button onclick="showSection('stock')" class="btn btn-ghost btn-xs" style="font-size:11px;width:100%">📋 Ver todo el stock →</button>
+      <button onclick="showSection('stock')" class="btn btn-ghost btn-xs" style="font-size:11px;width:100%">📋 Ver todo el stock -></button>
     </div>`;
 }
 
@@ -2674,7 +2679,7 @@ function renderDashRepMini(){
   el.innerHTML=`<div style="text-align:center;padding:10px 0">
     <div style="font-size:32px;margin-bottom:6px">⭐</div>
     <div style="font-size:13px;color:var(--text2);margin-bottom:10px">Ver reputación detallada</div>
-    <button onclick="showSection('reputacion')" class="btn btn-ghost btn-xs" style="width:100%;font-size:11px">Ver reputación →</button>
+    <button onclick="showSection('reputacion')" class="btn btn-ghost btn-xs" style="width:100%;font-size:11px">Ver reputación -></button>
   </div>`;
 }
 
@@ -2725,10 +2730,11 @@ function renderPubs(){
   const legacySort=document.getElementById('pub-sort')?.value||'';
   const tipoFilter=document.getElementById('pub-type-filter')?.value||'';
 
-  let items=[...allItems];
+  // visibleItems() excluye closed/deleted; pubFilter filtra active/paused/all
+  let items = visibleItems();
   if(pubFilter!=='all') items=items.filter(i=>i.status===pubFilter);
   if(search) items=items.filter(i=>i.title.toLowerCase().includes(search));
-  // Tipo filter
+  // Tipo filter usando catalog_listing (bool oficial de ML)
   if(tipoFilter) items=items.filter(i=>getPubType(i)===tipoFilter);
 
   // Ordenar
@@ -2859,10 +2865,10 @@ async function saveSKU(itemId){
         seller_custom_field: val || null
       }))
     };
-    console.log('[SKU] Item CON variaciones:', variations.length, '→ body:', JSON.stringify(body).slice(0,200));
+    console.log('[SKU] Item CON variaciones:', variations.length, '-> body:', JSON.stringify(body).slice(0,200));
   } else {
     body = { seller_custom_field: val || null };
-    console.log('[SKU] Item SIN variaciones → body:', JSON.stringify(body));
+    console.log('[SKU] Item SIN variaciones -> body:', JSON.stringify(body));
   }
 
   try{
@@ -2886,13 +2892,34 @@ async function saveSKU(itemId){
       return;
     }
 
-    // Actualizar estado local
-    if(item){
-      item.seller_custom_field = val || null;
-      if(hasVariations) variations.forEach(v => v.seller_custom_field = val || null);
+    // Verificar con GET que el valor realmente se guardó en ML
+    try{
+      const verify = await mlGet('/items/'+itemId+'?attributes=id,seller_custom_field,variations');
+      const savedVal = verify.seller_custom_field || 
+        (verify.variations?.[0]?.seller_custom_field) || null;
+      console.log('[SKU] Verificación GET -> seller_custom_field:', savedVal);
+      const confirmed = (val === '' || val === null)
+        ? (savedVal === null || savedVal === '')
+        : (savedVal === val);
+      if(item){
+        item.seller_custom_field = savedVal;
+        if(hasVariations && verify.variations){
+          verify.variations.forEach(v => {
+            const local = variations.find(lv => lv.id === v.id);
+            if(local) local.seller_custom_field = v.seller_custom_field;
+          });
+        }
+      }
+      if(msgEl){
+        msgEl.textContent = confirmed ? '✅ SKU guardado en ML' : '⚠️ Guardado pero ML devolvió: '+String(savedVal);
+        msgEl.style.color = confirmed ? 'var(--green)' : 'var(--amber)';
+      }
+    }catch(ve){
+      console.warn('[SKU] No se pudo verificar GET:', ve.message);
+      if(item) item.seller_custom_field = val || null;
+      if(msgEl){ msgEl.textContent='✅ SKU enviado a ML'; msgEl.style.color='var(--green)'; }
     }
-    if(msgEl){ msgEl.textContent='✅ SKU actualizado'; msgEl.style.color='var(--green)'; }
-    setTimeout(()=>renderPubs(), 900);
+    setTimeout(()=>renderPubs(), 1200);
 
   }catch(e){
     inp.disabled = false;
@@ -2944,7 +2971,7 @@ async function saveStock(itemId){
       body: JSON.stringify({ available_quantity: val })
     });
     const data = await res.json();
-    console.log('[Stock] PUT', itemId, '→', JSON.stringify(data).slice(0,200));
+    console.log('[Stock] PUT', itemId, '->', JSON.stringify(data).slice(0,200));
 
     if(res.status === 401 || data.error === 'unauthorized'){
       inp.disabled = false;
@@ -3012,10 +3039,10 @@ async function savePrice(itemId){
   let body;
   if(hasVariations){
     body = { variations: variations.map(v => ({ id: v.id, price: val })) };
-    console.log('[Precio] Item CON variaciones → body:', JSON.stringify(body).slice(0,150));
+    console.log('[Precio] Item CON variaciones -> body:', JSON.stringify(body).slice(0,150));
   } else {
     body = { price: val };
-    console.log('[Precio] Item SIN variaciones → price:', val);
+    console.log('[Precio] Item SIN variaciones -> price:', val);
   }
 
   try{
@@ -3117,9 +3144,11 @@ function renderThumbnail(item, size){
 
 // ── Shared: detectar tipo de publicación ──────────────────
 function getPubType(item){
-  const cats = item.catalog_product_id ? 'catalog' : null;
+  // catalog_listing boolean es el campo real de ML para detectar catálogo
+  if(item.catalog_listing === true) return 'catalog';
+  // fallback: catalog_product_id existe en ítems de catálogo
+  if(item.catalog_product_id) return 'catalog';
   const lt = (item.listing_type_id||'').toLowerCase();
-  if(cats) return 'catalog';
   if(lt.includes('gold')) return 'gold';
   if(lt === 'free' || lt === 'bronze') return 'free';
   return 'classic';
@@ -3149,8 +3178,11 @@ function itemHasEAN(item){
 // Campo oficial de ML para clips/videos.
 // NO usar attributes ni textos del frontend — SOLO este campo.
 function itemHasVideo(item){
-  // video_id es el ÚNICO campo oficial de ML para videos/clips
-  return !!(item.video_id && String(item.video_id).trim() && item.video_id !== 'null' && item.video_id !== 'undefined');
+  // Campo ÚNICO oficial de ML para video/clip es video_id
+  // null, undefined, cadena "null" = SIN video
+  if(!item) return false;
+  const v = item.video_id;
+  return v !== null && v !== undefined && v !== 'null' && v !== 'undefined' && String(v).trim() !== '';
 }
 
 // ── Sistema de objetivos de calidad (basado en datos reales) ─
@@ -3438,7 +3470,8 @@ function renderSEOTable(){
   const st=seoState.statusFilter;
 
   // 1. FILTRAR
-  let items=allItems.filter(i=>{
+  // visibleItems() excluye closed/deleted — luego aplicar resto de filtros
+  let items=visibleItems().filter(i=>{
     if(searchQ&&!i.title.toLowerCase().includes(searchQ)) return false;
     if(st&&i.status!==st) return false;
     if(seoState.tipoFilter && getPubType(i)!==seoState.tipoFilter) return false;
@@ -3568,7 +3601,7 @@ function renderSEOTable(){
     b+=`<button class="btn btn-ghost btn-xs" onclick="seoGoPage(${seoState.page-1})" ${seoState.page<=1?'disabled':''}>← Ant</button>`;
     const s=Math.max(1,seoState.page-2),e=Math.min(pages,s+4);
     for(let p=s;p<=e;p++) b+=`<button class="btn btn-xs ${p===seoState.page?'btn-primary':'btn-ghost'}" onclick="seoGoPage(${p})">${p}</button>`;
-    b+=`<button class="btn btn-ghost btn-xs" onclick="seoGoPage(${seoState.page+1})" ${seoState.page>=pages?'disabled':''}>Sig →</button></div>`;
+    b+=`<button class="btn btn-ghost btn-xs" onclick="seoGoPage(${seoState.page+1})" ${seoState.page>=pages?'disabled':''}>Sig -></button></div>`;
     pgEl.innerHTML=b;
   }
 }
@@ -3651,8 +3684,8 @@ PALABRAS ABSOLUTAMENTE PROHIBIDAS EN TÍTULO Y VARIANTES (nunca usarlas, ni siqu
 
 REGLA DE MICROONDAS (SOLO EN DESCRIPCIÓN):
 - Si el producto es taza plástica, taza cerámica, taza mágica o jarro térmico
-  → usar la frase exacta "Apto para microondas" o "Apta para microondas" según el género del sustantivo
-  → NO mencionar "lavavajillas" bajo ninguna circunstancia
+  -> usar la frase exacta "Apto para microondas" o "Apta para microondas" según el género del sustantivo
+  -> NO mencionar "lavavajillas" bajo ninguna circunstancia
 
 ═══ REGLAS DESCRIPCIÓN ═══
 - Longitud: entre 800 y 2000 caracteres (OBLIGATORIO)
@@ -3793,7 +3826,7 @@ Respondé SOLO JSON válido (sin markdown, sin backticks):
       ${result.mejoras_recomendadas?.length?`
       <div style="margin-bottom:12px">
         <div style="font-size:10px;color:#374151;margin-bottom:6px;font-weight:700;text-transform:uppercase">🎯 MEJORAS CLAVE</div>
-        ${result.mejoras_recomendadas.map(m=>`<div style="font-size:12px;color:#1e293b;margin-bottom:5px;display:flex;gap:6px"><span style="color:#3b82f6">→</span>${m}</div>`).join('')}
+        ${result.mejoras_recomendadas.map(m=>`<div style="font-size:12px;color:#1e293b;margin-bottom:5px;display:flex;gap:6px"><span style="color:#3b82f6">-></span>${m}</div>`).join('')}
       </div>`:''}
 
       ${result.enfoque_venta?`
@@ -3848,9 +3881,9 @@ function cleanForML(str, isTitle){
     .replace(/[\u0000-\u001F\u007F-\u009F\u00AD]/g, '')
     // Quitar emojis y símbolos Unicode
     .replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{200D}\u{FE0E}]/gu, '')
-    // Non-breaking space → espacio normal
+    // Non-breaking space -> espacio normal
     .replace(/\u00A0/g, ' ')
-    // Múltiples espacios → uno
+    // Múltiples espacios -> uno
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -4182,7 +4215,7 @@ function clearEANHistory(){
   if(fb) fb.textContent = '';
 }
 
-// generateProduct modal → ahora navega al generador de códigos
+// generateProduct modal -> ahora navega al generador de códigos
 async function generateProduct(){
   closeModal('modal-gen');
   showSection('generador');
@@ -4224,7 +4257,7 @@ Respondé SOLO JSON:
           <span class="badge ${d.potencial==='alto'?'bg-red':'bg-amber'}" style="flex-shrink:0">${d.potencial==='alto'?'🔥 Alto potencial':'💡 Potencial medio'}</span>
         </div>
         <div style="font-size:12px;color:#92400e;margin-bottom:8px;padding:6px 10px;background:#fffbeb;border-radius:6px;border-left:3px solid #f5a623">⚠️ ${d.problema_principal}</div>
-        <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:10px">${(d.sugerencias||[]).map(s=>`<div style="font-size:12px;color:var(--text2)">→ ${s}</div>`).join('')}</div>
+        <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:10px">${(d.sugerencias||[]).map(s=>`<div style="font-size:12px;color:var(--text2)">-> ${s}</div>`).join('')}</div>
         ${d.enfoque_venta?`<div style="font-size:12px;color:#1d4ed8;padding:6px 10px;background:#eff6ff;border-radius:6px;margin-bottom:8px">💡 ${d.enfoque_venta}</div>`:''}
         ${d.titulo_mejorado?`<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:var(--rs);padding:10px">
           <div style="font-size:10px;color:#166534;margin-bottom:4px;font-weight:700">✅ TÍTULO SUGERIDO</div>
@@ -4592,8 +4625,8 @@ function renderStock(){
 
 
   // ── 1. FILTRAR ───────────────────────────────────────────
-  let items = [...allItems];
-
+  // visibleItems() excluye closed/deleted automáticamente
+  let items = visibleItems();
   // Quick status chip (combinable con filtros de texto)
   if(stockState.quickStatus) items = items.filter(i => i.status === stockState.quickStatus);
 
@@ -4636,7 +4669,7 @@ function renderStock(){
   }
 
   console.log('[Stock] Filtro:', { type, textVal, statusVal, quickStatus: stockState.quickStatus, sortCol: stockState.sortCol },
-    '→', items.length, 'de', allItems.length, 'resultados');
+    '->', items.length, 'de', allItems.length, 'resultados');
 
   // ── 3. PAGINAR ───────────────────────────────────────────
   const total    = items.length;
@@ -4757,7 +4790,7 @@ function stockRenderPagination(total, perPage){
     <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">
       <button class="btn btn-ghost btn-xs" onclick="stockGoPage(${cur-1})" ${cur===1?'disabled':''}>← Ant</button>
       ${pageButtons}
-      <button class="btn btn-ghost btn-xs" onclick="stockGoPage(${cur+1})" ${cur===maxPages?'disabled':''}>Sig →</button>
+      <button class="btn btn-ghost btn-xs" onclick="stockGoPage(${cur+1})" ${cur===maxPages?'disabled':''}>Sig -></button>
     </div>`;
 }
 
@@ -4794,9 +4827,9 @@ async function updateStock(id){
   const item  = allItems.find(i => i.id === id);
   const label = item ? item.title.slice(0, 50) : id;
   const current = item ? (item.available_quantity ?? '?') : '?';
-  if(!confirm(`Actualizar stock de:\n"${label}"\n\nStock actual: ${current} → Nuevo: ${qty}`)) return;
+  if(!confirm(`Actualizar stock de:\n"${label}"\n\nStock actual: ${current} -> Nuevo: ${qty}`)) return;
 
-  console.log('[Stock] Actualizando', id, '→', qty, 'unidades');
+  console.log('[Stock] Actualizando', id, '->', qty, 'unidades');
 
   // UI loading
   if(btn){ btn.disabled = true; btn.textContent = '⏳'; }
@@ -4825,7 +4858,7 @@ async function updateStock(id){
     if(btn){ btn.disabled = false; btn.textContent = '✓'; }
     if(msg){ msg.textContent = '✅ Actualizado'; msg.style.color = '#16a34a'; }
 
-    console.log('[Stock] ✅ OK — item', id, '→', qty);
+    console.log('[Stock] ✅ OK — item', id, '->', qty);
 
     // Actualizar métricas superiores sin re-renderizar tabla
     const zero  = allItems.filter(i => (i.available_quantity||0) === 0).length;
@@ -4893,102 +4926,87 @@ function focusStockInput(id){
 async function loadHorarios(){
   const el = document.getElementById('horarios-out');
   if(!el) return;
-  el.innerHTML = '<div class="loading"><div class="spin"></div>Consultando API...</div>';
-  try{
-    // Intentamos obtener datos del seller — los horarios pueden estar en shipping_settings
-    const userData = await mlGet('/users/'+userId);
-    console.log('[Horarios] userData:', JSON.stringify(userData).slice(0,400));
-
-    // Buscar datos de envío/despacho en el perfil del vendedor
-    const shipping = userData.shipping_modes || userData.shipping || null;
-    const handling = userData.seller_experience?.handling_time || userData.handling_time || null;
-    const logistic = userData.seller_reputation?.logistics || null;
-
-    if(handling || shipping || logistic){
-      el.innerHTML = `
-        <div style="display:flex;flex-direction:column;gap:10px">
-          ${handling?`<div style="padding:10px;background:var(--bg3);border-radius:var(--rs);border:1px solid var(--border)">
-            <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Tiempo de manejo</div>
-            <div style="font-size:14px;font-weight:600">${typeof handling==='object'?JSON.stringify(handling):handling}</div>
-          </div>`:''}
-          ${shipping?`<div style="padding:10px;background:var(--bg3);border-radius:var(--rs);border:1px solid var(--border)">
-            <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Modos de envío</div>
-            <div style="font-size:12px">${Array.isArray(shipping)?shipping.join(', '):String(shipping)}</div>
-          </div>`:''}
-          <div class="alert a-info" style="margin-bottom:0;font-size:12px">
-            ℹ️ Para configurar horarios de despacho detallados, accedé a <a href="https://www.mercadolibre.com.ar/ajustes/ventas" target="_blank" style="color:var(--accent2)">Configuración de ventas en ML</a>.
-          </div>
-        </div>`;
-    } else {
-      el.innerHTML = `
-        <div class="alert a-info" style="margin-bottom:8px">
-          ℹ️ MercadoLibre no expone horarios de despacho directamente desde su API pública.
-        </div>
-        <div style="font-size:12.5px;color:var(--text2);line-height:1.6">
-          Para consultar y configurar tus horarios de despacho, accedé directamente a:
-          <a href="https://www.mercadolibre.com.ar/ajustes/ventas" target="_blank" class="btn btn-primary btn-sm" style="display:inline-flex;margin-top:10px;text-decoration:none">
-            ⚙️ Configuración de ventas en ML →
-          </a>
-        </div>`;
-    }
-  }catch(e){
-    console.warn('[Horarios] Error:', e.message);
-    el.innerHTML = `<div class="alert a-warn">⚠️ No se pudo obtener información de horarios desde la API. <a href="https://www.mercadolibre.com.ar/ajustes/ventas" target="_blank" style="color:var(--amber)">Configurar en ML →</a></div>`;
-  }
+  // ML no expone horarios por API pública — link directo al panel oficial
+  el.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="alert a-info" style="margin-bottom:0;font-size:12.5px">
+        📌 MercadoLibre no expone los horarios de despacho a través de su API pública.
+        Configurá tus horarios directamente desde el panel de ML.
+      </div>
+      <a href="https://www.mercadolibre.com.ar/preferencias-de-venta/horarios-de-envio"
+        target="_blank" rel="noopener"
+        class="btn btn-primary"
+        style="text-decoration:none;display:inline-flex;align-items:center;gap:8px;align-self:flex-start;font-size:13px;padding:10px 18px">
+        🕐 Configurar horarios de despacho en ML ->
+      </a>
+      <div style="font-size:12px;color:var(--text2);line-height:1.6">
+        Desde ese panel podés configurar:<br>
+        • Días y horarios de despacho habituales<br>
+        • Días que no despachás<br>
+        • Tiempo de manejo (handling time)
+      </div>
+    </div>`;
 }
-
 async function loadFestivos(){
   const el = document.getElementById('festivos-out');
   if(!el) return;
-  el.innerHTML = '<div class="loading"><div class="spin"></div>Consultando API...</div>';
-  try{
-    // ML publica feriados en /countries/{country_id}/time_zones o /countries/{country_id}
-    // Intentamos el endpoint de Argentina
-    const r = await mlGet('/countries/AR');
-    console.log('[Festivos] /countries/AR:', JSON.stringify(r).slice(0,300));
+  el.innerHTML = '<div class="loading"><div class="spin"></div>Cargando...</div>';
 
-    // Los feriados no están en la API pública de ML — mostramos info de fuente oficial
-    // Intentar obtener de /users/{USER_ID} si hay datos de feriados en el account
-    const year = new Date().getFullYear();
+  // Feriados nacionales Argentina 2025-2026 con tipo
+  // Fuente: argentina.gob.ar (los obligatorios son días inhábiles para despacho)
+  const festivos = [
+    { fecha:'01/01/2026', nombre:'Año Nuevo', tipo:'obligatorio' },
+    { fecha:'16/02/2026', nombre:'Carnaval', tipo:'puente' },
+    { fecha:'17/02/2026', nombre:'Carnaval', tipo:'puente' },
+    { fecha:'24/03/2026', nombre:'Día de la Memoria', tipo:'obligatorio' },
+    { fecha:'02/04/2026', nombre:'Día del Veterano de Malvinas', tipo:'obligatorio' },
+    { fecha:'03/04/2026', nombre:'Viernes Santo', tipo:'obligatorio' },
+    { fecha:'01/05/2026', nombre:'Día del Trabajador', tipo:'obligatorio' },
+    { fecha:'25/05/2026', nombre:'Revolución de Mayo', tipo:'obligatorio' },
+    { fecha:'20/06/2026', nombre:'Paso a la Inmortalidad del Gral. Belgrano', tipo:'obligatorio' },
+    { fecha:'09/07/2026', nombre:'Día de la Independencia', tipo:'obligatorio' },
+    { fecha:'17/08/2026', nombre:'Paso a la Inmortalidad del Gral. San Martín', tipo:'obligatorio' },
+    { fecha:'12/10/2026', nombre:'Día del Respeto a la Diversidad Cultural', tipo:'obligatorio' },
+    { fecha:'20/11/2026', nombre:'Día de la Soberanía Nacional', tipo:'obligatorio' },
+    { fecha:'08/12/2026', nombre:'Inmaculada Concepción de María', tipo:'obligatorio' },
+    { fecha:'25/12/2026', nombre:'Navidad', tipo:'obligatorio' },
+  ];
 
-    // Feriados oficiales Argentina (hardcoded como referencia — los reales se obtienen de API Gov)
-    const festivos = [
-      { fecha:'01/01', nombre:'Año Nuevo' },
-      { fecha:'24/03', nombre:'Día de la Memoria por la Verdad y la Justicia' },
-      { fecha:'02/04', nombre:'Día del Veterano y los Caídos en Malvinas' },
-      { fecha:'01/05', nombre:'Día del Trabajador' },
-      { fecha:'25/05', nombre:'Día de la Revolución de Mayo' },
-      { fecha:'20/06', nombre:'Paso a la Inmortalidad del Gral. Belgrano' },
-      { fecha:'09/07', nombre:'Día de la Independencia' },
-      { fecha:'17/08', nombre:'Paso a la Inmortalidad del Gral. San Martín' },
-      { fecha:'12/10', nombre:'Día del Respeto a la Diversidad Cultural' },
-      { fecha:'20/11', nombre:'Día de la Soberanía Nacional' },
-      { fecha:'08/12', nombre:'Inmaculada Concepción de María' },
-      { fecha:'25/12', nombre:'Navidad' },
-    ];
-
-    el.innerHTML = `
-      <div class="alert a-info" style="margin-bottom:12px;font-size:11.5px">
-        ℹ️ MercadoLibre no provee un endpoint de feriados en su API pública. Se muestran los feriados nacionales de Argentina ${year} como referencia.
+  el.innerHTML = `
+    <div style="margin-bottom:10px">
+      <a href="https://www.mercadolibre.com.ar/preferencias-de-venta/feriados-opcionales"
+        target="_blank" rel="noopener"
+        class="btn btn-ghost btn-sm"
+        style="text-decoration:none;display:inline-flex;align-items:center;gap:6px">
+        📅 Gestionar feriados opcionales en ML ->
+      </a>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text2)">
+        <span style="width:10px;height:10px;border-radius:2px;background:#ef4444;display:inline-block"></span>Obligatorio (no se despacha)
       </div>
-      <div style="display:flex;flex-direction:column;gap:6px">
-        ${festivos.map(f=>`
-          <div style="display:flex;align-items:center;gap:10px;padding:7px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs)">
-            <span style="font-family:var(--mono);font-size:12px;font-weight:600;color:var(--accent2);min-width:42px">${f.fecha}</span>
-            <span style="font-size:12px;color:var(--text2)">${f.nombre}</span>
-          </div>`).join('')}
+      <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text2)">
+        <span style="width:10px;height:10px;border-radius:2px;background:#f59e0b;display:inline-block"></span>Puente turístico
       </div>
-      <div style="margin-top:10px">
-        <a href="https://www.argentina.gob.ar/interior/feriados" target="_blank" class="btn btn-ghost btn-sm" style="text-decoration:none;font-size:11px">
-          📅 Ver feriados oficiales Argentina.gob.ar →
-        </a>
-      </div>`;
-  }catch(e){
-    console.warn('[Festivos] Error:', e.message);
-    el.innerHTML = `<div class="alert a-warn">⚠️ ${e.message}</div>`;
-  }
+    </div>
+    <div style="display:flex;flex-direction:column;gap:5px">
+      ${festivos.map(f=>{
+        const isOblig = f.tipo==='obligatorio';
+        const isPuente = f.tipo==='puente';
+        const bg = isOblig ? '#fef2f2' : isPuente ? '#fffbeb' : 'var(--bg3)';
+        const border = isOblig ? '#fecaca' : isPuente ? '#fde68a' : 'var(--border)';
+        const dot = isOblig ? '#ef4444' : '#f59e0b';
+        return \`<div style="display:flex;align-items:center;gap:10px;padding:7px 10px;background:\${bg};border:1px solid \${border};border-left:3px solid \${dot};border-radius:var(--rs)">
+          <span style="font-family:var(--mono);font-size:11.5px;font-weight:600;color:var(--text);min-width:80px">\${f.fecha}</span>
+          <span style="font-size:12px;color:var(--text2);flex:1">\${f.nombre}</span>
+          <span class="badge" style="font-size:9px;background:\${isOblig?'#fee2e2':'#fef3c7'};color:\${isOblig?'#991b1b':'#78350f'}">\${isOblig?'Obligatorio':'Puente'}</span>
+        </div>\`;
+      }).join('')}
+    </div>
+    <div style="margin-top:10px;font-size:11px;color:var(--text3)">
+      Fuente de referencia: <a href="https://www.argentina.gob.ar/interior/feriados" target="_blank" style="color:var(--accent2)">argentina.gob.ar/interior/feriados</a>
+    </div>`;
 }
-
 async function renderReclamos(){
   try{
     const r=await mlGet(`/orders/search?seller=${userId}&tags=has_claims&limit=20`);
@@ -5057,14 +5075,23 @@ function renderFacturacion(){
   document.getElementById('fac-hist').textContent='$'+total.toLocaleString('es-AR');
   document.getElementById('fac-prev').textContent='—';
   const tbody=document.getElementById('fac-tbody');
-  tbody.innerHTML=allOrders.map(o=>`<tr>
-    <td style="font-family:var(--mono);font-size:11px">#${o.id}</td>
-    <td style="max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${o.order_items?.[0]?.item?.title?.slice(0,40)||'—'}</td>
-    <td>${o.buyer?.nickname||'—'}</td>
-    <td style="font-weight:600;color:var(--green)">$${(o.total_amount||0).toLocaleString('es-AR')}</td>
-    <td><span class="badge ${o.status==='paid'?'bg-green':'bg-amber'}">${o.status||'—'}</span></td>
-    <td style="color:var(--text3)">${o.date_created?new Date(o.date_created).toLocaleDateString('es-AR'):''}</td>
-  </tr>`).join('');
+  tbody.innerHTML=allOrders.map(o=>{
+    const facTitle = o.order_items?.[0]?.item?.title?.slice(0,40)||'—';
+    const facThumb = o.order_items?.[0]?.item?.thumbnail||'';
+    return `<tr>
+      <td style="font-family:var(--mono);font-size:11px">#${o.id}</td>
+      <td style="max-width:180px">
+        <div style="display:flex;align-items:center;gap:7px">
+          ${facThumb?`<img src="${facThumb}" alt="" loading="lazy" style="width:36px;height:36px;object-fit:cover;border-radius:5px;flex-shrink:0;border:1px solid var(--border)" onerror="this.style.display='none'">`:''}
+          <span style="overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-size:12px;line-height:1.35">${facTitle}</span>
+        </div>
+      </td>
+      <td>${o.buyer?.nickname||'—'}</td>
+      <td style="font-weight:600;color:var(--green)">$${(o.total_amount||0).toLocaleString('es-AR')}</td>
+      <td><span class="badge ${o.status==='paid'?'bg-green':'bg-amber'}">${o.status||'—'}</span></td>
+      <td style="color:var(--text3)">${o.date_created?new Date(o.date_created).toLocaleDateString('es-AR'):''}</td>
+    </tr>`;
+  }).join('');
 
   const months={};
   for(let i=5;i>=0;i--){const d=new Date();d.setMonth(d.getMonth()-i);const k=d.getMonth()+'-'+d.getFullYear();months[k]={label:d.toLocaleDateString('es-AR',{month:'short'}),val:0};}
@@ -5086,7 +5113,7 @@ function addRule(){
   const el=document.getElementById('rules-list');
   const div=document.createElement('div');
   div.className='rule-card';div.id=id;
-  div.innerHTML=`<div class="rule-icon" style="background:var(--accent-g)">⚙️</div><div style="flex:1"><div style="font-size:12.5px;font-weight:500">${name}</div><div style="font-size:11px;color:var(--text3)">${cond} → ${action}</div></div><span class="badge bg-green" id="badge-${id}">Activa</span><button class="btn btn-ghost btn-xs" style="margin-left:6px" onclick="toggleRule('${id}',this)">⏸ Pausar</button><button class="btn btn-danger btn-xs" style="margin-left:4px" onclick="deleteRule('${id}')">✕</button>`;
+  div.innerHTML=`<div class="rule-icon" style="background:var(--accent-g)">⚙️</div><div style="flex:1"><div style="font-size:12.5px;font-weight:500">${name}</div><div style="font-size:11px;color:var(--text3)">${cond} -> ${action}</div></div><span class="badge bg-green" id="badge-${id}">Activa</span><button class="btn btn-ghost btn-xs" style="margin-left:6px" onclick="toggleRule('${id}',this)">⏸ Pausar</button><button class="btn btn-danger btn-xs" style="margin-left:4px" onclick="deleteRule('${id}')">✕</button>`;
   el.appendChild(div);
   document.getElementById('rule-name').value='';
 }
@@ -5132,7 +5159,7 @@ function refreshAlerts(){
     const price  = i.price || 0;
     const score  = (typeof seoScore === 'function') ? seoScore(title) : 50;
 
-    // Sin stock → CRÍTICO
+    // Sin stock -> CRÍTICO
     if (qty === 0 && i.status === 'active') {
       alerts.push({
         uid: 'sinstock_' + id,
@@ -5148,7 +5175,7 @@ function refreshAlerts(){
         item_stock: qty,
       });
     }
-    // Stock bajo (≤2) → IMPORTANTE
+    // Stock bajo (≤2) -> IMPORTANTE
     else if (qty > 0 && qty <= 2 && i.status === 'active') {
       alerts.push({
         uid: 'bajstock_' + id,
@@ -5165,7 +5192,7 @@ function refreshAlerts(){
       });
     }
 
-    // Publicación pausada → IMPORTANTE
+    // Publicación pausada -> IMPORTANTE
     if (i.status === 'paused') {
       alerts.push({
         uid: 'paused_' + id,
@@ -5181,7 +5208,7 @@ function refreshAlerts(){
       });
     }
 
-    // SEO crítico (< 20) → CRÍTICO
+    // SEO crítico (< 20) -> CRÍTICO
     if (score < 20) {
       alerts.push({
         uid: 'seocrit_' + id,
@@ -5197,7 +5224,7 @@ function refreshAlerts(){
         item_score: score,
       });
     }
-    // SEO bajo (20–39) → IMPORTANTE
+    // SEO bajo (20–39) -> IMPORTANTE
     else if (score < 40 && i.status === 'active') {
       alerts.push({
         uid: 'seowarn_' + id,
@@ -5311,18 +5338,21 @@ function refreshAlerts(){
            id="alertcard-${a.uid}"
            style="border-left-color:${p.borderColor}">
         <div class="alert-icon">${a.icon}</div>
-        <div class="alert-body">
-          <div class="alert-head">
-            <span class="badge ${p.badgeCls}" style="font-size:9px;letter-spacing:.04em">${p.label}</span>
-            <span class="alert-title">${a.title}</span>
+        <div style="display:flex;align-items:flex-start;gap:8px;flex:1;min-width:0">
+          ${(()=>{const ri=a.item_id?allItems.find(i=>i.id===a.item_id):null;const th=ri?.thumbnail||'';return th?`<img src="${th}" alt="" loading="lazy" style="width:36px;height:36px;object-fit:cover;border-radius:5px;flex-shrink:0;border:1px solid var(--border);margin-top:2px" onerror="this.style.display='none'">`:'';})()}
+          <div class="alert-body" style="flex:1;min-width:0">
+            <div class="alert-head">
+              <span class="badge ${p.badgeCls}" style="font-size:9px;letter-spacing:.04em">${p.label}</span>
+              <span class="alert-title">${a.title}</span>
+            </div>
+            <div class="alert-sub" title="${a.subtitle}">${a.subtitle}</div>
+            <div class="alert-detail">${a.detail}</div>
           </div>
-          <div class="alert-sub" title="${a.subtitle}">${a.subtitle}</div>
-          <div class="alert-detail">${a.detail}</div>
         </div>
         <button class="btn btn-sm"
                 onclick="alertGoTo('${a.category}','${safeId}','${safeTitle}',this,'${a.uid}')"
                 style="flex-shrink:0;background:${p.btnBg};color:${p.btnColor};border:1px solid ${p.btnBorder};font-weight:600;white-space:nowrap">
-          ${a.actionLabel} →
+          ${a.actionLabel} ->
         </button>
       </div>`;
   }).join('');
@@ -5332,7 +5362,7 @@ function refreshAlerts(){
 
 // ── Dispatcher principal de acciones ──────────────────────
 function alertGoTo(category, itemId, itemTitle, btnEl, uid){
-  console.log('[Alerta→Acción]', { category, itemId, itemTitle: (itemTitle||'').slice(0,40), uid });
+  console.log('[Alerta->Acción]', { category, itemId, itemTitle: (itemTitle||'').slice(0,40), uid });
 
   // Feedback de loading en el botón
   if(btnEl){
@@ -5353,7 +5383,7 @@ function alertGoTo(category, itemId, itemTitle, btnEl, uid){
 
 // ── Navegar a Stock y resaltar el producto ─────────────────
 function alertGoToStock(itemId, itemTitle){
-  console.log('[Alertas→Stock] item:', itemId);
+  console.log('[Alertas->Stock] item:', itemId);
   showSection('stock');
   // focusStockInput ya maneja paginación y búsqueda — delegar a él
   setTimeout(() => focusStockInput(itemId), 400);
@@ -5361,7 +5391,7 @@ function alertGoToStock(itemId, itemTitle){
 
 // ── Navegar a SEO y precargar el producto ──────────────────
 function alertGoToSEO(itemId, itemTitle){
-  console.log('[Alertas→SEO] item:', itemId, '/', (itemTitle||'').slice(0,40));
+  console.log('[Alertas->SEO] item:', itemId, '/', (itemTitle||'').slice(0,40));
   // Detectar si el ítem tiene problema EAN
   const item = allItems.find(i=>i.id===itemId);
   const eanP = item && qualityChecks(item).find(c=>c.id==='ean') ? 'faltante' : null;
@@ -5370,7 +5400,7 @@ function alertGoToSEO(itemId, itemTitle){
 
 // ── Reactivar publicación pausada directamente ─────────────
 function alertGoToPaused(itemId, itemTitle, btnEl, uid){
-  console.log('[Alertas→Pausada] item:', itemId);
+  console.log('[Alertas->Pausada] item:', itemId);
   if(!itemId){ showSection('publicaciones'); return; }
 
   const displayTitle = (itemTitle || 'esta publicación').slice(0, 65);
@@ -5481,7 +5511,7 @@ function renderVentas(){
   const days=parseInt(document.getElementById('ven-period')?.value||540);
   const now=new Date();
   const labels=[],data={};
-  // Para 30 días → etiquetas diarias; más → mensuales
+  // Para 30 días -> etiquetas diarias; más -> mensuales
   if(days<=90){
     for(let i=days-1;i>=0;i--){
       const d=new Date(now);d.setDate(d.getDate()-i);
@@ -5603,26 +5633,34 @@ function renderQuestions(){
     const dt=q.date_created?new Date(q.date_created):null;
     const dateStr=dt?dt.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit'})+' '+dt.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}):'—';
     const isPend=q.status==='UNANSWERED';
+    // Buscar thumbnail del ítem relacionado
+    const relItem = q.item_id ? allItems.find(i=>String(i.id)===String(q.item_id)) : null;
+    const qThumb = relItem?.thumbnail || '';
     return `<div style="padding:12px 0;border-bottom:1px solid var(--border)">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">
-        <div style="flex:1">
-          <div style="font-size:12.5px;font-weight:500;margin-bottom:4px">${q.text}</div>
-          <div style="font-size:10.5px;color:var(--text3);display:flex;gap:8px;align-items:center;margin-bottom:6px">
-            <span class="badge ${isPend?'bg-amber':'bg-green'}">${isPend?'⏳ Pendiente':'✅ Respondida'}</span>
-            <span>${dateStr}</span>
-            ${q.item_id?`<a href="https://www.mercadolibre.com.ar/ventas" target="_blank" style="color:var(--accent);font-size:10px">Ver pub</a>`:''}
-          </div>
-          ${q.answer?.text?`<div style="font-size:12px;color:var(--text3);padding:6px 10px;background:var(--bg3);border-radius:6px;border-left:2px solid var(--green)">↩ ${q.answer.text.slice(0,120)}</div>`:''}
-          ${isPend?`<div style="margin-top:8px">
-            <button class="btn btn-ghost btn-sm" onclick="aiAnswerQ(${q.id},'${q.text.replace(/'/g,"\\'").replace(/\n/g,' ')}',this)" style="margin-bottom:6px">🤖 Sugerir con IA</button>
-            <div id="ans-form-${q.id}" style="display:none;margin-top:6px">
-              <textarea id="ans-txt-${q.id}" rows="2" style="font-size:12px;margin-bottom:6px" placeholder="Respuesta sugerida..."></textarea>
-              <div style="display:flex;gap:6px">
-                <button class="btn btn-primary btn-sm" onclick="submitAns(${q.id})">✓ Enviar respuesta</button>
-                <button class="btn btn-ghost btn-sm" onclick="document.getElementById('ans-form-${q.id}').style.display='none'">Cancelar</button>
+      <div style="display:flex;align-items:flex-start;gap:10px">
+        ${qThumb?`<img src="${qThumb}" alt="" loading="lazy" style="width:44px;height:44px;object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border);margin-top:2px" onerror="this.style.display='none'">`:''}
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">
+            <div style="flex:1">
+              <div style="font-size:12.5px;font-weight:500;margin-bottom:4px">${q.text}</div>
+              <div style="font-size:10.5px;color:var(--text3);display:flex;gap:8px;align-items:center;margin-bottom:6px">
+                <span class="badge ${isPend?'bg-amber':'bg-green'}">${isPend?'⏳ Pendiente':'✅ Respondida'}</span>
+                <span>${dateStr}</span>
+                ${q.item_id?`<a href="https://www.mercadolibre.com.ar/ventas" target="_blank" style="color:var(--accent);font-size:10px">Ver pub</a>`:''}
               </div>
+              ${q.answer?.text?`<div style="font-size:12px;color:var(--text3);padding:6px 10px;background:var(--bg3);border-radius:6px;border-left:2px solid var(--green)">↩ ${q.answer.text.slice(0,120)}</div>`:''}
+              ${isPend?`<div style="margin-top:8px">
+                <button class="btn btn-ghost btn-sm" onclick="aiAnswerQ(${q.id},'${q.text.replace(/'/g,"\\'").replace(/\n/g,' ')}',this)" style="margin-bottom:6px">🤖 Sugerir con IA</button>
+                <div id="ans-form-${q.id}" style="display:none;margin-top:6px">
+                  <textarea id="ans-txt-${q.id}" rows="2" style="font-size:12px;margin-bottom:6px" placeholder="Respuesta sugerida..."></textarea>
+                  <div style="display:flex;gap:6px">
+                    <button class="btn btn-primary btn-sm" onclick="submitAns(${q.id})">✓ Enviar respuesta</button>
+                    <button class="btn btn-ghost btn-sm" onclick="document.getElementById('ans-form-${q.id}').style.display='none'">Cancelar</button>
+                  </div>
+                </div>
+              </div>`:''}
             </div>
-          </div>`:''}
+          </div>
         </div>
       </div>
     </div>`;
@@ -5872,7 +5910,7 @@ async function renderMensajes(){
       el.innerHTML='<div class="alert a-success">✅ Sin mensajes sin leer.</div><div style="margin-top:10px"><a href="https://www.mercadolibre.com.ar/mensajes" target="_blank" style="background:#3b82f6;color:#fff;padding:8px 16px;border-radius:6px;text-decoration:none;font-size:12px;display:inline-flex;align-items:center;gap:6px">📬 Abrir bandeja en ML</a></div>';
     }
   }catch(e){
-    el.innerHTML='<div class="alert a-info">ℹ️ Los mensajes requieren permiso especial de lectura de mensajes en la app ML. <a href="https://www.mercadolibre.com.ar/mensajes" target="_blank" style="color:#1d4ed8;font-weight:500">Ver directamente en ML →</a></div>';
+    el.innerHTML='<div class="alert a-info">ℹ️ Los mensajes requieren permiso especial de lectura de mensajes en la app ML. <a href="https://www.mercadolibre.com.ar/mensajes" target="_blank" style="color:#1d4ed8;font-weight:500">Ver directamente en ML -></a></div>';
   }
 }
 function renderMsgPacks(packs,el){
@@ -5896,7 +5934,7 @@ function renderMsgPacks(packs,el){
           </div>
           ${p.last_message?.text?`<div style="font-size:12px;color:var(--text2);padding:6px 10px;background:var(--bg3);border-radius:6px;font-style:italic">"${p.last_message.text.slice(0,120)}"</div>`:''}
         </div>
-        <a href="https://www.mercadolibre.com.ar/mensajes" target="_blank" style="background:var(--bg3);color:var(--text2);border:1px solid var(--border2);padding:5px 10px;border-radius:6px;font-size:11px;text-decoration:none;flex-shrink:0;white-space:nowrap">Ver →</a>
+        <a href="https://www.mercadolibre.com.ar/mensajes" target="_blank" style="background:var(--bg3);color:var(--text2);border:1px solid var(--border2);padding:5px 10px;border-radius:6px;font-size:11px;text-decoration:none;flex-shrink:0;white-space:nowrap">Ver -></a>
       </div>
     </div>`).join('')||'<div class="alert a-success">✅ Sin mensajes</div>';
 }
