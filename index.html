@@ -570,6 +570,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   <a class="nav" href="#reputacion" id="nav-reputacion" onclick="showSection('reputacion');return false;"><span class="ni">⭐</span>Reputación</a>
   <a class="nav" href="#stock" id="nav-stock" onclick="showSection('stock');return false;"><span class="ni">📋</span>Stock</a>
   <a class="nav" href="#reclamos" id="nav-reclamos" onclick="showSection('reclamos');return false;"><span class="ni">🚨</span>Reclamos</a>
+  <a class="nav" href="#horarios" id="nav-horarios" onclick="showSection('horarios');return false;"><span class="ni">🕐</span>Horarios y festivos</a>
 
   <div class="sb-sec">Monetización</div>
   <a class="nav" href="#publicidad" id="nav-publicidad" onclick="showSection('publicidad');return false;"><span class="ni">📢</span>Publicidad</a>
@@ -729,6 +730,13 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <option value="stock">Stock bajo</option>
           <option value="seo">Score SEO</option>
         </select>
+        <select id="pub-type-filter" onchange="renderPubs()" style="max-width:150px" title="Filtrar por tipo">
+          <option value="">Todos los tipos</option>
+          <option value="classic">Clásicas</option>
+          <option value="catalog">Catálogo</option>
+          <option value="gold">Gold/Premium</option>
+          <option value="free">Gratuitas</option>
+        </select>
       </div>
       <div class="bulk-bar" id="bulk-bar">
         <span id="bulk-count-bar">0 seleccionadas</span>
@@ -848,6 +856,15 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
   <!-- Filtros de problema + estado -->
   <div class="card mb" id="seo-filter-bar">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      <span style="font-size:11px;color:var(--text3);font-weight:600;white-space:nowrap">Tipo:</span>
+      <div class="chips" style="margin:0;gap:5px">
+        <div class="chip" id="chip-tipo-all"     onclick="seoSetTipo('')"          style="font-size:11px;background:var(--accent);color:#fff;border-color:var(--accent)">Todas</div>
+        <div class="chip" id="chip-tipo-classic" onclick="seoSetTipo('classic')"   style="font-size:11px">📋 Clásicas</div>
+        <div class="chip" id="chip-tipo-catalog" onclick="seoSetTipo('catalog')"   style="font-size:11px">📚 Catálogo</div>
+        <div class="chip" id="chip-tipo-gold"    onclick="seoSetTipo('gold')"      style="font-size:11px">⭐ Gold</div>
+      </div>
+    </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
       <span style="font-size:11px;color:var(--text3);font-weight:600;white-space:nowrap">Estado:</span>
       <div class="chips" style="margin:0;gap:5px">
@@ -1257,6 +1274,14 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <div><div class="card-title">🔍 Filtros y búsqueda</div><div class="card-sub">Filtrá por cualquier campo de MercadoLibre</div></div>
       <button class="btn btn-ghost btn-sm" onclick="stockResetFilters()">✕ Limpiar filtros</button>
     </div>
+    <!-- Quick status chips -->
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+      <span style="font-size:11px;color:var(--text3);align-self:center">Estado:</span>
+      <div class="chip" id="stk-chip-all"     onclick="stkSetStatus('')"       style="font-size:11px;background:var(--accent);color:#fff;border-color:var(--accent)">Todas</div>
+      <div class="chip" id="stk-chip-active"  onclick="stkSetStatus('active')" style="font-size:11px">✅ Activas</div>
+      <div class="chip" id="stk-chip-paused"  onclick="stkSetStatus('paused')" style="font-size:11px">⏸ Pausadas</div>
+      <div class="chip" id="stk-chip-closed"  onclick="stkSetStatus('closed')" style="font-size:11px">✕ Cerradas</div>
+    </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
 
       <!-- Tipo de búsqueda -->
@@ -1354,10 +1379,18 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <table>
         <thead>
           <tr>
-            <th style="width:36%">Publicación</th>
+            <th style="width:40%">
+              <span onclick="stkSortBy('title')" style="cursor:pointer;user-select:none">
+                Publicación <span id="stk-sort-title" style="font-size:10px"></span>
+              </span>
+            </th>
             <th>SKU</th>
-            <th>Precio</th>
-            <th>Stock</th>
+            <th onclick="stkSortBy('price')" style="cursor:pointer;user-select:none;white-space:nowrap">
+              Precio <span id="stk-sort-price" style="font-size:10px"></span>
+            </th>
+            <th onclick="stkSortBy('stock')" style="cursor:pointer;user-select:none;white-space:nowrap">
+              Stock <span id="stk-sort-stock" style="font-size:10px"></span>
+            </th>
             <th>Vendidas</th>
             <th>Estado</th>
             <th>Nuevo stock</th>
@@ -1490,6 +1523,32 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <div class="rule-card" id="rule-def-2"><div class="rule-icon" style="background:var(--red-g)">📉</div><div style="flex:1"><div style="font-size:12.5px;font-weight:500">Bajar precio sin ventas</div><div style="font-size:11px;color:var(--text3)">Sin ventas 7 días → Bajar 5%</div></div><span class="badge bg-green">Activa</span><button class="btn btn-ghost btn-xs" style="margin-left:6px" onclick="toggleRule('rule-def-2',this)">⏸ Pausar</button><button class="btn btn-danger btn-xs" style="margin-left:4px" onclick="deleteRule('rule-def-2')">✕</button></div>
         <div class="rule-card" id="rule-def-3"><div class="rule-icon" style="background:var(--accent-g)">🤖</div><div style="flex:1"><div style="font-size:12.5px;font-weight:500">Auto-responder preguntas</div><div style="font-size:11px;color:var(--text3)">Pregunta nueva → IA responde</div></div><span class="badge bg-amber">Pendiente</span><button class="btn btn-ghost btn-xs" style="margin-left:6px" onclick="toggleRule('rule-def-3',this)">⏸ Pausar</button><button class="btn btn-danger btn-xs" style="margin-left:4px" onclick="deleteRule('rule-def-3')">✕</button></div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════ HORARIOS Y DÍAS FESTIVOS ═══════════════════════ -->
+<div id="section-horarios" class="section fade-in">
+  <div class="g2 mb">
+    <div class="card">
+      <div class="card-hd">
+        <div class="card-title">🕐 Horarios de despacho</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadHorarios()">↻ Actualizar</button>
+      </div>
+      <div id="horarios-out"><div class="loading"><div class="spin"></div>Cargando...</div></div>
+    </div>
+    <div class="card">
+      <div class="card-hd">
+        <div class="card-title">📅 Días festivos</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadFestivos()">↻ Actualizar</button>
+      </div>
+      <div id="festivos-out"><div class="loading"><div class="spin"></div>Cargando...</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-hd"><div class="card-title">ℹ️ Información logística</div></div>
+    <div class="alert a-info" style="margin-bottom:0">
+      📌 Los horarios de despacho y feriados se basan en los datos de tu cuenta de MercadoLibre. Si la información no está disponible, consultá directamente en el <a href="https://www.mercadolibre.com.ar/ayuda" target="_blank" style="color:var(--accent2)">Centro de Ayuda de ML</a>.
     </div>
   </div>
 </div>
@@ -2663,35 +2722,37 @@ function pubSort(col){
 
 function renderPubs(){
   const search=(document.getElementById('pub-search')?.value||'').toLowerCase();
-  // Filtro legacy del select (mantener compatibilidad)
   const legacySort=document.getElementById('pub-sort')?.value||'';
+  const tipoFilter=document.getElementById('pub-type-filter')?.value||'';
 
   let items=[...allItems];
   if(pubFilter!=='all') items=items.filter(i=>i.status===pubFilter);
   if(search) items=items.filter(i=>i.title.toLowerCase().includes(search));
+  // Tipo filter
+  if(tipoFilter) items=items.filter(i=>getPubType(i)===tipoFilter);
 
-  // Ordenar: pubState tiene prioridad sobre el select legacy
+  // Ordenar
   const col=pubState.sortCol, dir=pubState.sortDir;
   items.sort((a,b)=>{
     let va,vb;
-    if(col==='price')   { va=a.price||0;                       vb=b.price||0; }
-    else if(col==='stock')   { va=a.available_quantity??0;          vb=b.available_quantity??0; }
-    else if(col==='sold')    { va=a.sold_quantity||0;               vb=b.sold_quantity||0; }
-    else if(col==='sku')     { va=(a.seller_custom_field||'').toLowerCase(); vb=(b.seller_custom_field||'').toLowerCase(); return dir*(va<vb?-1:va>vb?1:0); }
-    else if(col==='seo')     { va=seoScore(a.title);               vb=seoScore(b.title); }
-    else if(col==='quality') { va=qualityScore(a);                 vb=qualityScore(b); }
-    else if(legacySort==='sold')       { va=b.sold_quantity||0;       vb=a.sold_quantity||0; return va-vb; }
+    if(col==='price')        { va=a.price||0;                              vb=b.price||0; }
+    else if(col==='stock')   { va=a.available_quantity??0;                 vb=b.available_quantity??0; }
+    else if(col==='sold')    { va=a.sold_quantity||0;                      vb=b.sold_quantity||0; }
+    else if(col==='sku')     { va=(a.seller_custom_field||'').toLowerCase();vb=(b.seller_custom_field||'').toLowerCase();return dir*(va<vb?-1:va>vb?1:0); }
+    else if(col==='seo')     { va=seoScore(a.title);                       vb=seoScore(b.title); }
+    else if(col==='quality') { va=qualityScore(a);                         vb=qualityScore(b); }
+    else if(legacySort==='sold')       { return (b.sold_quantity||0)-(a.sold_quantity||0); }
     else if(legacySort==='price-asc')  { return (a.price||0)-(b.price||0); }
     else if(legacySort==='price-desc') { return (b.price||0)-(a.price||0); }
     else if(legacySort==='stock')      { return (a.available_quantity||0)-(b.available_quantity||0); }
     else if(legacySort==='seo')        { return seoScore(a.title)-seoScore(b.title); }
-    else { va=b.sold_quantity||0; vb=a.sold_quantity||0; return va-vb; }
+    else { return (b.sold_quantity||0)-(a.sold_quantity||0); }
     return dir*(vb-va);
   });
 
   const tbody=document.getElementById('pubs-tbody');
   if(!tbody) return;
-  if(!items.length){tbody.innerHTML='<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:22px">Sin resultados</td></tr>';return;}
+  if(!items.length){tbody.innerHTML='<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:22px">Sin resultados para los filtros actuales</td></tr>';return;}
   tbody.innerHTML=items.map(item=>{
     const sc=seoScore(item.title);
     const qs=qualityScore(item);
@@ -2703,7 +2764,7 @@ function renderPubs(){
     return `<tr>
       <td><input type="checkbox" class="row-check" value="${item.id}" onchange="toggleItem(this,'${item.id}')"></td>
       <td><div style="display:flex;align-items:flex-start;gap:9px">
-        <div class="item-thumb" style="flex-shrink:0">${item.thumbnail?`<img src="${item.thumbnail}" onerror="this.parentElement.textContent='☕'">`:'☕'}</div>
+        <div style="flex-shrink:0">${renderThumbnail(item,38)}</div>
         <div style="min-width:0">
           <div style="font-size:12px;font-weight:500;max-width:200px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.35" title="${item.title}">${item.title}</div>
           <div style="font-size:10px;color:var(--text3);margin-top:2px">${item.id}</div>
@@ -3040,6 +3101,30 @@ function quickOptimize(id, title){ goToOptimizerWith(id, title, null); }
 // ── Helper: construir URL de edición en ML (panel, no vista pública) ──
 // Formato: https://www.mercadolibre.com.ar/publicaciones/{ID}/modificar
 // Fallback si ID no es válido: listado de publicaciones
+// ── Shared: render miniatura de item ──────────────────────
+// Reutilizable en Stock, Publicaciones, SEO, Ventas
+function renderThumbnail(item, size){
+  size = size || 44;
+  const src = (item && (item.pictures?.[0]?.url || item.thumbnail)) || '';
+  if(src){
+    return `<img src="${src}" alt="" loading="lazy"
+      style="width:${size}px;height:${size}px;object-fit:cover;border-radius:5px;border:1px solid var(--border);flex-shrink:0"
+      onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+      <div style="display:none;width:${size}px;height:${size}px;border-radius:5px;background:var(--bg4);flex-shrink:0;align-items:center;justify-content:center;font-size:${Math.round(size*0.4)}px">☕</div>`;
+  }
+  return `<div style="width:${size}px;height:${size}px;border-radius:5px;background:var(--bg4);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:${Math.round(size*0.4)}px">☕</div>`;
+}
+
+// ── Shared: detectar tipo de publicación ──────────────────
+function getPubType(item){
+  const cats = item.catalog_product_id ? 'catalog' : null;
+  const lt = (item.listing_type_id||'').toLowerCase();
+  if(cats) return 'catalog';
+  if(lt.includes('gold')) return 'gold';
+  if(lt === 'free' || lt === 'bronze') return 'free';
+  return 'classic';
+}
+
 function mlEditLink(id){
   if(!id||typeof id!=='string'||id.length<5) return null;
   return 'https://www.mercadolibre.com.ar/publicaciones/'+id+'/modificar';
@@ -3356,6 +3441,7 @@ function renderSEOTable(){
   let items=allItems.filter(i=>{
     if(searchQ&&!i.title.toLowerCase().includes(searchQ)) return false;
     if(st&&i.status!==st) return false;
+    if(seoState.tipoFilter && getPubType(i)!==seoState.tipoFilter) return false;
     if(!f) return true;
     const sc=seoScore(i.title),qs=qualityScore(i),ch=qualityChecks(i);
     const hasErr=/[.!?,;:()]/.test(i.title)||i.title===i.title.toUpperCase();
@@ -4338,11 +4424,26 @@ async function renderReputacion(){
 const seoState = {
   page: 1,
   perPage: 25,
-  filter: null,       // problema específico o categoría
-  statusFilter: null, // null | 'active' | 'paused'
-  sortCol: null,      // null | 'seo' | 'quality'
-  sortDir: 1,         // 1=desc, -1=asc
+  filter: null,
+  statusFilter: null,
+  tipoFilter: '',    // '' | 'classic' | 'catalog' | 'gold' | 'free'
+  sortCol: null,
+  sortDir: 1,
 };
+
+function seoSetTipo(t){
+  seoState.tipoFilter = t;
+  seoState.page = 1;
+  ['all','classic','catalog','gold'].forEach(s=>{
+    const chip = document.getElementById('chip-tipo-'+(s==='all'?'all':s));
+    if(!chip) return;
+    const active = (s==='all'&&t==='')||(s===t);
+    chip.style.background  = active?'var(--accent)':'';
+    chip.style.color       = active?'#fff':'';
+    chip.style.borderColor = active?'var(--accent)':'';
+  });
+  renderSEOTable();
+}
 
 // Estado de ordenamiento Publicaciones
 const pubState = {
@@ -4354,6 +4455,9 @@ const pubState = {
 const stockState = {
   page: 1,
   perPage: 25,
+  quickStatus: '',   // '' | 'active' | 'paused' | 'closed'
+  sortCol: null,     // null | 'title' | 'price' | 'stock'
+  sortDir: 1,        // 1=desc, -1=asc
   _debounceTimer: null,
 };
 
@@ -4363,6 +4467,33 @@ function stockDebounceFilter(){
 }
 
 function stockResetPage(){ stockState.page = 1; }
+
+// ── Quick status chip filter ─────────────────────────────
+function stkSetStatus(st){
+  stockState.quickStatus = st;
+  stockState.page = 1;
+  ['all','active','paused','closed'].forEach(s => {
+    const chip = document.getElementById('stk-chip-'+s);
+    if(!chip) return;
+    const active = (s==='all' && st==='') || s===st;
+    chip.style.background    = active ? 'var(--accent)' : '';
+    chip.style.color         = active ? '#fff' : '';
+    chip.style.borderColor   = active ? 'var(--accent)' : '';
+  });
+  renderStock();
+}
+
+// ── Column sort ──────────────────────────────────────────
+function stkSortBy(col){
+  if(stockState.sortCol===col) stockState.sortDir *= -1;
+  else { stockState.sortCol=col; stockState.sortDir=-1; }
+  stockState.page = 1;
+  ['title','price','stock'].forEach(c => {
+    const el = document.getElementById('stk-sort-'+c);
+    if(el) el.innerHTML = sortArrow(c, stockState.sortCol, stockState.sortDir);
+  });
+  renderStock();
+}
 
 function stockResetFilters(){
   const tt = document.getElementById('stk-filter-type');
@@ -4380,6 +4511,11 @@ function stockResetFilters(){
   if(so) so.value = 'stock_asc';
   if(pp) pp.value = '25';
   stockState.page = 1;
+  stockState.sortCol = null;
+  stockState.sortDir = 1;
+  stockState.quickStatus = '';
+  // Reset chip highlights
+  stkSetStatus('');
   stockFilterTypeChanged();
   renderStock();
 }
@@ -4454,8 +4590,12 @@ function renderStock(){
     sZeroPct.textContent = Math.round(zero.length / allItems.length * 100) + '% del catálogo';
   }
 
-  // ── Filtrar ──────────────────────────────────────────────
+
+  // ── 1. FILTRAR ───────────────────────────────────────────
   let items = [...allItems];
+
+  // Quick status chip (combinable con filtros de texto)
+  if(stockState.quickStatus) items = items.filter(i => i.status === stockState.quickStatus);
 
   if(type === 'title' && textVal){
     items = items.filter(i => (i.title||'').toLowerCase().includes(textVal));
@@ -4473,25 +4613,32 @@ function renderStock(){
     if(maxVal !== null) items = items.filter(i => (i.price||0) <= maxVal);
   }
 
-  // ── Ordenar ──────────────────────────────────────────────
-  switch(sortMode){
-    case 'stock_asc':    items.sort((a,b) => (a.available_quantity||0)-(b.available_quantity||0)); break;
-    case 'stock_desc':   items.sort((a,b) => (b.available_quantity||0)-(a.available_quantity||0)); break;
-    case 'zero_first':   items.sort((a,b) => (a.available_quantity||0)-(b.available_quantity||0)); break;
-    case 'sold_desc':    items.sort((a,b) => (b.sold_quantity||0)-(a.sold_quantity||0)); break;
-    case 'sold_asc':     items.sort((a,b) => (a.sold_quantity||0)-(b.sold_quantity||0)); break;
-    case 'price_asc':    items.sort((a,b) => (a.price||0)-(b.price||0)); break;
-    case 'price_desc':   items.sort((a,b) => (b.price||0)-(a.price||0)); break;
-    case 'alpha':        items.sort((a,b) => (a.title||'').localeCompare(b.title||'')); break;
-    case 'active_first': items.sort((a,b) => (a.status==='active'?0:1)-(b.status==='active'?0:1)); break;
-    case 'updated':      items.sort((a,b) => new Date(b.last_updated||0)-new Date(a.last_updated||0)); break;
+  // ── 2. ORDENAR ───────────────────────────────────────────
+  // Columna clickeable tiene prioridad; luego el select legacy
+  if(stockState.sortCol){
+    const d = stockState.sortDir;
+    if(stockState.sortCol==='title')  items.sort((a,b)=>d*(a.title||'').localeCompare(b.title||''));
+    if(stockState.sortCol==='price')  items.sort((a,b)=>d*((b.price||0)-(a.price||0)));
+    if(stockState.sortCol==='stock')  items.sort((a,b)=>d*((b.available_quantity||0)-(a.available_quantity||0)));
+  } else {
+    switch(sortMode){
+      case 'stock_asc':    items.sort((a,b) => (a.available_quantity||0)-(b.available_quantity||0)); break;
+      case 'stock_desc':   items.sort((a,b) => (b.available_quantity||0)-(a.available_quantity||0)); break;
+      case 'zero_first':   items.sort((a,b) => (a.available_quantity||0)-(b.available_quantity||0)); break;
+      case 'sold_desc':    items.sort((a,b) => (b.sold_quantity||0)-(a.sold_quantity||0)); break;
+      case 'sold_asc':     items.sort((a,b) => (a.sold_quantity||0)-(b.sold_quantity||0)); break;
+      case 'price_asc':    items.sort((a,b) => (a.price||0)-(b.price||0)); break;
+      case 'price_desc':   items.sort((a,b) => (b.price||0)-(a.price||0)); break;
+      case 'alpha':        items.sort((a,b) => (a.title||'').localeCompare(b.title||'')); break;
+      case 'active_first': items.sort((a,b) => (a.status==='active'?0:1)-(b.status==='active'?0:1)); break;
+      case 'updated':      items.sort((a,b) => new Date(b.last_updated||0)-new Date(a.last_updated||0)); break;
+    }
   }
 
-  // ── Log de diagnóstico ────────────────────────────────────
-  console.log('[Stock] Filtro:', { type, textVal, statusVal, minVal, maxVal, sort: sortMode },
+  console.log('[Stock] Filtro:', { type, textVal, statusVal, quickStatus: stockState.quickStatus, sortCol: stockState.sortCol },
     '→', items.length, 'de', allItems.length, 'resultados');
 
-  // ── Paginación ────────────────────────────────────────────
+  // ── 3. PAGINAR ───────────────────────────────────────────
   const total    = items.length;
   const maxPages = perPage > 0 ? Math.ceil(total / perPage) : 1;
   if(stockState.page > maxPages) stockState.page = Math.max(1, maxPages);
@@ -4500,7 +4647,6 @@ function renderStock(){
     ? items.slice((stockState.page - 1) * perPage, stockState.page * perPage)
     : items;
 
-  // ── Resultado count ───────────────────────────────────────
   const countEl = document.getElementById('stk-result-count');
   if(countEl){
     countEl.textContent = total === allItems.length
@@ -4547,9 +4693,14 @@ function renderStock(){
     const link      = i.permalink || `https://www.mercadolibre.com.ar/p/${i.id}`;
 
     return `<tr id="stock-row-${safeId}">
-      <td style="max-width:0;width:36%">
-        <div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500;font-size:12.5px;color:#0f172a" title="${safeTitle}">${safeTitle}</div>
-        <div style="font-size:10px;color:#6b7280;margin-top:1px;font-family:var(--mono)">${safeId}</div>
+      <td style="max-width:0;width:40%">
+        <div style="display:flex;align-items:center;gap:9px">
+          <div style="flex-shrink:0">${renderThumbnail(i, 40)}</div>
+          <div style="min-width:0">
+            <div style="overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-weight:500;font-size:12px;color:var(--text);line-height:1.35" title="${safeTitle}">${safeTitle}</div>
+            <div style="font-size:10px;color:var(--text3);margin-top:1px;font-family:var(--mono)">${safeId}</div>
+          </div>
+        </div>
       </td>
       <td style="font-family:var(--mono);font-size:11px;color:#6b7280;white-space:nowrap">${sku}</td>
       <td style="white-space:nowrap;font-size:12px;font-weight:500">$${price}</td>
@@ -4735,6 +4886,109 @@ function focusStockInput(id){
 // ═══════════════════════════════════════════════════════════
 // RECLAMOS
 // ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// HORARIOS Y DÍAS FESTIVOS
+// ═══════════════════════════════════════════════════════════
+
+async function loadHorarios(){
+  const el = document.getElementById('horarios-out');
+  if(!el) return;
+  el.innerHTML = '<div class="loading"><div class="spin"></div>Consultando API...</div>';
+  try{
+    // Intentamos obtener datos del seller — los horarios pueden estar en shipping_settings
+    const userData = await mlGet('/users/'+userId);
+    console.log('[Horarios] userData:', JSON.stringify(userData).slice(0,400));
+
+    // Buscar datos de envío/despacho en el perfil del vendedor
+    const shipping = userData.shipping_modes || userData.shipping || null;
+    const handling = userData.seller_experience?.handling_time || userData.handling_time || null;
+    const logistic = userData.seller_reputation?.logistics || null;
+
+    if(handling || shipping || logistic){
+      el.innerHTML = `
+        <div style="display:flex;flex-direction:column;gap:10px">
+          ${handling?`<div style="padding:10px;background:var(--bg3);border-radius:var(--rs);border:1px solid var(--border)">
+            <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Tiempo de manejo</div>
+            <div style="font-size:14px;font-weight:600">${typeof handling==='object'?JSON.stringify(handling):handling}</div>
+          </div>`:''}
+          ${shipping?`<div style="padding:10px;background:var(--bg3);border-radius:var(--rs);border:1px solid var(--border)">
+            <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Modos de envío</div>
+            <div style="font-size:12px">${Array.isArray(shipping)?shipping.join(', '):String(shipping)}</div>
+          </div>`:''}
+          <div class="alert a-info" style="margin-bottom:0;font-size:12px">
+            ℹ️ Para configurar horarios de despacho detallados, accedé a <a href="https://www.mercadolibre.com.ar/ajustes/ventas" target="_blank" style="color:var(--accent2)">Configuración de ventas en ML</a>.
+          </div>
+        </div>`;
+    } else {
+      el.innerHTML = `
+        <div class="alert a-info" style="margin-bottom:8px">
+          ℹ️ MercadoLibre no expone horarios de despacho directamente desde su API pública.
+        </div>
+        <div style="font-size:12.5px;color:var(--text2);line-height:1.6">
+          Para consultar y configurar tus horarios de despacho, accedé directamente a:
+          <a href="https://www.mercadolibre.com.ar/ajustes/ventas" target="_blank" class="btn btn-primary btn-sm" style="display:inline-flex;margin-top:10px;text-decoration:none">
+            ⚙️ Configuración de ventas en ML →
+          </a>
+        </div>`;
+    }
+  }catch(e){
+    console.warn('[Horarios] Error:', e.message);
+    el.innerHTML = `<div class="alert a-warn">⚠️ No se pudo obtener información de horarios desde la API. <a href="https://www.mercadolibre.com.ar/ajustes/ventas" target="_blank" style="color:var(--amber)">Configurar en ML →</a></div>`;
+  }
+}
+
+async function loadFestivos(){
+  const el = document.getElementById('festivos-out');
+  if(!el) return;
+  el.innerHTML = '<div class="loading"><div class="spin"></div>Consultando API...</div>';
+  try{
+    // ML publica feriados en /countries/{country_id}/time_zones o /countries/{country_id}
+    // Intentamos el endpoint de Argentina
+    const r = await mlGet('/countries/AR');
+    console.log('[Festivos] /countries/AR:', JSON.stringify(r).slice(0,300));
+
+    // Los feriados no están en la API pública de ML — mostramos info de fuente oficial
+    // Intentar obtener de /users/{USER_ID} si hay datos de feriados en el account
+    const year = new Date().getFullYear();
+
+    // Feriados oficiales Argentina (hardcoded como referencia — los reales se obtienen de API Gov)
+    const festivos = [
+      { fecha:'01/01', nombre:'Año Nuevo' },
+      { fecha:'24/03', nombre:'Día de la Memoria por la Verdad y la Justicia' },
+      { fecha:'02/04', nombre:'Día del Veterano y los Caídos en Malvinas' },
+      { fecha:'01/05', nombre:'Día del Trabajador' },
+      { fecha:'25/05', nombre:'Día de la Revolución de Mayo' },
+      { fecha:'20/06', nombre:'Paso a la Inmortalidad del Gral. Belgrano' },
+      { fecha:'09/07', nombre:'Día de la Independencia' },
+      { fecha:'17/08', nombre:'Paso a la Inmortalidad del Gral. San Martín' },
+      { fecha:'12/10', nombre:'Día del Respeto a la Diversidad Cultural' },
+      { fecha:'20/11', nombre:'Día de la Soberanía Nacional' },
+      { fecha:'08/12', nombre:'Inmaculada Concepción de María' },
+      { fecha:'25/12', nombre:'Navidad' },
+    ];
+
+    el.innerHTML = `
+      <div class="alert a-info" style="margin-bottom:12px;font-size:11.5px">
+        ℹ️ MercadoLibre no provee un endpoint de feriados en su API pública. Se muestran los feriados nacionales de Argentina ${year} como referencia.
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        ${festivos.map(f=>`
+          <div style="display:flex;align-items:center;gap:10px;padding:7px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs)">
+            <span style="font-family:var(--mono);font-size:12px;font-weight:600;color:var(--accent2);min-width:42px">${f.fecha}</span>
+            <span style="font-size:12px;color:var(--text2)">${f.nombre}</span>
+          </div>`).join('')}
+      </div>
+      <div style="margin-top:10px">
+        <a href="https://www.argentina.gob.ar/interior/feriados" target="_blank" class="btn btn-ghost btn-sm" style="text-decoration:none;font-size:11px">
+          📅 Ver feriados oficiales Argentina.gob.ar →
+        </a>
+      </div>`;
+  }catch(e){
+    console.warn('[Festivos] Error:', e.message);
+    el.innerHTML = `<div class="alert a-warn">⚠️ ${e.message}</div>`;
+  }
+}
+
 async function renderReclamos(){
   try{
     const r=await mlGet(`/orders/search?seller=${userId}&tags=has_claims&limit=20`);
@@ -5306,11 +5560,17 @@ function renderVentasTable(){
     const dt=o.date_created?new Date(o.date_created):null;
     const dateStr=dt?dt.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'2-digit'})+' '+dt.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}):'—';
     const productTitle=o.order_items?.[0]?.item?.title||'—';
+    const productThumb=o.order_items?.[0]?.item?.thumbnail||'';
     const mlUrl='https://www.mercadolibre.com.ar/ventas/'+o.id+'/detalle';
     const ship=getShippingLabel(o);
     return `<tr>
       <td style="font-family:var(--mono);font-size:10.5px;color:var(--text3)">#${o.id}</td>
-      <td style="max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px">${productTitle.slice(0,45)}</td>
+      <td style="max-width:180px">
+        <div style="display:flex;align-items:center;gap:7px">
+          ${productThumb?`<img src="${productThumb}" alt="" loading="lazy" style="width:36px;height:36px;object-fit:cover;border-radius:5px;flex-shrink:0;border:1px solid var(--border)" onerror="this.style.display='none'">`:''}
+          <div style="overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-size:12px;line-height:1.35">${productTitle.slice(0,50)}</div>
+        </div>
+      </td>
       <td style="font-size:12px">${o.buyer?.nickname||'—'}</td>
       <td style="font-weight:600">$${total.toLocaleString('es-AR')}</td>
       <td><span class="badge ${ship.cls}" style="white-space:nowrap">${ship.label}</span></td>
@@ -5473,6 +5733,7 @@ const titles={
   reputacion:['⭐ Reputación','Indicadores oficiales de ML'],
   stock:['📋 Control de stock','Alertas y actualización de inventario'],
   reclamos:['🚨 Reclamos','Gestión de disputas'],
+  horarios:['🕐 Horarios y días festivos','Información logística de tu tienda'],
   publicidad:['📢 Publicidad','Product Ads, ACOS y ROI'],
   facturacion:['💰 Facturación','Ingresos y órdenes'],
   reglas:['⚙️ Reglas automáticas','Automatizaciones de precios y respuestas'],
@@ -5501,6 +5762,7 @@ function showSection(id){
   if(id==='reputacion') renderReputacion();
   if(id==='stock') renderStock();
   if(id==='reclamos') renderReclamos();
+  if(id==='horarios') { loadHorarios(); loadFestivos(); }
   if(id==='facturacion') renderFacturacion();
   if(id==='alertas') refreshAlerts();
   if(id==='tendencias') loadTrends();
