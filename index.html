@@ -555,7 +555,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   <a class="nav" href="#seo" id="nav-seo" onclick="showSection('seo');return false;"><span class="ni">🔍</span>Analizador SEO</a>
   <a class="nav" href="#ia" id="nav-ia" onclick="showSection('ia');return false;"><span class="ni">🤖</span>Asistente IA<span class="nb nb-new">PRO</span></a>
   <a class="nav" href="#optimizar" id="nav-optimizar" onclick="showSection('optimizar');return false;"><span class="ni">✨</span>Optimizar título</a>
-  <a class="nav" href="#generador" id="nav-generador" onclick="showSection('generador');return false;"><span class="ni">🎯</span>Generador producto<span class="nb nb-purple">NEW</span></a>
+  <a class="nav" href="#generador" id="nav-generador" onclick="showSection('generador');return false;"><span class="ni">🔢</span>Generador de códigos</a>
 
   <div class="sb-sec">Análisis</div>
   <a class="nav" href="#rank" id="nav-rank" onclick="showSection('rank');return false;"><span class="ni">📈</span>Rank Tracker</a>
@@ -1001,26 +1001,84 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
 <!-- ═══════════════════════ GENERADOR PRODUCTO ═══════════════════════ -->
 <div id="section-generador" class="section fade-in">
-  <div class="alert a-success">🎯 Ingresá una keyword y la IA genera un producto completo listo para publicar: título, descripción, tags y prompt para imagen.</div>
   <div class="g2">
     <div class="card">
-      <div class="card-hd"><div class="card-title">🎯 Generador de producto con IA</div></div>
-      <div class="ff"><label>Keyword base</label><input type="text" id="gen2-kw" placeholder="Ej: messi, taza amigos, breaking bad, stranger things..."></div>
-      <div class="fr"><div><label>Categoría</label><input type="text" id="gen2-cat" value="Tazas personalizadas"></div><div><label>Precio ($)</label><input type="number" id="gen2-price" value="12999"></div></div>
-      <div class="ff"><label>Material / estilo extra</label><input type="text" id="gen2-extra" placeholder="Ej: cerámica, mágica, sublimada..."></div>
-      <button class="btn btn-primary" style="width:100%;margin-bottom:8px" onclick="doGenProduct()">🤖 Generar producto completo</button>
-      <div class="chips">
-        <div class="chip" onclick="fillGen('messi')">⚽ Messi</div>
-        <div class="chip" onclick="fillGen('friends')">📺 Friends</div>
-        <div class="chip" onclick="fillGen('breaking bad')">🟡 Breaking Bad</div>
-        <div class="chip" onclick="fillGen('stranger things')">🔦 Stranger Things</div>
-        <div class="chip" onclick="fillGen('mate argentino')">🧉 Mate AR</div>
-        <div class="chip" onclick="fillGen('gato kawaii')">🐱 Kawaii</div>
+      <div class="card-hd">
+        <div>
+          <div class="card-title">🔢 Generador de código EAN-13</div>
+          <div class="card-sub">Generá códigos de barras válidos (EAN-13) con dígito verificador correcto</div>
+        </div>
+      </div>
+
+      <!-- Generador principal -->
+      <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:20px;margin-bottom:14px;text-align:center">
+        <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">Código generado</div>
+        <div id="ean-display" style="font-family:var(--mono);font-size:32px;font-weight:700;color:var(--text);letter-spacing:4px;margin-bottom:14px">— — —</div>
+        <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="genNewEAN()">🎲 Generar código</button>
+          <button class="btn btn-ghost" id="ean-copy-main" onclick="copyMainEAN()">📋 Copiar</button>
+        </div>
+        <div id="ean-copy-fb" style="font-size:11px;color:var(--green);margin-top:8px;min-height:16px"></div>
+      </div>
+
+      <!-- Ingreso manual y validación -->
+      <div style="margin-bottom:14px">
+        <label>Validar código existente</label>
+        <div style="display:flex;gap:8px;margin-top:6px">
+          <input type="text" id="ean-manual-input" maxlength="13" placeholder="Ingresá 13 dígitos para validar..."
+            style="font-family:var(--mono);font-size:14px;letter-spacing:2px"
+            oninput="validateManualEAN(this)">
+          <span id="ean-valid-main" style="font-size:20px;display:flex;align-items:center;flex-shrink:0"></span>
+        </div>
+        <div id="ean-valid-detail" style="font-size:11px;color:var(--text3);margin-top:5px"></div>
+      </div>
+
+      <!-- Historial -->
+      <div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <label style="margin:0">Códigos generados en esta sesión</label>
+          <button class="btn btn-ghost btn-xs" onclick="clearEANHistory()">Limpiar</button>
+        </div>
+        <div id="ean-history" style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto"></div>
       </div>
     </div>
-    <div id="gen2-out">
-      <div class="card" style="height:100%;display:flex;align-items:center;justify-content:center;color:var(--text3);font-size:13px">
-        Generá un producto para ver el resultado acá →
+
+    <div>
+      <!-- Info EAN-13 -->
+      <div class="card mb">
+        <div class="card-hd"><div class="card-title">ℹ️ ¿Qué es EAN-13?</div></div>
+        <div style="font-size:12.5px;color:var(--text2);line-height:1.7">
+          <p style="margin-bottom:8px"><strong>EAN-13</strong> (European Article Number) es el estándar internacional de código de barras más usado en productos de consumo.</p>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <div style="display:flex;gap:8px"><span>📏</span><span>13 dígitos: 12 de datos + 1 verificador</span></div>
+            <div style="display:flex;gap:8px"><span>✅</span><span>Requerido por MercadoLibre para mejorar visibilidad</span></div>
+            <div style="display:flex;gap:8px"><span>🔢</span><span>El dígito verificador se calcula automáticamente</span></div>
+            <div style="display:flex;gap:8px"><span>⚠️</span><span>Este generador crea códigos técnicamente válidos para uso interno</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Instrucciones -->
+      <div class="card">
+        <div class="card-hd"><div class="card-title">📋 Cómo usarlo en ML</div></div>
+        <div style="display:flex;flex-direction:column;gap:10px;font-size:12.5px;color:var(--text2)">
+          <div style="display:flex;gap:10px;align-items:flex-start">
+            <span style="background:var(--accent);color:#fff;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0">1</span>
+            <span>Generá un código EAN-13 con el botón de arriba</span>
+          </div>
+          <div style="display:flex;gap:10px;align-items:flex-start">
+            <span style="background:var(--accent);color:#fff;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0">2</span>
+            <span>Copiá el código con el botón "Copiar"</span>
+          </div>
+          <div style="display:flex;gap:10px;align-items:flex-start">
+            <span style="background:var(--accent);color:#fff;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0">3</span>
+            <span>Abrí la publicación en ML → Editar → campo "Código universal (GTIN)" → pegá el código</span>
+          </div>
+          <div style="display:flex;gap:10px;align-items:flex-start">
+            <span style="background:var(--green);color:#fff;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0">✓</span>
+            <span>Los datos <strong>no se envían automáticamente</strong> a ML — solo es una herramienta de generación</span>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -1859,43 +1917,66 @@ async function loadItems(){await loadItemsFull();}
 // ── Cargar métricas de visitas/ventas para publicaciones (7 días) ──
 // Endpoint: GET /items/{id}/visits?date_from=...&date_to=...
 // Se llama bajo demanda para la vista SEO (en lotes para evitar rate limit)
+// ── Métricas reales de visitas/ventas (últimos 7 días) ─────
+// Endpoint: GET /users/{USER_ID}/items_visits?date_from=...&date_to=...
+// Este endpoint es el correcto para obtener visitas por ítem del vendedor.
 async function loadPubMetricsBatch(ids){
-  const today = new Date();
-  const from  = new Date(today - 7*86400000);
+  if(!userId){ console.warn('[Métricas] userId no disponible'); return; }
+
+  const today    = new Date();
+  const from     = new Date(today - 7*86400000);
   const dateTo   = today.toISOString().slice(0,10);
   const dateFrom = from.toISOString().slice(0,10);
 
-  // Calcular ventas por ítem desde allOrders (últimos 7 días)
-  const cutoff = from;
+  // 1. Visitas: GET /users/{USER_ID}/items_visits
+  let visitsMap = {};
+  try{
+    const vr = await mlGet(`/users/${userId}/items_visits?date_from=${dateFrom}&date_to=${dateTo}&limit=50`);
+    console.log('[Métricas] items_visits raw:', JSON.stringify(vr).slice(0,300));
+    // Respuesta puede ser: { data: [{item_id, total_visits}] } o { results: [...] }
+    const rows = vr.data || vr.results || vr.visits || [];
+    rows.forEach(row => {
+      const id = row.item_id || row.id;
+      if(id) visitsMap[id] = row.total_visits || row.visits || 0;
+    });
+    console.log('[Métricas] visitsMap keys:', Object.keys(visitsMap).length);
+  }catch(e){
+    console.warn('[Métricas] /items_visits falló:', e.message);
+    // Fallback: intentar por ítem individual en lotes de 5
+    const todo = ids.filter(id => !itemMetrics[id]).slice(0,25);
+    for(let i=0; i<todo.length; i+=5){
+      await Promise.allSettled(todo.slice(i,i+5).map(async id=>{
+        try{
+          const r = await mlGet(`/items/${id}/visits?date_from=${dateFrom}&date_to=${dateTo}`);
+          visitsMap[id] = r.total_visits || r.visits || 0;
+        }catch(e2){ visitsMap[id] = 0; }
+      }));
+      if(i>0) await new Promise(r=>setTimeout(r,200));
+    }
+  }
+
+  // 2. Ventas: calcular desde allOrders (más confiable y sin llamadas extra)
   const salesMap = {};
   allOrders.forEach(o => {
     if(o.status === 'cancelled' || o.status === 'invalid') return;
-    if(new Date(o.date_created||0) < cutoff) return;
+    if(new Date(o.date_created||0) < from) return;
     (o.order_items||[]).forEach(oi => {
       const id = oi.item?.id;
       if(id) salesMap[id] = (salesMap[id]||0) + (oi.quantity||1);
     });
   });
 
-  // Cargar visitas en paralelo (lotes de 5 para no saturar la API)
-  const todo = ids.filter(id => !itemMetrics[id]);
-  for(let i=0; i<todo.length; i+=5){
-    const batch = todo.slice(i, i+5);
-    await Promise.allSettled(batch.map(async id => {
-      try{
-        const r = await mlGet('/items/'+id+'/visits?date_from='+dateFrom+'&date_to='+dateTo);
-        const visits = r.total_visits || r.visits || 0;
-        const sales  = salesMap[id] || 0;
-        const conv   = visits > 0 ? ((sales / visits)*100).toFixed(1) : '—';
-        itemMetrics[id] = { visits, sales, conv };
-        console.log('[Métricas]', id, '→ visitas:', visits, 'ventas:', sales, 'conv:', conv+'%');
-      }catch(e){
-        itemMetrics[id] = { visits:'—', sales: salesMap[id]||0, conv:'—' };
-        console.warn('[Métricas]', id, e.message);
-      }
-    }));
-    if(i>0) await new Promise(r=>setTimeout(r,150)); // pequeña pausa entre lotes
-  }
+  // 3. Calcular conversión y guardar en caché
+  ids.forEach(id => {
+    if(itemMetrics[id]) return; // ya cargado
+    const visits = visitsMap[id] ?? 0;
+    const sales  = salesMap[id] || 0;
+    const conv   = (visits > 0 && sales > 0)
+      ? ((sales / visits) * 100).toFixed(1)
+      : visits > 0 ? '0.0' : '—';
+    itemMetrics[id] = { visits: visits || '—', sales, conv };
+    console.log('[Métricas]', id, '→', itemMetrics[id]);
+  });
 }
 async function loadOrders(){await loadOrdersRecent();loadOrdersHistory();}
 
@@ -2628,7 +2709,12 @@ function renderPubs(){
           <div style="font-size:10px;color:var(--text3);margin-top:2px">${item.id}</div>
         </div>
       </div></td>
-      <td style="font-weight:600;color:var(--text)">$${(item.price||0).toLocaleString('es-AR')}</td>
+      <td>
+        <div id="price-cell-${item.id}" style="display:flex;align-items:center;gap:4px">
+          <span style="font-weight:600;color:var(--text);cursor:pointer" title="Clic para editar precio" onclick="startPriceEdit('${item.id}',${item.price||0})">$${(item.price||0).toLocaleString('es-AR')}</span>
+          <button class="btn btn-ghost btn-xs" style="padding:2px 5px;font-size:10px;opacity:.5" title="Editar precio" onclick="startPriceEdit('${item.id}',${item.price||0})">✎</button>
+        </div>
+      </td>
       <td>
         <div id="stock-cell-${item.id}" style="display:flex;align-items:center;gap:4px">
           <span class="${(item.available_quantity||0)===0?'badge bg-red':(item.available_quantity||0)<=3?'badge bg-amber':'badge bg-green'}" style="cursor:pointer" title="Clic para editar stock" onclick="startStockEdit('${item.id}',${item.available_quantity??0})">${item.available_quantity??'—'}</span>
@@ -2682,14 +2768,11 @@ function startSKUEdit(itemId, currentSku){
 }
 
 async function saveSKU(itemId){
-  const inp = document.getElementById('sku-inp-'+itemId);
+  const inp   = document.getElementById('sku-inp-'+itemId);
   const msgEl = document.getElementById('sku-msg-'+itemId);
   if(!inp) return;
 
   const val = inp.value.trim().slice(0,40);
-
-  // Validar vacío (permitido — borra el SKU)
-  // Validar formato si hay valor
   if(val && !/^[a-zA-Z0-9\-_.\/]+$/.test(val)){
     inp.style.borderColor='var(--red)';
     if(msgEl){ msgEl.textContent='⚠️ Solo letras, números, - _ . /'; msgEl.style.color='var(--red)'; }
@@ -2700,49 +2783,60 @@ async function saveSKU(itemId){
   inp.style.borderColor = 'var(--accent)';
   if(msgEl){ msgEl.textContent='Guardando...'; msgEl.style.color='var(--text3)'; }
 
+  // Detectar si el ítem tiene variaciones
+  const item = allItems.find(i=>i.id===itemId);
+  const variations = item?.variations || [];
+  const hasVariations = variations.length > 0;
+
+  // Construir body según estructura del ítem
+  let body;
+  if(hasVariations){
+    // Actualizar seller_custom_field en CADA variación (sin sobrescribir otros campos)
+    body = {
+      variations: variations.map(v => ({
+        id: v.id,
+        seller_custom_field: val || null
+      }))
+    };
+    console.log('[SKU] Item CON variaciones:', variations.length, '→ body:', JSON.stringify(body).slice(0,200));
+  } else {
+    body = { seller_custom_field: val || null };
+    console.log('[SKU] Item SIN variaciones → body:', JSON.stringify(body));
+  }
+
   try{
     const res = await fetch(WORKER+'/api/items/'+itemId, {
       method: 'PUT',
-      headers: {
-        'Authorization': 'Bearer '+token,
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
-      body: JSON.stringify({ seller_custom_field: val || null })
+      headers: { 'Authorization':'Bearer '+token, 'Content-Type':'application/json', 'Accept':'application/json' },
+      body: JSON.stringify(body)
     });
     const data = await res.json();
+    console.log('[SKU] Respuesta ML:', JSON.stringify(data).slice(0,300));
 
-    // Token vencido
-    if(res.status === 401 || data.error === 'unauthorized' || data.message?.includes('token')){
+    if(res.status === 401 || data.error === 'unauthorized'){
       inp.disabled = false;
       if(msgEl){ msgEl.textContent='❌ Token vencido — reconectá tu cuenta'; msgEl.style.color='var(--red)'; }
       return;
     }
-
     if(data.error){
       inp.disabled = false;
       inp.style.borderColor = 'var(--red)';
-      const errMsg = data.message || data.error || 'Error de API';
-      if(msgEl){ msgEl.textContent='❌ '+errMsg.slice(0,50); msgEl.style.color='var(--red)'; }
+      if(msgEl){ msgEl.textContent='❌ '+(data.message||data.error).slice(0,50); msgEl.style.color='var(--red)'; }
       return;
     }
 
-    // Éxito — actualizar estado local
-    const item = allItems.find(i=>i.id===itemId);
-    if(item) item.seller_custom_field = val || null;
-
-    // Mostrar feedback de éxito brevemente antes de re-renderizar
+    // Actualizar estado local
+    if(item){
+      item.seller_custom_field = val || null;
+      if(hasVariations) variations.forEach(v => v.seller_custom_field = val || null);
+    }
     if(msgEl){ msgEl.textContent='✅ SKU actualizado'; msgEl.style.color='var(--green)'; }
     setTimeout(()=>renderPubs(), 900);
 
   }catch(e){
     inp.disabled = false;
     inp.style.borderColor = 'var(--red)';
-    const isNet = e.message?.includes('fetch') || e.message?.includes('network');
-    if(msgEl){
-      msgEl.textContent = isNet ? '❌ Sin conexión' : '❌ '+e.message.slice(0,40);
-      msgEl.style.color = 'var(--red)';
-    }
+    if(msgEl){ msgEl.textContent='❌ '+(e.message||'Sin conexión').slice(0,40); msgEl.style.color='var(--red)'; }
   }
 }
 
@@ -2816,6 +2910,85 @@ async function saveStock(itemId){
   }
 }
 
+// ─── Inline Price editing ──────────────────────────────────
+function startPriceEdit(itemId, currentPrice){
+  const cell = document.getElementById('price-cell-'+itemId);
+  if(!cell) return;
+  cell.innerHTML = `
+    <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
+      <span style="font-size:11px;color:var(--text3)">$</span>
+      <input id="prc-inp-${itemId}" type="number" value="${currentPrice}" min="0" step="1"
+        style="width:90px;font-size:12px;padding:3px 6px;border-radius:4px;border:1px solid var(--accent);background:var(--bg3);color:var(--text);outline:none"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();savePrice('${itemId}');}if(event.key==='Escape')renderPubs();">
+      <button class="btn btn-primary btn-xs" style="padding:2px 7px" onclick="savePrice('${itemId}')">✓</button>
+      <button class="btn btn-ghost btn-xs" style="padding:2px 5px" onclick="renderPubs()">✕</button>
+      <span id="prc-msg-${itemId}" style="font-size:10px"></span>
+    </div>`;
+  const inp = document.getElementById('prc-inp-'+itemId);
+  if(inp){ inp.focus(); inp.select(); }
+}
+
+async function savePrice(itemId){
+  const inp   = document.getElementById('prc-inp-'+itemId);
+  const msgEl = document.getElementById('prc-msg-'+itemId);
+  if(!inp) return;
+
+  const val = parseFloat(inp.value);
+  if(isNaN(val) || val <= 0){
+    inp.style.borderColor = 'var(--red)';
+    if(msgEl){ msgEl.textContent='⚠️ Precio inválido'; msgEl.style.color='var(--red)'; }
+    return;
+  }
+
+  inp.disabled = true;
+  if(msgEl){ msgEl.textContent='Guardando...'; msgEl.style.color='var(--text3)'; }
+
+  const item = allItems.find(i=>i.id===itemId);
+  const variations = item?.variations || [];
+  const hasVariations = variations.length > 0;
+
+  // Construir body según estructura del ítem
+  let body;
+  if(hasVariations){
+    body = { variations: variations.map(v => ({ id: v.id, price: val })) };
+    console.log('[Precio] Item CON variaciones → body:', JSON.stringify(body).slice(0,150));
+  } else {
+    body = { price: val };
+    console.log('[Precio] Item SIN variaciones → price:', val);
+  }
+
+  try{
+    const res = await fetch(WORKER+'/api/items/'+itemId, {
+      method: 'PUT',
+      headers: { 'Authorization':'Bearer '+token, 'Content-Type':'application/json', 'Accept':'application/json' },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    console.log('[Precio] Respuesta ML:', JSON.stringify(data).slice(0,200));
+
+    if(res.status === 401 || data.error === 'unauthorized'){
+      inp.disabled = false;
+      if(msgEl){ msgEl.textContent='❌ Token vencido'; msgEl.style.color='var(--red)'; }
+      return;
+    }
+    if(data.error){
+      inp.disabled = false;
+      inp.style.borderColor = 'var(--red)';
+      if(msgEl){ msgEl.textContent='❌ '+(data.message||data.error).slice(0,45); msgEl.style.color='var(--red)'; }
+      return;
+    }
+
+    if(item){ item.price = val; if(hasVariations) variations.forEach(v=>v.price=val); }
+    if(msgEl){ msgEl.textContent='✅ Precio actualizado'; msgEl.style.color='var(--green)'; }
+    setTimeout(()=>renderPubs(), 900);
+
+  }catch(e){
+    inp.disabled = false;
+    inp.style.borderColor = 'var(--red)';
+    if(msgEl){ msgEl.textContent='❌ '+(e.message||'Sin conexión').slice(0,40); msgEl.style.color='var(--red)'; }
+  }
+}
+
 function toggleItem(cb,id){
   if(cb.checked) selectedItems.add(id); else selectedItems.delete(id);
   updateBulkBar();
@@ -2877,25 +3050,22 @@ function mlEditLink(id){
 // ═══════════════════════════════════════════════════════════
 
 // ── Detección correcta de EAN/GTIN desde attributes de ML ──
+// Campo oficial: item.attributes[] con id "GTIN"
 function itemHasEAN(item){
   const attrs = item.attributes || [];
-  // GTIN es el campo oficial de ML para códigos universales
   const gtin = attrs.find(a => a.id === 'GTIN');
   if(gtin && gtin.value_name && gtin.value_name.trim() && gtin.value_name !== '0') return true;
-  // Fallback: EAN, UPC, ISBN
   const alt = attrs.find(a => ['EAN','UPC','ISBN','MPN'].includes(a.id));
   if(alt && alt.value_name && alt.value_name.trim()) return true;
   return false;
 }
 
 // ── Detección correcta de video desde item.video_id ────────
+// Campo oficial de ML para clips/videos.
+// NO usar attributes ni textos del frontend — SOLO este campo.
 function itemHasVideo(item){
-  // video_id es el campo oficial de ML para clips
-  if(item.video_id && item.video_id.trim() && item.video_id !== 'null') return true;
-  // Fallback: attributes VIDEO_URL
-  const va = (item.attributes||[]).find(a => a.id === 'VIDEO_URL');
-  if(va && va.value_name && va.value_name.trim()) return true;
-  return false;
+  // video_id es el ÚNICO campo oficial de ML para videos/clips
+  return !!(item.video_id && String(item.video_id).trim() && item.video_id !== 'null' && item.video_id !== 'undefined');
 }
 
 // ── Sistema de objetivos de calidad (basado en datos reales) ─
@@ -3265,11 +3435,20 @@ function renderSEOTable(){
       : '<span style="font-size:10px;color:var(--text3)">—</span>';
 
     return `<tr>
-      <td style="max-width:210px">
-        <div style="font-size:12px;font-weight:500;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.4" title="${item.title.replace(/"/g,'&quot;')}">${item.title}</div>
-        <div style="font-size:10px;color:var(--text3);margin-top:2px;display:flex;gap:5px;flex-wrap:wrap">
-          <span>${item.id}</span>
-          ${clipBadge}
+      <td style="max-width:240px">
+        <div style="display:flex;align-items:flex-start;gap:8px">
+          <div style="width:42px;height:42px;flex-shrink:0;border-radius:5px;overflow:hidden;background:var(--bg4);border:1px solid var(--border)">
+            ${item.thumbnail
+              ? `<img src="${item.pictures?.[0]?.url||item.thumbnail}" alt="" style="width:100%;height:100%;object-fit:cover" onerror="this.parentElement.innerHTML='<div style=\\'display:flex;align-items:center;justify-content:center;height:100%;font-size:18px\\'>☕</div>'">`
+              : '<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:18px">☕</div>'}
+          </div>
+          <div style="min-width:0;flex:1">
+            <div style="font-size:12px;font-weight:500;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.35" title="${item.title.replace(/"/g,'&quot;')}">${item.title}</div>
+            <div style="font-size:10px;color:var(--text3);margin-top:2px;display:flex;gap:5px;flex-wrap:wrap">
+              <span>${item.id}</span>
+              ${clipBadge}
+            </div>
+          </div>
         </div>
       </td>
       <td><span class="${item.title.length>60?'badge bg-red':item.title.length<30?'badge bg-amber':'badge bg-green'}">${item.title.length}</span></td>
@@ -3382,6 +3561,12 @@ PALABRAS ABSOLUTAMENTE PROHIBIDAS EN TÍTULO Y VARIANTES (nunca usarlas, ni siqu
 - Cualquier variación de: "Personalizado", "Personalizada", "Personalizable", "Custom"
 - Claims vacíos: "Alta calidad", "El mejor", "Único", "Exclusivo", "Original"
 - Frases tipo slogan o publicidad de cualquier tipo
+- La palabra "lavavajillas" bajo NINGÚN contexto ni siquiera como sugerencia
+
+REGLA DE MICROONDAS (SOLO EN DESCRIPCIÓN):
+- Si el producto es taza plástica, taza cerámica, taza mágica o jarro térmico
+  → usar la frase exacta "Apto para microondas" o "Apta para microondas" según el género del sustantivo
+  → NO mencionar "lavavajillas" bajo ninguna circunstancia
 
 ═══ REGLAS DESCRIPCIÓN ═══
 - Longitud: entre 800 y 2000 caracteres (OBLIGATORIO)
@@ -3782,66 +3967,139 @@ async function applyOptBoth(){
 // ═══════════════════════════════════════════════════════════
 // GENERADOR PRODUCTO
 // ═══════════════════════════════════════════════════════════
-function fillGen(kw){document.getElementById('gen2-kw').value=kw;doGenProduct();}
+// ═══════════════════════════════════════════════════════════
+// GENERADOR DE CÓDIGOS EAN-13
+// ═══════════════════════════════════════════════════════════
 
-async function doGenProduct(){
-  const kw=document.getElementById('gen2-kw').value.trim();
-  const cat=document.getElementById('gen2-cat').value||'Tazas personalizadas';
-  const price=document.getElementById('gen2-price').value||'12999';
-  const extra=document.getElementById('gen2-extra').value||'cerámica';
-  if(!kw){alert('Ingresá una keyword');return;}
-  const el=document.getElementById('gen2-out');
-  el.innerHTML='<div class="card" style="height:200px;display:flex;align-items:center;justify-content:center"><div class="loading"><div class="spin"></div>Generando producto completo con IA...</div></div>';
-  try{
-    const r=await callClaude(`Actuá como experto en ventas en MercadoLibre Argentina 2026, especializado en tazas con diseño impreso.
+let _eanHistory = [];
+const _eanUsados = JSON.parse(localStorage.getItem('ean_usados')||'[]');
 
-Creá una publicación completa para: "${kw}"
-Categoría: ${cat} | Material: ${extra} | Precio: $${price}
+// Genera un EAN-13 con dígito verificador correcto (único en sesión)
+function generarEAN13(){
+  let code, attempts = 0;
+  do {
+    let digits = '';
+    for(let i=0; i<12; i++) digits += Math.floor(Math.random()*10);
+    let suma = 0;
+    for(let i=0; i<12; i++) suma += i%2===0 ? parseInt(digits[i]) : parseInt(digits[i])*3;
+    const check = (10 - (suma%10)) % 10;
+    code = digits + check;
+    attempts++;
+  } while(_eanUsados.includes(code) && attempts < 30);
 
-IMPORTANTE: Es un diseño YA DEFINIDO (no personalizable). Enfoque: compra impulsiva, regalo, identificación emocional.
-Título: 60-70 chars · keyword al inicio · sin puntuación · temática + intención de compra
-
-Respondé SOLO JSON válido (sin markdown):
-{"titulo":"...","titulo_alt":"...","descripcion":"...","descripcion_corta":"...","tags":["t1","t2","t3","t4","t5"],"prompt_imagen":"...","categoria_sugerida":"...","precio_sugerido":${price},"keywords_seo":["k1","k2","k3","k4","k5"],"ventajas":["v1","v2","v3"],"enfoque_venta":"...","score_seo":0}`);
-    const d=JSON.parse(r.replace(/```json|```/g,'').trim());
-    el.innerHTML=`<div class="card fade-in">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-        <div style="font-size:15px;font-weight:600;color:#166534">✅ Producto generado</div>
-        <div style="display:flex;gap:8px;align-items:center">
-          <span class="badge bg-blue">Score SEO: ${d.score_seo||'—'}</span>
-          <span class="badge bg-green">$${Number(d.precio_sugerido||price).toLocaleString('es-AR')}</span>
-        </div>
-      </div>
-      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:var(--rs);padding:12px;margin-bottom:10px">
-        <div style="font-size:10px;color:#166534;margin-bottom:4px;text-transform:uppercase;font-weight:700">TÍTULO PRINCIPAL</div>
-        <div style="font-size:14px;font-weight:600;color:#111827">${d.titulo}</div>
-        <div style="font-size:10px;color:#6b7280;margin-top:4px">${(d.titulo||'').length} chars</div>
-      </div>
-      ${d.titulo_alt?`<div style="font-size:12px;color:#374151;padding:8px;background:#f3f4f6;border-radius:var(--rs);margin-bottom:10px"><span style="color:#6b7280;font-size:10px;font-weight:700">💡 ALT: </span>${d.titulo_alt}</div>`:''}
-      <div style="background:#f3f4f6;border-radius:var(--rs);padding:12px;margin-bottom:10px">
-        <div style="font-size:10px;color:#6b7280;margin-bottom:6px;text-transform:uppercase;font-weight:700">DESCRIPCIÓN</div>
-        <div style="font-size:12.5px;color:#374151;line-height:1.75">${(d.descripcion||'').replace(/\n/g,'<br>').slice(0,500)}...</div>
-        <button class="btn btn-ghost btn-xs" style="margin-top:8px" onclick="navigator.clipboard.writeText('${(d.descripcion||'').replace(/'/g,"\\'")}')">📋 Copiar descripción</button>
-      </div>
-      ${d.enfoque_venta?`<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:var(--rs);padding:10px;margin-bottom:10px"><div style="font-size:10px;color:#1d4ed8;margin-bottom:3px;font-weight:700">💡 ENFOQUE DE VENTA</div><div style="font-size:12px;color:#1e40af">${d.enfoque_venta}</div></div>`:''}
-      ${d.tags?.length?`<div style="margin-bottom:10px"><div style="font-size:10px;color:#6b7280;margin-bottom:5px;font-weight:700">TAGS</div><div class="chips">${d.tags.map(t=>`<span class="badge bg-purple">${t}</span>`).join('')}</div></div>`:''}
-      ${d.keywords_seo?.length?`<div style="margin-bottom:10px"><div style="font-size:10px;color:#6b7280;margin-bottom:5px;font-weight:700">SEO KEYWORDS</div><div class="chips">${d.keywords_seo.map(k=>`<span class="badge bg-blue">${k}</span>`).join('')}</div></div>`:''}
-      ${d.ventajas?.length?`<div style="margin-bottom:10px"><div style="font-size:10px;color:#6b7280;margin-bottom:5px;font-weight:700">VENTAJAS A DESTACAR</div>${d.ventajas.map(v=>`<div style="font-size:12px;color:#374151;margin-bottom:3px">✓ ${v}</div>`).join('')}</div>`:''}
-      <div style="background:#f5f3ff;border:1px solid #e9d5ff;border-radius:var(--rs);padding:12px">
-        <div style="font-size:10px;color:#7c3aed;margin-bottom:5px;text-transform:uppercase;font-weight:700">🖼️ PROMPT PARA IMAGEN IA</div>
-        <div style="font-size:11.5px;color:#374151;font-family:var(--mono);line-height:1.5">${d.prompt_imagen}</div>
-        <button class="btn btn-ghost btn-xs" style="margin-top:8px" onclick="navigator.clipboard.writeText('${(d.prompt_imagen||'').replace(/'/g,"\\'")}')">📋 Copiar prompt</button>
-      </div>
-    </div>`;
-  }catch(e){console.error(e);el.innerHTML='<div class="alert a-red">⚠️ Error al generar. Revisá conexión.</div>';}
+  _eanUsados.push(code);
+  // Persistir en localStorage (máx 500 entradas)
+  localStorage.setItem('ean_usados', JSON.stringify(_eanUsados.slice(-500)));
+  return code;
 }
+
+// Valida un EAN-13 retornando {valid, checkDigit, expected}
+function validarEAN13(code){
+  if(!/^\d{13}$/.test(code)) return { valid: false, reason: 'Debe tener exactamente 13 dígitos numéricos' };
+  let suma = 0;
+  for(let i=0; i<12; i++) suma += i%2===0 ? parseInt(code[i]) : parseInt(code[i])*3;
+  const expected = (10 - (suma%10)) % 10;
+  const actual = parseInt(code[12]);
+  return { valid: expected === actual, checkDigit: actual, expected };
+}
+
+function genNewEAN(){
+  const code = generarEAN13();
+  // Mostrar con espacio cada 4 dígitos para legibilidad
+  const fmt = code.slice(0,1)+' '+code.slice(1,7)+' '+code.slice(7,13);
+  const dispEl = document.getElementById('ean-display');
+  if(dispEl) dispEl.textContent = fmt;
+  dispEl.dataset.code = code;
+
+  // Agregar al historial
+  _eanHistory.unshift({ code, ts: new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}) });
+  renderEANHistory();
+
+  // Feedback visual en el botón
+  const btn = document.getElementById('ean-copy-main');
+  if(btn){ btn.textContent = '📋 Copiar'; btn.style.background=''; }
+  const fb = document.getElementById('ean-copy-fb');
+  if(fb) fb.textContent = '';
+
+  console.log('[EAN-13] Generado:', code);
+}
+
+function copyMainEAN(){
+  const dispEl = document.getElementById('ean-display');
+  const code = dispEl?.dataset?.code;
+  if(!code){ alert('Primero generá un código'); return; }
+  navigator.clipboard.writeText(code).then(()=>{
+    const btn = document.getElementById('ean-copy-main');
+    const fb  = document.getElementById('ean-copy-fb');
+    if(btn){ btn.textContent='✔ Copiado'; btn.style.background='var(--green)'; btn.style.color='#fff'; }
+    if(fb)  fb.textContent = '✅ Código '+code+' copiado al portapapeles';
+    setTimeout(()=>{
+      if(btn){ btn.textContent='📋 Copiar'; btn.style.background=''; btn.style.color=''; }
+      if(fb)  fb.textContent = '';
+    }, 2500);
+  }).catch(()=>{ alert('No se pudo copiar. Código: '+code); });
+}
+
+function copyHistoryEAN(code, btnEl){
+  navigator.clipboard.writeText(code).then(()=>{
+    const orig = btnEl.textContent;
+    btnEl.textContent = '✔ Copiado';
+    btnEl.style.background = 'var(--green)';
+    btnEl.style.color = '#fff';
+    setTimeout(()=>{ btnEl.textContent = orig; btnEl.style.background=''; btnEl.style.color=''; }, 2000);
+  }).catch(()=>{ alert('Código: '+code); });
+}
+
+function validateManualEAN(inp){
+  const v = inp.value.replace(/\D/g,'');
+  inp.value = v;
+  const iconEl  = document.getElementById('ean-valid-main');
+  const detailEl= document.getElementById('ean-valid-detail');
+  if(!iconEl || !detailEl) return;
+
+  if(v.length === 0){ iconEl.textContent=''; detailEl.textContent=''; return; }
+  if(v.length < 13){ iconEl.textContent='⏳'; detailEl.textContent=v.length+'/13 dígitos'; return; }
+
+  const res = validarEAN13(v);
+  if(res.valid){
+    iconEl.textContent = '✅';
+    detailEl.textContent = 'Código EAN-13 válido — dígito verificador: '+res.checkDigit;
+    detailEl.style.color = 'var(--green)';
+  } else {
+    iconEl.textContent = '❌';
+    detailEl.textContent = res.reason || ('Dígito verificador incorrecto (esperado: '+res.expected+', recibido: '+res.checkDigit+')');
+    detailEl.style.color = 'var(--red)';
+  }
+}
+
+function renderEANHistory(){
+  const el = document.getElementById('ean-history');
+  if(!el) return;
+  if(!_eanHistory.length){
+    el.innerHTML = '<div style="font-size:12px;color:var(--text3);padding:8px 0">Aún no generaste ningún código en esta sesión.</div>';
+    return;
+  }
+  el.innerHTML = _eanHistory.map((entry, idx) => `
+    <div style="display:flex;align-items:center;gap:10px;padding:7px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs)">
+      <span style="font-size:11px;color:var(--text3);flex-shrink:0">${entry.ts}</span>
+      <code style="flex:1;font-family:var(--mono);font-size:13px;letter-spacing:2px;color:var(--text)">${entry.code}</code>
+      <button class="btn btn-ghost btn-xs" onclick="copyHistoryEAN('${entry.code}',this)" style="flex-shrink:0;font-size:10px">📋 Copiar</button>
+    </div>`).join('');
+}
+
+function clearEANHistory(){
+  _eanHistory = [];
+  renderEANHistory();
+  const dispEl = document.getElementById('ean-display');
+  if(dispEl){ dispEl.textContent = '— — —'; delete dispEl.dataset.code; }
+  const fb = document.getElementById('ean-copy-fb');
+  if(fb) fb.textContent = '';
+}
+
+// generateProduct modal → ahora navega al generador de códigos
 async function generateProduct(){
-  document.getElementById('gen2-kw').value=document.getElementById('gen-kw').value;
-  document.getElementById('gen2-cat').value=document.getElementById('gen-cat').value||'Tazas';
-  document.getElementById('gen2-price').value=document.getElementById('gen-price').value||'12999';
   closeModal('modal-gen');
   showSection('generador');
-  await doGenProduct();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -5204,7 +5462,7 @@ const titles={
   seo:['🔍 Analizador SEO','Score y optimización de títulos'],
   ia:['🤖 Asistente IA','Experto en ML Argentina 2026 · Tazas con diseño'],
   optimizar:['✨ Optimizador','Título, descripción y keywords con IA'],
-  generador:['🎯 Generador de producto','Creá publicaciones completas desde una keyword'],
+  generador:['🔢 Generador de códigos','Generá códigos EAN-13 válidos para tus publicaciones'],
   rank:['📈 Rank Tracker','Seguimiento de posición por keyword'],
   potencial:['💡 Potencial oculto','Publicaciones con oportunidades de mejora'],
   tendencias:['🔥 Tendencias','Productos en auge en ML Argentina'],
