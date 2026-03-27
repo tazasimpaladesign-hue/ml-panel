@@ -2126,6 +2126,121 @@ function _updateVentasBadge(){
   if(nb){nb.textContent=toPrint||'';nb.style.display=toPrint>0?'inline-flex':'none';}
 }
 
+
+// ── Funciones restauradas ───────────────────────────────
+function makeChart(id,config){
+  const prev=chartInstances[id];
+  if(prev)prev.destroy();
+  const ctx=document.getElementById(id);
+  if(!ctx)return;
+  chartInstances[id]=new Chart(ctx,config);
+}
+
+
+function chartDefaults(){return{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}};}
+
+function tOpts(){return{ticks:{color:'#6b7280',font:{size:10}},grid:{color:'rgba(0,0,0,0.05)'},border:{color:'transparent'}};}
+
+function tXOpts(){return{ticks:{color:'#6b7280',font:{size:10},maxRotation:0,maxTicksLimit:8},grid:{display:false},border:{color:'transparent'}};}
+
+
+async function loadShippingStatuses(orders){
+  const toLoad=(orders||[]).filter(o=>o.shipping?.id&&!o.shipping._statusLoaded).slice(0,60);
+  if(!toLoad.length)return;
+  for(let i=0;i<toLoad.length;i+=5){
+    await Promise.allSettled(toLoad.slice(i,i+5).map(async o=>{
+      try{
+        const s=await mlGet('/shipments/'+o.shipping.id);
+        if(s?.status)o.shipping.status=s.status;
+        if(s?.substatus)o.shipping.substatus=s.substatus;
+        o.shipping._statusLoaded=true;
+      }catch(e){}
+    }));
+  }
+}
+
+
+async function loadPubMetricsBatch(ids){
+  if(!userId || !ids || !ids.length){ console.warn('[Metricas] userId o ids no disponible'); return; }
+  console.log('[Metricas] Iniciando para', ids.length, 'items usando time_window endpoint');
+
+  // Ventas de los últimos 7 días desde allOrders (ya cargado en memoria)
+  const from7 = new Date(new Date() - 7*86400000);
+  const salesMap = {};
+  allOrders.forEach(o => {
+    if(o.status === 'cancelled' || o.status === 'invalid') return;
+    if(new Date(o.date_created||0) < from7) return;
+    (o.order_items||[]).forEach(oi => {
+      const id = oi.item && oi.item.id;
+      if(id) salesMap[id] = (salesMap[id]||0) + (oi.quantity||1);
+    });
+  });
+
+  // Visitas: GET /items/{ITEM_ID}/visits/time_window?last=7&unit=day
+  // Endpoint oficial de ML para métricas por ventana de tiempo
+  // Procesamos en lotes de 5 con pausa de 350ms para respetar rate limits
+  const todo = ids.filter(id => !itemMetrics[id]);
+  for(let i=0; i<todo.length; i+=5){
+    const batch = todo.slice(i, i+5);
+    await Promise.allSettled(batch.map(async id => {
+      try{
+        const r = await mlGet('/items/'+id+'/visits/time_window?last=7&unit=day');
+        console.log('[Metricas] '+id+' time_window raw:', JSON.stringify(r).slice(0,150));
+        // Respuesta oficial: { item_id, date_from, date_to, total_visits, visits: [...] }
+        let visits = 0;
+        if(r && typeof r.total_visits === 'number') visits = r.total_visits;
+        else if(r && Array.isArray(r.visits)) visits = r.visits.reduce((s,d)=>s+(d.total||d.quantity||0),0);
+        else if(typeof r === 'number') visits = r;
+        const sales = salesMap[id] || 0;
+        const conv  = visits > 0 ? ((sales/visits)*100).toFixed(1) : (sales > 0 ? '100+' : '-');
+        itemMetrics[id] = { visits, sales, conv };
+        console.log('[Metricas]', id, '-> visitas:', visits, '| ventas:', sales, '| conv:', conv+'%');
+      }catch(e){
+        // Fallback: si time_window falla, intentar endpoint básico
+        try{
+          const today = new Date();
+          const from  = new Date(today - 7*86400000);
+          const r2 = await mlGet('/items/'+id+'/visits?date_from='+from.toISOString().slice(0,10)+'&date_to='+today.toISOString().slice(0,10));
+          const visits2 = (r2 && r2.total_visits) || 0;
+          const sales2  = salesMap[id] || 0;
+          itemMetrics[id] = { visits: visits2, sales: sales2, conv: visits2>0?((sales2/visits2)*100).toFixed(1):'-' };
+          console.log('[Metricas] fallback', id, '->', itemMetrics[id]);
+        }catch(e2){
+          itemMetrics[id] = { visits: 0, sales: salesMap[id]||0, conv: '-' };
+          console.warn('[Metricas]', id, 'sin datos:', e2.message);
+        }
+      }
+    }));
+    if(i+5 < todo.length) await new Promise(r => setTimeout(r, 350));
+  }
+  Object.keys(salesMap).forEach(id => {
+    if(!itemMetrics[id]) itemMetrics[id] = { visits: 0, sales: salesMap[id], conv: '-' };
+  });
+}
+
+async function getItemThumb(itemId){
+  if(!itemId) return '';
+  if(_thumbCache[itemId] !== undefined) return _thumbCache[itemId];
+  // Buscar primero en allItems (ya cargado en memoria)
+  const local = allItems.find(i => i.id === itemId || String(i.id) === String(itemId));
+  if(local && local.thumbnail){ _thumbCache[itemId] = local.thumbnail; return local.thumbnail; }
+  // Si no está en memoria, hacer GET ligero a la API
+  try{
+    const r = await mlGet('/items/'+itemId+'?attributes=id,thumbnail');
+    const th = r.thumbnail || '';
+    _thumbCache[itemId] = th;
+    return th;
+  }catch(e){
+    _thumbCache[itemId] = '';
+    return '';
+  }
+}
+
+
+async function loadItems(){await loadItemsFull();}
+
+
+
 function _updateItemsUI(){
   const active=allItems.filter(i=>i.status==='active').length;
   const paused=allItems.filter(i=>i.status==='paused').length;
