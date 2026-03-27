@@ -1914,6 +1914,18 @@ async function mlGet(ep){
   if(r.status===401){const ok=await tryRefreshToken();if(ok)return mlGet(ep);showSessionExpired();throw new Error('401');}
   return r.json();
 }
+// mlGetPublic: para endpoints públicos de ML que no requieren token
+// Usa WORKER/pub/* que el Worker reenvía a api.mercadolibre.com sin Authorization
+async function mlGetPublic(ep){
+  try{
+    const r = await fetch(WORKER+'/pub'+ep, { signal: AbortSignal.timeout(8000) });
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    return r.json();
+  }catch(e){
+    throw new Error(e.message);
+  }
+}
+
 async function mlPost(ep,body){
   const r = await fetch(WORKER+'/api'+ep,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(r.status===401){showSessionExpired();throw new Error('401');}
@@ -6434,8 +6446,9 @@ async function buscarCompetencia(query){
   // Pasar por el Worker (evita CORS y agrega el token de auth de ML)
   // mlGet() -> WORKER/api/sites/MLA/search -> api.mercadolibre.com/sites/MLA/search
   try{
+    // Usar mlGetPublic: la búsqueda pública no necesita auth, y el token propio puede causar 403
     const ep = '/sites/MLA/search?q=' + encodeURIComponent(query) + '&limit=15';
-    const data = await mlGet(ep);
+    const data = await mlGetPublic(ep);
     return (data.results || [])
       .filter(r => r.price > 0 && String(r.seller?.id) !== String(userId))
       .map(r => ({
@@ -6526,7 +6539,8 @@ async function rpAddCompetitor(itemId){
 async function obtenerPrecioCompetidor(itemId){
   // Pasar por el Worker — evita CORS y agrega token de auth
   // mlGet() -> WORKER/api/items/{id} -> api.mercadolibre.com/items/{id}
-  const d = await mlGet('/items/' + itemId + '?attributes=id,title,price,thumbnail,seller_id,permalink');
+  // mlGetPublic: competidor ajeno, no necesita nuestro token
+  const d = await mlGetPublic('/items/' + itemId + '?attributes=id,title,price,thumbnail,seller_id,permalink');
   if(!d || !d.id) throw new Error(`Item ${itemId} no encontrado o error de API`);
   return {
     id:        d.id,
