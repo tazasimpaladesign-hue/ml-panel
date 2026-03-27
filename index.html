@@ -6525,21 +6525,19 @@ async function rpAddCompetitor(itemId, preloaded){
   }
 }
 
-// ── obtenerPrecioCompetidor — GET /items/{id} SIN token (endpoint público)
-// NO usar mlGet() — el token del vendedor activa PolicyAgent y bloquea con 403.
-// /items/{id} es un endpoint público de ML: funciona sin auth desde el browser.
+// ── obtenerPrecioCompetidor — GET /items/{id} via Worker /pub/* ───────
+// Browser → Worker /pub/items/{id} → ML (sin token, sin Origin header)
+// El Worker hace la request server-to-server: sin CORS, sin PolicyAgent.
+// NO usar mlGet() (agrega token) ni fetch directo (agrega Origin header).
 async function obtenerPrecioCompetidor(itemId){
-  const url = 'https://api.mercadolibre.com/items/'+itemId
-    +'?attributes=id,title,price,thumbnail,seller_id,permalink';
-  // Fetch directo SIN Authorization header — evita el bloqueo de PolicyAgent
-  const r = await fetch(url, { headers: { 'Accept': 'application/json' } });
-  if(!r.ok){
-    const body = await r.json().catch(()=>({}));
-    const msg = body.message || body.error || 'HTTP '+r.status;
+  // mlGetPublic usa WORKER/pub/* — el Worker reenvía a ML sin Authorization
+  // y sin el header Origin que causa el bloqueo desde GitHub Pages
+  const d = await mlGetPublic('/items/'+itemId
+    +'?attributes=id,title,price,thumbnail,seller_id,permalink');
+  if(!d || !d.id){
+    const msg = d && d.message ? d.message : 'Item '+itemId+' no encontrado';
     throw new Error(msg);
   }
-  const d = await r.json();
-  if(!d || !d.id) throw new Error('Item '+itemId+' no encontrado');
   return {
     id: d.id, title: d.title||'', price: d.price||0,
     thumbnail: d.thumbnail||'', sellerId: d.seller_id, permalink: d.permalink||'',
