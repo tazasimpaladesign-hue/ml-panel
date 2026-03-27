@@ -6450,18 +6450,16 @@ function rpToggleSearch(){
 // ── Extraer MLA ID desde URL o string ───────────────────────────────
 function rpExtractItemId(input){
   input = (input || '').trim();
-  // Formato directo: MLA1234567890
-  if(/^MLA\d+$/i.test(input)) return input.toUpperCase();
-  // URL con /p/MLA o /MLA en el path
-  const m = input.match(/(?:\/p\/|\/)(MLA\d+)/i);
-  if(m) return m[1].toUpperCase();
-  // Solo números (ID sin prefijo)
+  // Buscar cualquier patrón MLA seguido de guión opcional y números
+  // Cubre: MLA1452903143, MLA-1452903143, artículo.../MLA-1452903143..., URLs completas
+  const m = input.match(/MLA[-]?(\d+)/i);
+  if(m) return 'MLA' + m[1];
+  // Solo números puros
   if(/^\d{8,}$/.test(input)) return 'MLA' + input;
   return null;
 }
 
 // ── Agregar competidor desde URL o ID pegado ─────────────────────────
-// Usa mlGet('/items/{id}') — autenticado via Worker, 100% funcional
 async function rpAddFromUrl(){
   const input = document.getElementById('rp-comp-query')?.value || '';
   const itemId = rpExtractItemId(input);
@@ -6470,7 +6468,7 @@ async function rpAddFromUrl(){
   if(!itemId){
     if(resultEl) resultEl.innerHTML =
       '<div style="color:var(--red);font-size:11.5px;padding:6px 0">'
-      + '⚠ No se reconoció el formato. Pegá una URL de ML o un ID como MLA1234567890</div>';
+      + '⚠ No se reconoció. Pegá la URL de ML o el ID (ej: MLA1452903143)</div>';
     return;
   }
 
@@ -6480,7 +6478,7 @@ async function rpAddFromUrl(){
 
   try{
     const comp = await obtenerPrecioCompetidor(itemId);
-    await rpAddCompetitor(comp.id, comp);  // pasar datos ya cargados
+    await rpAddCompetitor(comp.id, comp);
     if(resultEl) resultEl.innerHTML =
       '<div style="color:var(--green);font-size:11.5px;padding:6px 0">'
       + '✅ Agregado: ' + comp.title.slice(0,50) + ' — $' + comp.price.toLocaleString('es-AR') + '</div>';
@@ -6514,14 +6512,12 @@ async function rpAddCompetitor(itemId, preloaded){
 
   rpLogMsg(`Cargando datos del competidor ${itemId}...`, 'info');
   try{
-    // obtenerPrecioCompetidor via ML pública (no requiere auth)
     const comp = preloaded || await obtenerPrecioCompetidor(itemId);
     rule.competitors.push(comp);
     rpSaveRules();
     rpRenderCompetitors(rule);
     rpRecalcPrices(rule);
     rpLogMsg(`Competidor agregado: "${comp.title.slice(0,40)}" $${comp.price.toLocaleString('es-AR')}`, 'ok');
-    // Re-render search results to show "Agregado"
     const q = document.getElementById('rp-comp-query')?.value || '';
     if(q) rpSearchCompetitors(q);
   }catch(e){
@@ -6529,16 +6525,29 @@ async function rpAddCompetitor(itemId, preloaded){
   }
 }
 
-// ── obtenerPrecioCompetidor(itemId) — GET /items/{ITEM_ID} via Worker ─
-// Usa mlGet() → Worker → api.mercadolibre.com (autenticado, sin problemas de CORS ni bloqueo)
+// ── obtenerPrecioCompetidor — GET /items/{id} via Worker (autenticado)
+// El Worker reenvía la request a ML con el token del usuario.
+// /items/{id} funciona para items de cualquier vendedor, no solo los propios.
 async function obtenerPrecioCompetidor(itemId){
-  // mlGet pasa por el Worker con el token del usuario — funciona siempre
-  const d = await mlGet('/items/'+itemId+'?attributes=id,title,price,thumbnail,seller_id,permalink');
-  if(!d || !d.id) throw new Error('Item '+itemId+' no encontrado o sin acceso');
-  return {
-    id: d.id, title: d.title||'', price: d.price||0,
-    thumbnail: d.thumbnail||'', sellerId: d.seller_id, permalink: d.permalink||'',
-  };
+  try{
+    const d = await mlGet('/items/'+itemId+'?attributes=id,title,price,thumbnail,seller_id,permalink');
+    if(d && d.id) return {
+      id: d.id, title: d.title||'', price: d.price||0,
+      thumbnail: d.thumbnail||'', sellerId: d.seller_id, permalink: d.permalink||'',
+    };
+    throw new Error('Respuesta vacía');
+  }catch(e){
+    // Fallback: fetch directo (funciona para items públicos si no hay CORS issue)
+    const r = await fetch('https://api.mercadolibre.com/items/'+itemId
+      +'?attributes=id,title,price,thumbnail,seller_id,permalink');
+    if(!r.ok) throw new Error('No se pudo cargar el item '+itemId+' (HTTP '+r.status+')');
+    const d = await r.json();
+    if(!d || !d.id) throw new Error('Item '+itemId+' no encontrado');
+    return {
+      id: d.id, title: d.title||'', price: d.price||0,
+      thumbnail: d.thumbnail||'', sellerId: d.seller_id, permalink: d.permalink||'',
+    };
+  }
 }
 
 // ── Eliminar competidor de la regla ──────────────────────────────────
