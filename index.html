@@ -1669,14 +1669,28 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           </div>
         </div>
 
-        <!-- Competidores -->
+        <!-- Competidores: buscador manual + lista seleccionada -->
         <div style="margin-bottom:14px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-            <div style="font-size:12px;font-weight:600;color:var(--text)">Competidores detectados</div>
-            <button class="btn btn-ghost btn-xs" onclick="rpRefreshCompetitors(rpSelectedRule)" id="rp-comp-refresh">↻ Actualizar</button>
+            <div style="font-size:12px;font-weight:600;color:var(--text)">Competidores seleccionados</div>
+            <div style="display:flex;gap:6px">
+              <button class="btn btn-ghost btn-xs" onclick="rpRefreshPrices(rpSelectedRule)" id="rp-comp-refresh" title="Actualizar precios de competidores seleccionados">↻ Actualizar precios</button>
+              <button class="btn btn-primary btn-xs" onclick="rpToggleSearch()" id="rp-search-toggle">+ Buscar competidor</button>
+            </div>
           </div>
-          <div id="rp-competitors-list" style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto">
-            <div style="color:var(--text3);font-size:12px;padding:8px 0">Ejecutá la regla para ver competidores...</div>
+
+          <!-- Buscador de competidores -->
+          <div id="rp-comp-search-panel" style="display:none;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:10px;margin-bottom:10px">
+            <input type="text" id="rp-comp-query" placeholder="Buscar en MercadoLibre..." oninput="rpSearchCompetitors(this.value)"
+              style="width:100%;font-size:12px;padding:7px 10px;margin-bottom:8px">
+            <div id="rp-comp-search-results" style="max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
+              <div style="color:var(--text3);font-size:12px;text-align:center;padding:12px">Escribí para buscar productos...</div>
+            </div>
+          </div>
+
+          <!-- Lista de competidores seleccionados -->
+          <div id="rp-competitors-list" style="display:flex;flex-direction:column;gap:6px;max-height:260px;overflow-y:auto">
+            <div style="color:var(--text3);font-size:12px;padding:8px 0">Buscá y seleccioná competidores con el botón de arriba.</div>
           </div>
         </div>
 
@@ -6391,97 +6405,301 @@ function rpSelectRule(ruleId){
 
   // Show competitors if already fetched
   rpRenderCompetitors(rule);
+  rpRecalcPrices(rule);
   rpRenderList(); // re-render to highlight selected
 }
 
 // ── Mostrar competidores en el panel ────────────────────────────────
-function rpRenderCompetitors(rule){
-  const el = document.getElementById('rp-competitors-list');
-  if(!el) return;
-  if(!rule.competitors || !rule.competitors.length){
-    el.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:8px 0">Ejecutá la regla para detectar competidores...</div>';
-    return;
-  }
-  const minPrice = Math.min(...rule.competitors.map(c=>c.price));
-  el.innerHTML = rule.competitors.map(comp => {
-    const isMin = comp.price === minPrice;
-    return `<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border)">
-      <img src="${comp.thumbnail||''}" width="32" height="32"
-        style="object-fit:cover;border-radius:4px;flex-shrink:0;border:1px solid var(--border)"
-        onerror="this.style.display='none'">
-      <div style="flex:1;min-width:0">
-        <div style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${comp.title.slice(0,45)}</div>
-        <div style="font-size:10px;color:var(--text3)">${comp.sellerId ? 'Seller: '+comp.sellerId : ''}</div>
-      </div>
-      <div style="text-align:right;flex-shrink:0">
-        <span style="font-size:13px;font-weight:700;color:${isMin?'var(--red)':'var(--text)'}">$${comp.price.toLocaleString('es-AR')}</span>
-        ${isMin?'<div style="font-size:9px;color:var(--red)">mínimo</div>':''}
-      </div>
-    </div>`;
-  }).join('');
+// ════════════════════════════════════════════════════════════════════
+// MÓDULO: BUSCADOR MANUAL DE COMPETIDORES
+// Busca en ML, permite selección múltiple, persiste en la regla
+// ════════════════════════════════════════════════════════════════════
+
+let _rpSearchTimer = null;
+
+// ── Toggle panel de búsqueda ─────────────────────────────────────────
+function rpToggleSearch(){
+  const panel = document.getElementById('rp-comp-search-panel');
+  const btn   = document.getElementById('rp-search-toggle');
+  if(!panel) return;
+  const isOpen = panel.style.display !== 'none';
+  panel.style.display = isOpen ? 'none' : 'block';
+  if(btn) btn.textContent = isOpen ? '+ Buscar competidor' : '✕ Cerrar';
+  if(!isOpen) document.getElementById('rp-comp-query')?.focus();
 }
 
-// ── LÓGICA CORE: obtener competencia de ML ───────────────────────────
-// GET /sites/MLA/search?q={query}&category={category_id}&limit=20
-async function obtenerCompetencia(producto){
-  const item = allItems.find(i=>i.id===producto.itemId);
-  if(!item){
-    rpLogMsg(`Item ${producto.itemId} no encontrado en allItems`, 'error');
-    return [];
-  }
-
-  // Limpiar título: quitar palabras muy cortas y generar query
-  const cleanTitle = item.title
-    .replace(/[^a-zA-ZáéíóúÁÉÍÓÚñÑ0-9\s]/g,'')
-    .split(' ')
-    .filter(w=>w.length>2)
-    .slice(0,5)
-    .join(' ');
-
-  rpLogMsg(`Buscando competencia para: "${item.title.slice(0,40)}"`, 'info');
-  rpLogMsg(`Query: "${cleanTitle}" | Categoría: ${item.category_id}`, 'info');
-
+// ── buscarCompetencia(query) — API pública ML sin auth ───────────────
+async function buscarCompetencia(query){
+  if(!query || query.trim().length < 2) return [];
   try{
-    // Endpoint de búsqueda pública de ML (no requiere auth)
-    const params = new URLSearchParams({
-      q: cleanTitle,
-      category: item.category_id,
-      limit: '20',
-    });
-    const url = `https://api.mercadolibre.com/sites/MLA/search?${params}`;
-    const resp = await fetch(url, { signal: AbortSignal.timeout(8000) });
-    if(!resp.ok) throw new Error(`ML search error: ${resp.status}`);
+    const url = `https://api.mercadolibre.com/sites/MLA/search?q=${encodeURIComponent(query)}&limit=15`;
+    const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
-
-    const results = (data.results || [])
-      .filter(r =>
-        r.price > 0 &&
-        r.seller && r.seller.id && String(r.seller.id) !== String(userId) // excluir propias
-      )
+    return (data.results || [])
+      .filter(r => r.price > 0 && String(r.seller?.id) !== String(userId))
       .map(r => ({
         id:        r.id,
         title:     r.title,
         price:     r.price,
         thumbnail: r.thumbnail,
         sellerId:  r.seller?.id,
-        link:      r.permalink,
-      }))
-      .slice(0, 15);
-
-    rpLogMsg(`Competidores encontrados: ${results.length}`, results.length>0?'ok':'warn');
-    if(results.length){
-      const minP = Math.min(...results.map(r=>r.price));
-      const avgP = Math.round(results.reduce((s,r)=>s+r.price,0)/results.length);
-      rpLogMsg(`Precio mínimo detectado: $${minP.toLocaleString('es-AR')}`, 'info');
-      rpLogMsg(`Precio promedio detectado: $${avgP.toLocaleString('es-AR')}`, 'info');
-    }
-
-    return results;
+        permalink: r.permalink,
+      }));
   }catch(e){
-    rpLogMsg(`Error buscando competencia: ${e.message}`, 'error');
+    rpLogMsg(`Error buscando competidores: ${e.message}`, 'error');
     return [];
   }
 }
+
+// ── Búsqueda en tiempo real con debounce ─────────────────────────────
+function rpSearchCompetitors(query){
+  clearTimeout(_rpSearchTimer);
+  const el = document.getElementById('rp-comp-search-results');
+  if(!el) return;
+  if(!query || query.trim().length < 2){
+    el.innerHTML = '<div style="color:var(--text3);font-size:12px;text-align:center;padding:12px">Escribí al menos 2 caracteres...</div>';
+    return;
+  }
+  el.innerHTML = '<div style="color:var(--text3);font-size:12px;text-align:center;padding:12px"><div class="spin" style="width:14px;height:14px;margin:0 auto 4px"></div>Buscando...</div>';
+
+  _rpSearchTimer = setTimeout(async () => {
+    const results = await buscarCompetencia(query);
+    if(!results.length){
+      el.innerHTML = '<div style="color:var(--text3);font-size:12px;text-align:center;padding:12px">Sin resultados para esta búsqueda.</div>';
+      return;
+    }
+    const rule = rpRules.find(r=>r.id===rpSelectedRule);
+    const alreadySelected = new Set((rule?.competitors||[]).map(c=>c.id));
+
+    el.innerHTML = results.map(item => {
+      const isAdded = alreadySelected.has(item.id);
+      return `<div style="display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:var(--rs);background:var(--bg2);border:1px solid var(--border)">
+        <img src="${item.thumbnail||''}" width="48" height="48"
+          style="object-fit:cover;border-radius:5px;flex-shrink:0;border:1px solid var(--border)"
+          onerror="this.style.display='none'">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:11.5px;font-weight:500;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.35">${item.title}</div>
+          <div style="font-size:12px;font-weight:700;color:var(--text);margin-top:2px">$${item.price.toLocaleString('es-AR')}</div>
+        </div>
+        <button onclick="rpAddCompetitor('${item.id}')"
+          class="btn ${isAdded?'btn-ghost':'btn-primary'} btn-xs"
+          style="flex-shrink:0;white-space:nowrap"
+          ${isAdded?'disabled':''}>
+          ${isAdded?'✓ Agregado':'+  Agregar'}
+        </button>
+      </div>`;
+    }).join('');
+  }, 380);
+}
+
+// ── Agregar competidor seleccionado a la regla ───────────────────────
+async function rpAddCompetitor(itemId){
+  const rule = rpRules.find(r=>r.id===rpSelectedRule);
+  if(!rule){ rpLogMsg('Seleccioná una regla primero', 'warn'); return; }
+
+  // Evitar duplicados
+  if(rule.competitors.find(c=>c.id===itemId)){
+    rpLogMsg(`El competidor ${itemId} ya está en la lista`, 'warn');
+    return;
+  }
+
+  rpLogMsg(`Cargando datos del competidor ${itemId}...`, 'info');
+  try{
+    // obtenerPrecioCompetidor via ML pública (no requiere auth)
+    const comp = await obtenerPrecioCompetidor(itemId);
+    rule.competitors.push(comp);
+    rpSaveRules();
+    rpRenderCompetitors(rule);
+    rpRecalcPrices(rule);
+    rpLogMsg(`Competidor agregado: "${comp.title.slice(0,40)}" $${comp.price.toLocaleString('es-AR')}`, 'ok');
+    // Re-render search results to show "Agregado"
+    const q = document.getElementById('rp-comp-query')?.value || '';
+    if(q) rpSearchCompetitors(q);
+  }catch(e){
+    rpLogMsg(`Error cargando competidor: ${e.message}`, 'error');
+  }
+}
+
+// ── obtenerPrecioCompetidor(itemId) — GET /items/{ITEM_ID} ───────────
+// Usa la API pública de ML (no requiere token)
+async function obtenerPrecioCompetidor(itemId){
+  const url = `https://api.mercadolibre.com/items/${itemId}?attributes=id,title,price,thumbnail,seller_id,permalink`;
+  const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
+  if(!resp.ok) throw new Error(`HTTP ${resp.status} para item ${itemId}`);
+  const d = await resp.json();
+  if(!d.id) throw new Error(`Item ${itemId} no encontrado`);
+  return {
+    id:        d.id,
+    title:     d.title || '',
+    price:     d.price || 0,
+    thumbnail: d.thumbnail || '',
+    sellerId:  d.seller_id,
+    permalink: d.permalink || '',
+  };
+}
+
+// ── Eliminar competidor de la regla ──────────────────────────────────
+function rpRemoveCompetitor(ruleId, competitorId){
+  const rule = rpRules.find(r=>r.id===ruleId);
+  if(!rule) return;
+  const before = rule.competitors.length;
+  rule.competitors = rule.competitors.filter(c=>c.id!==competitorId);
+  rpSaveRules();
+  rpRenderCompetitors(rule);
+  rpRecalcPrices(rule);
+  if(rule.competitors.length < before)
+    rpLogMsg(`Competidor ${competitorId} eliminado de la regla`, 'info');
+}
+
+// ── Render lista de competidores seleccionados ───────────────────────
+function rpRenderCompetitors(rule){
+  const el = document.getElementById('rp-competitors-list');
+  if(!el) return;
+  if(!rule.competitors || !rule.competitors.length){
+    el.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:8px 0">Sin competidores seleccionados. Usá el buscador para agregar.</div>';
+    return;
+  }
+  const prices  = rule.competitors.map(c=>c.price).filter(p=>p>0);
+  const minPrice = prices.length ? Math.min(...prices) : 0;
+
+  el.innerHTML = rule.competitors.map(comp => {
+    const isMin = comp.price === minPrice;
+    const compIdSafe = comp.id.replace(/'/g, '');
+    const ruleSafe   = rule.id.replace(/'/g, '');
+    return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:var(--rs);background:var(--bg2);border:1px solid ${isMin?'var(--red)':'var(--border)'}">
+      <img src="${comp.thumbnail||''}" width="48" height="48"
+        style="object-fit:cover;border-radius:5px;flex-shrink:0;border:1px solid var(--border)"
+        onerror="this.style.display='none'">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:11.5px;font-weight:500;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.35">${comp.title}</div>
+        <div style="display:flex;align-items:center;gap:6px;margin-top:3px">
+          <span style="font-size:13px;font-weight:700;color:${isMin?'var(--red)':'var(--text)'}">$${comp.price.toLocaleString('es-AR')}</span>
+          ${isMin?'<span class="badge bg-red" style="font-size:9px">mínimo</span>':''}
+          ${comp.permalink?`<a href="${comp.permalink}" target="_blank" style="font-size:10px;color:var(--accent);text-decoration:none">Ver en ML</a>`:''}
+        </div>
+      </div>
+      <button onclick="rpRemoveCompetitor('${ruleSafe}','${compIdSafe}')"
+        class="btn btn-ghost btn-xs" style="flex-shrink:0;color:var(--red);border-color:var(--red)" title="Eliminar competidor">✕</button>
+    </div>`;
+  }).join('');
+}
+
+// ── Actualizar precios de competidores seleccionados ─────────────────
+// GET /items/{ITEM_ID} para cada competidor — usa API pública
+async function rpRefreshPrices(ruleId){
+  const rule = rpRules.find(r=>r.id===ruleId);
+  if(!rule || !rule.competitors.length){
+    rpLogMsg('No hay competidores seleccionados para actualizar', 'warn');
+    return;
+  }
+  const btn = document.getElementById('rp-comp-refresh');
+  if(btn){ btn.disabled=true; btn.textContent='Actualizando...'; }
+
+  rpLogMsg(`Actualizando precios de ${rule.competitors.length} competidores...`, 'info');
+  let updated = 0;
+
+  for(let i=0; i<rule.competitors.length; i++){
+    const comp = rule.competitors[i];
+    try{
+      const fresh = await obtenerPrecioCompetidor(comp.id);
+      if(fresh.price !== comp.price){
+        rpLogMsg(`"${comp.title.slice(0,35)}" cambió: $${comp.price.toLocaleString('es-AR')} -> $${fresh.price.toLocaleString('es-AR')}`, 'ok');
+        updated++;
+      }
+      comp.price     = fresh.price;
+      comp.thumbnail = fresh.thumbnail || comp.thumbnail;
+    }catch(e){
+      rpLogMsg(`Error actualizando ${comp.id}: ${e.message}`, 'warn');
+    }
+    if(i < rule.competitors.length-1) await new Promise(r=>setTimeout(r,200));
+  }
+
+  rpSaveRules();
+  rpRenderCompetitors(rule);
+  rpRecalcPrices(rule);
+  rpLogMsg(`Actualización completa. ${updated} precio${updated!==1?'s':''} cambiado${updated!==1?'s':''}.`, updated>0?'ok':'info');
+  if(btn){ btn.disabled=false; btn.textContent='↻ Actualizar precios'; }
+}
+
+// ── Recalcular precios en UI (sin actualizar ML) ─────────────────────
+function rpRecalcPrices(rule){
+  if(!rule.competitors.length){
+    const el = id => document.getElementById(id);
+    if(el('rp-price-min'))       el('rp-price-min').textContent       = '—';
+    if(el('rp-price-suggested')) el('rp-price-suggested').textContent = '—';
+    return;
+  }
+  const prices    = rule.competitors.map(c=>c.price).filter(p=>p>0);
+  const minPrice  = Math.min(...prices);
+  const suggested = calcularNuevoPrecio(rule.competitors, rule);
+  const item      = allItems.find(i=>i.id===rule.itemId);
+
+  if(rpSelectedRule === rule.id){
+    const el = id => document.getElementById(id);
+    if(el('rp-price-current'))   el('rp-price-current').textContent   = '$'+(item?.price||rule.lastPrice||0).toLocaleString('es-AR');
+    if(el('rp-price-min'))       el('rp-price-min').textContent       = '$'+minPrice.toLocaleString('es-AR');
+    if(el('rp-price-suggested')) el('rp-price-suggested').textContent = suggested ? '$'+suggested.toLocaleString('es-AR') : '—';
+  }
+}
+
+// ── AUTO-SYNC cada 24h: actualizar precios competidores + reprice ─────
+let _rpAutoInterval = null;
+const RP_AUTO_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 horas
+
+function rpStartAutoSync(){
+  if(_rpAutoInterval) clearInterval(_rpAutoInterval);
+  _rpAutoInterval = setInterval(rpAutoTick, RP_AUTO_INTERVAL_MS);
+  rpLogMsg('Sincronización automática activada (cada 24h)', 'info');
+}
+
+async function rpAutoTick(){
+  if(!token || !userId) return;
+  const activas = rpRules.filter(r=>r.status==='active' && r.competitors.length>0);
+  if(!activas.length) return;
+  rpLogMsg(`[Auto-sync] Iniciando actualización de ${activas.length} regla${activas.length!==1?'s':''}...`, 'info');
+  for(const rule of activas){
+    await rpRefreshPrices(rule.id);
+    const nuevoPrecio = calcularNuevoPrecio(rule.competitors, rule);
+    if(nuevoPrecio){
+      const item = allItems.find(i=>i.id===rule.itemId);
+      if(item && nuevoPrecio !== item.price){
+        await actualizarPrecio(rule.itemId, nuevoPrecio);
+        rule.lastPrice  = nuevoPrecio;
+        rule.lastRun    = Date.now();
+        rule.updatedCount++;
+        rpSaveRules();
+      }
+    }
+    await new Promise(r=>setTimeout(r,600));
+  }
+  rpUpdateKPIs();
+  rpLogMsg('[Auto-sync] Completado', 'ok');
+}
+
+// ── Compatibilidad: mantener obtenerCompetencia para rpRunSingle ─────
+// Ahora usa competidores seleccionados manualmente; fallback a búsqueda auto
+async function obtenerCompetencia(regla){
+  // Si la regla ya tiene competidores seleccionados manualmente, actualizar sus precios
+  if(regla.competitors && regla.competitors.length > 0){
+    rpLogMsg(`Usando ${regla.competitors.length} competidores seleccionados manualmente`, 'info');
+    await rpRefreshPrices(regla.id);
+    return regla.competitors;
+  }
+  // Fallback: búsqueda automática por título y categoría
+  const item = allItems.find(i=>i.id===regla.itemId);
+  if(!item){ rpLogMsg(`Item ${regla.itemId} no encontrado`, 'error'); return []; }
+  const cleanTitle = item.title
+    .replace(/[^a-zA-ZáéíóúÁÉÍÓÚñÑ0-9\s]/g,'')
+    .split(' ').filter(w=>w.length>2).slice(0,5).join(' ');
+  rpLogMsg(`Sin competidores manuales. Búsqueda automática: "${cleanTitle}"`, 'info');
+  const results = await buscarCompetencia(cleanTitle);
+  const filtered = results.filter(r=>String(r.sellerId)!==String(userId)).slice(0,10);
+  rpLogMsg(`Auto-búsqueda: ${filtered.length} resultados`, filtered.length>0?'ok':'warn');
+  return filtered;
+}
+
+
 
 // ── LÓGICA CORE: calcular nuevo precio según reglas ──────────────────
 function calcularNuevoPrecio(preciosCompetencia, regla){
@@ -6650,23 +6868,8 @@ async function rpApplyNow(ruleId){
 }
 
 // ── Actualizar competidores (botón en detalle) ───────────────────────
-async function rpRefreshCompetitors(ruleId){
-  const rule = rpRules.find(r=>r.id===ruleId);
-  if(!rule) return;
-  const btn = document.getElementById('rp-comp-refresh');
-  if(btn){ btn.disabled=true; btn.textContent='Buscando...'; }
-  const competitors = await obtenerCompetencia(rule);
-  rule.competitors = competitors;
-  const minP = competitors.length ? Math.min(...competitors.map(c=>c.price)) : 0;
-  const nuevoPrecio = competitors.length ? calcularNuevoPrecio(competitors, rule) : null;
-  if(rpSelectedRule===ruleId){
-    if(minP) document.getElementById('rp-price-min').textContent = '$'+minP.toLocaleString('es-AR');
-    if(nuevoPrecio) document.getElementById('rp-price-suggested').textContent = '$'+nuevoPrecio.toLocaleString('es-AR');
-    rpRenderCompetitors(rule);
-  }
-  rpSaveRules();
-  if(btn){ btn.disabled=false; btn.textContent='↻ Actualizar'; }
-}
+// Alias legacy para compatibilidad con onclick existentes
+async function rpRefreshCompetitors(ruleId){ await rpRefreshPrices(ruleId); }
 
 // ── Toggle activa/pausada ────────────────────────────────────────────
 function rpToggleRule(ruleId){
@@ -6737,7 +6940,8 @@ function rpUpdateKPIs(){
 function rpInit(){
   rpRenderList();
   rpUpdateKPIs();
-  rpLogMsg('Módulo de repricing listo', 'ok');
+  rpStartAutoSync();
+  rpLogMsg('Módulo de repricing listo. Sincronización automática cada 24h activa.', 'ok');
 }
 
 function filterPAItems(){
