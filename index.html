@@ -6442,47 +6442,24 @@ function rpToggleSearch(){
 
 async function buscarCompetencia(query, ownItemId){
   if(!query || query.trim().length < 2) return [];
-
-  // Estrategia 1: /items/{ownItemId}/similar - autenticado, sin restricciones de IP
-  // Este endpoint devuelve productos similares, perfecto para encontrar competidores
-  if(ownItemId){
-    try{
-      rpLogMsg('Buscando similares...', 'info');
-      const data = await mlGet('/items/' + ownItemId + '/similar');
-      const items = Array.isArray(data) ? data : (data.results || data.items || []);
-      const results = items
-        .filter(r => r.price > 0 && String(r.seller_id||r.seller?.id) !== String(userId))
-        .map(r => ({
-          id: r.id, title: r.title||r.name||'', price: r.price||0,
-          thumbnail: r.thumbnail||'', sellerId: r.seller_id||r.seller?.id,
-          permalink: r.permalink||'',
-        })).slice(0,15);
-      if(results.length){ rpLogMsg('Similares encontrados: '+results.length, 'ok'); return results; }
-    }catch(e){
-      rpLogMsg('Similar endpoint no disponible, intentando búsqueda...', 'warn');
-    }
-  }
-
-  // Estrategia 2: search con token auth via /api/*
   try{
-    rpLogMsg('Búsqueda por texto: "'+query+'"', 'info');
-    const data = await mlGet('/sites/MLA/search?q='+encodeURIComponent(query)+'&limit=15');
+    rpLogMsg('Buscando competidores: "'+query+'"', 'info');
+    // Fetch DIRECTO desde el browser del usuario (IP residencial).
+    // ML bloquea IPs de data centers (Cloudflare/AWS) pero NO IPs de usuarios.
+    // SIN Authorization header — endpoint público de ML.
+    const url = 'https://api.mercadolibre.com/sites/MLA/search?q='
+      + encodeURIComponent(query) + '&limit=20&sort=relevance';
+    const r = await fetch(url);  // sin Worker, sin token, sin headers extra
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const data = await r.json();
     const results = (data.results||[])
-      .filter(r => r.price>0 && String(r.seller?.id)!==String(userId))
-      .map(r => ({id:r.id,title:r.title,price:r.price,thumbnail:r.thumbnail,sellerId:r.seller?.id,permalink:r.permalink}))
-      .slice(0,15);
-    if(results.length){ rpLogMsg('Resultados: '+results.length, 'ok'); return results; }
-  }catch(e){
-    rpLogMsg('Búsqueda con auth falló ('+e.message+'), intentando sin auth...', 'warn');
-  }
-
-  // Estrategia 3: search sin auth via /pub/*
-  try{
-    const data = await mlGetPublic('/sites/MLA/search?q='+encodeURIComponent(query)+'&limit=15');
-    return (data.results||[])
-      .filter(r => r.price>0 && String(r.seller?.id)!==String(userId))
-      .map(r => ({id:r.id,title:r.title,price:r.price,thumbnail:r.thumbnail,sellerId:r.seller?.id,permalink:r.permalink}))
-      .slice(0,15);
+      .filter(r => r.price > 0 && String(r.seller?.id) !== String(userId))
+      .map(r => ({
+        id: r.id, title: r.title, price: r.price,
+        thumbnail: r.thumbnail, sellerId: r.seller?.id, permalink: r.permalink,
+      })).slice(0,15);
+    rpLogMsg('Competidores encontrados: '+results.length, results.length>0?'ok':'warn');
+    return results;
   }catch(e){
     rpLogMsg('Error buscando competidores: '+e.message, 'error');
     return [];
@@ -6562,26 +6539,16 @@ async function rpAddCompetitor(itemId){
 // ── obtenerPrecioCompetidor(itemId) — GET /items/{ITEM_ID} ───────────
 // Usa la API pública de ML (no requiere token)
 async function obtenerPrecioCompetidor(itemId){
-  // Pasar por el Worker — evita CORS y agrega token de auth
-  // mlGet() -> WORKER/api/items/{id} -> api.mercadolibre.com/items/{id}
-  // Usar /api/* con auth — ML acepta consultas de items individuales con token de vendedor
-  // Si falla, intentar /pub/* sin auth
-  let d;
-  try{
-    d = await mlGet('/items/' + itemId + '?attributes=id,title,price,thumbnail,seller_id,permalink');
-  }catch(e){
-  let d;
-  try{ d = await mlGet('/items/'+itemId+'?attributes=id,title,price,thumbnail,seller_id,permalink'); }
-  catch(e){ d = await mlGetPublic('/items/'+itemId+'?attributes=id,title,price,thumbnail,seller_id,permalink'); }
-  }
-  if(!d || !d.id) throw new Error(`Item ${itemId} no encontrado o error de API`);
+  // Fetch DIRECTO desde el browser — sin Worker, sin token.
+  // /items/{id} es público en ML, funciona desde IPs residenciales sin problema.
+  const r = await fetch('https://api.mercadolibre.com/items/'+itemId
+    +'?attributes=id,title,price,thumbnail,seller_id,permalink');
+  if(!r.ok) throw new Error('HTTP '+r.status+' para item '+itemId);
+  const d = await r.json();
+  if(!d.id) throw new Error('Item '+itemId+' no encontrado');
   return {
-    id:        d.id,
-    title:     d.title || '',
-    price:     d.price || 0,
-    thumbnail: d.thumbnail || '',
-    sellerId:  d.seller_id,
-    permalink: d.permalink || '',
+    id: d.id, title: d.title||'', price: d.price||0,
+    thumbnail: d.thumbnail||'', sellerId: d.seller_id, permalink: d.permalink||'',
   };
 }
 
