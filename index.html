@@ -2090,6 +2090,42 @@ async function _loadNextItemsPage(){
 async function loadMoreItems(){
   if(_itemsHasMore) await _loadNextItemsPage();
 }
+
+function stamp(){
+  document.getElementById('last-upd').textContent='Actualizado '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+}
+
+function _updateOrdersUI(mesOrders){
+  const mes=mesOrders||[];
+  const totalMes=mes.reduce((s,o)=>s+(o.total_amount||0),0);
+  const ticket=mes.length?Math.round(totalMes/mes.length):0;
+  const ss=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
+  ss('d-billing','$'+totalMes.toLocaleString('es-AR'));ss('d-sales',mes.length);
+  ss('d-ticket','$'+ticket.toLocaleString('es-AR'));ss('fac-mes','$'+totalMes.toLocaleString('es-AR'));
+  ss('v-mes',mes.length);ss('v-ticket','$'+ticket.toLocaleString('es-AR'));
+}
+
+function _updateVentasBadge(){
+  // Contar órdenes que necesitan imprimir etiqueta:
+  // - si shipping.status fue cargado: usarlo (más preciso)
+  // - si no: usar order.status=paid/confirmed como proxy confiable
+  const withShipStatus=allOrders.filter(o=>o.shipping?._statusLoaded).length;
+  let toPrint;
+  if(withShipStatus>0){
+    // Tenemos datos reales de shipments
+    toPrint=allOrders.filter(o=>o.shipping?.status==='ready_to_ship').length;
+  } else {
+    // Fallback: órdenes pagadas con envío asignado y sin entregar/cancelar
+    toPrint=allOrders.filter(o=>
+      (o.status==='paid'||o.status==='confirmed')&&
+      o.shipping?.id&&
+      o.status!=='shipped'&&o.status!=='delivered'&&o.status!=='cancelled'
+    ).length;
+  }
+  const nb=document.getElementById('nb-ventas');
+  if(nb){nb.textContent=toPrint||'';nb.style.display=toPrint>0?'inline-flex':'none';}
+}
+
 function _updateItemsUI(){
   const active=allItems.filter(i=>i.status==='active').length;
   const paused=allItems.filter(i=>i.status==='paused').length;
