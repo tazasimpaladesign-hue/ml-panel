@@ -6525,23 +6525,27 @@ async function rpAddCompetitor(itemId, preloaded){
   }
 }
 
-// ── obtenerPrecioCompetidor — GET /items/{id} via Worker /pub/* ───────
-// Browser → Worker /pub/items/{id} → ML (sin token, sin Origin header)
-// El Worker hace la request server-to-server: sin CORS, sin PolicyAgent.
-// NO usar mlGet() (agrega token) ni fetch directo (agrega Origin header).
+// ── obtenerPrecioCompetidor — usa el mismo endpoint batch que carga tus items
+// /items?ids=MLA... es el mismo que usa loadItemsFast() y funciona con auth.
+// Es distinto a /items/{id} que activa PolicyAgent para items ajenos.
 async function obtenerPrecioCompetidor(itemId){
-  // mlGetPublic usa WORKER/pub/* — el Worker reenvía a ML sin Authorization
-  // y sin el header Origin que causa el bloqueo desde GitHub Pages
-  const d = await mlGetPublic('/items/'+itemId
-    +'?attributes=id,title,price,thumbnail,seller_id,permalink');
-  if(!d || !d.id){
-    const msg = d && d.message ? d.message : 'Item '+itemId+' no encontrado';
-    throw new Error(msg);
+  try{
+    // Endpoint batch — funciona con token propio para cualquier item activo
+    const r = await mlGet('/items?ids='+itemId+'&attributes=id,title,price,thumbnail,seller_id,permalink');
+    // Respuesta: array [{code:200, body:{...}}, ...]
+    const item = Array.isArray(r) ? r[0] : null;
+    if(item && item.code === 200 && item.body && item.body.id){
+      const d = item.body;
+      return {
+        id: d.id, title: d.title||'', price: d.price||0,
+        thumbnail: d.thumbnail||'', sellerId: d.seller_id, permalink: d.permalink||'',
+      };
+    }
+    const errCode = item ? item.code : 'sin respuesta';
+    throw new Error('ML devolvió código '+errCode+' para '+itemId);
+  }catch(e){
+    throw new Error(e.message);
   }
-  return {
-    id: d.id, title: d.title||'', price: d.price||0,
-    thumbnail: d.thumbnail||'', sellerId: d.seller_id, permalink: d.permalink||'',
-  };
 }
 
 // ── Eliminar competidor de la regla ──────────────────────────────────
