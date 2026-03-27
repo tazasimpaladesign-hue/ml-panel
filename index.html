@@ -577,6 +577,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   <a class="nav" href="#facturacion" id="nav-facturacion" onclick="showSection('facturacion');return false;"><span class="ni">💰</span>Facturación</a>
 
   <div class="sb-sec">Automatización</div>
+  <a class="nav" href="#repricing" id="nav-repricing" onclick="showSection('repricing');return false;"><span class="ni">💲</span>Precios automáticos<span class="nb nb-purple">NEW</span></a>
   <a class="nav" href="#reglas" id="nav-reglas" onclick="showSection('reglas');return false;"><span class="ni">⚙️</span>Reglas automáticas</a>
   <a class="nav" href="#alertas" id="nav-alertas" onclick="showSection('alertas');return false;"><span class="ni">🔔</span>Alertas<span class="nb nb-red" id="nb-alerts">0</span></a>
 
@@ -1527,6 +1528,214 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     </div>
   </div>
 </div>
+
+<!-- ═══════════════════════ PRECIOS AUTOMÁTICOS (REPRICING) ═══════════════════════ -->
+<div id="section-repricing" class="section fade-in">
+
+  <!-- KPIs top -->
+  <div class="mgt" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">
+    <div class="mc c-green"><div class="mc-label">Reglas activas</div><div class="mc-val" id="rp-kpi-active">—</div></div>
+    <div class="mc c-blue"><div class="mc-label">Últimas 24h</div><div class="mc-val" id="rp-kpi-updated">—</div><div class="mc-sub">actualizaciones</div></div>
+    <div class="mc c-amber"><div class="mc-label">Reglas pausadas</div><div class="mc-val" id="rp-kpi-paused">—</div></div>
+    <div class="mc c-purple"><div class="mc-label">Ahorro promedio vs competencia</div><div class="mc-val" id="rp-kpi-diff">—</div></div>
+  </div>
+
+  <div class="g2" style="align-items:flex-start">
+
+    <!-- Lista de reglas -->
+    <div>
+      <div class="card mb">
+        <div class="card-hd">
+          <div>
+            <div class="card-title">💲 Reglas de repricing</div>
+            <div class="card-sub" id="rp-rules-count">Sin reglas configuradas</div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost btn-sm" onclick="rpRunAll()" id="rp-run-btn">▶ Ejecutar todas</button>
+            <button class="btn btn-primary btn-sm" onclick="rpOpenNewRule()">+ Nueva regla</button>
+          </div>
+        </div>
+
+        <!-- Filtro de publicación para regla nueva -->
+        <div id="rp-new-rule-panel" style="display:none;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:16px;margin-bottom:14px">
+          <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:12px">Nueva regla de repricing</div>
+
+          <!-- Seleccionar publicación -->
+          <div class="ff" style="margin-bottom:10px">
+            <label>Publicación base</label>
+            <input type="text" id="rp-search-item" placeholder="Buscar por título..." oninput="rpSearchItems(this.value)"
+              style="margin-bottom:6px">
+            <div id="rp-item-results" style="max-height:160px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;display:none"></div>
+            <div id="rp-selected-item" style="display:none;padding:8px 10px;background:var(--bg2);border:1px solid var(--accent);border-radius:6px;font-size:12px"></div>
+          </div>
+
+          <!-- Config de la regla -->
+          <div class="g2" style="gap:10px;margin-bottom:10px">
+            <div>
+              <label>Tipo de regla</label>
+              <select id="rp-rule-type" style="font-size:12.5px;padding:7px 9px">
+                <option value="cheaper">Más barato que competencia</option>
+                <option value="match">Igualar precio mínimo</option>
+                <option value="avg">Igualar precio promedio</option>
+              </select>
+            </div>
+            <div>
+              <label>Estado inicial</label>
+              <select id="rp-rule-status" style="font-size:12.5px;padding:7px 9px">
+                <option value="active">Activa</option>
+                <option value="paused">Pausada</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="g2" style="gap:10px;margin-bottom:10px">
+            <div>
+              <label>Margen (ARS que se descuenta del precio mínimo)</label>
+              <input type="number" id="rp-rule-margin" value="50" min="0" step="10" style="font-size:12.5px;padding:7px 9px">
+            </div>
+            <div>
+              <label>Margen tipo</label>
+              <select id="rp-rule-margin-type" style="font-size:12.5px;padding:7px 9px">
+                <option value="pesos">Pesos fijos</option>
+                <option value="pct">Porcentaje (%)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="g2" style="gap:10px;margin-bottom:14px">
+            <div>
+              <label>Precio mínimo permitido (floor)</label>
+              <input type="number" id="rp-rule-floor" placeholder="Ej: 15000" min="0" step="100" style="font-size:12.5px;padding:7px 9px">
+            </div>
+            <div>
+              <label>Precio máximo (opcional)</label>
+              <input type="number" id="rp-rule-ceil" placeholder="Sin límite" min="0" step="100" style="font-size:12.5px;padding:7px 9px">
+            </div>
+          </div>
+
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-primary" onclick="rpSaveNewRule()">💾 Guardar regla</button>
+            <button class="btn btn-ghost" onclick="rpCloseNewRule()">Cancelar</button>
+          </div>
+        </div>
+
+        <!-- Lista de reglas existentes -->
+        <div id="rp-rules-list">
+          <div style="text-align:center;padding:28px;color:var(--text3);font-size:12.5px">
+            No hay reglas configuradas. Hacé clic en <strong>+ Nueva regla</strong> para empezar.
+          </div>
+        </div>
+      </div>
+
+      <!-- Log de actividad -->
+      <div class="card">
+        <div class="card-hd">
+          <div class="card-title">📋 Log de actividad</div>
+          <button class="btn btn-ghost btn-xs" onclick="rpClearLog()">Limpiar</button>
+        </div>
+        <div id="rp-log" style="font-family:var(--mono);font-size:11px;max-height:220px;overflow-y:auto;color:var(--text2);line-height:1.7">
+          <div style="color:var(--text3)">El log aparecerá acá cuando ejecutes reglas...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Panel detalle regla seleccionada -->
+    <div>
+      <div class="card" id="rp-detail-panel" style="display:none">
+        <div class="card-hd">
+          <div>
+            <div class="card-title" id="rp-detail-title">Detalle de regla</div>
+            <div class="card-sub" id="rp-detail-sub"></div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost btn-sm" id="rp-detail-toggle" onclick="rpToggleRule(rpSelectedRule)">⏸ Pausar</button>
+            <button class="btn btn-ghost btn-sm" onclick="rpRunSingle(rpSelectedRule)" id="rp-detail-run">▶ Ejecutar</button>
+          </div>
+        </div>
+
+        <!-- Precios actuales -->
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">
+          <div style="background:var(--bg3);border-radius:var(--rs);padding:12px;border:1px solid var(--border);text-align:center">
+            <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px">Precio actual</div>
+            <div style="font-size:18px;font-weight:700;color:var(--text)" id="rp-price-current">—</div>
+          </div>
+          <div style="background:var(--bg3);border-radius:var(--rs);padding:12px;border:1px solid var(--border);text-align:center">
+            <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px">Precio mínimo mercado</div>
+            <div style="font-size:18px;font-weight:700;color:var(--amber)" id="rp-price-min">—</div>
+          </div>
+          <div style="background:#f0fdf4;border-radius:var(--rs);padding:12px;border:1px solid #bbf7d0;text-align:center">
+            <div style="font-size:10px;color:#166534;text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px">Precio sugerido</div>
+            <div style="font-size:18px;font-weight:700;color:var(--green)" id="rp-price-suggested">—</div>
+          </div>
+        </div>
+
+        <!-- Competidores -->
+        <div style="margin-bottom:14px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+            <div style="font-size:12px;font-weight:600;color:var(--text)">Competidores detectados</div>
+            <button class="btn btn-ghost btn-xs" onclick="rpRefreshCompetitors(rpSelectedRule)" id="rp-comp-refresh">↻ Actualizar</button>
+          </div>
+          <div id="rp-competitors-list" style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto">
+            <div style="color:var(--text3);font-size:12px;padding:8px 0">Ejecutá la regla para ver competidores...</div>
+          </div>
+        </div>
+
+        <!-- Config editable -->
+        <div style="background:var(--bg3);border-radius:var(--rs);padding:12px;border:1px solid var(--border);margin-bottom:12px">
+          <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Configuración</div>
+          <div class="g2" style="gap:8px;margin-bottom:8px">
+            <div>
+              <label style="font-size:11px">Margen</label>
+              <div style="display:flex;gap:6px">
+                <input type="number" id="rp-edit-margin" style="font-size:12px;padding:5px 8px" min="0">
+                <select id="rp-edit-margin-type" style="font-size:12px;padding:5px 8px;flex-shrink:0">
+                  <option value="pesos">ARS</option>
+                  <option value="pct">%</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label style="font-size:11px">Tipo de regla</label>
+              <select id="rp-edit-type" style="font-size:12px;padding:5px 8px">
+                <option value="cheaper">Más barato</option>
+                <option value="match">Igualar mínimo</option>
+                <option value="avg">Igualar promedio</option>
+              </select>
+            </div>
+          </div>
+          <div class="g2" style="gap:8px;margin-bottom:10px">
+            <div>
+              <label style="font-size:11px">Precio mínimo (floor)</label>
+              <input type="number" id="rp-edit-floor" style="font-size:12px;padding:5px 8px" min="0" placeholder="Sin límite">
+            </div>
+            <div>
+              <label style="font-size:11px">Precio máximo</label>
+              <input type="number" id="rp-edit-ceil" style="font-size:12px;padding:5px 8px" min="0" placeholder="Sin límite">
+            </div>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="rpSaveEdit()">💾 Guardar cambios</button>
+        </div>
+
+        <!-- Acciones -->
+        <div style="display:flex;gap:8px;padding-top:12px;border-top:1px solid var(--border)">
+          <button class="btn btn-danger btn-sm" onclick="rpDeleteRule(rpSelectedRule)">🗑️ Eliminar regla</button>
+          <button class="btn btn-ghost btn-sm" onclick="rpApplyNow(rpSelectedRule)" id="rp-apply-btn">✅ Aplicar precio ahora</button>
+        </div>
+      </div>
+
+      <!-- Info panel when nothing selected -->
+      <div class="card" id="rp-empty-panel">
+        <div style="text-align:center;padding:32px 16px;color:var(--text3)">
+          <div style="font-size:32px;margin-bottom:10px">💲</div>
+          <div style="font-size:13px;font-weight:600;margin-bottom:6px">Seleccioná una regla</div>
+          <div style="font-size:12px">Hacé clic en una regla de la lista para ver sus detalles, editar la configuración y ver los competidores detectados.</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
 
 <!-- ═══════════════════════ HORARIOS Y DÍAS FESTIVOS ═══════════════════════ -->
 <div id="section-horarios" class="section fade-in">
@@ -5800,6 +6009,7 @@ const titles={
   horarios:['🕐 Horarios y días festivos','Información logística de tu tienda'],
   publicidad:['📢 Publicidad','Product Ads, ACOS y ROI'],
   facturacion:['💰 Facturación','Ingresos y órdenes'],
+  repricing:['💲 Precios automáticos','Repricing dinámico basado en competencia'],
   reglas:['⚙️ Reglas automáticas','Automatizaciones de precios y respuestas'],
   alertas:['🔔 Alertas','Centro de notificaciones']
 };
@@ -5826,6 +6036,7 @@ function showSection(id){
   if(id==='reputacion') renderReputacion();
   if(id==='stock') renderStock();
   if(id==='reclamos') renderReclamos();
+  if(id==='repricing'){ rpUpdateKPIs(); rpRenderList(); }
   if(id==='horarios') { loadHorarios(); loadFestivos(); }
   if(id==='facturacion') renderFacturacion();
   if(id==='alertas') refreshAlerts();
@@ -5965,10 +6176,571 @@ function renderMsgPacks(packs,el){
     </div>`).join('')||'<div class="alert a-success">✅ Sin mensajes</div>';
 }
 
-// ── Precios automáticos ──
+// ══════════════════════════════════════════════════════════════════════
+// MÓDULO: PRECIOS AUTOMÁTICOS (REPRICING DINÁMICO)
+// Basado en competencia real via API de Mercado Libre
+// ══════════════════════════════════════════════════════════════════════
+
+// ── Estado global del módulo ────────────────────────────────────────
+let rpRules = JSON.parse(localStorage.getItem('rp_rules') || '[]');
+let rpSelectedRule = null;   // ID de la regla actualmente abierta en detalle
+let rpLog = [];              // historial de logs en memoria
+
+// ── Persistencia ────────────────────────────────────────────────────
+function rpSaveRules(){
+  localStorage.setItem('rp_rules', JSON.stringify(rpRules));
+}
+
+// ── Log de actividad ────────────────────────────────────────────────
+function rpLogMsg(msg, type){
+  // type: 'info' | 'ok' | 'warn' | 'error'
+  const colors = { info:'#60a5fa', ok:'#4ade80', warn:'#fbbf24', error:'#f87171' };
+  const prefix = { info:'[INFO]', ok:'[OK]', warn:'[WARN]', error:'[ERROR]' };
+  const ts = new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const entry = `<div><span style="color:var(--text3)">${ts}</span> <span style="color:${colors[type]||colors.info}">${prefix[type]||''}</span> ${msg}</div>`;
+  rpLog.unshift(entry);
+  if(rpLog.length > 200) rpLog = rpLog.slice(0, 200);
+  const el = document.getElementById('rp-log');
+  if(el) el.innerHTML = rpLog.join('');
+  console.log(`[Repricing] [${type}] ${msg}`);
+}
+
+function rpClearLog(){
+  rpLog = [];
+  const el = document.getElementById('rp-log');
+  if(el) el.innerHTML = '<div style="color:var(--text3)">Log limpiado.</div>';
+}
+
+// ── Búsqueda de publicaciones propia para nueva regla ───────────────
+function rpSearchItems(q){
+  const res = document.getElementById('rp-item-results');
+  if(!res) return;
+  if(!q || q.length < 2){ res.style.display='none'; return; }
+  const matches = allItems
+    .filter(i => i.status==='active' && i.title.toLowerCase().includes(q.toLowerCase()))
+    .slice(0, 8);
+  if(!matches.length){ res.style.display='none'; return; }
+  res.style.display = 'block';
+  res.innerHTML = matches.map(i => `
+    <div onclick="rpSelectItem('${i.id}')"
+      style="padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);font-size:12px;display:flex;align-items:center;gap:8px"
+      onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''">
+      <img src="${i.thumbnail||''}" width="30" height="30"
+        style="object-fit:cover;border-radius:4px;flex-shrink:0"
+        onerror="this.style.display='none'">
+      <div>
+        <div style="font-weight:500">${i.title.slice(0,60)}</div>
+        <div style="color:var(--text3)">$${(i.price||0).toLocaleString('es-AR')} · ${i.id}</div>
+      </div>
+    </div>`).join('');
+}
+
+function rpSelectItem(itemId){
+  const item = allItems.find(i=>i.id===itemId);
+  if(!item) return;
+  const inp = document.getElementById('rp-search-item');
+  const res = document.getElementById('rp-item-results');
+  const sel = document.getElementById('rp-selected-item');
+  if(inp) inp.value = '';
+  if(res) res.style.display='none';
+  if(sel){
+    sel.style.display='block';
+    sel.dataset.id = itemId;
+    sel.innerHTML = `<div style="display:flex;align-items:center;gap:8px">
+      <img src="${item.thumbnail||''}" width="36" height="36" style="object-fit:cover;border-radius:5px" onerror="this.style.display='none'">
+      <div>
+        <div style="font-weight:600;font-size:12px">${item.title.slice(0,55)}</div>
+        <div style="color:var(--text3);font-size:11px">ID: ${item.id} · Precio actual: <b>$${(item.price||0).toLocaleString('es-AR')}</b></div>
+      </div>
+      <button onclick="rpClearSelectedItem()" class="btn btn-ghost btn-xs" style="margin-left:auto">✕</button>
+    </div>`;
+    // Pre-fill floor with 90% of current price
+    const floorEl = document.getElementById('rp-rule-floor');
+    if(floorEl && !floorEl.value) floorEl.value = Math.round((item.price||0) * 0.85);
+  }
+}
+
+function rpClearSelectedItem(){
+  const sel = document.getElementById('rp-selected-item');
+  if(sel){ sel.style.display='none'; delete sel.dataset.id; sel.innerHTML=''; }
+}
+
+// ── Abrir / cerrar panel de nueva regla ─────────────────────────────
+function rpOpenNewRule(){
+  document.getElementById('rp-new-rule-panel').style.display = 'block';
+  document.getElementById('rp-search-item').focus();
+}
+function rpCloseNewRule(){
+  document.getElementById('rp-new-rule-panel').style.display = 'none';
+  rpClearSelectedItem();
+  ['rp-rule-margin','rp-rule-floor','rp-rule-ceil'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.value='';
+  });
+}
+
+// ── Guardar nueva regla ──────────────────────────────────────────────
+function rpSaveNewRule(){
+  const sel = document.getElementById('rp-selected-item');
+  const itemId = sel && sel.dataset.id;
+  if(!itemId){ alert('Seleccioná una publicación primero'); return; }
+
+  const item  = allItems.find(i=>i.id===itemId);
+  const floor = parseFloat(document.getElementById('rp-rule-floor').value) || 0;
+  const ceil  = parseFloat(document.getElementById('rp-rule-ceil').value)  || null;
+
+  // Evitar duplicados
+  if(rpRules.find(r=>r.itemId===itemId)){
+    alert('Ya existe una regla para esta publicación. Editala desde el detalle.');
+    return;
+  }
+
+  const rule = {
+    id:         'rp_' + Date.now(),
+    itemId,
+    itemTitle:  item?.title || '',
+    itemThumb:  item?.thumbnail || '',
+    type:       document.getElementById('rp-rule-type').value,
+    status:     document.getElementById('rp-rule-status').value,
+    margin:     parseFloat(document.getElementById('rp-rule-margin').value) || 50,
+    marginType: document.getElementById('rp-rule-margin-type').value,
+    floor,
+    ceil,
+    lastRun:    null,
+    lastPrice:  item?.price || null,
+    updatedCount: 0,
+    competitors: [],
+  };
+
+  rpRules.push(rule);
+  rpSaveRules();
+  rpCloseNewRule();
+  rpRenderList();
+  rpUpdateKPIs();
+  rpLogMsg(`Regla creada para "${item?.title?.slice(0,40)}" (ID ${itemId})`, 'ok');
+}
+
+// ── Renderizar lista de reglas ───────────────────────────────────────
+function rpRenderList(){
+  const el = document.getElementById('rp-rules-list');
+  const count = document.getElementById('rp-rules-count');
+  if(!el) return;
+
+  const active = rpRules.filter(r=>r.status==='active').length;
+  const paused = rpRules.filter(r=>r.status==='paused').length;
+  if(count) count.textContent = `${rpRules.length} regla${rpRules.length!==1?'s':''} · ${active} activa${active!==1?'s':''} · ${paused} pausada${paused!==1?'s':''}`;
+
+  if(!rpRules.length){
+    el.innerHTML = '<div style="text-align:center;padding:28px;color:var(--text3);font-size:12.5px">No hay reglas configuradas. Hacé clic en <strong>+ Nueva regla</strong> para empezar.</div>';
+    return;
+  }
+
+  el.innerHTML = rpRules.map(rule => {
+    const isActive = rule.status === 'active';
+    const item = allItems.find(i=>i.id===rule.itemId);
+    const price = item?.price ?? rule.lastPrice ?? 0;
+    const typeLabel = {cheaper:'Más barato', match:'Igualar mínimo', avg:'Igualar promedio'}[rule.type]||rule.type;
+    const marginStr = rule.marginType==='pct' ? `${rule.margin}%` : `$${rule.margin}`;
+    const lastRun = rule.lastRun ? new Date(rule.lastRun).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : 'Nunca';
+    const isSelected = rpSelectedRule === rule.id;
+
+    return `<div onclick="rpSelectRule('${rule.id}')"
+      style="display:flex;align-items:center;gap:10px;padding:12px;border-radius:var(--rs);border:1px solid ${isSelected?'var(--accent)':'var(--border)'};background:${isSelected?'var(--accent-g)':'var(--bg2)'};cursor:pointer;margin-bottom:8px;transition:all .15s"
+      onmouseover="if('${rule.id}'!==rpSelectedRule)this.style.background='var(--bg3)'"
+      onmouseout="if('${rule.id}'!==rpSelectedRule)this.style.background='var(--bg2)'">
+      <img src="${rule.itemThumb||''}" width="42" height="42"
+        style="object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border)"
+        onerror="this.style.display='none'">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${rule.itemTitle.slice(0,50)}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px">${typeLabel} · margen ${marginStr} · floor $${(rule.floor||0).toLocaleString('es-AR')}</div>
+        <div style="font-size:10px;color:var(--text3)">Último: ${lastRun}</div>
+      </div>
+      <div style="text-align:right;flex-shrink:0">
+        <div style="font-size:14px;font-weight:700;color:var(--text)">$${(price||0).toLocaleString('es-AR')}</div>
+        <span class="badge ${isActive?'bg-green':'bg-amber'}" style="font-size:9px">${isActive?'Activa':'Pausada'}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── Seleccionar regla -- mostrar detalle ─────────────────────────────
+function rpSelectRule(ruleId){
+  rpSelectedRule = ruleId;
+  const rule = rpRules.find(r=>r.id===ruleId);
+  if(!rule) return;
+  const item = allItems.find(i=>i.id===rule.itemId);
+
+  document.getElementById('rp-empty-panel').style.display = 'none';
+  document.getElementById('rp-detail-panel').style.display = 'block';
+  document.getElementById('rp-detail-title').textContent = rule.itemTitle.slice(0,45) || 'Detalle de regla';
+  document.getElementById('rp-detail-sub').textContent = `ID: ${rule.itemId}`;
+
+  const toggleBtn = document.getElementById('rp-detail-toggle');
+  if(toggleBtn) toggleBtn.textContent = rule.status==='active' ? '⏸ Pausar' : '▶ Activar';
+
+  document.getElementById('rp-price-current').textContent = '$'+(item?.price||rule.lastPrice||0).toLocaleString('es-AR');
+  document.getElementById('rp-price-min').textContent = '—';
+  document.getElementById('rp-price-suggested').textContent = '—';
+
+  // Fill edit fields
+  document.getElementById('rp-edit-margin').value = rule.margin;
+  document.getElementById('rp-edit-margin-type').value = rule.marginType;
+  document.getElementById('rp-edit-type').value = rule.type;
+  document.getElementById('rp-edit-floor').value = rule.floor || '';
+  document.getElementById('rp-edit-ceil').value = rule.ceil || '';
+
+  // Show competitors if already fetched
+  rpRenderCompetitors(rule);
+  rpRenderList(); // re-render to highlight selected
+}
+
+// ── Mostrar competidores en el panel ────────────────────────────────
+function rpRenderCompetitors(rule){
+  const el = document.getElementById('rp-competitors-list');
+  if(!el) return;
+  if(!rule.competitors || !rule.competitors.length){
+    el.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:8px 0">Ejecutá la regla para detectar competidores...</div>';
+    return;
+  }
+  const minPrice = Math.min(...rule.competitors.map(c=>c.price));
+  el.innerHTML = rule.competitors.map(comp => {
+    const isMin = comp.price === minPrice;
+    return `<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border)">
+      <img src="${comp.thumbnail||''}" width="32" height="32"
+        style="object-fit:cover;border-radius:4px;flex-shrink:0;border:1px solid var(--border)"
+        onerror="this.style.display='none'">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${comp.title.slice(0,45)}</div>
+        <div style="font-size:10px;color:var(--text3)">${comp.sellerId ? 'Seller: '+comp.sellerId : ''}</div>
+      </div>
+      <div style="text-align:right;flex-shrink:0">
+        <span style="font-size:13px;font-weight:700;color:${isMin?'var(--red)':'var(--text)'}">$${comp.price.toLocaleString('es-AR')}</span>
+        ${isMin?'<div style="font-size:9px;color:var(--red)">mínimo</div>':''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── LÓGICA CORE: obtener competencia de ML ───────────────────────────
+// GET /sites/MLA/search?q={query}&category={category_id}&limit=20
+async function obtenerCompetencia(producto){
+  const item = allItems.find(i=>i.id===producto.itemId);
+  if(!item){
+    rpLogMsg(`Item ${producto.itemId} no encontrado en allItems`, 'error');
+    return [];
+  }
+
+  // Limpiar título: quitar palabras muy cortas y generar query
+  const cleanTitle = item.title
+    .replace(/[^a-zA-ZáéíóúÁÉÍÓÚñÑ0-9\s]/g,'')
+    .split(' ')
+    .filter(w=>w.length>2)
+    .slice(0,5)
+    .join(' ');
+
+  rpLogMsg(`Buscando competencia para: "${item.title.slice(0,40)}"`, 'info');
+  rpLogMsg(`Query: "${cleanTitle}" | Categoría: ${item.category_id}`, 'info');
+
+  try{
+    // Endpoint de búsqueda pública de ML (no requiere auth)
+    const params = new URLSearchParams({
+      q: cleanTitle,
+      category: item.category_id,
+      limit: '20',
+    });
+    const url = `https://api.mercadolibre.com/sites/MLA/search?${params}`;
+    const resp = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if(!resp.ok) throw new Error(`ML search error: ${resp.status}`);
+    const data = await resp.json();
+
+    const results = (data.results || [])
+      .filter(r =>
+        r.price > 0 &&
+        r.seller && r.seller.id && String(r.seller.id) !== String(userId) // excluir propias
+      )
+      .map(r => ({
+        id:        r.id,
+        title:     r.title,
+        price:     r.price,
+        thumbnail: r.thumbnail,
+        sellerId:  r.seller?.id,
+        link:      r.permalink,
+      }))
+      .slice(0, 15);
+
+    rpLogMsg(`Competidores encontrados: ${results.length}`, results.length>0?'ok':'warn');
+    if(results.length){
+      const minP = Math.min(...results.map(r=>r.price));
+      const avgP = Math.round(results.reduce((s,r)=>s+r.price,0)/results.length);
+      rpLogMsg(`Precio mínimo detectado: $${minP.toLocaleString('es-AR')}`, 'info');
+      rpLogMsg(`Precio promedio detectado: $${avgP.toLocaleString('es-AR')}`, 'info');
+    }
+
+    return results;
+  }catch(e){
+    rpLogMsg(`Error buscando competencia: ${e.message}`, 'error');
+    return [];
+  }
+}
+
+// ── LÓGICA CORE: calcular nuevo precio según reglas ──────────────────
+function calcularNuevoPrecio(preciosCompetencia, regla){
+  if(!preciosCompetencia.length) return null;
+
+  const precios = preciosCompetencia.map(c=>c.price).filter(p=>p>0);
+  const minPrecio = Math.min(...precios);
+  const avgPrecio = Math.round(precios.reduce((s,p)=>s+p,0)/precios.length);
+
+  let base;
+  if(regla.type === 'cheaper' || regla.type === 'match') base = minPrecio;
+  else if(regla.type === 'avg') base = avgPrecio;
+  else base = minPrecio;
+
+  // Calcular margen
+  let margen = 0;
+  if(regla.marginType === 'pesos')    margen = regla.margin;
+  else if(regla.marginType === 'pct') margen = Math.round(base * regla.margin / 100);
+
+  let nuevoPrecio = regla.type === 'match' ? base : base - margen;
+
+  // Aplicar límites
+  if(regla.floor && nuevoPrecio < regla.floor){
+    rpLogMsg(`Precio calculado $${nuevoPrecio.toLocaleString('es-AR')} está por debajo del floor $${regla.floor.toLocaleString('es-AR')} — usando floor`, 'warn');
+    nuevoPrecio = regla.floor;
+  }
+  if(regla.ceil && nuevoPrecio > regla.ceil){
+    rpLogMsg(`Precio calculado $${nuevoPrecio.toLocaleString('es-AR')} supera el techo $${regla.ceil.toLocaleString('es-AR')} — usando techo`, 'warn');
+    nuevoPrecio = regla.ceil;
+  }
+
+  rpLogMsg(`Precio calculado: $${nuevoPrecio.toLocaleString('es-AR')} (base $${base.toLocaleString('es-AR')} - margen $${margen.toLocaleString('es-AR')})`, 'info');
+  return Math.round(nuevoPrecio);
+}
+
+// ── LÓGICA CORE: actualizar precio en ML via PUT ─────────────────────
+async function actualizarPrecio(itemId, nuevoPrecio){
+  rpLogMsg(`Actualizando precio del ítem ${itemId} a $${nuevoPrecio.toLocaleString('es-AR')}...`, 'info');
+  try{
+    const res = await fetch(WORKER+'/api/items/'+itemId, {
+      method: 'PUT',
+      headers:{ 'Authorization':'Bearer '+token, 'Content-Type':'application/json' },
+      body: JSON.stringify({ price: nuevoPrecio }),
+    });
+    const data = await res.json();
+    if(res.status===401 || data.error==='unauthorized'){
+      rpLogMsg(`Error: token vencido. Reconectá tu cuenta.`, 'error');
+      return false;
+    }
+    if(data.error){
+      rpLogMsg(`Error ML: ${data.message||data.error}`, 'error');
+      return false;
+    }
+
+    // GET de verificación — confirmar que ML aplicó el cambio
+    await new Promise(r=>setTimeout(r,800));
+    const verify = await mlGet(`/items/${itemId}?attributes=id,price`);
+    if(Math.abs((verify.price||0) - nuevoPrecio) < 1){
+      rpLogMsg(`✓ Precio confirmado: $${(verify.price||0).toLocaleString('es-AR')}`, 'ok');
+      // Actualizar allItems local
+      const local = allItems.find(i=>i.id===itemId);
+      if(local) local.price = verify.price;
+      return true;
+    } else {
+      rpLogMsg(`⚠ Precio en ML ($${(verify.price||0).toLocaleString('es-AR')}) difiere del solicitado. Puede demorar.`, 'warn');
+      return false;
+    }
+  }catch(e){
+    rpLogMsg(`Error de red al actualizar precio: ${e.message}`, 'error');
+    return false;
+  }
+}
+
+// ── Ejecutar una regla individual ───────────────────────────────────
+async function rpRunSingle(ruleId){
+  const rule = rpRules.find(r=>r.id===ruleId);
+  if(!rule){ rpLogMsg(`Regla ${ruleId} no encontrada`, 'error'); return; }
+  if(rule.status==='paused'){
+    rpLogMsg(`Regla "${rule.itemTitle.slice(0,30)}" está pausada — omitiendo`, 'warn');
+    return;
+  }
+
+  const item = allItems.find(i=>i.id===rule.itemId);
+  const precioActual = item?.price || 0;
+
+  // 1. Obtener competencia
+  const competitors = await obtenerCompetencia(rule);
+  rule.competitors = competitors;
+
+  if(!competitors.length){
+    rpLogMsg(`Sin competidores detectados para "${rule.itemTitle.slice(0,30)}" — no se actualiza`, 'warn');
+    rpSaveRules();
+    rpRenderCompetitors(rule);
+    return;
+  }
+
+  // 2. Calcular nuevo precio
+  const nuevoPrecio = calcularNuevoPrecio(competitors, rule);
+  if(nuevoPrecio === null){ rpSaveRules(); return; }
+
+  // 3. Actualizar UI de detalle
+  const minP = Math.min(...competitors.map(c=>c.price));
+  if(rpSelectedRule === ruleId){
+    document.getElementById('rp-price-current').textContent   = '$'+precioActual.toLocaleString('es-AR');
+    document.getElementById('rp-price-min').textContent        = '$'+minP.toLocaleString('es-AR');
+    document.getElementById('rp-price-suggested').textContent  = '$'+nuevoPrecio.toLocaleString('es-AR');
+    rpRenderCompetitors(rule);
+  }
+
+  // 4. Verificar si hay cambio necesario
+  if(nuevoPrecio === precioActual){
+    rpLogMsg(`Precio igual al actual ($${precioActual.toLocaleString('es-AR')}) — sin cambios`, 'info');
+    rule.lastRun = Date.now();
+    rpSaveRules();
+    rpRenderList();
+    return;
+  }
+
+  // 5. Actualizar precio en ML
+  const success = await actualizarPrecio(rule.itemId, nuevoPrecio);
+  rule.lastRun = Date.now();
+  rule.lastPrice = nuevoPrecio;
+  if(success) rule.updatedCount++;
+  rpSaveRules();
+  rpRenderList();
+  rpUpdateKPIs();
+}
+
+// ── Ejecutar todas las reglas activas ───────────────────────────────
+async function rpRunAll(){
+  const activas = rpRules.filter(r=>r.status==='active');
+  if(!activas.length){ rpLogMsg('No hay reglas activas para ejecutar', 'warn'); return; }
+
+  const btn = document.getElementById('rp-run-btn');
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Ejecutando...'; }
+
+  rpLogMsg(`Iniciando ejecución de ${activas.length} regla${activas.length!==1?'s':''}...`, 'info');
+
+  for(let i=0; i<activas.length; i++){
+    await rpRunSingle(activas[i].id);
+    if(i < activas.length-1) await new Promise(r=>setTimeout(r,500)); // delay entre reglas
+  }
+
+  rpLogMsg(`Ejecución completada (${activas.length} reglas procesadas)`, 'ok');
+  if(btn){ btn.disabled=false; btn.textContent='▶ Ejecutar todas'; }
+}
+
+// ── Actualizar precio inmediatamente (desde el panel) ────────────────
+async function rpApplyNow(ruleId){
+  const rule = rpRules.find(r=>r.id===ruleId);
+  if(!rule || !rule.competitors.length){
+    rpLogMsg('Ejecutá la regla primero para obtener competidores', 'warn');
+    return;
+  }
+  const nuevoPrecio = calcularNuevoPrecio(rule.competitors, rule);
+  if(nuevoPrecio === null) return;
+  const btn = document.getElementById('rp-apply-btn');
+  if(btn){ btn.disabled=true; btn.textContent='Aplicando...'; }
+  await actualizarPrecio(rule.itemId, nuevoPrecio);
+  if(btn){ btn.disabled=false; btn.textContent='✅ Aplicar precio ahora'; }
+  rule.lastRun = Date.now();
+  rule.lastPrice = nuevoPrecio;
+  rpSaveRules();
+  rpRenderList();
+  rpUpdateKPIs();
+}
+
+// ── Actualizar competidores (botón en detalle) ───────────────────────
+async function rpRefreshCompetitors(ruleId){
+  const rule = rpRules.find(r=>r.id===ruleId);
+  if(!rule) return;
+  const btn = document.getElementById('rp-comp-refresh');
+  if(btn){ btn.disabled=true; btn.textContent='Buscando...'; }
+  const competitors = await obtenerCompetencia(rule);
+  rule.competitors = competitors;
+  const minP = competitors.length ? Math.min(...competitors.map(c=>c.price)) : 0;
+  const nuevoPrecio = competitors.length ? calcularNuevoPrecio(competitors, rule) : null;
+  if(rpSelectedRule===ruleId){
+    if(minP) document.getElementById('rp-price-min').textContent = '$'+minP.toLocaleString('es-AR');
+    if(nuevoPrecio) document.getElementById('rp-price-suggested').textContent = '$'+nuevoPrecio.toLocaleString('es-AR');
+    rpRenderCompetitors(rule);
+  }
+  rpSaveRules();
+  if(btn){ btn.disabled=false; btn.textContent='↻ Actualizar'; }
+}
+
+// ── Toggle activa/pausada ────────────────────────────────────────────
+function rpToggleRule(ruleId){
+  const rule = rpRules.find(r=>r.id===ruleId);
+  if(!rule) return;
+  rule.status = rule.status==='active' ? 'paused' : 'active';
+  rpSaveRules();
+  rpRenderList();
+  rpUpdateKPIs();
+  const btn = document.getElementById('rp-detail-toggle');
+  if(btn) btn.textContent = rule.status==='active' ? '⏸ Pausar' : '▶ Activar';
+  rpLogMsg(`Regla "${rule.itemTitle.slice(0,30)}" ${rule.status==='active'?'activada':'pausada'}`, 'info');
+}
+
+// ── Eliminar regla ───────────────────────────────────────────────────
+function rpDeleteRule(ruleId){
+  if(!confirm('¿Eliminar esta regla de repricing?')) return;
+  rpRules = rpRules.filter(r=>r.id!==ruleId);
+  rpSaveRules();
+  rpSelectedRule = null;
+  document.getElementById('rp-detail-panel').style.display = 'none';
+  document.getElementById('rp-empty-panel').style.display = 'block';
+  rpRenderList();
+  rpUpdateKPIs();
+  rpLogMsg(`Regla eliminada (${ruleId})`, 'warn');
+}
+
+// ── Guardar edición de regla en detalle ─────────────────────────────
+function rpSaveEdit(){
+  const rule = rpRules.find(r=>r.id===rpSelectedRule);
+  if(!rule) return;
+  rule.margin     = parseFloat(document.getElementById('rp-edit-margin').value) || 50;
+  rule.marginType = document.getElementById('rp-edit-margin-type').value;
+  rule.type       = document.getElementById('rp-edit-type').value;
+  rule.floor      = parseFloat(document.getElementById('rp-edit-floor').value) || 0;
+  rule.ceil       = parseFloat(document.getElementById('rp-edit-ceil').value) || null;
+  rpSaveRules();
+  rpRenderList();
+  rpLogMsg(`Regla "${rule.itemTitle.slice(0,30)}" actualizada`, 'ok');
+}
+
+// ── KPIs del módulo ─────────────────────────────────────────────────
+function rpUpdateKPIs(){
+  const active  = rpRules.filter(r=>r.status==='active').length;
+  const paused  = rpRules.filter(r=>r.status==='paused').length;
+  const since24 = Date.now() - 24*3600*1000;
+  const updated = rpRules.filter(r=>r.lastRun && r.lastRun>since24 && r.updatedCount>0).length;
+  const el = id => document.getElementById(id);
+  if(el('rp-kpi-active'))  el('rp-kpi-active').textContent  = active;
+  if(el('rp-kpi-paused'))  el('rp-kpi-paused').textContent  = paused;
+  if(el('rp-kpi-updated')) el('rp-kpi-updated').textContent = updated;
+  // Ahorro promedio vs competencia
+  const withComp = rpRules.filter(r=>r.competitors?.length && r.lastPrice);
+  if(withComp.length){
+    const diffs = withComp.map(r=>{
+      const minComp = Math.min(...r.competitors.map(c=>c.price));
+      return minComp - (r.lastPrice||minComp);
+    });
+    const avg = Math.round(diffs.reduce((s,d)=>s+d,0)/diffs.length);
+    if(el('rp-kpi-diff')) el('rp-kpi-diff').textContent = avg>=0?`+$${avg.toLocaleString('es-AR')}`:'-$'+Math.abs(avg).toLocaleString('es-AR');
+  } else {
+    if(el('rp-kpi-diff')) el('rp-kpi-diff').textContent = '—';
+  }
+}
+
+// ── Inicialización del módulo ────────────────────────────────────────
+// (se llama desde showSection('repricing'))
+function rpInit(){
+  rpRenderList();
+  rpUpdateKPIs();
+  rpLogMsg('Módulo de repricing listo', 'ok');
+}
+
 function filterPAItems(){
-  const search=(document.getElementById('pa-search')?.value||'').toLowerCase();
-  const sel=document.getElementById('pa-item');if(!sel)return;
   const active=allItems.filter(i=>i.status==='active');
   const filtered=search?active.filter(i=>i.title?.toLowerCase().includes(search)||(i.seller_custom_field||'').toLowerCase().includes(search)):active;
   sel.innerHTML='<option value="">— '+filtered.length+' publicaciones —</option>'+filtered.slice(0,200).map(i=>'<option value="'+i.id+'" data-price="'+i.price+'" data-title="'+i.title.replace(/"/g,"'")+'">'+(i.title.slice(0,60))+' · $'+(i.price||0).toLocaleString('es-AR')+'</option>').join('');
