@@ -1594,7 +1594,98 @@ let token=null, userId=null, userData=null;
 let allItems=[], allOrders=[], allQuestions=[];
 let selectedItems=new Set();
 let itemMetrics={};
-let _thumbCache={};  // item_id -> thumbnail URL — caché para no repetir llamadas
+let _thumbCache={};
+
+// ══════════════════════════════════════════════════════════════
+// CAPA DE CACHÉ: IndexedDB  (usando la API nativa)
+// Guarda allItems y allOrders entre recargas para mostrar datos
+// instantáneos mientras se sincroniza con ML en segundo plano.
+// ══════════════════════════════════════════════════════════════
+const DB_NAME    = 'MLPanelCache';
+const DB_VERSION = 1;
+let _idb = null;
+
+function dbOpen(){
+  if(_idb) return Promise.resolve(_idb);
+  return new Promise((res,rej)=>{
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = e=>{
+      const db = e.target.result;
+      if(!db.objectStoreNames.contains('store'))
+        db.createObjectStore('store');
+    };
+    req.onsuccess = e=>{ _idb=e.target.result; res(_idb); };
+    req.onerror   = e=>rej(e.target.error);
+  });
+}
+
+async function dbSave(key, value){
+  try{
+    const db = await dbOpen();
+    return new Promise((res,rej)=>{
+      const tx = db.transaction('store','readwrite');
+      tx.objectStore('store').put({data:value, ts:Date.now()}, key);
+      tx.oncomplete = ()=>res();
+      tx.onerror    = e=>rej(e.target.error);
+    });
+  }catch(e){ console.warn('[Cache] dbSave error:', e.message); }
+}
+
+async function dbLoad(key){
+  try{
+    const db = await dbOpen();
+    return new Promise((res,rej)=>{
+      const tx = db.transaction('store','readonly');
+      const req = tx.objectStore('store').get(key);
+      req.onsuccess = e=>res(e.target.result || null);
+      req.onerror   = e=>rej(e.target.error);
+    });
+  }catch(e){ console.warn('[Cache] dbLoad error:', e.message); return null; }
+}
+
+async function dbClear(key){
+  try{
+    const db = await dbOpen();
+    return new Promise((res,rej)=>{
+      const tx = db.transaction('store','readwrite');
+      tx.objectStore('store').delete(key);
+      tx.oncomplete = ()=>res();
+      tx.onerror    = e=>rej(e.target.error);
+    });
+  }catch(e){ console.warn('[Cache] dbClear error:', e.message); }
+}
+
+// Cargar datos de caché (si existen y no son muy viejos) al arrancar
+// Retorna true si se cargaron datos válidos desde caché
+async function loadFromCache(){
+  const MAX_CACHE_AGE_MS = 60 * 60 * 1000; // 1 hora
+  try{
+    const [itemsEntry, ordersEntry] = await Promise.all([
+      dbLoad('items_'+userId),
+      dbLoad('orders_'+userId),
+    ]);
+    let loaded = false;
+    if(itemsEntry && (Date.now()-itemsEntry.ts) < MAX_CACHE_AGE_MS && itemsEntry.data?.length){
+      allItems = itemsEntry.data;
+      _updateItemsUI();
+      console.log('[Cache] Items restaurados:', allItems.length);
+      loaded = true;
+    }
+    if(ordersEntry && (Date.now()-ordersEntry.ts) < MAX_CACHE_AGE_MS && ordersEntry.data?.length){
+      allOrders = ordersEntry.data;
+      const now = new Date();
+      const mesOrders = allOrders.filter(o=>new Date(o.date_created)>=new Date(now.getFullYear(),now.getMonth(),1));
+      _updateOrdersUI(mesOrders);
+      _updateVentasBadge();
+      console.log('[Cache] Órdenes restauradas:', allOrders.length);
+      loaded = true;
+    }
+    return loaded;
+  }catch(e){
+    console.warn('[Cache] No se pudo cargar caché:', e.message);
+    return false;
+  }
+}  // item_id -> thumbnail URL — caché para no repetir llamadas
 
 // Filtro global: excluye closed/deleted de TODOS los modulos
 function visibleItems(){
@@ -1751,62 +1842,161 @@ async function initApp(){
   const switchBtn = document.getElementById('switch-account-btn');
   if(switchBtn) switchBtn.style.display = 'flex';
   stamp();
-  // CARGA RAPIDA: dashboard listo en ~2s
+
+  // PASO 1: Intentar mostrar datos de caché INMEDIATAMENTE (0ms de espera)
+  const hadCache = await loadFromCache();
+  if(hadCache){
+    renderDashboard();
+    console.log('[Init] UI lista desde caché');
+  }
+
+  // PASO 2: Cargar datos frescos del mes actual + preguntas en paralelo
   await Promise.all([loadItemsFast(), loadOrdersRecent(), loadQuestions()]);
   renderDashboard();
   initAI();
   buildAlgoFactors();
   buildAdsChart();
-  // BACKGROUND: historico + estados de envio
-  loadItemsFull();
-  loadOrdersHistory();
-  loadTrends();
-  // POLLING: auto-actualizar cada 60s
-  startPolling();
+
+  // PASO 3: En background (sin bloquear), cargar historial y catálogo completo
+  // Cada función guarda su resultado en IndexedDB al completarse
+  setTimeout(()=>{
+    loadItemsFull();
+    loadOrdersHistory();
+    loadTrends();
+  }, 500);
+
+  // PASO 4: Sincronización ligera en tiempo real (reemplaza polling 60s)
+  startRealtimeSync();
 }
 
-let _pollingInterval=null;
-function startPolling(){
-  if(_pollingInterval)clearInterval(_pollingInterval);
-  _pollingInterval=setInterval(pollNewData,60000);
-}
-function stopPolling(){if(_pollingInterval){clearInterval(_pollingInterval);_pollingInterval=null;}}
+// ══════════════════════════════════════════════════════════════
+// SINCRONIZACIÓN EN TIEMPO REAL
+// Estrategia 1 (preferida): Server-Sent Events desde el Worker
+// Estrategia 2 (fallback): Polling ligero cada 10 segundos
+// El polling de 60s fue ELIMINADO.
+// ══════════════════════════════════════════════════════════════
+let _sseSource    = null;
+let _lightPollInt = null;
+let _syncActive   = false;
 
-async function pollNewData(){
-  if(!token||!userId)return;
+function startRealtimeSync(){
+  if(_syncActive) return;
+  _syncActive = true;
+
+  // Intentar SSE primero (si el Worker lo soporta en /api/events)
+  // Si el Worker aún no tiene el endpoint, cae automáticamente al polling ligero
+  _trySSE();
+}
+
+function _trySSE(){
+  if(!token) return;
   try{
-    // Ordenes de las ultimas 2 horas
-    const from2h=new Date(Date.now()-2*60*60*1000).toISOString();
-    const r=await mlGet('/orders/search?seller='+userId+'&order.date_created.from='+encodeURIComponent(from2h)+'&sort=date_desc&limit=10');
-    const fresh=r.results||[];
-    let hasNew=false;
+    const url = WORKER + '/api/events?token=' + encodeURIComponent(token);
+    _sseSource = new EventSource(url);
+
+    _sseSource.onopen = ()=>{
+      console.log('[SSE] Conectado al Worker para eventos en tiempo real');
+      // SSE activo: no necesitamos polling
+      if(_lightPollInt){ clearInterval(_lightPollInt); _lightPollInt = null; }
+    };
+
+    _sseSource.addEventListener('order', async e=>{
+      try{
+        const order = JSON.parse(e.data);
+        console.log('[SSE] Nueva orden:', order.id);
+        await _processNewOrder(order);
+      }catch(err){ console.warn('[SSE] Error parseando orden:', err.message); }
+    });
+
+    _sseSource.addEventListener('question', async e=>{
+      try{
+        const q = JSON.parse(e.data);
+        console.log('[SSE] Nueva pregunta:', q.id);
+        allQuestions.unshift(q);
+        const pend = allQuestions.filter(q=>q.status==='UNANSWERED').length;
+        document.getElementById('nb-q').textContent = pend;
+        if(document.getElementById('section-preguntas')?.classList.contains('active')) renderQuestions();
+      }catch(err){ console.warn('[SSE] Error parseando pregunta:', err.message); }
+    });
+
+    _sseSource.addEventListener('item', async e=>{
+      try{
+        const item = JSON.parse(e.data);
+        const idx = allItems.findIndex(i=>i.id===item.id);
+        if(idx>=0) allItems[idx]={...allItems[idx],...item};
+        renderPubs();
+      }catch(err){ console.warn('[SSE] Error parseando item:', err.message); }
+    });
+
+    _sseSource.onerror = ()=>{
+      console.warn('[SSE] Sin conexión — activando polling ligero (10s)');
+      _sseSource.close();
+      _sseSource = null;
+      _startLightPoll();
+    };
+  }catch(e){
+    console.warn('[SSE] No disponible — usando polling ligero');
+    _startLightPoll();
+  }
+}
+
+function _startLightPoll(){
+  if(_lightPollInt) return;
+  // Polling ligero cada 10 segundos (en lugar de 60)
+  _lightPollInt = setInterval(_lightPollTick, 10000);
+  console.log('[Poll] Polling ligero cada 10s activo');
+}
+
+async function _lightPollTick(){
+  if(!token||!userId) return;
+  try{
+    // Solo pedir órdenes de los últimos 10 minutos — muy liviano
+    const from10m = new Date(Date.now() - 10*60*1000).toISOString();
+    const r = await mlGet('/orders/search?seller='+userId+'&order.date_created.from='+encodeURIComponent(from10m)+'&sort=date_desc&limit=5');
+    const fresh = r.results||[];
+    let hasNew = false;
     fresh.forEach(o=>{
-      const idx=allOrders.findIndex(e=>e.id===o.id);
-      if(idx<0){allOrders.unshift(o);hasNew=true;}
+      const idx = allOrders.findIndex(e=>e.id===o.id);
+      if(idx<0){ allOrders.unshift(o); hasNew=true; }
       else allOrders[idx]={...allOrders[idx],...o};
     });
     if(hasNew){
-      const n=fresh[0];
-      showToast('🛍️ Nueva venta: '+(n.order_items?.[0]?.item?.title||'').slice(0,40)+' $'+(n.total_amount||0).toLocaleString('es-AR'),'success');
+      await _processNewOrder(fresh[0]);
     }
-    // Actualizar shipping de las frescas
-    await loadShippingStatuses(fresh.filter(o=>o.shipping?.id));
-    _updateVentasBadge();
-    const now=new Date();
-    const mesOrders=allOrders.filter(o=>new Date(o.date_created)>=new Date(now.getFullYear(),now.getMonth(),1));
-    _updateOrdersUI(mesOrders);
-    if(document.getElementById('section-ventas')?.classList.contains('active'))renderVentasTable();
-    if(document.getElementById('section-dashboard')?.classList.contains('active'))renderDashboard();
-    // Preguntas
-    const uq=await mlGet('/questions/search?seller_id='+userId+'&status=UNANSWERED&limit=50');
-    const pend=(uq.questions||[]).length;
-    const prev=parseInt(document.getElementById('nb-q')?.textContent)||0;
-    if(pend>prev)showToast('💬 Nueva pregunta ('+pend+' pendientes)','warn');
-    document.getElementById('nb-q').textContent=pend;
-    if(pend!==prev&&document.getElementById('section-preguntas')?.classList.contains('active'))renderQuestions();
+    // Preguntas — solo si hay cambio en el badge count
+    const uq   = await mlGet('/questions/search?seller_id='+userId+'&status=UNANSWERED&limit=5');
+    const pend  = (uq.questions||[]).length;
+    const prev  = parseInt(document.getElementById('nb-q')?.textContent)||0;
+    if(pend !== prev){
+      document.getElementById('nb-q').textContent=pend;
+      if(pend>prev) showToast('💬 Nueva pregunta ('+pend+' pendientes)','warn');
+      if(document.getElementById('section-preguntas')?.classList.contains('active')) renderQuestions();
+    }
     stamp();
-  }catch(e){console.warn('[Poll]',e.message);}
+  }catch(e){ console.warn('[Poll]', e.message); }
 }
+
+async function _processNewOrder(order){
+  showToast('🛍️ Nueva venta: '+(order.order_items?.[0]?.item?.title||'').slice(0,40)+' $'+(order.total_amount||0).toLocaleString('es-AR'),'success');
+  await loadShippingStatuses([order].filter(o=>o.shipping?.id));
+  _updateVentasBadge();
+  const now = new Date();
+  const mesOrders = allOrders.filter(o=>new Date(o.date_created)>=new Date(now.getFullYear(),now.getMonth(),1));
+  _updateOrdersUI(mesOrders);
+  if(document.getElementById('section-ventas')?.classList.contains('active')) renderVentasTable();
+  if(document.getElementById('section-dashboard')?.classList.contains('active')) renderDashboard();
+  // Persistir en caché
+  await dbSave('orders_'+userId, JSON.parse(JSON.stringify(allOrders)));
+}
+
+function stopRealtimeSync(){
+  if(_sseSource){ _sseSource.close(); _sseSource=null; }
+  if(_lightPollInt){ clearInterval(_lightPollInt); _lightPollInt=null; }
+  _syncActive = false;
+}
+
+// Mantener compatibilidad con código que llame stopPolling()
+function stopPolling(){ stopRealtimeSync(); }
 
 function showToast(msg,type){
   const cfg={success:['#f0fdf4','#166534','#bbf7d0'],warn:['#fffbeb','#78350f','#fde68a'],info:['#eff6ff','#1e40af','#bfdbfe']};
@@ -1834,30 +2024,72 @@ async function loadItemsFast(){
   }catch(e){console.warn('[loadItemsFast]',e);}
 }
 
+// ── LAZY LOADING: carga ítems por páginas, sin while(true) ────────────
+// Carga hasta maxPages páginas de 50 ítems. Llamar con page=1 para inicio.
+let _itemsPage = 0;         // página actual cargada
+let _itemsHasMore = true;   // hay más páginas disponibles
+let _itemsScrollId = null;  // scroll cursor de ML
+
 async function loadItemsFull(){
-  try{
-    let allIds=[];let scrollId=null;
-    while(true){
-      const ep=scrollId?'/users/'+userId+'/items/search?search_type=scan&scroll_id='+encodeURIComponent(scrollId)+'&limit=100':'/users/'+userId+'/items/search?search_type=scan&limit=100';
-      const s=await mlGet(ep);const ids=s.results||[];
-      if(!ids.length)break;allIds.push(...ids);scrollId=s.scroll_id||null;
-      if(!scrollId)break;await new Promise(r=>setTimeout(r,100));
-    }
-    for(const status of ['paused','under_review']){
-      for(let offset=0;offset<500;offset+=50){
-        try{const s=await mlGet('/users/'+userId+'/items/search?limit=50&offset='+offset+'&status='+status);const ids=s.results||[];allIds.push(...ids);if(ids.length<50)break;}catch(e){break;}
-      }
-    }
-    allIds=[...new Set(allIds)];const full=[];
-    for(let i=0;i<allIds.length;i+=20){
-      try{const r=await mlGet('/items?ids='+allIds.slice(i,i+20).join(',')+'&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations');r.forEach(x=>{if(x.code===200)full.push(x.body);});}catch(e){}
-      if(i>0&&i%200===0)await new Promise(r=>setTimeout(r,100));
-    }
-    allItems=full;_updateItemsUI();
-    console.log('[loadItemsFull]',allItems.length);
-  }catch(e){console.error('[loadItemsFull]',e);}
+  // Reset y cargar primer lote
+  _itemsPage = 0;
+  _itemsHasMore = true;
+  _itemsScrollId = null;
+  allItems = [];
+  await _loadNextItemsPage();
 }
 
+async function _loadNextItemsPage(){
+  if(!userId || !_itemsHasMore) return;
+  try{
+    const ATTRS = 'id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations';
+
+    // 1. Obtener IDs activos via scroll
+    const scrollEp = _itemsScrollId
+      ? '/users/'+userId+'/items/search?search_type=scan&scroll_id='+encodeURIComponent(_itemsScrollId)+'&limit=50'
+      : '/users/'+userId+'/items/search?search_type=scan&limit=50';
+
+    const s = await mlGet(scrollEp);
+    const ids = s.results || [];
+    _itemsScrollId = s.scroll_id || null;
+    if(!ids.length || !_itemsScrollId) _itemsHasMore = false;
+
+    if(ids.length){
+      const r = await mlGet('/items?ids='+ids.join(',')+'&attributes='+ATTRS);
+      r.forEach(x=>{ if(x.code===200) allItems.push(x.body); });
+    }
+
+    _itemsPage++;
+
+    // 2. Al completar el primer lote, cargar pausadas/en revisión una sola vez
+    if(_itemsPage === 1){
+      for(const status of ['paused','under_review']){
+        for(let offset=0; offset<200; offset+=50){
+          try{
+            const sr = await mlGet('/users/'+userId+'/items/search?limit=50&offset='+offset+'&status='+status);
+            const extraIds = (sr.results||[]).filter(id => !allItems.find(i=>i.id===id));
+            if(!extraIds.length || (sr.results||[]).length < 50) break;
+            const re = await mlGet('/items?ids='+extraIds.join(',')+'&attributes='+ATTRS);
+            re.forEach(x=>{ if(x.code===200) allItems.push(x.body); });
+            await new Promise(r=>setTimeout(r,100));
+          }catch(e){ break; }
+        }
+      }
+    }
+
+    // Guardar en caché IndexedDB y actualizar UI
+    await dbSave('items_'+userId, JSON.parse(JSON.stringify(allItems)));
+    _updateItemsUI();
+    console.log('[loadItems] Lote', _itemsPage, '| total:', allItems.length, '| hasMore:', _itemsHasMore);
+  }catch(e){
+    console.error('[loadItemsFull]', e);
+  }
+}
+
+// Trigger para cargar más ítems (llamar desde paginación de tablas)
+async function loadMoreItems(){
+  if(_itemsHasMore) await _loadNextItemsPage();
+}
 function _updateItemsUI(){
   const active=allItems.filter(i=>i.status==='active').length;
   const paused=allItems.filter(i=>i.status==='paused').length;
@@ -1888,180 +2120,60 @@ async function loadOrdersRecent(){
 }
 
 // Historico 18 meses en background
+// ── LAZY LOADING: historial de órdenes — máximo 3 meses, por páginas ──
+let _ordersPage = 0;
+let _ordersHasMore = true;
+const _ORDERS_BATCH = 50;
+
 async function loadOrdersHistory(){
+  _ordersPage = 0;
+  _ordersHasMore = true;
+  await _loadNextOrdersPage();
+}
+
+async function _loadNextOrdersPage(){
+  if(!userId || !_ordersHasMore) return;
   try{
-    const from18=new Date();from18.setMonth(from18.getMonth()-18);
-    let hist=[];
-    for(let offset=0;offset<2000;offset+=50){
-      try{
-        const r=await mlGet('/orders/search?seller='+userId+'&order.date_created.from='+encodeURIComponent(from18.toISOString())+'&sort=date_desc&limit=50&offset='+offset);
-        const res=r.results||[];hist.push(...res);
-        if(res.length<50)break;
-        await new Promise(r=>setTimeout(r,80));
-      }catch(e){break;}
-    }
-    const seen=new Set();
-    allOrders=[...hist].filter(o=>{if(seen.has(o.id))return false;seen.add(o.id);return true;});
-    allOrders.sort((a,b)=>new Date(b.date_created)-new Date(a.date_created));
-    console.log('[loadOrdersHistory]',allOrders.length);
-    // Cargar envios del ultimo mes
-    const recent=allOrders.filter(o=>o.shipping?.id&&!o.shipping._statusLoaded&&new Date(o.date_created)>new Date(Date.now()-30*24*3600*1000));
-    await loadShippingStatuses(recent);
-    const now=new Date();
-    _updateOrdersUI(allOrders.filter(o=>new Date(o.date_created)>=new Date(now.getFullYear(),now.getMonth(),1)));
+    // Máximo 3 meses (no 18 como antes)
+    const from3m = new Date();
+    from3m.setMonth(from3m.getMonth() - 3);
+    const fromISO = encodeURIComponent(from3m.toISOString());
+
+    const offset = _ordersPage * _ORDERS_BATCH;
+    const r = await mlGet(
+      '/orders/search?seller='+userId+
+      '&order.date_created.from='+fromISO+
+      '&sort=date_desc&limit='+_ORDERS_BATCH+'&offset='+offset
+    );
+    const res = r.results || [];
+
+    // Merge deduplicado con allOrders ya en memoria
+    const seen = new Set(allOrders.map(o=>o.id));
+    const fresh = res.filter(o=>!seen.has(o.id));
+    allOrders = allOrders.concat(fresh);
+
+    _ordersHasMore = res.length === _ORDERS_BATCH;
+    _ordersPage++;
+
+    // Actualizar caché IndexedDB
+    await dbSave('orders_'+userId, JSON.parse(JSON.stringify(allOrders)));
+
+    // Actualizar UI
+    const now = new Date();
+    const mesOrders = allOrders.filter(o=>new Date(o.date_created)>=new Date(now.getFullYear(),now.getMonth(),1));
+    _updateOrdersUI(mesOrders);
     _updateVentasBadge();
-    if(document.getElementById('section-ventas')?.classList.contains('active'))renderVentasTable();
-  }catch(e){console.error('[loadOrdersHistory]',e);}
-}
 
-// Cargar status real desde /shipments/{id}, en lotes de 5
-async function loadShippingStatuses(orders){
-  const toLoad=(orders||[]).filter(o=>o.shipping?.id&&!o.shipping._statusLoaded).slice(0,60);
-  if(!toLoad.length)return;
-  for(let i=0;i<toLoad.length;i+=5){
-    await Promise.allSettled(toLoad.slice(i,i+5).map(async o=>{
-      try{
-        const s=await mlGet('/shipments/'+o.shipping.id);
-        if(s?.status)o.shipping.status=s.status;
-        if(s?.substatus)o.shipping.substatus=s.substatus;
-        o.shipping._statusLoaded=true;
-      }catch(e){}
-    }));
-  }
-}
-
-function makeChart(id,config){
-  const prev=chartInstances[id];
-  if(prev)prev.destroy();
-  const ctx=document.getElementById(id);
-  if(!ctx)return;
-  chartInstances[id]=new Chart(ctx,config);
-}
-
-function chartDefaults(){return{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}};}
-function tOpts(){return{ticks:{color:'#6b7280',font:{size:10}},grid:{color:'rgba(0,0,0,0.05)'},border:{color:'transparent'}};}
-function tXOpts(){return{ticks:{color:'#6b7280',font:{size:10},maxRotation:0,maxTicksLimit:8},grid:{display:false},border:{color:'transparent'}};}
-
-function _updateOrdersUI(mesOrders){
-  const mes=mesOrders||[];
-  const totalMes=mes.reduce((s,o)=>s+(o.total_amount||0),0);
-  const ticket=mes.length?Math.round(totalMes/mes.length):0;
-  const ss=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
-  ss('d-billing','$'+totalMes.toLocaleString('es-AR'));ss('d-sales',mes.length);
-  ss('d-ticket','$'+ticket.toLocaleString('es-AR'));ss('fac-mes','$'+totalMes.toLocaleString('es-AR'));
-  ss('v-mes',mes.length);ss('v-ticket','$'+ticket.toLocaleString('es-AR'));
-}
-
-function _updateVentasBadge(){
-  // Contar órdenes que necesitan imprimir etiqueta:
-  // - si shipping.status fue cargado: usarlo (más preciso)
-  // - si no: usar order.status=paid/confirmed como proxy confiable
-  const withShipStatus=allOrders.filter(o=>o.shipping?._statusLoaded).length;
-  let toPrint;
-  if(withShipStatus>0){
-    // Tenemos datos reales de shipments
-    toPrint=allOrders.filter(o=>o.shipping?.status==='ready_to_ship').length;
-  } else {
-    // Fallback: órdenes pagadas con envío asignado y sin entregar/cancelar
-    toPrint=allOrders.filter(o=>
-      (o.status==='paid'||o.status==='confirmed')&&
-      o.shipping?.id&&
-      o.status!=='shipped'&&o.status!=='delivered'&&o.status!=='cancelled'
-    ).length;
-  }
-  const nb=document.getElementById('nb-ventas');
-  if(nb){nb.textContent=toPrint||'';nb.style.display=toPrint>0?'inline-flex':'none';}
-}
-
-function stamp(){
-  document.getElementById('last-upd').textContent='Actualizado '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
-}
-
-// LOAD — compatibilidad con refreshAll y otras llamadas
-async function loadItems(){await loadItemsFull();}
-
-// ── Cargar métricas de visitas/ventas para publicaciones (7 días) ──
-// Endpoint: GET /items/{id}/visits?date_from=...&date_to=...
-// Se llama bajo demanda para la vista SEO (en lotes para evitar rate limit)
-// ── Métricas reales de visitas/ventas (últimos 7 días) ─────
-// Endpoint: GET /users/{USER_ID}/items_visits?date_from=...&date_to=...
-// Este endpoint es el correcto para obtener visitas por ítem del vendedor.
-async function loadPubMetricsBatch(ids){
-  if(!userId || !ids || !ids.length){ console.warn('[Metricas] userId o ids no disponible'); return; }
-  console.log('[Metricas] Iniciando para', ids.length, 'items usando time_window endpoint');
-
-  // Ventas de los últimos 7 días desde allOrders (ya cargado en memoria)
-  const from7 = new Date(new Date() - 7*86400000);
-  const salesMap = {};
-  allOrders.forEach(o => {
-    if(o.status === 'cancelled' || o.status === 'invalid') return;
-    if(new Date(o.date_created||0) < from7) return;
-    (o.order_items||[]).forEach(oi => {
-      const id = oi.item && oi.item.id;
-      if(id) salesMap[id] = (salesMap[id]||0) + (oi.quantity||1);
-    });
-  });
-
-  // Visitas: GET /items/{ITEM_ID}/visits/time_window?last=7&unit=day
-  // Endpoint oficial de ML para métricas por ventana de tiempo
-  // Procesamos en lotes de 5 con pausa de 350ms para respetar rate limits
-  const todo = ids.filter(id => !itemMetrics[id]);
-  for(let i=0; i<todo.length; i+=5){
-    const batch = todo.slice(i, i+5);
-    await Promise.allSettled(batch.map(async id => {
-      try{
-        const r = await mlGet('/items/'+id+'/visits/time_window?last=7&unit=day');
-        console.log('[Metricas] '+id+' time_window raw:', JSON.stringify(r).slice(0,150));
-        // Respuesta oficial: { item_id, date_from, date_to, total_visits, visits: [...] }
-        let visits = 0;
-        if(r && typeof r.total_visits === 'number') visits = r.total_visits;
-        else if(r && Array.isArray(r.visits)) visits = r.visits.reduce((s,d)=>s+(d.total||d.quantity||0),0);
-        else if(typeof r === 'number') visits = r;
-        const sales = salesMap[id] || 0;
-        const conv  = visits > 0 ? ((sales/visits)*100).toFixed(1) : (sales > 0 ? '100+' : '-');
-        itemMetrics[id] = { visits, sales, conv };
-        console.log('[Metricas]', id, '-> visitas:', visits, '| ventas:', sales, '| conv:', conv+'%');
-      }catch(e){
-        // Fallback: si time_window falla, intentar endpoint básico
-        try{
-          const today = new Date();
-          const from  = new Date(today - 7*86400000);
-          const r2 = await mlGet('/items/'+id+'/visits?date_from='+from.toISOString().slice(0,10)+'&date_to='+today.toISOString().slice(0,10));
-          const visits2 = (r2 && r2.total_visits) || 0;
-          const sales2  = salesMap[id] || 0;
-          itemMetrics[id] = { visits: visits2, sales: sales2, conv: visits2>0?((sales2/visits2)*100).toFixed(1):'-' };
-          console.log('[Metricas] fallback', id, '->', itemMetrics[id]);
-        }catch(e2){
-          itemMetrics[id] = { visits: 0, sales: salesMap[id]||0, conv: '-' };
-          console.warn('[Metricas]', id, 'sin datos:', e2.message);
-        }
-      }
-    }));
-    if(i+5 < todo.length) await new Promise(r => setTimeout(r, 350));
-  }
-  Object.keys(salesMap).forEach(id => {
-    if(!itemMetrics[id]) itemMetrics[id] = { visits: 0, sales: salesMap[id], conv: '-' };
-  });
-}
-// Obtener thumbnail de un ítem con caché — evita llamadas repetidas para el mismo producto
-async function getItemThumb(itemId){
-  if(!itemId) return '';
-  if(_thumbCache[itemId] !== undefined) return _thumbCache[itemId];
-  // Buscar primero en allItems (ya cargado en memoria)
-  const local = allItems.find(i => i.id === itemId || String(i.id) === String(itemId));
-  if(local && local.thumbnail){ _thumbCache[itemId] = local.thumbnail; return local.thumbnail; }
-  // Si no está en memoria, hacer GET ligero a la API
-  try{
-    const r = await mlGet('/items/'+itemId+'?attributes=id,thumbnail');
-    const th = r.thumbnail || '';
-    _thumbCache[itemId] = th;
-    return th;
+    console.log('[loadOrders] Lote', _ordersPage,'| total:', allOrders.length,'| hasMore:', _ordersHasMore);
   }catch(e){
-    _thumbCache[itemId] = '';
-    return '';
+    console.error('[loadOrdersHistory]', e);
   }
 }
 
+// Trigger para cargar más órdenes (llamar desde paginación)
+async function loadMoreOrders(){
+  if(_ordersHasMore) await _loadNextOrdersPage();
+}
 async function loadOrders(){await loadOrdersRecent();loadOrdersHistory();}
 
 async function loadQuestions(){
