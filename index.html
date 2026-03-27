@@ -732,7 +732,6 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         </select>
         <select id="pub-type-filter" onchange="renderPubs()" style="max-width:150px" title="Filtrar por tipo">
           <option value="">Todos los tipos</option>
-          <option value="classic">Clásicas</option>
           <option value="catalog">Catálogo</option>
           <option value="gold">Gold/Premium</option>
           <option value="free">Gratuitas</option>
@@ -860,17 +859,18 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <span style="font-size:11px;color:var(--text3);font-weight:600;white-space:nowrap">Tipo:</span>
       <div class="chips" style="margin:0;gap:5px">
         <div class="chip" id="chip-tipo-all"     onclick="seoSetTipo('')"          style="font-size:11px;background:var(--accent);color:#fff;border-color:var(--accent)">Todas</div>
-        <div class="chip" id="chip-tipo-classic" onclick="seoSetTipo('classic')"   style="font-size:11px">📋 Clásicas</div>
         <div class="chip" id="chip-tipo-catalog" onclick="seoSetTipo('catalog')"   style="font-size:11px">📚 Catálogo</div>
-        <div class="chip" id="chip-tipo-gold"    onclick="seoSetTipo('gold')"      style="font-size:11px">⭐ Gold</div>
+        <div class="chip" id="chip-tipo-gold"    onclick="seoSetTipo('gold')"      style="font-size:11px">⭐ Gold/Premium</div>
+        <div class="chip" id="chip-tipo-free"    onclick="seoSetTipo('free')"      style="font-size:11px">🆓 Gratuitas</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
       <span style="font-size:11px;color:var(--text3);font-weight:600;white-space:nowrap">Estado:</span>
       <div class="chips" style="margin:0;gap:5px">
-        <div class="chip" id="chip-st-all"    onclick="seoSetStatus(null)"      style="font-size:11px;background:var(--accent);color:#fff;border-color:var(--accent)">Todas</div>
-        <div class="chip" id="chip-st-active" onclick="seoSetStatus('active')"  style="font-size:11px">✅ Activas</div>
-        <div class="chip" id="chip-st-paused" onclick="seoSetStatus('paused')"  style="font-size:11px">⏸ Pausadas</div>
+        <div class="chip" id="chip-st-all"      onclick="seoSetStatus(null)"         style="font-size:11px;background:var(--accent);color:#fff;border-color:var(--accent)">Todas</div>
+        <div class="chip" id="chip-st-active"   onclick="seoSetStatus('active')"     style="font-size:11px">✅ Activas</div>
+        <div class="chip" id="chip-st-paused"   onclick="seoSetStatus('paused')"     style="font-size:11px">⏸ Pausadas</div>
+        <div class="chip" id="chip-st-inactive" onclick="seoSetStatus('under_review')" style="font-size:11px">🔍 Inactivas</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -907,6 +907,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <th>Chars</th>
           <th onclick="seoSort('seo')"     style="cursor:pointer;user-select:none;white-space:nowrap">Score SEO <span id="seo-sort-seo" style="font-size:10px"></span></th>
           <th onclick="seoSort('quality')" style="cursor:pointer;user-select:none;white-space:nowrap">Calidad pub. <span id="seo-sort-quality" style="font-size:10px"></span></th>
+          <th onclick="seoSort('sold')" style="cursor:pointer;user-select:none;white-space:nowrap">Vendidas <span id="seo-sort-sold" style="font-size:10px"></span></th>
           <th>Problemas detectados</th>
           <th style="white-space:nowrap">Métricas 7d <span style="font-size:9px;color:var(--text3)" title="Cargadas bajo demanda">ⓘ</span></th>
           <th>Acciones</th>
@@ -1593,6 +1594,7 @@ let token=null, userId=null, userData=null;
 let allItems=[], allOrders=[], allQuestions=[];
 let selectedItems=new Set();
 let itemMetrics={};
+let _thumbCache={};  // item_id -> thumbnail URL — caché para no repetir llamadas
 
 // Filtro global: excluye closed/deleted de TODOS los modulos
 function visibleItems(){
@@ -1986,15 +1988,10 @@ async function loadItems(){await loadItemsFull();}
 // Este endpoint es el correcto para obtener visitas por ítem del vendedor.
 async function loadPubMetricsBatch(ids){
   if(!userId || !ids || !ids.length){ console.warn('[Metricas] userId o ids no disponible'); return; }
+  console.log('[Metricas] Iniciando para', ids.length, 'items usando time_window endpoint');
 
-  const today  = new Date();
-  const from7  = new Date(today - 7*86400000);
-  const dateTo  = today.toISOString().slice(0,10);
-  const dateFrom= from7.toISOString().slice(0,10);
-
-  console.log('[Metricas] Iniciando para', ids.length, 'items |', dateFrom, '->', dateTo);
-
-  // Ventas: cruzar con allOrders ya cargado en memoria (sin llamadas extra a la API)
+  // Ventas de los últimos 7 días desde allOrders (ya cargado en memoria)
+  const from7 = new Date(new Date() - 7*86400000);
   const salesMap = {};
   allOrders.forEach(o => {
     if(o.status === 'cancelled' || o.status === 'invalid') return;
@@ -2005,38 +2002,66 @@ async function loadPubMetricsBatch(ids){
     });
   });
 
-  // Visitas: GET /items/{ITEM_ID}/visits?date_from=...&date_to=...
-  // Procesar en lotes de 5 para respetar rate limits de ML
+  // Visitas: GET /items/{ITEM_ID}/visits/time_window?last=7&unit=day
+  // Endpoint oficial de ML para métricas por ventana de tiempo
+  // Procesamos en lotes de 5 con pausa de 350ms para respetar rate limits
   const todo = ids.filter(id => !itemMetrics[id]);
   for(let i=0; i<todo.length; i+=5){
     const batch = todo.slice(i, i+5);
     await Promise.allSettled(batch.map(async id => {
       try{
-        const r = await mlGet('/items/'+id+'/visits?date_from='+dateFrom+'&date_to='+dateTo);
-        console.log('[Metricas] '+id+' raw:', JSON.stringify(r).slice(0,100));
-        // ML puede devolver: {total_visits:N}, {visits:N}, o array de dias
+        const r = await mlGet('/items/'+id+'/visits/time_window?last=7&unit=day');
+        console.log('[Metricas] '+id+' time_window raw:', JSON.stringify(r).slice(0,150));
+        // Respuesta oficial: { item_id, date_from, date_to, total_visits, visits: [...] }
         let visits = 0;
-        if(typeof r === 'number')                    visits = r;
-        else if(r && typeof r.total_visits==='number') visits = r.total_visits;
-        else if(r && typeof r.visits==='number')       visits = r.visits;
-        else if(Array.isArray(r))                    visits = r.reduce((s,d)=>s+(d.total||d.visits||0),0);
+        if(r && typeof r.total_visits === 'number') visits = r.total_visits;
+        else if(r && Array.isArray(r.visits)) visits = r.visits.reduce((s,d)=>s+(d.total||d.quantity||0),0);
+        else if(typeof r === 'number') visits = r;
         const sales = salesMap[id] || 0;
         const conv  = visits > 0 ? ((sales/visits)*100).toFixed(1) : (sales > 0 ? '100+' : '-');
         itemMetrics[id] = { visits, sales, conv };
         console.log('[Metricas]', id, '-> visitas:', visits, '| ventas:', sales, '| conv:', conv+'%');
       }catch(e){
-        itemMetrics[id] = { visits:'-', sales: salesMap[id]||0, conv:'-' };
-        console.warn('[Metricas]', id, 'error:', e.message);
+        // Fallback: si time_window falla, intentar endpoint básico
+        try{
+          const today = new Date();
+          const from  = new Date(today - 7*86400000);
+          const r2 = await mlGet('/items/'+id+'/visits?date_from='+from.toISOString().slice(0,10)+'&date_to='+today.toISOString().slice(0,10));
+          const visits2 = (r2 && r2.total_visits) || 0;
+          const sales2  = salesMap[id] || 0;
+          itemMetrics[id] = { visits: visits2, sales: sales2, conv: visits2>0?((sales2/visits2)*100).toFixed(1):'-' };
+          console.log('[Metricas] fallback', id, '->', itemMetrics[id]);
+        }catch(e2){
+          itemMetrics[id] = { visits: 0, sales: salesMap[id]||0, conv: '-' };
+          console.warn('[Metricas]', id, 'sin datos:', e2.message);
+        }
       }
     }));
-    // Pausa 350ms entre lotes para respetar rate limits
     if(i+5 < todo.length) await new Promise(r => setTimeout(r, 350));
   }
-  // Items con ventas pero sin visitas cargadas
   Object.keys(salesMap).forEach(id => {
-    if(!itemMetrics[id]) itemMetrics[id] = { visits:'-', sales:salesMap[id], conv:'-' };
+    if(!itemMetrics[id]) itemMetrics[id] = { visits: 0, sales: salesMap[id], conv: '-' };
   });
 }
+// Obtener thumbnail de un ítem con caché — evita llamadas repetidas para el mismo producto
+async function getItemThumb(itemId){
+  if(!itemId) return '';
+  if(_thumbCache[itemId] !== undefined) return _thumbCache[itemId];
+  // Buscar primero en allItems (ya cargado en memoria)
+  const local = allItems.find(i => i.id === itemId || String(i.id) === String(itemId));
+  if(local && local.thumbnail){ _thumbCache[itemId] = local.thumbnail; return local.thumbnail; }
+  // Si no está en memoria, hacer GET ligero a la API
+  try{
+    const r = await mlGet('/items/'+itemId+'?attributes=id,thumbnail');
+    const th = r.thumbnail || '';
+    _thumbCache[itemId] = th;
+    return th;
+  }catch(e){
+    _thumbCache[itemId] = '';
+    return '';
+  }
+}
+
 async function loadOrders(){await loadOrdersRecent();loadOrdersHistory();}
 
 async function loadQuestions(){
@@ -2849,20 +2874,25 @@ async function saveSKU(itemId){
   const variations = item?.variations || [];
   const hasVariations = variations.length > 0;
 
-  // Construir body según estructura del ítem
+  // Construir body según ML API oficial:
+  // - Items sin variaciones: atributo SELLER_SKU a nivel raíz
+  // - Items con variaciones: atributo SELLER_SKU dentro de la variación específica
   let body;
   if(hasVariations){
-    // Actualizar seller_custom_field en CADA variación (sin sobrescribir otros campos)
+    // Caso 2: publicación con variaciones — actualizar SELLER_SKU en cada variación
     body = {
       variations: variations.map(v => ({
         id: v.id,
-        seller_custom_field: val || null
+        attributes: [{ id: 'SELLER_SKU', value_name: val || '' }]
       }))
     };
-    console.log('[SKU] Item CON variaciones:', variations.length, '-> body:', JSON.stringify(body).slice(0,200));
+    console.log('[SKU] CON variaciones (SELLER_SKU en attributes):', JSON.stringify(body).slice(0,250));
   } else {
-    body = { seller_custom_field: val || null };
-    console.log('[SKU] Item SIN variaciones -> body:', JSON.stringify(body));
+    // Caso 1: publicación simple — actualizar SELLER_SKU a nivel raíz del ítem
+    body = {
+      attributes: [{ id: 'SELLER_SKU', value_name: val || '' }]
+    };
+    console.log('[SKU] SIN variaciones (SELLER_SKU en attributes):', JSON.stringify(body));
   }
 
   try{
@@ -2888,18 +2918,12 @@ async function saveSKU(itemId){
 
     // GET verification: confirmar que ML guardo el valor
     try{
-      const verify = await mlGet('/items/'+itemId+'?attributes=id,seller_custom_field,variations');
-      const saved = verify.seller_custom_field || (verify.variations && verify.variations[0] && verify.variations[0].seller_custom_field) || null;
-      console.log('[SKU] Verificacion GET seller_custom_field:', saved);
-      if(item){
-        item.seller_custom_field = saved;
-        if(hasVariations && verify.variations){
-          verify.variations.forEach(vr => {
-            const lv = variations.find(x => x.id === vr.id);
-            if(lv) lv.seller_custom_field = vr.seller_custom_field;
-          });
-        }
-      }
+      const verify = await mlGet('/items/'+itemId+'?attributes=id,seller_custom_field,attributes,variations');
+      // SELLER_SKU puede estar en attributes[] o en seller_custom_field (legacy)
+      const skuAttr = (verify.attributes||[]).find(a => a.id === 'SELLER_SKU');
+      const saved   = (skuAttr && skuAttr.value_name) || verify.seller_custom_field || null;
+      console.log('[SKU] Verificacion GET -> SELLER_SKU:', saved);
+      if(item) item.seller_custom_field = saved; // sync local cache
       const confirmed = (val==='' || val===null) ? (!saved || saved==='') : (saved===val);
       if(msgEl){
         msgEl.textContent = confirmed ? '✅ SKU guardado en ML' : '⚠️ ML devolvio: '+String(saved);
@@ -3168,11 +3192,25 @@ function itemHasEAN(item){
 // Campo oficial de ML para clips/videos.
 // NO usar attributes ni textos del frontend — SOLO este campo.
 function itemHasVideo(item){
-  // UNICO campo oficial de ML para video/clip: item.video_id
-  // Si es null, undefined, string "null" o vacio = SIN video
   if(!item) return false;
+
+  // 1. Campo estándar: video de YouTube vinculado al ítem
   const v = item.video_id;
-  return v !== null && v !== undefined && v !== 'null' && v !== 'undefined' && String(v).trim() !== '';
+  if(v !== null && v !== undefined && v !== 'null' && v !== 'undefined' && String(v).trim() !== ''){
+    return true;
+  }
+
+  // 2. Clips/Shorts nativos: ML los devuelve en clips[] (preparado para el futuro)
+  // if(item.clips && Array.isArray(item.clips) && item.clips.length > 0) return true;
+
+  // 3. Short videos nativos (posible campo futuro de ML)
+  // if(item.short_videos && Array.isArray(item.short_videos) && item.short_videos.length > 0) return true;
+
+  // 4. Atributo VIDEO_CLIP en el array de attributes (posible campo futuro)
+  // const clipAttr = (item.attributes||[]).find(a => a.id === 'VIDEO_CLIP');
+  // if(clipAttr && clipAttr.value_name && clipAttr.value_name.trim()) return true;
+
+  return false;
 }
 
 // ── Sistema de objetivos de calidad (basado en datos reales) ─
@@ -3264,8 +3302,7 @@ function seoSort(col){
   if(seoState.sortCol===col) seoState.sortDir*=-1;
   else{ seoState.sortCol=col; seoState.sortDir=-1; }
   seoState.page=1;
-  // actualizar indicadores
-  ['seo','quality'].forEach(c=>{
+  ['seo','quality','sold'].forEach(c=>{
     const el=document.getElementById('seo-sort-'+c);
     if(el) el.innerHTML=sortArrow(c,seoState.sortCol,seoState.sortDir);
   });
@@ -3276,10 +3313,12 @@ function seoSort(col){
 function seoSetStatus(st){
   seoState.statusFilter=st;
   seoState.page=1;
-  ['all','active','paused'].forEach(s=>{
-    const chip=document.getElementById('chip-st-'+s);
+  // Map chip id -> status value
+  const chipMap = {all:null, active:'active', paused:'paused', inactive:'under_review'};
+  Object.entries(chipMap).forEach(([id,val])=>{
+    const chip=document.getElementById('chip-st-'+id);
     if(!chip) return;
-    const isActive=(s==='all'&&st===null)||(s===st);
+    const isActive = (st===null && val===null) || (st===val);
     chip.style.background=isActive?'var(--accent)':'';
     chip.style.color=isActive?'#fff':'';
     chip.style.borderColor=isActive?'var(--accent)':'';
@@ -3460,7 +3499,10 @@ function renderSEOTable(){
   const st=seoState.statusFilter;
 
   // 1. FILTRAR
+  // Si no hay filtro de estado, mostrar solo active/paused (excluye closed/deleted)
+  // Si hay filtro específico (incluyendo under_review/inactive), aplicar ese
   let items=allItems.filter(i=>{
+    if(!st && (i.status==='closed'||i.status==='deleted'||i.status==='inactive')) return false;
     if(searchQ&&!i.title.toLowerCase().includes(searchQ)) return false;
     if(st&&i.status!==st) return false;
     if(seoState.tipoFilter && getPubType(i)!==seoState.tipoFilter) return false;
@@ -3481,8 +3523,10 @@ function renderSEOTable(){
   // 2. ORDENAR (mantiene orden después de filtrar)
   if(seoState.sortCol){
     items.sort((a,b)=>{
-      const va=seoState.sortCol==='seo'?seoScore(a.title):qualityScore(a);
-      const vb=seoState.sortCol==='seo'?seoScore(b.title):qualityScore(b);
+      let va, vb;
+      if(seoState.sortCol==='seo')     { va=seoScore(a.title);       vb=seoScore(b.title); }
+      else if(seoState.sortCol==='sold'){ va=a.sold_quantity||0;      vb=b.sold_quantity||0; }
+      else                              { va=qualityScore(a);         vb=qualityScore(b); }
       return seoState.sortDir*(vb-va);
     });
   }
@@ -3499,7 +3543,7 @@ function renderSEOTable(){
   const tbody=document.getElementById('seo-tbody');
   if(!tbody) return;
   if(!paged.length){
-    tbody.innerHTML='<tr><td colspan="7" style="text-align:center;padding:22px;color:var(--text3)">Sin resultados para este filtro</td></tr>';
+    tbody.innerHTML='<tr><td colspan="8" style="text-align:center;padding:22px;color:var(--text3)">Sin resultados para este filtro</td></tr>';
     const pg=document.getElementById('seo-pagination');if(pg)pg.innerHTML='';
     return;
   }
@@ -3569,6 +3613,9 @@ function renderSEOTable(){
             <div style="font-size:10px;color:var(--text3);margin-top:2px">${qs}/100 calidad</div>
           </div>
         </div>
+      </td>
+      <td style="text-align:center">
+        <span style="font-size:13px;font-weight:700;color:var(--text)">${item.sold_quantity||0}</span>
       </td>
       <td style="max-width:190px"><div style="display:flex;flex-wrap:wrap;gap:3px">
         ${tI.map(i=>`<span class="badge bg-amber" style="font-size:9px">${i}</span>`).join('')}
@@ -4456,8 +4503,8 @@ const seoState = {
 function seoSetTipo(t){
   seoState.tipoFilter = t;
   seoState.page = 1;
-  ['all','classic','catalog','gold'].forEach(s=>{
-    const chip = document.getElementById('chip-tipo-'+(s==='all'?'all':s));
+  ['all','catalog','gold','free'].forEach(s=>{
+    const chip = document.getElementById('chip-tipo-'+s);
     if(!chip) return;
     const active = (s==='all'&&t==='')||(s===t);
     chip.style.background  = active?'var(--accent)':'';
@@ -5569,7 +5616,10 @@ function renderVentasTable(){
     const dt=o.date_created?new Date(o.date_created):null;
     const dateStr=dt?dt.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'2-digit'})+' '+dt.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}):'—';
     const productTitle=o.order_items?.[0]?.item?.title||'—';
-    const productThumb=o.order_items?.[0]?.item?.thumbnail||'';
+    const orderItemId = o.order_items?.[0]?.item?.id;
+    // Thumbnail: buscar en caché local primero (allItems), luego _thumbCache
+    const localItem = orderItemId ? allItems.find(i=>String(i.id)===String(orderItemId)) : null;
+    const productThumb = (localItem && localItem.thumbnail) || (orderItemId && _thumbCache[orderItemId]) || o.order_items?.[0]?.item?.thumbnail || '';
     const mlUrl='https://www.mercadolibre.com.ar/ventas/'+o.id+'/detalle';
     const ship=getShippingLabel(o);
     return `<tr>
