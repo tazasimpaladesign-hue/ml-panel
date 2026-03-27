@@ -1679,13 +1679,20 @@ input::placeholder,textarea::placeholder{color:#6b7280}
             </div>
           </div>
 
-          <!-- Buscador de competidores -->
-          <div id="rp-comp-search-panel" style="display:none;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:10px;margin-bottom:10px">
-            <input type="text" id="rp-comp-query" placeholder="Buscar en MercadoLibre..." oninput="rpSearchCompetitors(this.value)"
-              style="width:100%;font-size:12px;padding:7px 10px;margin-bottom:8px">
-            <div id="rp-comp-search-results" style="max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
-              <div style="color:var(--text3);font-size:12px;text-align:center;padding:12px">Escribí para buscar productos...</div>
+          <!-- Agregar competidor por URL o ID de ML -->
+          <div id="rp-comp-search-panel" style="display:none;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:12px;margin-bottom:10px">
+            <div style="font-size:11.5px;font-weight:600;color:var(--text);margin-bottom:8px">Agregar competidor por URL o ID</div>
+            <div style="font-size:11px;color:var(--text3);margin-bottom:8px;line-height:1.6">
+              Copiá la URL del producto en ML (ej: <code style="background:var(--bg4);padding:1px 5px;border-radius:3px">mercadolibre.com.ar/taza.../p/MLA123</code>)
+              o pegá el ID directamente (ej: <code style="background:var(--bg4);padding:1px 5px;border-radius:3px">MLA1234567890</code>)
             </div>
+            <div style="display:flex;gap:6px">
+              <input type="text" id="rp-comp-query" placeholder="URL de ML o ID del producto (MLA...)"
+                style="flex:1;font-size:12px;padding:7px 10px"
+                onkeydown="if(event.key==='Enter'){rpAddFromUrl();event.preventDefault();}">
+              <button class="btn btn-primary btn-sm" onclick="rpAddFromUrl()" id="rp-add-url-btn">Agregar</button>
+            </div>
+            <div id="rp-comp-search-results" style="margin-top:8px"></div>
           </div>
 
           <!-- Lista de competidores seleccionados -->
@@ -6436,80 +6443,66 @@ function rpToggleSearch(){
   if(!panel) return;
   const isOpen = panel.style.display !== 'none';
   panel.style.display = isOpen ? 'none' : 'block';
-  if(btn) btn.textContent = isOpen ? '+ Buscar competidor' : '✕ Cerrar';
+  if(btn) btn.textContent = isOpen ? '+ Agregar competidor' : '✕ Cerrar';
   if(!isOpen) document.getElementById('rp-comp-query')?.focus();
 }
 
-async function buscarCompetencia(query, ownItemId){
-  if(!query || query.trim().length < 2) return [];
-  try{
-    rpLogMsg('Buscando competidores: "'+query+'"', 'info');
-    // Fetch DIRECTO desde el browser del usuario (IP residencial).
-    // ML bloquea IPs de data centers (Cloudflare/AWS) pero NO IPs de usuarios.
-    // SIN Authorization header — endpoint público de ML.
-    const url = 'https://api.mercadolibre.com/sites/MLA/search?q='
-      + encodeURIComponent(query) + '&limit=20&sort=relevance';
-    const r = await fetch(url);  // sin Worker, sin token, sin headers extra
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    const data = await r.json();
-    const results = (data.results||[])
-      .filter(r => r.price > 0 && String(r.seller?.id) !== String(userId))
-      .map(r => ({
-        id: r.id, title: r.title, price: r.price,
-        thumbnail: r.thumbnail, sellerId: r.seller?.id, permalink: r.permalink,
-      })).slice(0,15);
-    rpLogMsg('Competidores encontrados: '+results.length, results.length>0?'ok':'warn');
-    return results;
-  }catch(e){
-    rpLogMsg('Error buscando competidores: '+e.message, 'error');
-    return [];
-  }
+// ── Extraer MLA ID desde URL o string ───────────────────────────────
+function rpExtractItemId(input){
+  input = (input || '').trim();
+  // Formato directo: MLA1234567890
+  if(/^MLA\d+$/i.test(input)) return input.toUpperCase();
+  // URL con /p/MLA o /MLA en el path
+  const m = input.match(/(?:\/p\/|\/)(MLA\d+)/i);
+  if(m) return m[1].toUpperCase();
+  // Solo números (ID sin prefijo)
+  if(/^\d{8,}$/.test(input)) return 'MLA' + input;
+  return null;
 }
 
-// ── Búsqueda en tiempo real con debounce ─────────────────────────────
-function rpSearchCompetitors(query){
-  clearTimeout(_rpSearchTimer);
-  const el = document.getElementById('rp-comp-search-results');
-  if(!el) return;
-  if(!query || query.trim().length < 2){
-    el.innerHTML = '<div style="color:var(--text3);font-size:12px;text-align:center;padding:12px">Escribí al menos 2 caracteres...</div>';
+// ── Agregar competidor desde URL o ID pegado ─────────────────────────
+// Usa mlGet('/items/{id}') — autenticado via Worker, 100% funcional
+async function rpAddFromUrl(){
+  const input = document.getElementById('rp-comp-query')?.value || '';
+  const itemId = rpExtractItemId(input);
+  const resultEl = document.getElementById('rp-comp-search-results');
+
+  if(!itemId){
+    if(resultEl) resultEl.innerHTML =
+      '<div style="color:var(--red);font-size:11.5px;padding:6px 0">'
+      + '⚠ No se reconoció el formato. Pegá una URL de ML o un ID como MLA1234567890</div>';
     return;
   }
-  el.innerHTML = '<div style="color:var(--text3);font-size:12px;text-align:center;padding:12px"><div class="spin" style="width:14px;height:14px;margin:0 auto 4px"></div>Buscando...</div>';
 
-  _rpSearchTimer = setTimeout(async () => {
-    const activeRule = rpRules.find(r=>r.id===rpSelectedRule);
-      const results = await buscarCompetencia(query, activeRule?.itemId);
-    if(!results.length){
-      el.innerHTML = '<div style="color:var(--text3);font-size:12px;text-align:center;padding:12px">Sin resultados para esta búsqueda.</div>';
-      return;
-    }
-    const rule = rpRules.find(r=>r.id===rpSelectedRule);
-    const alreadySelected = new Set((rule?.competitors||[]).map(c=>c.id));
+  const btn = document.getElementById('rp-add-url-btn');
+  if(btn){ btn.disabled=true; btn.textContent='Cargando...'; }
+  if(resultEl) resultEl.innerHTML = '';
 
-    el.innerHTML = results.map(item => {
-      const isAdded = alreadySelected.has(item.id);
-      return `<div style="display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:var(--rs);background:var(--bg2);border:1px solid var(--border)">
-        <img src="${item.thumbnail||''}" width="48" height="48"
-          style="object-fit:cover;border-radius:5px;flex-shrink:0;border:1px solid var(--border)"
-          onerror="this.style.display='none'">
-        <div style="flex:1;min-width:0">
-          <div style="font-size:11.5px;font-weight:500;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.35">${item.title}</div>
-          <div style="font-size:12px;font-weight:700;color:var(--text);margin-top:2px">$${item.price.toLocaleString('es-AR')}</div>
-        </div>
-        <button onclick="rpAddCompetitor('${item.id}')"
-          class="btn ${isAdded?'btn-ghost':'btn-primary'} btn-xs"
-          style="flex-shrink:0;white-space:nowrap"
-          ${isAdded?'disabled':''}>
-          ${isAdded?'✓ Agregado':'+  Agregar'}
-        </button>
-      </div>`;
-    }).join('');
-  }, 380);
+  try{
+    const comp = await obtenerPrecioCompetidor(itemId);
+    await rpAddCompetitor(comp.id, comp);  // pasar datos ya cargados
+    if(resultEl) resultEl.innerHTML =
+      '<div style="color:var(--green);font-size:11.5px;padding:6px 0">'
+      + '✅ Agregado: ' + comp.title.slice(0,50) + ' — $' + comp.price.toLocaleString('es-AR') + '</div>';
+    const inp = document.getElementById('rp-comp-query');
+    if(inp) inp.value = '';
+  }catch(e){
+    if(resultEl) resultEl.innerHTML =
+      '<div style="color:var(--red);font-size:11.5px;padding:6px 0">❌ ' + e.message + '</div>';
+  }finally{
+    if(btn){ btn.disabled=false; btn.textContent='Agregar'; }
+  }
 }
 
+// ── buscarCompetencia — delegado a rpAddFromUrl, mantenido para compatibilidad
+async function buscarCompetencia(query){ return []; }
+
+// ── rpSearchCompetitors — no usada (reemplazada por rpAddFromUrl)
+function rpSearchCompetitors(query){}
+
+
 // ── Agregar competidor seleccionado a la regla ───────────────────────
-async function rpAddCompetitor(itemId){
+async function rpAddCompetitor(itemId, preloaded){
   const rule = rpRules.find(r=>r.id===rpSelectedRule);
   if(!rule){ rpLogMsg('Seleccioná una regla primero', 'warn'); return; }
 
@@ -6522,7 +6515,7 @@ async function rpAddCompetitor(itemId){
   rpLogMsg(`Cargando datos del competidor ${itemId}...`, 'info');
   try{
     // obtenerPrecioCompetidor via ML pública (no requiere auth)
-    const comp = await obtenerPrecioCompetidor(itemId);
+    const comp = preloaded || await obtenerPrecioCompetidor(itemId);
     rule.competitors.push(comp);
     rpSaveRules();
     rpRenderCompetitors(rule);
@@ -6536,16 +6529,12 @@ async function rpAddCompetitor(itemId){
   }
 }
 
-// ── obtenerPrecioCompetidor(itemId) — GET /items/{ITEM_ID} ───────────
-// Usa la API pública de ML (no requiere token)
+// ── obtenerPrecioCompetidor(itemId) — GET /items/{ITEM_ID} via Worker ─
+// Usa mlGet() → Worker → api.mercadolibre.com (autenticado, sin problemas de CORS ni bloqueo)
 async function obtenerPrecioCompetidor(itemId){
-  // Fetch DIRECTO desde el browser — sin Worker, sin token.
-  // /items/{id} es público en ML, funciona desde IPs residenciales sin problema.
-  const r = await fetch('https://api.mercadolibre.com/items/'+itemId
-    +'?attributes=id,title,price,thumbnail,seller_id,permalink');
-  if(!r.ok) throw new Error('HTTP '+r.status+' para item '+itemId);
-  const d = await r.json();
-  if(!d.id) throw new Error('Item '+itemId+' no encontrado');
+  // mlGet pasa por el Worker con el token del usuario — funciona siempre
+  const d = await mlGet('/items/'+itemId+'?attributes=id,title,price,thumbnail,seller_id,permalink');
+  if(!d || !d.id) throw new Error('Item '+itemId+' no encontrado o sin acceso');
   return {
     id: d.id, title: d.title||'', price: d.price||0,
     thumbnail: d.thumbnail||'', sellerId: d.seller_id, permalink: d.permalink||'',
