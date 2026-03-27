@@ -6525,29 +6525,25 @@ async function rpAddCompetitor(itemId, preloaded){
   }
 }
 
-// ── obtenerPrecioCompetidor — GET /items/{id} via Worker (autenticado)
-// El Worker reenvía la request a ML con el token del usuario.
-// /items/{id} funciona para items de cualquier vendedor, no solo los propios.
+// ── obtenerPrecioCompetidor — GET /items/{id} SIN token (endpoint público)
+// NO usar mlGet() — el token del vendedor activa PolicyAgent y bloquea con 403.
+// /items/{id} es un endpoint público de ML: funciona sin auth desde el browser.
 async function obtenerPrecioCompetidor(itemId){
-  try{
-    const d = await mlGet('/items/'+itemId+'?attributes=id,title,price,thumbnail,seller_id,permalink');
-    if(d && d.id) return {
-      id: d.id, title: d.title||'', price: d.price||0,
-      thumbnail: d.thumbnail||'', sellerId: d.seller_id, permalink: d.permalink||'',
-    };
-    throw new Error('Respuesta vacía');
-  }catch(e){
-    // Fallback: fetch directo (funciona para items públicos si no hay CORS issue)
-    const r = await fetch('https://api.mercadolibre.com/items/'+itemId
-      +'?attributes=id,title,price,thumbnail,seller_id,permalink');
-    if(!r.ok) throw new Error('No se pudo cargar el item '+itemId+' (HTTP '+r.status+')');
-    const d = await r.json();
-    if(!d || !d.id) throw new Error('Item '+itemId+' no encontrado');
-    return {
-      id: d.id, title: d.title||'', price: d.price||0,
-      thumbnail: d.thumbnail||'', sellerId: d.seller_id, permalink: d.permalink||'',
-    };
+  const url = 'https://api.mercadolibre.com/items/'+itemId
+    +'?attributes=id,title,price,thumbnail,seller_id,permalink';
+  // Fetch directo SIN Authorization header — evita el bloqueo de PolicyAgent
+  const r = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  if(!r.ok){
+    const body = await r.json().catch(()=>({}));
+    const msg = body.message || body.error || 'HTTP '+r.status;
+    throw new Error(msg);
   }
+  const d = await r.json();
+  if(!d || !d.id) throw new Error('Item '+itemId+' no encontrado');
+  return {
+    id: d.id, title: d.title||'', price: d.price||0,
+    thumbnail: d.thumbnail||'', sellerId: d.seller_id, permalink: d.permalink||'',
+  };
 }
 
 // ── Eliminar competidor de la regla ──────────────────────────────────
