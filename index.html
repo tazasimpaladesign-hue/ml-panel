@@ -6431,11 +6431,11 @@ function rpToggleSearch(){
 // ── buscarCompetencia(query) — API pública ML sin auth ───────────────
 async function buscarCompetencia(query){
   if(!query || query.trim().length < 2) return [];
+  // Pasar por el Worker (evita CORS y agrega el token de auth de ML)
+  // mlGet() -> WORKER/api/sites/MLA/search -> api.mercadolibre.com/sites/MLA/search
   try{
-    const url = `https://api.mercadolibre.com/sites/MLA/search?q=${encodeURIComponent(query)}&limit=15`;
-    const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
-    if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
+    const ep = '/sites/MLA/search?q=' + encodeURIComponent(query) + '&limit=15';
+    const data = await mlGet(ep);
     return (data.results || [])
       .filter(r => r.price > 0 && String(r.seller?.id) !== String(userId))
       .map(r => ({
@@ -6524,11 +6524,10 @@ async function rpAddCompetitor(itemId){
 // ── obtenerPrecioCompetidor(itemId) — GET /items/{ITEM_ID} ───────────
 // Usa la API pública de ML (no requiere token)
 async function obtenerPrecioCompetidor(itemId){
-  const url = `https://api.mercadolibre.com/items/${itemId}?attributes=id,title,price,thumbnail,seller_id,permalink`;
-  const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
-  if(!resp.ok) throw new Error(`HTTP ${resp.status} para item ${itemId}`);
-  const d = await resp.json();
-  if(!d.id) throw new Error(`Item ${itemId} no encontrado`);
+  // Pasar por el Worker — evita CORS y agrega token de auth
+  // mlGet() -> WORKER/api/items/{id} -> api.mercadolibre.com/items/{id}
+  const d = await mlGet('/items/' + itemId + '?attributes=id,title,price,thumbnail,seller_id,permalink');
+  if(!d || !d.id) throw new Error(`Item ${itemId} no encontrado o error de API`);
   return {
     id:        d.id,
     title:     d.title || '',
