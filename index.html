@@ -2265,6 +2265,25 @@ async function loadItems(){await loadItemsFull();}
 // ── Métricas reales de visitas/ventas (últimos 7 días) ─────
 // Endpoint: GET /users/{USER_ID}/items_visits?date_from=...&date_to=...
 // Este endpoint es el correcto para obtener visitas por ítem del vendedor.
+// ── Caché de métricas en localStorage (persiste 24h entre recargas) ──
+const METRICS_CACHE_KEY = 'mlp_metrics_v1_';
+const METRICS_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 horas
+
+function metricsFromCache(id){
+  try{
+    const raw = localStorage.getItem(METRICS_CACHE_KEY + id);
+    if(!raw) return null;
+    const entry = JSON.parse(raw);
+    if(Date.now() - entry.ts > METRICS_CACHE_TTL) return null; // expirado
+    return entry.data;
+  }catch(e){ return null; }
+}
+
+function metricsToCache(id, data){
+  try{ localStorage.setItem(METRICS_CACHE_KEY + id, JSON.stringify({ ts: Date.now(), data })); }
+  catch(e){ /* localStorage lleno — ignorar silenciosamente */ }
+}
+
 async function loadPubMetricsBatch(ids){
   if(!userId || !ids || !ids.length) return;
 
@@ -2272,8 +2291,7 @@ async function loadPubMetricsBatch(ids){
   const from7 = new Date(now - 7*86400000);
   const from14= new Date(now - 14*86400000);
 
-  // Ventas 7d y 14d-7d desde allOrders en memoria (sin llamadas API extra)
-  // Normalizar IDs a string con prefijo MLA para hacer match con allItems
+  // Ventas 7d y prev desde allOrders en memoria
   const salesMap7 = {}, salesMap_prev = {};
   allOrders.forEach(o => {
     if(o.status === 'cancelled' || o.status === 'invalid') return;
@@ -2281,76 +2299,88 @@ async function loadPubMetricsBatch(ids){
     (o.order_items||[]).forEach(oi => {
       const rawId = oi.item && oi.item.id;
       if(!rawId) return;
-      // Normalizar: puede llegar como número 1234567 o string "MLA1234567"
       const sid = String(rawId);
       const id  = sid.startsWith('MLA') ? sid : 'MLA'+sid;
       const qty = oi.quantity||1;
-      if(dt >= from7)        salesMap7[id]    = (salesMap7[id]||0)    + qty;
-      else if(dt >= from14)  salesMap_prev[id] = (salesMap_prev[id]||0) + qty;
+      if(dt >= from7)       salesMap7[id]     = (salesMap7[id]||0)     + qty;
+      else if(dt >= from14) salesMap_prev[id] = (salesMap_prev[id]||0) + qty;
     });
   });
-  console.log('[Metricas] Ventas 7d mapeadas:', Object.keys(salesMap7).length, 'ítems | Ejemplo:', JSON.stringify(Object.entries(salesMap7).slice(0,3)));
 
-  // Visitas: time_window — en lotes de 5 con Promise.all, caché en itemMetrics
-  // Actualizar ventas 7d en caché aunque ya existan (orders pueden ser frescos)
-  ids.forEach(id => {
-    if(itemMetrics[id]){
-      itemMetrics[id].sales     = salesMap7[id]    || 0;
-      itemMetrics[id].salesPrev = salesMap_prev[id] || 0;
-      const sp = itemMetrics[id].salesPrev;
-      const s  = itemMetrics[id].sales;
-      itemMetrics[id].salesTrend = sp>0 ? Math.round((s-sp)/sp*100) : (s>0?100:0);
-      // Recalcular conv con nuevas ventas
-      const v = itemMetrics[id].visits || 0;
-      itemMetrics[id].conv = v > 0 ? +((s/v)*100).toFixed(1) : 0;
+  // 1. Cargar desde localStorage (instantáneo, sin API)
+  //    y actualizar ventas en caché existente
+  const toFetch = [];
+  for(const id of ids){
+    const cached = metricsFromCache(id);
+    if(cached){
+      // Datos de visitas válidos del caché — actualizar ventas (siempre frescos de allOrders)
+      cached.sales      = salesMap7[id]    || 0;
+      cached.salesPrev  = salesMap_prev[id] || 0;
+      const sp = cached.salesPrev, s = cached.sales, v = cached.visits || 0;
+      cached.salesTrend  = sp>0 ? Math.round((s-sp)/sp*100) : (s>0?100:0);
+      cached.conv        = v > 0 ? +((s/v)*100).toFixed(1) : 0;
+      itemMetrics[id] = cached;
+      metricsToCache(id, cached); // refrescar timestamp de ventas
+    } else {
+      toFetch.push(id);
     }
-  });
-  const todo = ids.filter(id => !itemMetrics[id]);
-  for(let i=0; i<todo.length; i+=5){
-    const batch = todo.slice(i, i+5);
-    await Promise.allSettled(batch.map(async id => {
-      let visits=0, visitsPrev=0;
-      try{
-        // Período actual: últimos 7 días
-        const r = await mlGet('/items/'+id+'/visits/time_window?last=7&unit=day');
-        if(r && typeof r.total_visits==='number') visits = r.total_visits;
-        else if(r && Array.isArray(r.visits)) visits = r.visits.reduce((s,d)=>s+(d.total||d.quantity||0),0);
-      }catch(e){
-        // Log exacto del error (ej: 429 Too Many Requests) — no rompe la tabla
-        console.warn('[Metricas] time_window falló para', id, '—', e.message);
-        try{
-          const r2 = await mlGet('/items/'+id+'/visits?date_from='+from7.toISOString().slice(0,10)+'&date_to='+now.toISOString().slice(0,10));
-          visits = (r2&&r2.total_visits)||0;
-          console.log('[Metricas] fallback OK', id, '->', visits);
-        }catch(e2){
-          console.warn('[Metricas] fallback también falló para', id, '—', e2.message, '— usando 0');
-          visits = 0; // silencioso, no rompe el render
-        }
-      }
-      try{
-        // Período anterior: 14d-7d para comparación de tendencia
-        const rp = await mlGet('/items/'+id+'/visits?date_from='+from14.toISOString().slice(0,10)+'&date_to='+from7.toISOString().slice(0,10));
-        visitsPrev = (rp&&rp.total_visits)||0;
-      }catch(e){ visitsPrev = 0; }
-
-      const sales     = salesMap7[id]    || 0;
-      const salesPrev = salesMap_prev[id] || 0;
-      const conv      = visits > 0 ? +((sales/visits)*100).toFixed(1) : 0;
-      // Tendencia: diferencia vs período anterior
-      const salesTrend = salesPrev>0 ? Math.round((sales-salesPrev)/salesPrev*100) : (sales>0?100:0);
-      const visitsTrend= visitsPrev>0? Math.round((visits-visitsPrev)/visitsPrev*100): (visits>0?100:0);
-
-      itemMetrics[id] = { visits, visitsPrev, sales, salesPrev, conv, salesTrend, visitsTrend };
-    }));
-    if(i+5 < todo.length) await new Promise(r => setTimeout(r, 350));
   }
+
+  if(toFetch.length){
+    console.log('[Metricas] A buscar en API:', toFetch.length, '| desde caché:', ids.length - toFetch.length);
+  }
+
+  // 2. Fetch secuencial con for...of + delay 200ms (anti-429)
+  //    Prioridad: items sin caché primero (ya está así por el filtro toFetch)
+  for(const id of toFetch){
+    let visits = 0, visitsPrev = 0;
+
+    // Visitas período actual
+    try{
+      const r = await mlGet('/items/'+id+'/visits/time_window?last=7&unit=day');
+      if(r && typeof r.total_visits === 'number')   visits = r.total_visits;
+      else if(r && Array.isArray(r.visits)) visits = r.visits.reduce((s,d)=>s+(d.total||d.quantity||0),0);
+    }catch(e){
+      console.warn('[Metricas] time_window error', id, '—', e.message);
+      try{
+        const r2 = await mlGet('/items/'+id+'/visits?date_from='+from7.toISOString().slice(0,10)+'&date_to='+now.toISOString().slice(0,10));
+        visits = (r2 && r2.total_visits) || 0;
+      }catch(e2){
+        console.warn('[Metricas] fallback error', id, '—', e2.message);
+        visits = 0;
+      }
+    }
+
+    // Visitas período anterior (para tendencia)
+    try{
+      const rp = await mlGet('/items/'+id+'/visits?date_from='+from14.toISOString().slice(0,10)+'&date_to='+from7.toISOString().slice(0,10));
+      visitsPrev = (rp && rp.total_visits) || 0;
+    }catch(e){ visitsPrev = 0; }
+
+    const sales      = salesMap7[id]    || 0;
+    const salesPrev  = salesMap_prev[id] || 0;
+    const conv       = visits > 0 ? +((sales/visits)*100).toFixed(1) : 0;
+    const salesTrend = salesPrev>0 ? Math.round((sales-salesPrev)/salesPrev*100) : (sales>0?100:0);
+    const visitsTrend= visitsPrev>0 ? Math.round((visits-visitsPrev)/visitsPrev*100) : (visits>0?100:0);
+
+    const data = { visits, visitsPrev, sales, salesPrev, conv, salesTrend, visitsTrend };
+    itemMetrics[id] = data;
+    metricsToCache(id, data); // persistir en localStorage
+
+    // Delay anti-429: 200ms entre cada request (secuencial, no paralelo)
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
+
+  // Poblar ventas para ítems con ventas pero sin visitas aún
   Object.keys(salesMap7).forEach(id => {
     if(!itemMetrics[id]) itemMetrics[id] = {
-      visits:0, visitsPrev:0, sales:salesMap7[id], salesPrev:salesMap_prev[id]||0,
+      visits:0, visitsPrev:0,
+      sales: salesMap7[id], salesPrev: salesMap_prev[id]||0,
       conv:0, salesTrend:0, visitsTrend:0
     };
   });
 }
+
 // Obtener thumbnail de un ítem con caché — evita llamadas repetidas para el mismo producto
 async function getItemThumb(itemId){
   if(!itemId) return '';
@@ -3992,7 +4022,7 @@ async function loadSEOMetrics(){
   const btn = document.getElementById('seo-metrics-btn');
   if(btn){ btn.disabled=true; btn.textContent='⏳ Cargando...'; }
 
-  // Solo cargar los items de la PÁGINA ACTUAL visible en la tabla
+  // Filtrar exactamente igual que renderSEOTable para obtener los ítems visibles
   const searchQ = (document.getElementById('seo-search')?.value||'').toLowerCase();
   const st = seoState.statusFilter;
   let filtered = allItems.filter(i=>{
@@ -4002,23 +4032,31 @@ async function loadSEOMetrics(){
     if(searchQ && !i.title.toLowerCase().includes(searchQ)) return false;
     return true;
   });
+
+  // Prioridad: página actual primero, luego el resto del filtro
   const start = (seoState.page-1) * seoState.perPage;
-  const pageItems = filtered.slice(start, start + seoState.perPage);
-  const ids = pageItems.map(i=>i.id);
+  const pageItems  = filtered.slice(start, start + seoState.perPage);
+  const restItems  = filtered.filter((_, idx) => idx < start || idx >= start + seoState.perPage);
+  // Solo borrar caché de la página actual (forzar refresh), el resto usa localStorage
+  pageItems.forEach(i => delete itemMetrics[i.id]);
+  const ids = [...pageItems.map(i=>i.id), ...restItems.map(i=>i.id)];
 
   if(!ids.length){ if(btn){ btn.disabled=false; btn.textContent='📊 Cargar métricas'; } return; }
 
-  // FORZAR recarga de visitas: borrar caché de visitas para esta página
-  // (las ventas se mantienen pero las visitas se vuelven a pedir siempre)
-  ids.forEach(id => {
-    if(itemMetrics[id]) delete itemMetrics[id];
-  });
-
   try{
-    await loadPubMetricsBatch(ids);
+    // Cargar página actual (ya limpió caché → siempre frescos)
+    await loadPubMetricsBatch(pageItems.map(i=>i.id));
     renderSEOTable();
-    if(btn){ btn.disabled=false; btn.textContent='📊 Métricas ✓ (pág '+seoState.page+')'; }
-    console.log('[SEO] Métricas recargadas para', ids.length, 'ítems de la página', seoState.page);
+    if(btn) btn.textContent = '📊 Pág '+seoState.page+' lista ✓';
+
+    // Cargar el resto del filtro en background (usa localStorage si disponible)
+    if(restItems.length){
+      if(btn) btn.textContent = '⏳ Cargando resto ('+restItems.length+')...';
+      await loadPubMetricsBatch(restItems.map(i=>i.id));
+      renderSEOTable();
+    }
+    if(btn){ btn.disabled=false; btn.textContent='📊 Métricas ✓'; }
+    console.log('[SEO] Métricas completas para', ids.length, 'ítems');
   }catch(e){
     console.error('[SEO] Error cargando métricas:', e.message);
     if(btn){ btn.disabled=false; btn.textContent='📊 Cargar métricas'; }
