@@ -908,7 +908,8 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <th>Chars</th>
           <th onclick="seoSort('seo')"     style="cursor:pointer;user-select:none;white-space:nowrap">Score SEO <span id="seo-sort-seo" style="font-size:10px"></span></th>
           <th onclick="seoSort('quality')" style="cursor:pointer;user-select:none;white-space:nowrap">Calidad pub. <span id="seo-sort-quality" style="font-size:10px"></span></th>
-          <th onclick="seoSort('sold')" style="cursor:pointer;user-select:none;white-space:nowrap;background:#f0fdf4" title="Ventas últimos 7 días">Ventas 7d ↕<span id="seo-sort-sold" style="font-size:10px"></span></th>
+          <th onclick="seoSort('sold')" style="cursor:pointer;user-select:none;white-space:nowrap" title="Total ventas históricas del ítem">Vendidas ↕<span id="seo-sort-sold" style="font-size:10px"></span></th>
+          <th onclick="seoSort('sales7')" style="cursor:pointer;user-select:none;white-space:nowrap;background:#f0fdf4" title="Ventas últimos 7 días">Ventas 7d ↕<span id="seo-sort-sales7" style="font-size:10px"></span></th>
           <th onclick="seoSort('visits')" style="cursor:pointer;user-select:none;white-space:nowrap;background:#eff6ff" title="Visitas últimos 7 días">Visitas 7d ↕<span id="seo-sort-visits" style="font-size:10px"></span></th>
           <th onclick="seoSort('conv')" style="cursor:pointer;user-select:none;white-space:nowrap;background:#fefce8" title="Tasa de conversión = Ventas/Visitas">Conv% ↕<span id="seo-sort-conv" style="font-size:10px"></span></th>
           <th>Problemas</th>
@@ -2272,20 +2273,38 @@ async function loadPubMetricsBatch(ids){
   const from14= new Date(now - 14*86400000);
 
   // Ventas 7d y 14d-7d desde allOrders en memoria (sin llamadas API extra)
+  // Normalizar IDs a string con prefijo MLA para hacer match con allItems
   const salesMap7 = {}, salesMap_prev = {};
   allOrders.forEach(o => {
     if(o.status === 'cancelled' || o.status === 'invalid') return;
     const dt = new Date(o.date_created||0);
     (o.order_items||[]).forEach(oi => {
-      const id = oi.item && oi.item.id;
-      if(!id) return;
+      const rawId = oi.item && oi.item.id;
+      if(!rawId) return;
+      // Normalizar: puede llegar como número 1234567 o string "MLA1234567"
+      const sid = String(rawId);
+      const id  = sid.startsWith('MLA') ? sid : 'MLA'+sid;
       const qty = oi.quantity||1;
-      if(dt >= from7)   salesMap7[id]    = (salesMap7[id]||0)    + qty;
-      else if(dt >= from14) salesMap_prev[id] = (salesMap_prev[id]||0) + qty;
+      if(dt >= from7)        salesMap7[id]    = (salesMap7[id]||0)    + qty;
+      else if(dt >= from14)  salesMap_prev[id] = (salesMap_prev[id]||0) + qty;
     });
   });
+  console.log('[Metricas] Ventas 7d mapeadas:', Object.keys(salesMap7).length, 'ítems | Ejemplo:', JSON.stringify(Object.entries(salesMap7).slice(0,3)));
 
   // Visitas: time_window — en lotes de 5 con Promise.all, caché en itemMetrics
+  // Actualizar ventas 7d en caché aunque ya existan (orders pueden ser frescos)
+  ids.forEach(id => {
+    if(itemMetrics[id]){
+      itemMetrics[id].sales     = salesMap7[id]    || 0;
+      itemMetrics[id].salesPrev = salesMap_prev[id] || 0;
+      const sp = itemMetrics[id].salesPrev;
+      const s  = itemMetrics[id].sales;
+      itemMetrics[id].salesTrend = sp>0 ? Math.round((s-sp)/sp*100) : (s>0?100:0);
+      // Recalcular conv con nuevas ventas
+      const v = itemMetrics[id].visits || 0;
+      itemMetrics[id].conv = v > 0 ? +((s/v)*100).toFixed(1) : 0;
+    }
+  });
   const todo = ids.filter(id => !itemMetrics[id]);
   for(let i=0; i<todo.length; i+=5){
     const batch = todo.slice(i, i+5);
@@ -3591,7 +3610,7 @@ function seoSort(col){
   if(seoState.sortCol===col) seoState.sortDir*=-1;
   else{ seoState.sortCol=col; seoState.sortDir=-1; }
   seoState.page=1;
-  ['seo','quality','sold','visits','conv'].forEach(c=>{
+  ['seo','quality','sold','sales7','visits','conv'].forEach(c=>{
     const el=document.getElementById('seo-sort-'+c);
     if(el) el.innerHTML=sortArrow(c,seoState.sortCol,seoState.sortDir);
   });
@@ -3821,7 +3840,8 @@ function renderSEOTable(){
       let va=0, vb=0;
       const ma = itemMetrics[a.id], mb = itemMetrics[b.id];
       if(seoState.sortCol==='seo')      { va=seoScore(a.title);          vb=seoScore(b.title); }
-      else if(seoState.sortCol==='sold') { va=ma?.sales??a.sold_quantity??0; vb=mb?.sales??b.sold_quantity??0; }
+      else if(seoState.sortCol==='sold')   { va=a.sold_quantity||0;           vb=b.sold_quantity||0; }
+      else if(seoState.sortCol==='sales7') { va=ma?.sales||0;                 vb=mb?.sales||0; }
       else if(seoState.sortCol==='visits'){ va=ma?.visits||0;              vb=mb?.visits||0; }
       else if(seoState.sortCol==='conv') { va=ma?.conv||0;                 vb=mb?.conv||0; }
       else                               { va=qualityScore(a);             vb=qualityScore(b); }
@@ -3841,7 +3861,7 @@ function renderSEOTable(){
   const tbody=document.getElementById('seo-tbody');
   if(!tbody) return;
   if(!paged.length){
-    tbody.innerHTML='<tr><td colspan="9" style="text-align:center;padding:22px;color:var(--text3)">Sin resultados para este filtro</td></tr>';
+    tbody.innerHTML='<tr><td colspan="10" style="text-align:center;padding:22px;color:var(--text3)">Sin resultados para este filtro</td></tr>';
     const pg=document.getElementById('seo-pagination');if(pg)pg.innerHTML='';
     return;
   }
@@ -3905,11 +3925,16 @@ function renderSEOTable(){
           </div>
         </div>
       </td>
+      <td style="text-align:center">
+        <span style="font-size:14px;font-weight:700;color:var(--text)">${item.sold_quantity||0}</span>
+      </td>
       <td style="text-align:center;background:#f0fdf4">
-        <div style="font-size:14px;font-weight:700;color:var(--text)">${item.sold_quantity||0}</div>
-        ${m && m.salesTrend!==undefined
-          ? '<div style="font-size:9px;margin-top:1px;color:'+(m.salesTrend>0?'var(--green)':m.salesTrend<0?'var(--red)':'var(--text3)')+'">'+( m.salesTrend>0?'▲ +':'▼ ')+m.salesTrend+'% vs sem.ant.</div>'
-          : '<div style="font-size:9px;color:var(--text3)">7d: '+(m?m.sales:'—')+'</div>'}
+        ${m
+          ? '<span style="font-size:14px;font-weight:700;color:var(--text)">'+m.sales+'</span>'
+            +(m.salesTrend!==undefined
+              ? '<div style="font-size:9px;margin-top:1px;color:'+(m.salesTrend>0?'var(--green)':m.salesTrend<0?'var(--red)':'var(--text3)')+'">'+( m.salesTrend>0?'▲ +':'▼ ')+m.salesTrend+'% vs sem.ant.</div>'
+              : '')
+          : '<span style="font-size:10px;color:var(--text3)">📊 Cargar</span>'}
       </td>
       <td style="text-align:center;background:#eff6ff">
         ${m ? `<div style="font-size:14px;font-weight:700;color:var(--text)">${(m.visits||0).toLocaleString('es-AR')}</div>
