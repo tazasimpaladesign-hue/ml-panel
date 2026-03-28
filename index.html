@@ -3993,7 +3993,6 @@ async function loadSEOMetrics(){
   if(btn){ btn.disabled=true; btn.textContent='⏳ Cargando...'; }
 
   // Solo cargar los items de la PÁGINA ACTUAL visible en la tabla
-  // Esto evita 2300 requests al cargar y respeta rate limits de ML
   const searchQ = (document.getElementById('seo-search')?.value||'').toLowerCase();
   const st = seoState.statusFilter;
   let filtered = allItems.filter(i=>{
@@ -4009,11 +4008,17 @@ async function loadSEOMetrics(){
 
   if(!ids.length){ if(btn){ btn.disabled=false; btn.textContent='📊 Cargar métricas'; } return; }
 
+  // FORZAR recarga de visitas: borrar caché de visitas para esta página
+  // (las ventas se mantienen pero las visitas se vuelven a pedir siempre)
+  ids.forEach(id => {
+    if(itemMetrics[id]) delete itemMetrics[id];
+  });
+
   try{
     await loadPubMetricsBatch(ids);
     renderSEOTable();
     if(btn){ btn.disabled=false; btn.textContent='📊 Métricas ✓ (pág '+seoState.page+')'; }
-    console.log('[SEO] Métricas cargadas para', ids.length, 'ítems de la página', seoState.page);
+    console.log('[SEO] Métricas recargadas para', ids.length, 'ítems de la página', seoState.page);
   }catch(e){
     console.error('[SEO] Error cargando métricas:', e.message);
     if(btn){ btn.disabled=false; btn.textContent='📊 Cargar métricas'; }
