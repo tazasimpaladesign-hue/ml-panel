@@ -2297,10 +2297,16 @@ async function loadPubMetricsBatch(ids){
         if(r && typeof r.total_visits==='number') visits = r.total_visits;
         else if(r && Array.isArray(r.visits)) visits = r.visits.reduce((s,d)=>s+(d.total||d.quantity||0),0);
       }catch(e){
+        // Log exacto del error (ej: 429 Too Many Requests) — no rompe la tabla
+        console.warn('[Metricas] time_window falló para', id, '—', e.message);
         try{
           const r2 = await mlGet('/items/'+id+'/visits?date_from='+from7.toISOString().slice(0,10)+'&date_to='+now.toISOString().slice(0,10));
           visits = (r2&&r2.total_visits)||0;
-        }catch(e2){ visits = 0; }
+          console.log('[Metricas] fallback OK', id, '->', visits);
+        }catch(e2){
+          console.warn('[Metricas] fallback también falló para', id, '—', e2.message, '— usando 0');
+          visits = 0; // silencioso, no rompe el render
+        }
       }
       try{
         // Período anterior: 14d-7d para comparación de tendencia
@@ -3774,7 +3780,13 @@ function seoSetFilter(f){
   renderSEOTable();
 }
 
-function seoGoPage(n){seoState.page=n;renderSEOTable();}
+function seoGoPage(n){
+  seoState.page=n;
+  renderSEOTable();
+  // Resetear el botón de métricas al cambiar de página (nueva página = sin métricas cargadas)
+  const btn=document.getElementById('seo-metrics-btn');
+  if(btn && btn.textContent.includes('✓')) btn.textContent='📊 Cargar métricas';
+}
 
 function renderSEOTable(){
   const searchQ=(document.getElementById('seo-search')?.value||'').toLowerCase();
@@ -3894,19 +3906,19 @@ function renderSEOTable(){
         </div>
       </td>
       <td style="text-align:center;background:#f0fdf4">
-        ${m ? `<div style="font-size:14px;font-weight:700;color:var(--text)">${m.sales}</div>
-          <div style="font-size:9px;margin-top:1px;color:${m.salesTrend>0?'var(--green)':m.salesTrend<0?'var(--red)':'var(--text3)'}">
-            ${m.salesTrend>0?'▲':'▼'} ${Math.abs(m.salesTrend)}% vs anterior
-          </div>` : '<span style="color:var(--text3);font-size:10px">—</span>'}
+        <div style="font-size:14px;font-weight:700;color:var(--text)">${item.sold_quantity||0}</div>
+        ${m && m.salesTrend!==undefined
+          ? '<div style="font-size:9px;margin-top:1px;color:'+(m.salesTrend>0?'var(--green)':m.salesTrend<0?'var(--red)':'var(--text3)')+'">'+( m.salesTrend>0?'▲ +':'▼ ')+m.salesTrend+'% vs sem.ant.</div>'
+          : '<div style="font-size:9px;color:var(--text3)">7d: '+(m?m.sales:'—')+'</div>'}
       </td>
       <td style="text-align:center;background:#eff6ff">
-        ${m ? `<div style="font-size:14px;font-weight:700;color:var(--text)">${m.visits.toLocaleString('es-AR')}</div>
-          <div style="font-size:9px;margin-top:1px;color:${m.visitsTrend>0?'var(--green)':m.visitsTrend<0?'var(--red)':'var(--text3)'}">
-            ${m.visitsTrend>0?'▲':'▼'} ${Math.abs(m.visitsTrend)}% vs anterior
-          </div>` : '<span style="color:var(--text3);font-size:10px">—</span>'}
+        ${m ? `<div style="font-size:14px;font-weight:700;color:var(--text)">${(m.visits||0).toLocaleString('es-AR')}</div>
+          ${m.visitsTrend!==undefined?`<div style="font-size:9px;margin-top:1px;color:${m.visitsTrend>0?'var(--green)':m.visitsTrend<0?'var(--red)':'var(--text3)'}">${m.visitsTrend>0?'▲ +':'▼ '}${m.visitsTrend}% vs sem.ant.</div>`:''}` 
+        : '<span style="font-size:10px;color:var(--text3)">📊 Cargar</span>'}
       </td>
       <td style="text-align:center;background:#fefce8">
-        ${m ? `<div style="font-size:14px;font-weight:700;color:${m.conv>=5?'var(--green)':m.conv>=2?'var(--amber)':'var(--red)'}">${m.conv}%</div>` : '<span style="color:var(--text3);font-size:10px">—</span>'}
+        ${m ? `<div style="font-size:14px;font-weight:700;color:${(m.conv||0)>=5?'var(--green)':(m.conv||0)>=2?'var(--amber)':'var(--red)'}">${(m.conv||0).toFixed(1)}%</div>` 
+        : '<span style="font-size:10px;color:var(--text3)">—</span>'}
       </td>
       <td style="max-width:160px"><div style="display:flex;flex-wrap:wrap;gap:3px">
         ${tI.map(i=>`<span class="badge bg-amber" style="font-size:9px">${i}</span>`).join('')}
@@ -3954,11 +3966,33 @@ function renderKWDensity(){
 async function loadSEOMetrics(){
   const btn = document.getElementById('seo-metrics-btn');
   if(btn){ btn.disabled=true; btn.textContent='⏳ Cargando...'; }
-  const ids = allItems.map(i=>i.id).slice(0,50); // máx 50 para no saturar
-  await loadPubMetricsBatch(ids);
-  renderSEOTable(); // re-render con métricas cargadas
-  if(btn){ btn.disabled=false; btn.textContent='📊 Métricas ✓'; }
-  console.log('[SEO] Métricas cargadas para', ids.length, 'ítems');
+
+  // Solo cargar los items de la PÁGINA ACTUAL visible en la tabla
+  // Esto evita 2300 requests al cargar y respeta rate limits de ML
+  const searchQ = (document.getElementById('seo-search')?.value||'').toLowerCase();
+  const st = seoState.statusFilter;
+  let filtered = allItems.filter(i=>{
+    if(!st && (i.status==='closed'||i.status==='deleted'||i.status==='inactive')) return false;
+    if(st && i.status!==st) return false;
+    if(seoState.tipoFilter && getPubType(i)!==seoState.tipoFilter) return false;
+    if(searchQ && !i.title.toLowerCase().includes(searchQ)) return false;
+    return true;
+  });
+  const start = (seoState.page-1) * seoState.perPage;
+  const pageItems = filtered.slice(start, start + seoState.perPage);
+  const ids = pageItems.map(i=>i.id);
+
+  if(!ids.length){ if(btn){ btn.disabled=false; btn.textContent='📊 Cargar métricas'; } return; }
+
+  try{
+    await loadPubMetricsBatch(ids);
+    renderSEOTable();
+    if(btn){ btn.disabled=false; btn.textContent='📊 Métricas ✓ (pág '+seoState.page+')'; }
+    console.log('[SEO] Métricas cargadas para', ids.length, 'ítems de la página', seoState.page);
+  }catch(e){
+    console.error('[SEO] Error cargando métricas:', e.message);
+    if(btn){ btn.disabled=false; btn.textContent='📊 Cargar métricas'; }
+  }
 }
 
 async function analyzeSEOAll(){ renderSEOSection(); }
