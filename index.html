@@ -6483,10 +6483,8 @@ function rpOnMlIdInput(val){
   // Intentar autocompletar el título via search bypass
   _rpMlIdTimer = setTimeout(async ()=>{
     try{
-      const r = await fetch('https://api.mercadolibre.com/sites/MLA/search?q='
-        +encodeURIComponent(mlId)+'&limit=3');
-      if(!r.ok) return;
-      const data = await r.json();
+      // Usar Worker /pub/* — sin Origin header, sin bloqueo de ML
+      const data = await mlGetPublic('/sites/MLA/search?q='+encodeURIComponent(mlId)+'&limit=3');
       const match = (data.results||[]).find(x=>x.id===mlId) || data.results[0];
       if(match){
         const titleEl = document.getElementById('rp-comp-title');
@@ -6567,47 +6565,39 @@ async function buscarCompetencia(query){ return []; }
 // ── rpSearchCompetitors — no usada
 function rpSearchCompetitors(query){}
 
-// ── obtenerPrecioCompetidor — bypass vía endpoint de búsqueda ────────
-// Estrategia de Gemini: buscar por item_id en /sites/MLA/search
-// El endpoint de búsqueda tiene políticas de IP más relajadas que /items/{id}
-// Esta request va DIRECTA desde el browser del usuario (sin Worker, sin token)
-// Si también falla: modo manual como contingencia
+// ── obtenerPrecioCompetidor — precio via Worker /pub/* (sin token, sin Origin)
+// Intento 1: /items/{id} sin auth via Worker
+// Intento 2: /sites/MLA/search?q={id} via Worker  
+// Ambos pasan por WORKER/pub/* → ML server-to-server, sin Origin header
 async function obtenerPrecioCompetidor(itemId){
-  // Competidores manuales: solo se actualizan con ✎ Editar
   if(itemId && itemId.startsWith('MANUAL_')){
     throw new Error('Competidor manual — usá ✎ Editar para actualizar el precio');
   }
 
-  // Estrategia 1: GET /sites/MLA/search?q={item_id} — anónimo, directo desde browser
-  // El ID como query devuelve ese ítem exacto como primer resultado
+  // Intento 1: /items/{id} directo sin auth vía Worker /pub/*
   try{
-    rpLogMsg('Buscando precio via search: '+itemId, 'info');
-    const url = 'https://api.mercadolibre.com/sites/MLA/search?q='
-      + encodeURIComponent(itemId) + '&limit=5';
-    // SIN Authorization, SIN Worker — fetch directo desde IP del usuario
-    const r = await fetch(url);
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    const data = await r.json();
-    const results = data.results || [];
-    // Buscar el resultado que coincida exactamente con el item_id
-    const match = results.find(x => x.id === itemId) || results[0];
-    if(match && match.price > 0){
-      rpLogMsg('Precio encontrado via search: $'+match.price.toLocaleString('es-AR'), 'ok');
-      return {
-        id:        match.id,
-        title:     match.title || '',
-        price:     match.price,
-        thumbnail: match.thumbnail || '',
-        sellerId:  match.seller?.id || null,
-        permalink: match.permalink || '',
-      };
+    const d = await mlGetPublic('/items/'+itemId+'?attributes=id,title,price,thumbnail,seller_id,permalink');
+    if(d && d.id && d.price){
+      return { id:d.id, title:d.title||'', price:d.price, thumbnail:d.thumbnail||'', sellerId:d.seller_id, permalink:d.permalink||'' };
     }
-    throw new Error('Sin resultados para '+itemId);
-  }catch(e){
-    rpLogMsg('Search falló ('+e.message+') — precio no actualizable automáticamente', 'warn');
-    // Estrategia 2: modo manual — no tiramos error, devolvemos null
-    // para que rpRefreshPrices sepa que no pudo actualizar pero no rompa el flujo
-    return null;
+  }catch(e1){
+    rpLogMsg('items/{id} bloqueado ('+e1.message+'), intentando search...', 'info');
+  }
+
+  // Intento 2: /sites/MLA/search?q={itemId} vía Worker /pub/*
+  // El search tiene políticas de IP distintas que /items/{id}
+  try{
+    const data = await mlGetPublic('/sites/MLA/search?q='+encodeURIComponent(itemId)+'&limit=5');
+    const results = data.results || [];
+    const match = results.find(x=>x.id===itemId) || results[0];
+    if(match && match.price > 0){
+      rpLogMsg('Precio via search: $'+match.price.toLocaleString('es-AR'), 'ok');
+      return { id:match.id, title:match.title||'', price:match.price, thumbnail:match.thumbnail||'', sellerId:match.seller?.id||null, permalink:match.permalink||'' };
+    }
+    throw new Error('Sin resultados');
+  }catch(e2){
+    rpLogMsg('Search vía Worker también bloqueado ('+e2.message+')', 'warn');
+    return null; // activa modo manual
   }
 }
 
