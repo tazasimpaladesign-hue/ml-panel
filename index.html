@@ -1679,20 +1679,37 @@ input::placeholder,textarea::placeholder{color:#6b7280}
             </div>
           </div>
 
-          <!-- Agregar competidor por URL o ID de ML -->
+          <!-- Agregar competidor manualmente -->
           <div id="rp-comp-search-panel" style="display:none;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:12px;margin-bottom:10px">
-            <div style="font-size:11.5px;font-weight:600;color:var(--text);margin-bottom:8px">Agregar competidor por URL o ID</div>
-            <div style="font-size:11px;color:var(--text3);margin-bottom:8px;line-height:1.6">
-              Copiá la URL del producto en ML (ej: <code style="background:var(--bg4);padding:1px 5px;border-radius:3px">mercadolibre.com.ar/taza.../p/MLA123</code>)
-              o pegá el ID directamente (ej: <code style="background:var(--bg4);padding:1px 5px;border-radius:3px">MLA1234567890</code>)
+            <div style="font-size:11.5px;font-weight:600;color:var(--text);margin-bottom:4px">Agregar competidor</div>
+            <div style="font-size:11px;color:var(--text3);margin-bottom:10px;line-height:1.6;background:#fef3c7;border:1px solid #fde68a;border-radius:5px;padding:7px 9px">
+              ⚠ La API de ML bloquea la lectura de precios de competidores desde servidores externos.
+              Ingresá los datos manualmente: buscá el precio en ML, copialo y pegalo acá.
             </div>
-            <div style="display:flex;gap:6px">
-              <input type="text" id="rp-comp-query" placeholder="URL de ML o ID del producto (MLA...)"
-                style="flex:1;font-size:12px;padding:7px 10px"
-                onkeydown="if(event.key==='Enter'){rpAddFromUrl();event.preventDefault();}">
-              <button class="btn btn-primary btn-sm" onclick="rpAddFromUrl()" id="rp-add-url-btn">Agregar</button>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <div>
+                <label style="font-size:11px;font-weight:500;color:var(--text2);display:block;margin-bottom:3px">Título del producto</label>
+                <input type="text" id="rp-comp-title" placeholder="Ej: Taza cerámica Buenos Aires souvenir"
+                  style="width:100%;font-size:12px;padding:7px 10px">
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                <div>
+                  <label style="font-size:11px;font-weight:500;color:var(--text2);display:block;margin-bottom:3px">Precio actual (ARS)</label>
+                  <input type="number" id="rp-comp-price" placeholder="Ej: 8500" min="0" step="100"
+                    style="width:100%;font-size:12px;padding:7px 10px"
+                    onkeydown="if(event.key==='Enter'){rpAddManual();event.preventDefault();}">
+                </div>
+                <div>
+                  <label style="font-size:11px;font-weight:500;color:var(--text2);display:block;margin-bottom:3px">URL en ML (opcional)</label>
+                  <input type="text" id="rp-comp-url" placeholder="https://articulo.mercadolibre..."
+                    style="width:100%;font-size:12px;padding:7px 10px">
+                </div>
+              </div>
+              <div style="display:flex;gap:6px;align-items:center">
+                <button class="btn btn-primary btn-sm" onclick="rpAddManual()" id="rp-add-url-btn">+ Agregar competidor</button>
+                <span id="rp-comp-search-results" style="font-size:11.5px"></span>
+              </div>
             </div>
-            <div id="rp-comp-search-results" style="margin-top:8px"></div>
           </div>
 
           <!-- Lista de competidores seleccionados -->
@@ -1921,16 +1938,19 @@ async function mlGet(ep){
   if(r.status===401){const ok=await tryRefreshToken();if(ok)return mlGet(ep);showSessionExpired();throw new Error('401');}
   return r.json();
 }
-// mlGetPublic: para endpoints públicos de ML que no requieren token
-// Usa WORKER/pub/* que el Worker reenvía a api.mercadolibre.com sin Authorization
+// mlGetPublic: para endpoints públicos de ML — SIN token, vía Worker server-to-server
+// El Worker no agrega Authorization ni Origin → ML lo trata como request anónima
 async function mlGetPublic(ep){
-  try{
-    const r = await fetch(WORKER+'/pub'+ep, { signal: AbortSignal.timeout(8000) });
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    return r.json();
-  }catch(e){
-    throw new Error(e.message);
+  const r = await fetch(WORKER+'/pub'+ep, { signal: AbortSignal.timeout(8000) });
+  const text = await r.text();
+  let data;
+  try{ data = JSON.parse(text); }catch(e){ throw new Error('Respuesta no-JSON del Worker'); }
+  if(!r.ok){
+    // Loguear la respuesta exacta de ML para diagnosticar
+    console.warn('[mlGetPublic] HTTP', r.status, ep, JSON.stringify(data).slice(0,200));
+    throw new Error('HTTP '+r.status+(data.message?' — '+data.message:''));
   }
+  return data;
 }
 
 async function mlPost(ep,body){
@@ -6448,54 +6468,112 @@ function rpToggleSearch(){
 }
 
 // ── Extraer MLA ID desde URL o string ───────────────────────────────
-function rpExtractItemId(input){
-  input = (input || '').trim();
-  // Buscar cualquier patrón MLA seguido de guión opcional y números
-  // Cubre: MLA1452903143, MLA-1452903143, artículo.../MLA-1452903143..., URLs completas
-  const m = input.match(/MLA[-]?(\d+)/i);
-  if(m) return 'MLA' + m[1];
-  // Solo números puros
-  if(/^\d{8,}$/.test(input)) return 'MLA' + input;
-  return null;
-}
 
 // ── Agregar competidor desde URL o ID pegado ─────────────────────────
-async function rpAddFromUrl(){
-  const input = document.getElementById('rp-comp-query')?.value || '';
-  const itemId = rpExtractItemId(input);
-  const resultEl = document.getElementById('rp-comp-search-results');
+// ── Agregar competidor manualmente (precio ingresado por el usuario) ─
+// ML bloquea la lectura de precios de competidores via API desde servidores
+// externos (Cloudflare IPs) con PolicyAgent 403. Solución: ingreso manual.
+function rpAddManual(){
+  const title  = (document.getElementById('rp-comp-title')?.value || '').trim();
+  const price  = parseFloat(document.getElementById('rp-comp-price')?.value || '0');
+  const url    = (document.getElementById('rp-comp-url')?.value || '').trim();
+  const result = document.getElementById('rp-comp-search-results');
 
-  if(!itemId){
-    if(resultEl) resultEl.innerHTML =
-      '<div style="color:var(--red);font-size:11.5px;padding:6px 0">'
-      + '⚠ No se reconoció. Pegá la URL de ML o el ID (ej: MLA1452903143)</div>';
+  if(!title){ if(result) result.textContent = '⚠ Ingresá el título del producto'; return; }
+  if(!price || price <= 0){ if(result) result.textContent = '⚠ Ingresá un precio válido'; return; }
+
+  const rule = rpRules.find(r=>r.id===rpSelectedRule);
+  if(!rule){ if(result) result.textContent = '⚠ Seleccioná una regla primero'; return; }
+
+  // Generar ID único para este competidor manual
+  const compId = 'MANUAL_' + Date.now();
+
+  if(rule.competitors.find(c=>c.title===title)){
+    if(result){ result.textContent = '⚠ Ya existe un competidor con ese título'; result.style.color='var(--amber)'; }
     return;
   }
 
-  const btn = document.getElementById('rp-add-url-btn');
-  if(btn){ btn.disabled=true; btn.textContent='Cargando...'; }
-  if(resultEl) resultEl.innerHTML = '';
+  const comp = {
+    id:        compId,
+    title,
+    price,
+    thumbnail: '',
+    sellerId:  null,
+    permalink: url || '',
+    manual:    true,  // marcado como ingreso manual
+  };
 
+  rule.competitors.push(comp);
+  rpSaveRules();
+  rpRenderCompetitors(rule);
+  rpRecalcPrices(rule);
+  rpLogMsg('Competidor agregado manualmente: "'+title.slice(0,40)+'" $'+price.toLocaleString('es-AR'), 'ok');
+
+  // Limpiar campos
+  ['rp-comp-title','rp-comp-price','rp-comp-url'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.value='';
+  });
+  if(result){ result.textContent = '✅ Agregado'; result.style.color='var(--green)'; }
+  setTimeout(()=>{ if(result) result.textContent=''; }, 2500);
+}
+
+// ── rpAddFromUrl — alias por compatibilidad (ya no se usa)
+function rpAddFromUrl(){ rpAddManual(); }
+
+// ── buscarCompetencia — no disponible (ML bloquea desde servidores externos)
+async function buscarCompetencia(query){ return []; }
+
+// ── rpSearchCompetitors — no usada
+function rpSearchCompetitors(query){}
+
+// ── obtenerPrecioCompetidor — bypass vía endpoint de búsqueda ────────
+// Estrategia de Gemini: buscar por item_id en /sites/MLA/search
+// El endpoint de búsqueda tiene políticas de IP más relajadas que /items/{id}
+// Esta request va DIRECTA desde el browser del usuario (sin Worker, sin token)
+// Si también falla: modo manual como contingencia
+async function obtenerPrecioCompetidor(itemId){
+  // Competidores manuales: solo se actualizan con ✎ Editar
+  if(itemId && itemId.startsWith('MANUAL_')){
+    throw new Error('Competidor manual — usá ✎ Editar para actualizar el precio');
+  }
+
+  // Estrategia 1: GET /sites/MLA/search?q={item_id} — anónimo, directo desde browser
+  // El ID como query devuelve ese ítem exacto como primer resultado
   try{
-    const comp = await obtenerPrecioCompetidor(itemId);
-    await rpAddCompetitor(comp.id, comp);
-    if(resultEl) resultEl.innerHTML =
-      '<div style="color:var(--green);font-size:11.5px;padding:6px 0">'
-      + '✅ Agregado: ' + comp.title.slice(0,50) + ' — $' + comp.price.toLocaleString('es-AR') + '</div>';
-    const inp = document.getElementById('rp-comp-query');
-    if(inp) inp.value = '';
+    rpLogMsg('Buscando precio via search: '+itemId, 'info');
+    const url = 'https://api.mercadolibre.com/sites/MLA/search?q='
+      + encodeURIComponent(itemId) + '&limit=5';
+    // SIN Authorization, SIN Worker — fetch directo desde IP del usuario
+    const r = await fetch(url);
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const data = await r.json();
+    const results = data.results || [];
+    // Buscar el resultado que coincida exactamente con el item_id
+    const match = results.find(x => x.id === itemId) || results[0];
+    if(match && match.price > 0){
+      rpLogMsg('Precio encontrado via search: $'+match.price.toLocaleString('es-AR'), 'ok');
+      return {
+        id:        match.id,
+        title:     match.title || '',
+        price:     match.price,
+        thumbnail: match.thumbnail || '',
+        sellerId:  match.seller?.id || null,
+        permalink: match.permalink || '',
+      };
+    }
+    throw new Error('Sin resultados para '+itemId);
   }catch(e){
-    if(resultEl) resultEl.innerHTML =
-      '<div style="color:var(--red);font-size:11.5px;padding:6px 0">❌ ' + e.message + '</div>';
-  }finally{
-    if(btn){ btn.disabled=false; btn.textContent='Agregar'; }
+    rpLogMsg('Search falló ('+e.message+') — precio no actualizable automáticamente', 'warn');
+    // Estrategia 2: modo manual — no tiramos error, devolvemos null
+    // para que rpRefreshPrices sepa que no pudo actualizar pero no rompa el flujo
+    return null;
   }
 }
 
-// ── buscarCompetencia — delegado a rpAddFromUrl, mantenido para compatibilidad
+// ── buscarCompetencia — no disponible (ML PolicyAgent bloquea desde servidores)
 async function buscarCompetencia(query){ return []; }
 
-// ── rpSearchCompetitors — no usada (reemplazada por rpAddFromUrl)
+// ── rpSearchCompetitors — no usada
 function rpSearchCompetitors(query){}
 
 
@@ -6525,27 +6603,23 @@ async function rpAddCompetitor(itemId, preloaded){
   }
 }
 
-// ── obtenerPrecioCompetidor — usa el mismo endpoint batch que carga tus items
-// /items?ids=MLA... es el mismo que usa loadItemsFast() y funciona con auth.
-// Es distinto a /items/{id} que activa PolicyAgent para items ajenos.
-async function obtenerPrecioCompetidor(itemId){
-  try{
-    // Endpoint batch — funciona con token propio para cualquier item activo
-    const r = await mlGet('/items?ids='+itemId+'&attributes=id,title,price,thumbnail,seller_id,permalink');
-    // Respuesta: array [{code:200, body:{...}}, ...]
-    const item = Array.isArray(r) ? r[0] : null;
-    if(item && item.code === 200 && item.body && item.body.id){
-      const d = item.body;
-      return {
-        id: d.id, title: d.title||'', price: d.price||0,
-        thumbnail: d.thumbnail||'', sellerId: d.seller_id, permalink: d.permalink||'',
-      };
-    }
-    const errCode = item ? item.code : 'sin respuesta';
-    throw new Error('ML devolvió código '+errCode+' para '+itemId);
-  }catch(e){
-    throw new Error(e.message);
-  }
+// ── obtenerPrecioCompetidor ────────────────────────────────────────────
+// Gemini: "asegurate de NO incluir Authorization en esta llamada específica"
+// → Usamos mlGetPublic() que llama a WORKER/pub/* sin ningún token.
+// El Worker hace la request server-to-server a ML sin Authorization ni Origin.
+
+// ── Editar precio de competidor manual ──────────────────────────────────
+function rpEditCompetitorPrice(ruleId, compId){
+  const rule = rpRules.find(r=>r.id===ruleId);
+  const comp = rule && rule.competitors.find(c=>c.id===compId);
+  if(!comp) return;
+  const newPrice = parseFloat(prompt('Nuevo precio para "'+comp.title.slice(0,40)+'":', comp.price));
+  if(isNaN(newPrice) || newPrice <= 0) return;
+  comp.price = newPrice;
+  rpSaveRules();
+  rpRenderCompetitors(rule);
+  rpRecalcPrices(rule);
+  rpLogMsg('Precio actualizado: "'+comp.title.slice(0,35)+'" -> $'+newPrice.toLocaleString('es-AR'), 'ok');
 }
 
 // ── Eliminar competidor de la regla ──────────────────────────────────
@@ -6588,8 +6662,12 @@ function rpRenderCompetitors(rule){
           ${comp.permalink?`<a href="${comp.permalink}" target="_blank" style="font-size:10px;color:var(--accent);text-decoration:none">Ver en ML</a>`:''}
         </div>
       </div>
-      <button onclick="rpRemoveCompetitor('${ruleSafe}','${compIdSafe}')"
-        class="btn btn-ghost btn-xs" style="flex-shrink:0;color:var(--red);border-color:var(--red)" title="Eliminar competidor">✕</button>
+      <div style="display:flex;flex-direction:column;gap:3px;flex-shrink:0">
+        ${comp.manual ? `<button onclick="rpEditCompetitorPrice('${ruleSafe}','${compIdSafe}')"
+          class="btn btn-ghost btn-xs" style="font-size:9px" title="Editar precio">✎ Editar</button>` : ''}
+        <button onclick="rpRemoveCompetitor('${ruleSafe}','${compIdSafe}')"
+          class="btn btn-ghost btn-xs" style="flex-shrink:0;color:var(--red);border-color:var(--red);font-size:9px" title="Eliminar">✕</button>
+      </div>
     </div>`;
   }).join('');
 }
@@ -6605,6 +6683,13 @@ async function rpRefreshPrices(ruleId){
   const btn = document.getElementById('rp-comp-refresh');
   if(btn){ btn.disabled=true; btn.textContent='Actualizando...'; }
 
+  // Separar manuales (no actualizables via API) de los que sí
+  const manuales = rule.competitors.filter(c=>c.manual||c.id.startsWith('MANUAL_'));
+  if(manuales.length === rule.competitors.length){
+    rpLogMsg('Todos los competidores son manuales — actualizá los precios con ✎ en cada uno', 'warn');
+    if(btn){ btn.disabled=false; btn.textContent='↻ Actualizar precios'; }
+    return;
+  }
   rpLogMsg(`Actualizando precios de ${rule.competitors.length} competidores...`, 'info');
   let updated = 0;
 
@@ -6612,12 +6697,15 @@ async function rpRefreshPrices(ruleId){
     const comp = rule.competitors[i];
     try{
       const fresh = await obtenerPrecioCompetidor(comp.id);
-      if(fresh.price !== comp.price){
-        rpLogMsg(`"${comp.title.slice(0,35)}" cambió: $${comp.price.toLocaleString('es-AR')} -> $${fresh.price.toLocaleString('es-AR')}`, 'ok');
+      if(!fresh){
+        // Search bypass también falló — es un competidor manual, skip silencioso
+        rpLogMsg('"'+comp.title.slice(0,30)+'" — precio manual, actualizá con ✎ Editar', 'info');
+      } else if(fresh.price !== comp.price){
+        rpLogMsg('"'+comp.title.slice(0,35)+'" cambió: $'+comp.price.toLocaleString('es-AR')+' -> $'+fresh.price.toLocaleString('es-AR'), 'ok');
+        comp.price     = fresh.price;
+        comp.thumbnail = fresh.thumbnail || comp.thumbnail;
         updated++;
       }
-      comp.price     = fresh.price;
-      comp.thumbnail = fresh.thumbnail || comp.thumbnail;
     }catch(e){
       rpLogMsg(`Error actualizando ${comp.id}: ${e.message}`, 'warn');
     }
