@@ -908,9 +908,10 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <th>Chars</th>
           <th onclick="seoSort('seo')"     style="cursor:pointer;user-select:none;white-space:nowrap">Score SEO <span id="seo-sort-seo" style="font-size:10px"></span></th>
           <th onclick="seoSort('quality')" style="cursor:pointer;user-select:none;white-space:nowrap">Calidad pub. <span id="seo-sort-quality" style="font-size:10px"></span></th>
-          <th onclick="seoSort('sold')" style="cursor:pointer;user-select:none;white-space:nowrap">Vendidas <span id="seo-sort-sold" style="font-size:10px"></span></th>
-          <th>Problemas detectados</th>
-          <th style="white-space:nowrap">Métricas 7d <span style="font-size:9px;color:var(--text3)" title="Cargadas bajo demanda">ⓘ</span></th>
+          <th onclick="seoSort('sold')" style="cursor:pointer;user-select:none;white-space:nowrap;background:#f0fdf4" title="Ventas últimos 7 días">Ventas 7d ↕<span id="seo-sort-sold" style="font-size:10px"></span></th>
+          <th onclick="seoSort('visits')" style="cursor:pointer;user-select:none;white-space:nowrap;background:#eff6ff" title="Visitas últimos 7 días">Visitas 7d ↕<span id="seo-sort-visits" style="font-size:10px"></span></th>
+          <th onclick="seoSort('conv')" style="cursor:pointer;user-select:none;white-space:nowrap;background:#fefce8" title="Tasa de conversión = Ventas/Visitas">Conv% ↕<span id="seo-sort-conv" style="font-size:10px"></span></th>
+          <th>Problemas</th>
           <th>Acciones</th>
         </tr></thead>
         <tbody id="seo-tbody"></tbody>
@@ -1647,7 +1648,11 @@ input::placeholder,textarea::placeholder{color:#6b7280}
             <div class="card-title" id="rp-detail-title">Detalle de regla</div>
             <div class="card-sub" id="rp-detail-sub"></div>
           </div>
-          <div style="display:flex;gap:8px">
+          <div style="display:flex;gap:6px;align-items:center">
+            <a id="rp-detail-ml-link" href="#" target="_blank" rel="noopener"
+              class="btn btn-ghost btn-sm"
+              style="text-decoration:none;font-size:11px;display:none"
+              title="Ver publicación en MercadoLibre">🔗 Ver en ML</a>
             <button class="btn btn-ghost btn-sm" id="rp-detail-toggle" onclick="rpToggleRule(rpSelectedRule)">⏸ Pausar</button>
             <button class="btn btn-ghost btn-sm" onclick="rpRunSingle(rpSelectedRule)" id="rp-detail-run">▶ Ejecutar</button>
           </div>
@@ -2260,60 +2265,65 @@ async function loadItems(){await loadItemsFull();}
 // Endpoint: GET /users/{USER_ID}/items_visits?date_from=...&date_to=...
 // Este endpoint es el correcto para obtener visitas por ítem del vendedor.
 async function loadPubMetricsBatch(ids){
-  if(!userId || !ids || !ids.length){ console.warn('[Metricas] userId o ids no disponible'); return; }
-  console.log('[Metricas] Iniciando para', ids.length, 'items usando time_window endpoint');
+  if(!userId || !ids || !ids.length) return;
 
-  // Ventas de los últimos 7 días desde allOrders (ya cargado en memoria)
-  const from7 = new Date(new Date() - 7*86400000);
-  const salesMap = {};
+  const now   = new Date();
+  const from7 = new Date(now - 7*86400000);
+  const from14= new Date(now - 14*86400000);
+
+  // Ventas 7d y 14d-7d desde allOrders en memoria (sin llamadas API extra)
+  const salesMap7 = {}, salesMap_prev = {};
   allOrders.forEach(o => {
     if(o.status === 'cancelled' || o.status === 'invalid') return;
-    if(new Date(o.date_created||0) < from7) return;
+    const dt = new Date(o.date_created||0);
     (o.order_items||[]).forEach(oi => {
       const id = oi.item && oi.item.id;
-      if(id) salesMap[id] = (salesMap[id]||0) + (oi.quantity||1);
+      if(!id) return;
+      const qty = oi.quantity||1;
+      if(dt >= from7)   salesMap7[id]    = (salesMap7[id]||0)    + qty;
+      else if(dt >= from14) salesMap_prev[id] = (salesMap_prev[id]||0) + qty;
     });
   });
 
-  // Visitas: GET /items/{ITEM_ID}/visits/time_window?last=7&unit=day
-  // Endpoint oficial de ML para métricas por ventana de tiempo
-  // Procesamos en lotes de 5 con pausa de 350ms para respetar rate limits
+  // Visitas: time_window — en lotes de 5 con Promise.all, caché en itemMetrics
   const todo = ids.filter(id => !itemMetrics[id]);
   for(let i=0; i<todo.length; i+=5){
     const batch = todo.slice(i, i+5);
     await Promise.allSettled(batch.map(async id => {
+      let visits=0, visitsPrev=0;
       try{
+        // Período actual: últimos 7 días
         const r = await mlGet('/items/'+id+'/visits/time_window?last=7&unit=day');
-        console.log('[Metricas] '+id+' time_window raw:', JSON.stringify(r).slice(0,150));
-        // Respuesta oficial: { item_id, date_from, date_to, total_visits, visits: [...] }
-        let visits = 0;
-        if(r && typeof r.total_visits === 'number') visits = r.total_visits;
+        if(r && typeof r.total_visits==='number') visits = r.total_visits;
         else if(r && Array.isArray(r.visits)) visits = r.visits.reduce((s,d)=>s+(d.total||d.quantity||0),0);
-        else if(typeof r === 'number') visits = r;
-        const sales = salesMap[id] || 0;
-        const conv  = visits > 0 ? ((sales/visits)*100).toFixed(1) : (sales > 0 ? '100+' : '-');
-        itemMetrics[id] = { visits, sales, conv };
-        console.log('[Metricas]', id, '-> visitas:', visits, '| ventas:', sales, '| conv:', conv+'%');
       }catch(e){
-        // Fallback: si time_window falla, intentar endpoint básico
         try{
-          const today = new Date();
-          const from  = new Date(today - 7*86400000);
-          const r2 = await mlGet('/items/'+id+'/visits?date_from='+from.toISOString().slice(0,10)+'&date_to='+today.toISOString().slice(0,10));
-          const visits2 = (r2 && r2.total_visits) || 0;
-          const sales2  = salesMap[id] || 0;
-          itemMetrics[id] = { visits: visits2, sales: sales2, conv: visits2>0?((sales2/visits2)*100).toFixed(1):'-' };
-          console.log('[Metricas] fallback', id, '->', itemMetrics[id]);
-        }catch(e2){
-          itemMetrics[id] = { visits: 0, sales: salesMap[id]||0, conv: '-' };
-          console.warn('[Metricas]', id, 'sin datos:', e2.message);
-        }
+          const r2 = await mlGet('/items/'+id+'/visits?date_from='+from7.toISOString().slice(0,10)+'&date_to='+now.toISOString().slice(0,10));
+          visits = (r2&&r2.total_visits)||0;
+        }catch(e2){ visits = 0; }
       }
+      try{
+        // Período anterior: 14d-7d para comparación de tendencia
+        const rp = await mlGet('/items/'+id+'/visits?date_from='+from14.toISOString().slice(0,10)+'&date_to='+from7.toISOString().slice(0,10));
+        visitsPrev = (rp&&rp.total_visits)||0;
+      }catch(e){ visitsPrev = 0; }
+
+      const sales     = salesMap7[id]    || 0;
+      const salesPrev = salesMap_prev[id] || 0;
+      const conv      = visits > 0 ? +((sales/visits)*100).toFixed(1) : 0;
+      // Tendencia: diferencia vs período anterior
+      const salesTrend = salesPrev>0 ? Math.round((sales-salesPrev)/salesPrev*100) : (sales>0?100:0);
+      const visitsTrend= visitsPrev>0? Math.round((visits-visitsPrev)/visitsPrev*100): (visits>0?100:0);
+
+      itemMetrics[id] = { visits, visitsPrev, sales, salesPrev, conv, salesTrend, visitsTrend };
     }));
     if(i+5 < todo.length) await new Promise(r => setTimeout(r, 350));
   }
-  Object.keys(salesMap).forEach(id => {
-    if(!itemMetrics[id]) itemMetrics[id] = { visits: 0, sales: salesMap[id], conv: '-' };
+  Object.keys(salesMap7).forEach(id => {
+    if(!itemMetrics[id]) itemMetrics[id] = {
+      visits:0, visitsPrev:0, sales:salesMap7[id], salesPrev:salesMap_prev[id]||0,
+      conv:0, salesTrend:0, visitsTrend:0
+    };
   });
 }
 // Obtener thumbnail de un ítem con caché — evita llamadas repetidas para el mismo producto
@@ -3575,7 +3585,7 @@ function seoSort(col){
   if(seoState.sortCol===col) seoState.sortDir*=-1;
   else{ seoState.sortCol=col; seoState.sortDir=-1; }
   seoState.page=1;
-  ['seo','quality','sold'].forEach(c=>{
+  ['seo','quality','sold','visits','conv'].forEach(c=>{
     const el=document.getElementById('seo-sort-'+c);
     if(el) el.innerHTML=sortArrow(c,seoState.sortCol,seoState.sortDir);
   });
@@ -3796,10 +3806,13 @@ function renderSEOTable(){
   // 2. ORDENAR (mantiene orden después de filtrar)
   if(seoState.sortCol){
     items.sort((a,b)=>{
-      let va, vb;
-      if(seoState.sortCol==='seo')     { va=seoScore(a.title);       vb=seoScore(b.title); }
-      else if(seoState.sortCol==='sold'){ va=a.sold_quantity||0;      vb=b.sold_quantity||0; }
-      else                              { va=qualityScore(a);         vb=qualityScore(b); }
+      let va=0, vb=0;
+      const ma = itemMetrics[a.id], mb = itemMetrics[b.id];
+      if(seoState.sortCol==='seo')      { va=seoScore(a.title);          vb=seoScore(b.title); }
+      else if(seoState.sortCol==='sold') { va=ma?.sales??a.sold_quantity??0; vb=mb?.sales??b.sold_quantity??0; }
+      else if(seoState.sortCol==='visits'){ va=ma?.visits||0;              vb=mb?.visits||0; }
+      else if(seoState.sortCol==='conv') { va=ma?.conv||0;                 vb=mb?.conv||0; }
+      else                               { va=qualityScore(a);             vb=qualityScore(b); }
       return seoState.sortDir*(vb-va);
     });
   }
@@ -3816,7 +3829,7 @@ function renderSEOTable(){
   const tbody=document.getElementById('seo-tbody');
   if(!tbody) return;
   if(!paged.length){
-    tbody.innerHTML='<tr><td colspan="8" style="text-align:center;padding:22px;color:var(--text3)">Sin resultados para este filtro</td></tr>';
+    tbody.innerHTML='<tr><td colspan="9" style="text-align:center;padding:22px;color:var(--text3)">Sin resultados para este filtro</td></tr>';
     const pg=document.getElementById('seo-pagination');if(pg)pg.innerHTML='';
     return;
   }
@@ -3850,14 +3863,7 @@ function renderSEOTable(){
       ? '<span style="display:inline-flex;align-items:center;gap:3px;font-size:9px;padding:1px 5px;border-radius:3px;background:#fef3c7;color:#92400e;border:1px solid #fde68a">▶ Sin clip</span>'
       : '';
 
-    // Métricas 7d
-    const metricsHtml = m
-      ? `<div style="font-size:11px;line-height:1.7;color:var(--text2)">
-           <div>👁️ <b>${m.visits}</b> visitas</div>
-           <div>🛒 <b>${m.sales}</b> ventas</div>
-           <div style="color:${m.conv!=='—'&&parseFloat(m.conv)>=5?'var(--green)':m.conv!=='—'&&parseFloat(m.conv)>=2?'var(--amber)':'var(--red)'}">📊 <b>${m.conv}${m.conv!=='—'?'%':''}</b> conv.</div>
-         </div>`
-      : '<span style="font-size:10px;color:var(--text3)">—</span>';
+    // metricsHtml removido — ahora son 3 columnas separadas
 
     return `<tr>
       <td style="max-width:240px">
@@ -3887,15 +3893,26 @@ function renderSEOTable(){
           </div>
         </div>
       </td>
-      <td style="text-align:center">
-        <span style="font-size:13px;font-weight:700;color:var(--text)">${item.sold_quantity||0}</span>
+      <td style="text-align:center;background:#f0fdf4">
+        ${m ? `<div style="font-size:14px;font-weight:700;color:var(--text)">${m.sales}</div>
+          <div style="font-size:9px;margin-top:1px;color:${m.salesTrend>0?'var(--green)':m.salesTrend<0?'var(--red)':'var(--text3)'}">
+            ${m.salesTrend>0?'▲':'▼'} ${Math.abs(m.salesTrend)}% vs anterior
+          </div>` : '<span style="color:var(--text3);font-size:10px">—</span>'}
       </td>
-      <td style="max-width:190px"><div style="display:flex;flex-wrap:wrap;gap:3px">
+      <td style="text-align:center;background:#eff6ff">
+        ${m ? `<div style="font-size:14px;font-weight:700;color:var(--text)">${m.visits.toLocaleString('es-AR')}</div>
+          <div style="font-size:9px;margin-top:1px;color:${m.visitsTrend>0?'var(--green)':m.visitsTrend<0?'var(--red)':'var(--text3)'}">
+            ${m.visitsTrend>0?'▲':'▼'} ${Math.abs(m.visitsTrend)}% vs anterior
+          </div>` : '<span style="color:var(--text3);font-size:10px">—</span>'}
+      </td>
+      <td style="text-align:center;background:#fefce8">
+        ${m ? `<div style="font-size:14px;font-weight:700;color:${m.conv>=5?'var(--green)':m.conv>=2?'var(--amber)':'var(--red)'}">${m.conv}%</div>` : '<span style="color:var(--text3);font-size:10px">—</span>'}
+      </td>
+      <td style="max-width:160px"><div style="display:flex;flex-wrap:wrap;gap:3px">
         ${tI.map(i=>`<span class="badge bg-amber" style="font-size:9px">${i}</span>`).join('')}
         ${ch.map(p=>`<span class="badge ${p.sev===2?'bg-red':'bg-amber'}" style="font-size:9px">${p.label}</span>`).join('')}
         ${(!tI.length&&!ch.length)?'<span class="badge bg-green" style="font-size:9px">✓ Sin problemas</span>':''}
       </div></td>
-      <td>${metricsHtml}</td>
       <td><div style="display:flex;gap:4px;flex-wrap:wrap">
         <button class="btn btn-ghost btn-xs" style="font-size:10px;white-space:nowrap" onclick="goToOptimizerWith('${item.id}','${sT}',${eanArg})">✨ Optimizar</button>
         ${editUrl?`<a href="${editUrl}" target="_blank" rel="noopener" class="btn btn-ghost btn-xs" style="text-decoration:none;background:#fffbeb;color:#78350f;border-color:#fde68a;font-size:10px;white-space:nowrap" title="Editar en MercadoLibre">✏️ Editar ML</a>`:''}
@@ -6437,6 +6454,13 @@ function rpSelectRule(ruleId){
   document.getElementById('rp-empty-panel').style.display = 'none';
   document.getElementById('rp-detail-panel').style.display = 'block';
   document.getElementById('rp-detail-title').textContent = rule.itemTitle.slice(0,45) || 'Detalle de regla';
+  // Set "Ver en ML" link for the rule's own item
+  const mlLink = document.getElementById('rp-detail-ml-link');
+  if(mlLink && rule.itemId){
+    const numId = rule.itemId.replace(/^MLA/i,'');
+    mlLink.href = 'https://articulo.mercadolibre.com.ar/MLA-'+numId;
+    mlLink.style.display = 'inline-flex';
+  }
   document.getElementById('rp-detail-sub').textContent = `ID: ${rule.itemId}`;
 
   const toggleBtn = document.getElementById('rp-detail-toggle');
