@@ -6483,8 +6483,11 @@ function rpOnMlIdInput(val){
   // Intentar autocompletar el título via search bypass
   _rpMlIdTimer = setTimeout(async ()=>{
     try{
-      // Usar Worker /pub/* — sin Origin header, sin bloqueo de ML
-      const data = await mlGetPublic('/sites/MLA/search?q='+encodeURIComponent(mlId)+'&limit=3');
+      // Usar corsproxy.io — IP del browser del usuario, sin bloqueo de ML
+      const url = 'https://corsproxy.io/?'+encodeURIComponent('https://api.mercadolibre.com/sites/MLA/search?q='+mlId+'&limit=3');
+      const r = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      if(!r.ok) return;
+      const data = await r.json();
       const match = (data.results||[]).find(x=>x.id===mlId) || data.results[0];
       if(match){
         const titleEl = document.getElementById('rp-comp-title');
@@ -6565,39 +6568,46 @@ async function buscarCompetencia(query){ return []; }
 // ── rpSearchCompetitors — no usada
 function rpSearchCompetitors(query){}
 
-// ── obtenerPrecioCompetidor — precio via Worker /pub/* (sin token, sin Origin)
-// Intento 1: /items/{id} sin auth via Worker
-// Intento 2: /sites/MLA/search?q={id} via Worker  
-// Ambos pasan por WORKER/pub/* → ML server-to-server, sin Origin header
+// ── obtenerPrecioCompetidor — Client-Side Fetching (IP residencial del usuario)
+// El Worker tiene IPs de Cloudflare bloqueadas por ML.
+// El NAVEGADOR tiene IP residencial → ML no bloquea.
+// corsproxy.io actúa como relay para saltar el bloqueo de CORS/Origin.
 async function obtenerPrecioCompetidor(itemId){
   if(itemId && itemId.startsWith('MANUAL_')){
     throw new Error('Competidor manual — usá ✎ Editar para actualizar el precio');
   }
 
-  // Intento 1: /items/{id} directo sin auth vía Worker /pub/*
+  // Estrategia 1: /items/{id} directo desde el browser via corsproxy.io
+  // corsproxy.io reenvía la request sin el header Origin → ML la acepta
   try{
-    const d = await mlGetPublic('/items/'+itemId+'?attributes=id,title,price,thumbnail,seller_id,permalink');
-    if(d && d.id && d.price){
+    const url = 'https://corsproxy.io/?'+encodeURIComponent('https://api.mercadolibre.com/items/'+itemId+'?attributes=id,title,price,thumbnail,seller_id,permalink');
+    const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const d = await r.json();
+    if(d && d.id && d.price > 0){
+      rpLogMsg('Precio via browser (corsproxy): $'+d.price.toLocaleString('es-AR'), 'ok');
       return { id:d.id, title:d.title||'', price:d.price, thumbnail:d.thumbnail||'', sellerId:d.seller_id, permalink:d.permalink||'' };
     }
+    throw new Error(d.message || 'Sin precio');
   }catch(e1){
-    rpLogMsg('items/{id} bloqueado ('+e1.message+'), intentando search...', 'info');
+    rpLogMsg('corsproxy /items/ falló ('+e1.message+'), intentando search...', 'info');
   }
 
-  // Intento 2: /sites/MLA/search?q={itemId} vía Worker /pub/*
-  // El search tiene políticas de IP distintas que /items/{id}
+  // Estrategia 2: /sites/MLA/search?q={itemId} via corsproxy.io
   try{
-    const data = await mlGetPublic('/sites/MLA/search?q='+encodeURIComponent(itemId)+'&limit=5');
-    const results = data.results || [];
-    const match = results.find(x=>x.id===itemId) || results[0];
+    const url2 = 'https://corsproxy.io/?'+encodeURIComponent('https://api.mercadolibre.com/sites/MLA/search?q='+itemId+'&limit=5');
+    const r2 = await fetch(url2, { signal: AbortSignal.timeout(8000) });
+    if(!r2.ok) throw new Error('HTTP '+r2.status);
+    const data = await r2.json();
+    const match = (data.results||[]).find(x=>x.id===itemId) || (data.results||[])[0];
     if(match && match.price > 0){
-      rpLogMsg('Precio via search: $'+match.price.toLocaleString('es-AR'), 'ok');
+      rpLogMsg('Precio via browser search: $'+match.price.toLocaleString('es-AR'), 'ok');
       return { id:match.id, title:match.title||'', price:match.price, thumbnail:match.thumbnail||'', sellerId:match.seller?.id||null, permalink:match.permalink||'' };
     }
     throw new Error('Sin resultados');
   }catch(e2){
-    rpLogMsg('Search vía Worker también bloqueado ('+e2.message+')', 'warn');
-    return null; // activa modo manual
+    rpLogMsg('Todas las estrategias fallaron — modo manual activo', 'warn');
+    return null;
   }
 }
 
