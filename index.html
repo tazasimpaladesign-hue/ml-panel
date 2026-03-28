@@ -1682,28 +1682,29 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <!-- Agregar competidor manualmente -->
           <div id="rp-comp-search-panel" style="display:none;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:12px;margin-bottom:10px">
             <div style="font-size:11.5px;font-weight:600;color:var(--text);margin-bottom:4px">Agregar competidor</div>
-            <div style="font-size:11px;color:var(--text3);margin-bottom:10px;line-height:1.6;background:#fef3c7;border:1px solid #fde68a;border-radius:5px;padding:7px 9px">
-              ⚠ La API de ML bloquea la lectura de precios de competidores desde servidores externos.
-              Ingresá los datos manualmente: buscá el precio en ML, copialo y pegalo acá.
+            <div style="font-size:11px;color:var(--text3);margin-bottom:10px;line-height:1.6;background:#eff6ff;border:1px solid #bfdbfe;border-radius:5px;padding:7px 9px">
+              💡 <b>Con ID de ML:</b> el precio se actualiza automáticamente (el ID está al final de la URL: <code style="background:var(--bg4);padding:1px 4px;border-radius:3px">MLA1234567890</code>)<br>
+              <span style="color:var(--text3)">Sin ID: ingresá el precio manualmente y usá ✎ Editar para actualizarlo.</span>
             </div>
             <div style="display:flex;flex-direction:column;gap:8px">
-              <div>
-                <label style="font-size:11px;font-weight:500;color:var(--text2);display:block;margin-bottom:3px">Título del producto</label>
-                <input type="text" id="rp-comp-title" placeholder="Ej: Taza cerámica Buenos Aires souvenir"
-                  style="width:100%;font-size:12px;padding:7px 10px">
-              </div>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                <div>
+                  <label style="font-size:11px;font-weight:500;color:var(--text2);display:block;margin-bottom:3px">ID de ML <span style="color:var(--green);font-size:10px">→ auto-update</span></label>
+                  <input type="text" id="rp-comp-mlid" placeholder="MLA1234567890 (opcional)"
+                    style="width:100%;font-size:12px;padding:7px 10px"
+                    oninput="rpOnMlIdInput(this.value)">
+                </div>
                 <div>
                   <label style="font-size:11px;font-weight:500;color:var(--text2);display:block;margin-bottom:3px">Precio actual (ARS)</label>
                   <input type="number" id="rp-comp-price" placeholder="Ej: 8500" min="0" step="100"
                     style="width:100%;font-size:12px;padding:7px 10px"
                     onkeydown="if(event.key==='Enter'){rpAddManual();event.preventDefault();}">
                 </div>
-                <div>
-                  <label style="font-size:11px;font-weight:500;color:var(--text2);display:block;margin-bottom:3px">URL en ML (opcional)</label>
-                  <input type="text" id="rp-comp-url" placeholder="https://articulo.mercadolibre..."
-                    style="width:100%;font-size:12px;padding:7px 10px">
-                </div>
+              </div>
+              <div>
+                <label style="font-size:11px;font-weight:500;color:var(--text2);display:block;margin-bottom:3px">Título del producto</label>
+                <input type="text" id="rp-comp-title" placeholder="Ej: Taza cerámica Buenos Aires souvenir"
+                  style="width:100%;font-size:12px;padding:7px 10px">
               </div>
               <div style="display:flex;gap:6px;align-items:center">
                 <button class="btn btn-primary btn-sm" onclick="rpAddManual()" id="rp-add-url-btn">+ Agregar competidor</button>
@@ -6473,23 +6474,62 @@ function rpToggleSearch(){
 // ── Agregar competidor manualmente (precio ingresado por el usuario) ─
 // ML bloquea la lectura de precios de competidores via API desde servidores
 // externos (Cloudflare IPs) con PolicyAgent 403. Solución: ingreso manual.
-function rpAddManual(){
-  const title  = (document.getElementById('rp-comp-title')?.value || '').trim();
-  const price  = parseFloat(document.getElementById('rp-comp-price')?.value || '0');
-  const url    = (document.getElementById('rp-comp-url')?.value || '').trim();
-  const result = document.getElementById('rp-comp-search-results');
+// ── Auto-completar título cuando se ingresa un ID de ML ──────────────
+let _rpMlIdTimer = null;
+function rpOnMlIdInput(val){
+  clearTimeout(_rpMlIdTimer);
+  const mlId = rpExtractMlId(val);
+  if(!mlId) return;
+  // Intentar autocompletar el título via search bypass
+  _rpMlIdTimer = setTimeout(async ()=>{
+    try{
+      const r = await fetch('https://api.mercadolibre.com/sites/MLA/search?q='
+        +encodeURIComponent(mlId)+'&limit=3');
+      if(!r.ok) return;
+      const data = await r.json();
+      const match = (data.results||[]).find(x=>x.id===mlId) || data.results[0];
+      if(match){
+        const titleEl = document.getElementById('rp-comp-title');
+        const priceEl = document.getElementById('rp-comp-price');
+        if(titleEl && !titleEl.value) titleEl.value = match.title || '';
+        if(priceEl && !priceEl.value) priceEl.value = match.price || '';
+        const res = document.getElementById('rp-comp-search-results');
+        if(res){ res.textContent = '✓ Datos cargados desde ML'; res.style.color='var(--green)'; }
+      }
+    }catch(e){ /* silencioso */ }
+  }, 700);
+}
 
-  if(!title){ if(result) result.textContent = '⚠ Ingresá el título del producto'; return; }
-  if(!price || price <= 0){ if(result) result.textContent = '⚠ Ingresá un precio válido'; return; }
+// ── Extraer ID de ML desde texto libre ───────────────────────────────
+function rpExtractMlId(input){
+  if(!input) return null;
+  const m = (input+'').match(/MLA[-]?(\d+)/i);
+  if(m) return 'MLA'+m[1];
+  if(/^\d{8,}$/.test(input.trim())) return 'MLA'+input.trim();
+  return null;
+}
+
+// ── Agregar competidor (con o sin ID de ML) ───────────────────────────
+function rpAddManual(){
+  const mlIdRaw = (document.getElementById('rp-comp-mlid')?.value || '').trim();
+  const title   = (document.getElementById('rp-comp-title')?.value || '').trim();
+  const price   = parseFloat(document.getElementById('rp-comp-price')?.value || '0');
+  const result  = document.getElementById('rp-comp-search-results');
+
+  if(!title){ if(result){ result.textContent='⚠ Ingresá el título'; result.style.color='var(--amber)'; } return; }
+  if(!price || price<=0){ if(result){ result.textContent='⚠ Ingresá un precio válido'; result.style.color='var(--amber)'; } return; }
 
   const rule = rpRules.find(r=>r.id===rpSelectedRule);
-  if(!rule){ if(result) result.textContent = '⚠ Seleccioná una regla primero'; return; }
+  if(!rule){ if(result){ result.textContent='⚠ Seleccioná una regla primero'; result.style.color='var(--amber)'; } return; }
 
-  // Generar ID único para este competidor manual
-  const compId = 'MANUAL_' + Date.now();
+  // Si se ingresó un ID de ML válido → usarlo como ID real (habilita auto-update via search)
+  // Si no → generar ID manual (requiere ✎ Editar para actualizar precio)
+  const mlId  = rpExtractMlId(mlIdRaw);
+  const compId = mlId || ('MANUAL_'+Date.now());
+  const isAuto = !!mlId;
 
-  if(rule.competitors.find(c=>c.title===title)){
-    if(result){ result.textContent = '⚠ Ya existe un competidor con ese título'; result.style.color='var(--amber)'; }
+  if(rule.competitors.find(c=>c.id===compId)){
+    if(result){ result.textContent='⚠ Este competidor ya está en la lista'; result.style.color='var(--amber)'; }
     return;
   }
 
@@ -6499,22 +6539,23 @@ function rpAddManual(){
     price,
     thumbnail: '',
     sellerId:  null,
-    permalink: url || '',
-    manual:    true,  // marcado como ingreso manual
+    permalink: mlId ? 'https://articulo.mercadolibre.com.ar/'+mlId : '',
+    manual:    !isAuto,  // false = tiene ID real → auto-update activo
   };
 
   rule.competitors.push(comp);
   rpSaveRules();
   rpRenderCompetitors(rule);
   rpRecalcPrices(rule);
-  rpLogMsg('Competidor agregado manualmente: "'+title.slice(0,40)+'" $'+price.toLocaleString('es-AR'), 'ok');
+  const badge = isAuto ? '🔄 auto-update' : '✎ manual';
+  rpLogMsg('Competidor agregado ['+badge+']: "'+title.slice(0,35)+'" $'+price.toLocaleString('es-AR'), 'ok');
 
   // Limpiar campos
-  ['rp-comp-title','rp-comp-price','rp-comp-url'].forEach(id=>{
+  ['rp-comp-mlid','rp-comp-title','rp-comp-price'].forEach(id=>{
     const el=document.getElementById(id); if(el) el.value='';
   });
-  if(result){ result.textContent = '✅ Agregado'; result.style.color='var(--green)'; }
-  setTimeout(()=>{ if(result) result.textContent=''; }, 2500);
+  if(result){ result.textContent='✅ Agregado'+(isAuto?' — se actualizará automáticamente':''); result.style.color='var(--green)'; }
+  setTimeout(()=>{ if(result) result.textContent=''; }, 3000);
 }
 
 // ── rpAddFromUrl — alias por compatibilidad (ya no se usa)
