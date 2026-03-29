@@ -896,7 +896,12 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <div class="card-sub" id="seo-result-count">—</div>
       </div>
       <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
-        <input type="text" id="seo-search" placeholder="Buscar por título..." style="max-width:200px;font-size:12px;padding:5px 9px" oninput="seoGoPage(1)">
+        <input type="text" id="seo-search" placeholder="Título, SKU o MLA..." style="width:175px;font-size:12px;padding:5px 26px 5px 9px" oninput="seoGoPage(1)">
+          <input type="number" id="seo-price-min" placeholder="$ Min" min="0" step="100" style="width:68px;font-size:12px;padding:5px 7px" oninput="seoGoPage(1)" title="Precio mínimo">
+          <input type="number" id="seo-price-max" placeholder="$ Máx" min="0" step="100" style="width:68px;font-size:12px;padding:5px 7px" oninput="seoGoPage(1)" title="Precio máximo">
+          <input type="number" id="seo-stock-min" placeholder="Stock≥" min="0" style="width:62px;font-size:12px;padding:5px 7px" oninput="seoGoPage(1)" title="Stock mínimo">
+          <input type="number" id="seo-stock-max" placeholder="Stock≤" min="0" style="width:62px;font-size:12px;padding:5px 7px" oninput="seoGoPage(1)" title="Stock máximo">
+          <button class="btn btn-ghost btn-xs" onclick="seoClearFilters()" style="font-size:10px;padding:4px 8px" title="Limpiar filtros">✕</button>
         <button class="btn btn-ghost btn-sm" onclick="loadSEOMetrics()" id="seo-metrics-btn" title="Cargar visitas reales de los últimos 7 días desde ML">📊 Cargar métricas</button>
         <button class="btn btn-ghost btn-sm" onclick="analyzeSEOAll()">↻ Actualizar</button>
       </div>
@@ -1227,7 +1232,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <button class="tab" onclick="filterQs('ANSWERED',this)">Respondidas</button>
         <button class="tab" onclick="filterQs('all',this)">Todas</button>
       </div>
-      <button class="btn btn-primary btn-sm" onclick="bulkAnswerIA()">🤖 Responder todas con IA</button>
+      <div style="display:flex;gap:6px"><button class="btn btn-ghost btn-sm" onclick="openTmplConfig()" title="Plantilla y respuestas rápidas">⚙️ Plantilla</button><button class="btn btn-primary btn-sm" onclick="bulkAnswerIA()">🤖 Responder todas con IA</button></div>
     </div>
     <div id="q-list"><div class="loading"><div class="spin"></div>Cargando...</div></div>
   </div>
@@ -2404,11 +2409,27 @@ async function loadOrders(){await loadOrdersRecent();loadOrdersHistory();}
 
 async function loadQuestions(){
   try{
-    const ua=await mlGet(`/questions/search?seller_id=${userId}&status=UNANSWERED&limit=50`);
-    const rAll=await mlGet(`/questions/search?seller_id=${userId}&limit=50`);
-    allQuestions=rAll.questions||[];
-    const pend=(ua.questions||[]).length;
-    document.getElementById('nb-q').textContent=pend;
+    const oneMonthAgo = new Date(Date.now()-30*86400000).toISOString().slice(0,10);
+    let unanswered=[];
+    try{
+      const ua=await mlGet('/my/received_questions/search?status=UNANSWERED&limit=50&date_created_from='+oneMonthAgo);
+      unanswered=ua.questions||ua.data||[];
+    }catch(e){
+      const ua2=await mlGet(`/questions/search?seller_id=${userId}&status=UNANSWERED&limit=50`);
+      unanswered=ua2.questions||[];
+    }
+    let allQ=[];
+    try{
+      const rAll=await mlGet('/my/received_questions/search?limit=50&date_created_from='+oneMonthAgo);
+      allQ=rAll.questions||rAll.data||[];
+    }catch(e){
+      const rAll2=await mlGet(`/questions/search?seller_id=${userId}&limit=50`);
+      allQ=rAll2.questions||[];
+    }
+    allQuestions=allQ;
+    const pend=unanswered.length;
+    const nbEl=document.getElementById('nb-q');
+    if(nbEl){nbEl.textContent=pend;nbEl.style.display=pend>0?'flex':'none';}
     document.getElementById('q-pend').textContent=pend;
     document.getElementById('q-today').textContent=allQuestions.filter(q=>q.status==='ANSWERED'&&isToday(q.answer?.date_created)).length;
     document.getElementById('q-avgtime').textContent=calcAvgRT()+'h';
@@ -3829,6 +3850,13 @@ function seoSetFilter(f){
   renderSEOTable();
 }
 
+function seoClearFilters(){
+  ["seo-search","seo-price-min","seo-price-max","seo-stock-min","seo-stock-max"].forEach(id=>{
+    const el=document.getElementById(id);if(el)el.value="";
+  });
+  seoGoPage(1);
+}
+
 function seoGoPage(n){
   seoState.page=n;
   renderSEOTable();
@@ -4029,7 +4057,16 @@ async function loadSEOMetrics(){
     if(!st && (i.status==='closed'||i.status==='deleted'||i.status==='inactive')) return false;
     if(st && i.status!==st) return false;
     if(seoState.tipoFilter && getPubType(i)!==seoState.tipoFilter) return false;
-    if(searchQ && !i.title.toLowerCase().includes(searchQ)) return false;
+    if(searchQ){
+      const tM=i.title.toLowerCase().includes(searchQ);
+      const sM=(i.seller_custom_field||'').toLowerCase().includes(searchQ);
+      const iM=String(i.id).toLowerCase().includes(searchQ);
+      if(!tM && !sM && !iM) return false;
+    }
+    if(priceMin && (i.price||0) < priceMin) return false;
+    if(isFinite(priceMax) && priceMax>0 && (i.price||0) > priceMax) return false;
+    if(!isNaN(stockMin) && stockMin!=='' && (i.available_quantity||0) < stockMin) return false;
+    if(!isNaN(stockMax) && stockMax!=='' && (i.available_quantity||0) > stockMax) return false;
     return true;
   });
 
@@ -6042,48 +6079,139 @@ function filterQs(status,btn){
   renderQuestions();
 }
 
+// ─── Quick Replies & Template (LocalStorage) ──────────────
+const QR_KEY='mlp_quick_replies',TMPL_KEY='mlp_q_template';
+const QR_DEFAULT=[
+  {label:'✅ Hay stock',text:'¡Sí, tenemos disponible! Podés comprarlo ahora mismo.',color:'#22c55e'},
+  {label:'❌ Sin stock',text:'Lamentablemente ese producto está agotado por el momento.',color:'#ef4444'},
+  {label:'📦 Envío',text:'El envío es a través de Mercado Envíos. El tiempo lo ves al comprar.',color:'#3b82f6'},
+  {label:'💳 Cuotas',text:'Podés pagar en cuotas con tarjeta vía Mercado Pago.',color:'#8b5cf6'},
+];
+function getQuickReplies(){try{return JSON.parse(localStorage.getItem(QR_KEY))||QR_DEFAULT;}catch(e){return QR_DEFAULT;}}
+function getTemplate(){try{return JSON.parse(localStorage.getItem(TMPL_KEY)||'{}');}catch(e){return {};}}
+
+function qInsertAtCursor(taId,text){
+  const ta=document.getElementById(taId);if(!ta)return;
+  const s=ta.selectionStart,e=ta.selectionEnd;
+  ta.value=ta.value.slice(0,s)+text+ta.value.slice(e);
+  ta.selectionStart=ta.selectionEnd=s+text.length;ta.focus();
+}
+async function qResolveComprador(taId,fromId){
+  const ta=document.getElementById(taId);
+  if(!ta||!fromId||!ta.value.includes('@COMPRADOR'))return;
+  try{const u=await mlGet('/users/'+fromId);ta.value=ta.value.replace(/@COMPRADOR/g,u.nickname||'Comprador');}
+  catch(e){ta.value=ta.value.replace(/@COMPRADOR/g,'Comprador');}
+}
+let _qLinkTaId=null;
+function qOpenLinkModal(taId){
+  _qLinkTaId=taId;
+  const m=document.getElementById('q-link-modal');if(m)m.classList.add('open');
+  const inp=document.getElementById('q-link-search');if(inp){inp.value='';inp.focus();qSearchLinks('');}
+}
+function qSearchLinks(q){
+  const res=document.getElementById('q-link-results');if(!res)return;
+  const matches=allItems.filter(i=>i.status==='active'&&(!q||i.title.toLowerCase().includes(q.toLowerCase()))).slice(0,8);
+  res.innerHTML=matches.map(i=>'<div onclick="qInsertLink(\''+i.id+'\')" style="padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);font-size:12px;display:flex;align-items:center;gap:8px" onmouseover="this.style.background=\'var(--bg3)\'" onmouseout="this.style.background=\'\'"><img src="'+( i.thumbnail||'')+'" width="32" height="32" style="object-fit:cover;border-radius:4px;flex-shrink:0" onerror="this.style.display=\'none\'"><div><div style="font-weight:500">'+i.title.slice(0,55)+'</div><div style="color:var(--text3);font-size:10px">'+i.id+' · $'+(i.price||0).toLocaleString('es-AR')+'</div></div></div>').join('')||'<div style="padding:12px;color:var(--text3);font-size:12px">Sin resultados</div>';
+}
+function qInsertLink(itemId){
+  const url='https://articulo.mercadolibre.com.ar/MLA-'+itemId.replace(/^MLA/i,'');
+  if(_qLinkTaId)qInsertAtCursor(_qLinkTaId,url);
+  closeModal('q-link-modal');
+}
+function qOpenAnswer(qId,fromId){
+  const form=document.getElementById('ans-form-'+qId);if(!form)return;
+  form.style.display='block';
+  const ta=document.getElementById('ans-txt-'+qId);if(!ta||ta.value)return;
+  const tmpl=getTemplate();
+  const saludo=tmpl.saludo||'Hola, gracias por tu consulta.';
+  const firma=tmpl.firma||'Saludos y buena compra.';
+  ta.value=saludo+'\n\n\n\n'+firma;
+  const pos=saludo.length+2;ta.focus();ta.setSelectionRange(pos,pos);
+  if(ta.value.includes('@COMPRADOR')&&fromId)qResolveComprador('ans-txt-'+qId,fromId);
+}
+function openTmplConfig(){
+  const tmpl=getTemplate(),qrs=getQuickReplies();
+  const s=document.getElementById('tmpl-saludo'),f=document.getElementById('tmpl-firma');
+  if(s)s.value=tmpl.saludo||'';if(f)f.value=tmpl.firma||'';
+  const list=document.getElementById('tmpl-qr-list');
+  if(list)list.innerHTML=qrs.map((qr,i)=>'<div style="display:flex;gap:6px;align-items:center"><input type="text" value="'+qr.label+'" id="qrl-'+i+'" style="width:120px;font-size:11px;padding:5px 7px" placeholder="Label"><input type="text" value="'+qr.text+'" id="qrt-'+i+'" style="flex:1;font-size:11px;padding:5px 7px" placeholder="Texto"><input type="color" value="'+qr.color+'" id="qrc-'+i+'" style="width:30px;height:30px;border:none;cursor:pointer"></div>').join('');
+  openModal('q-tmpl-modal');
+}
+function saveTmplConfig(){
+  const tmpl={saludo:document.getElementById('tmpl-saludo')?.value||'',firma:document.getElementById('tmpl-firma')?.value||''};
+  localStorage.setItem(TMPL_KEY,JSON.stringify(tmpl));
+  const qrs=getQuickReplies();
+  const newQrs=qrs.map((_,i)=>({label:document.getElementById('qrl-'+i)?.value||'',text:document.getElementById('qrt-'+i)?.value||'',color:document.getElementById('qrc-'+i)?.value||'#3b82f6'})).filter(qr=>qr.label);
+  localStorage.setItem(QR_KEY,JSON.stringify(newQrs));
+  closeModal('q-tmpl-modal');renderQuestions();
+}
+
 function renderQuestions(){
   let qs=[...allQuestions];
-  if(qFilter!=='all') qs=qs.filter(q=>q.status===qFilter);
-  // Más recientes primero
+  if(qFilter==='UNANSWERED')qs=qs.filter(q=>q.status==='UNANSWERED');
+  else if(qFilter==='ANSWERED')qs=qs.filter(q=>q.status==='ANSWERED');
+  const oneMonth=Date.now()-30*86400000;
+  qs=qs.filter(q=>!q.date_created||new Date(q.date_created).getTime()>=oneMonth);
   qs.sort((a,b)=>new Date(b.date_created)-new Date(a.date_created));
-  const el=document.getElementById('q-list');
-  if(!el)return;
-  if(!qs.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:16px 0">Sin preguntas en esta categoría</div>';return;}
+  const el=document.getElementById('q-list');if(!el)return;
+  if(!qs.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:16px 0">Sin preguntas en esta categoría (último mes).</div>';return;}
+  const qrs=getQuickReplies();
   el.innerHTML=qs.map(q=>{
     const dt=q.date_created?new Date(q.date_created):null;
     const dateStr=dt?dt.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit'})+' '+dt.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}):'—';
     const isPend=q.status==='UNANSWERED';
-    const qItem = q.item_id ? allItems.find(function(i){return String(i.id)===String(q.item_id);}) : null;
-    const qThumb = qItem ? (qItem.thumbnail||'') : '';
-    return `<div style="padding:12px 0;border-bottom:1px solid var(--border)">
-      <div style="display:flex;align-items:flex-start;gap:10px">
-        ${qThumb?`<img src="${qThumb}" width="44" height="44" loading="lazy" style="object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border);margin-top:2px" onerror="this.style.display='none'">`:''}
-        <div style="flex:1;min-width:0">
-          <div style="font-size:12.5px;font-weight:500;margin-bottom:4px">${q.text}</div>
-          <div style="font-size:10.5px;color:var(--text3);display:flex;gap:8px;align-items:center;margin-bottom:6px">
-            <span class="badge ${isPend?'bg-amber':'bg-green'}">${isPend?'⏳ Pendiente':'✅ Respondida'}</span>
-            <span>${dateStr}</span>
-            ${q.item_id?`<a href="https://www.mercadolibre.com.ar/ventas" target="_blank" style="color:var(--accent);font-size:10px">Ver pub</a>`:''}
-          </div>
-          ${q.answer?.text?`<div style="font-size:12px;color:var(--text3);padding:6px 10px;background:var(--bg3);border-radius:6px;border-left:2px solid var(--green)">↩ ${q.answer.text.slice(0,120)}</div>`:''}
-          ${isPend?`<div style="margin-top:8px">
-            <button class="btn btn-ghost btn-sm" onclick="aiAnswerQ(${q.id},'${q.text.replace(/'/g,"\\'").replace(/\n/g,' ')}',this)" style="margin-bottom:6px">🤖 Sugerir con IA</button>
-            <div id="ans-form-${q.id}" style="display:none;margin-top:6px">
-              <textarea id="ans-txt-${q.id}" rows="2" style="font-size:12px;margin-bottom:6px" placeholder="Respuesta sugerida..."></textarea>
-              <div style="display:flex;gap:6px">
-                <button class="btn btn-primary btn-sm" onclick="submitAns(${q.id})">✓ Enviar respuesta</button>
-                <button class="btn btn-ghost btn-sm" onclick="document.getElementById('ans-form-${q.id}').style.display='none'">Cancelar</button>
-              </div>
-            </div>
-          </div>`:''}
-        </div>
-        </div>
-        </div>
-      </div>
-    </div>`;
+    const qItem=q.item_id?allItems.find(function(i){return String(i.id)===String(q.item_id);}):null;
+    const qThumb=qItem?(qItem.thumbnail||''):'';
+    const fromId=(q.from&&q.from.id)?q.from.id:'';
+    const itemUrl=q.item_id?'https://articulo.mercadolibre.com.ar/MLA-'+String(q.item_id).replace(/^MLA/i,''):null;
+    const qrHtml=qrs.map(qr=>'<button class="btn btn-xs" style="background:'+qr.color+';color:#fff;border:none;font-size:10px;padding:3px 8px" onclick="qInsertAtCursor(\'ans-txt-'+q.id+'\',\''+qr.text.replace(/'/g,'&#39;')+'\');document.getElementById(\'ans-form-'+q.id+'\').style.display=\'block\'">'+qr.label+'</button>').join('');
+    return '<div style="padding:12px 0;border-bottom:1px solid var(--border)">'
+      +'<div style="display:flex;align-items:flex-start;gap:10px">'
+      +(qThumb?'<img src="'+qThumb+'" width="44" height="44" loading="lazy" style="object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border);margin-top:2px" onerror="this.style.display=\'none\'">':'')
+      +'<div style="flex:1;min-width:0">'
+      +'<div style="font-size:12.5px;font-weight:500;margin-bottom:5px">'+q.text+'</div>'
+      +'<div style="font-size:10.5px;color:var(--text3);display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap">'
+      +'<span class="badge '+(isPend?'bg-amber':'bg-green')+'">'+(isPend?'⏳ Pendiente':'✅ Respondida')+'</span>'
+      +'<span>'+dateStr+'</span>'
+      +(itemUrl?'<a href="'+itemUrl+'" target="_blank" style="color:var(--accent);font-size:10px;text-decoration:none">🔗 Ver pub</a>':'')
+      +'</div>'
+      +(q.answer&&q.answer.text?'<div style="font-size:12px;color:var(--text3);padding:6px 10px;background:var(--bg3);border-radius:6px;border-left:2px solid var(--green);margin-bottom:6px">↩ '+q.answer.text.slice(0,160)+'</div>':'')
+      +(isPend
+        ?'<div style="margin-top:6px">'
+          +'<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:7px;align-items:center">'
+          +qrHtml
+          +'<button class="btn btn-ghost btn-xs" style="font-size:10px" onclick="qOpenLinkModal(\'ans-txt-'+q.id+'\')" title="Insertar link">🔗 #Link</button>'
+          +'<button class="btn btn-ghost btn-xs" style="font-size:10px;background:#ede9fe;color:#7c3aed;border-color:#c4b5fd" onclick="aiAnswerQSmart('+q.id+',\''+( q.item_id||'')+'\',this)">🤖 IA</button>'
+          +'<button class="btn btn-ghost btn-xs" style="font-size:10px" onclick="qOpenAnswer('+q.id+',\''+fromId+'\')" title="Plantilla base">📝 Plantilla</button>'
+          +'</div>'
+          +'<div id="ans-form-'+q.id+'" style="display:none;margin-top:4px">'
+          +'<textarea id="ans-txt-'+q.id+'" rows="3" style="font-size:12px;margin-bottom:6px;width:100%" placeholder="Escribí tu respuesta..."></textarea>'
+          +'<div style="display:flex;gap:6px">'
+          +'<button class="btn btn-primary btn-sm" onclick="submitAns('+q.id+')">✓ Enviar</button>'
+          +'<button class="btn btn-ghost btn-sm" onclick="document.getElementById(\'ans-form-'+q.id+'\').style.display=\'none\'">Cancelar</button>'
+          +'</div></div></div>'
+        :'')
+      +'</div></div></div>';
   }).join('');
 }
+
+// IA contextualizada para responder preguntas
+async function aiAnswerQSmart(id, itemId, btn){
+  const ta=document.getElementById('ans-txt-'+id);
+  const qDiv=btn.closest('div[style*="padding:12px"]');
+  const text=qDiv?qDiv.querySelector('[style*="font-weight:500"]')?.textContent?.trim()||'':'';
+  btn.textContent='⏳...';btn.disabled=true;
+  const qItem=itemId?allItems.find(i=>String(i.id)===String(itemId)):null;
+  const ctx=qItem?'Publicación: "'+qItem.title+'" - Precio: $'+(qItem.price||0).toLocaleString('es-AR')+' - Stock: '+(qItem.available_quantity||0):'';
+  const nl='\n';
+  try{
+    const prompt='Sos vendedor en MercadoLibre Argentina.'+(ctx?nl+ctx:'')+nl+nl+'Pregunta del comprador: "'+text+'"'+nl+nl+'Respondé en 2-3 oraciones, amable, español argentino. Sé natural y vendedor.';
+    const r=await callClaude(prompt);
+    if(ta){ta.value=r;document.getElementById('ans-form-'+id).style.display='block';ta.focus();}
+    btn.textContent='🤖 IA';btn.disabled=false;
+  }catch(e){btn.textContent='🤖 IA';btn.disabled=false;}
+}
+
 function initAI(){
   aiHistory=[
     {role:'user',content:`Sistema: Actuá como un experto en ventas y posicionamiento en MercadoLibre Argentina (2026), especializado en productos con diseños impresos (tazas, regalos, merchandising).
@@ -7340,5 +7468,35 @@ function selectOptItem(id,title){
   });
 })();
 </script>
+
+<div class="modal-overlay" id="q-link-modal">
+  <div style="background:var(--bg2);border-radius:12px;padding:20px;width:420px;max-width:90vw;max-height:70vh;display:flex;flex-direction:column;gap:10px">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div style="font-size:14px;font-weight:600">🔗 Insertar link de publicación</div>
+      <button class="btn btn-ghost btn-xs" onclick="closeModal('q-link-modal')">✕</button>
+    </div>
+    <input type="text" id="q-link-search" placeholder="Buscar publicación..." style="font-size:12.5px;padding:8px 10px" oninput="qSearchLinks(this.value)">
+    <div id="q-link-results" style="overflow-y:auto;max-height:300px;border:1px solid var(--border);border-radius:6px"></div>
+  </div>
+</div>
+<div class="modal-overlay" id="q-tmpl-modal">
+  <div style="background:var(--bg2);border-radius:12px;padding:20px;width:480px;max-width:90vw;display:flex;flex-direction:column;gap:12px">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div style="font-size:14px;font-weight:600">⚙️ Plantilla y respuestas rápidas</div>
+      <button class="btn btn-ghost btn-xs" onclick="closeModal('q-tmpl-modal')">✕</button>
+    </div>
+    <div>
+      <label style="font-size:11px;font-weight:500;color:var(--text2);display:block;margin-bottom:3px">Saludo predefinido</label>
+      <input type="text" id="tmpl-saludo" style="width:100%;font-size:12px;padding:7px 9px" placeholder="Ej: Hola, gracias por tu consulta.">
+    </div>
+    <div>
+      <label style="font-size:11px;font-weight:500;color:var(--text2);display:block;margin-bottom:3px">Firma predefinida</label>
+      <input type="text" id="tmpl-firma" style="width:100%;font-size:12px;padding:7px 9px" placeholder="Ej: Saludos y buena compra.">
+    </div>
+    <div style="font-size:11.5px;font-weight:600;color:var(--text);margin-top:4px">Respuestas rápidas</div>
+    <div id="tmpl-qr-list" style="display:flex;flex-direction:column;gap:6px"></div>
+    <button class="btn btn-primary" onclick="saveTmplConfig()" style="width:100%">💾 Guardar</button>
+  </div>
+</div>
 </body>
 </html>
