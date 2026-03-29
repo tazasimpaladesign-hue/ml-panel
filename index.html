@@ -1223,15 +1223,66 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <div class="mc c-blue"><div class="mc-label">Tiempo promedio</div><div class="mc-val" id="q-avgtime">—</div></div>
   </div>
   <div class="card">
-    <div class="card-hd">
+    <div class="card-hd" style="flex-wrap:wrap;gap:8px">
       <div class="tabs">
         <button class="tab active" onclick="filterQs('UNANSWERED',this)">Sin responder</button>
         <button class="tab" onclick="filterQs('ANSWERED',this)">Respondidas</button>
         <button class="tab" onclick="filterQs('all',this)">Todas</button>
       </div>
-      <button class="btn btn-primary btn-sm" onclick="bulkAnswerIA()">🤖 Responder todas con IA</button>
+      <div style="display:flex;gap:6px;margin-left:auto">
+        <button class="btn btn-ghost btn-sm" onclick="qOpenTmpl()" title="Plantilla y respuestas rápidas" style="font-size:11px">⚙️ Plantilla</button>
+        <button class="btn btn-primary btn-sm" onclick="bulkAnswerIA()">🤖 Responder todas con IA</button>
+      </div>
     </div>
     <div id="q-list"><div class="loading"><div class="spin"></div>Cargando...</div></div>
+  </div>
+</div>
+
+<!-- ── Modal plantilla y quick replies ── -->
+<div class="modal-overlay" id="q-tmpl-modal">
+  <div style="background:var(--bg2);border-radius:12px;padding:20px;width:500px;max-width:92vw;max-height:85vh;overflow-y:auto;display:flex;flex-direction:column;gap:12px">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div style="font-size:14px;font-weight:600">⚙️ Plantilla y respuestas rápidas</div>
+      <button class="btn btn-ghost btn-xs" onclick="closeModal('q-tmpl-modal')">✕</button>
+    </div>
+    <div style="font-size:11.5px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.04em">Plantilla base</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div>
+        <label style="font-size:11px;color:var(--text3);margin-bottom:3px;display:block">Saludo (prefijo)</label>
+        <input type="text" id="qtmpl-saludo" style="width:100%;font-size:12px;padding:7px 9px" placeholder="Ej: Hola, gracias por tu consulta.">
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--text3);margin-bottom:3px;display:block">Firma (sufijo)</label>
+        <input type="text" id="qtmpl-firma" style="width:100%;font-size:12px;padding:7px 9px" placeholder="Ej: Esperamos tu compra. Saludos - Tienda Impala Design">
+      </div>
+    </div>
+    <div style="font-size:11.5px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-top:4px">Respuestas rápidas</div>
+    <div id="qtmpl-qr-list" style="display:flex;flex-direction:column;gap:6px"></div>
+    <div style="background:var(--bg3);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:8px">
+      <div style="font-size:11.5px;font-weight:600">Agregar nuevo botón</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
+        <input type="text" id="qr-new-label" placeholder="Nombre del botón" style="font-size:11.5px;padding:6px 8px">
+        <div style="display:flex;align-items:center;gap:6px">
+          <label style="font-size:11px;color:var(--text3);flex-shrink:0">Color:</label>
+          <input type="color" id="qr-new-color" value="#22c55e" style="width:40px;height:30px;border:none;cursor:pointer;border-radius:4px">
+        </div>
+      </div>
+      <textarea id="qr-new-text" rows="2" placeholder="Texto a insertar al hacer clic..." style="font-size:12px;resize:vertical"></textarea>
+      <button class="btn btn-primary btn-sm" onclick="qrAddNew()">+ Agregar botón</button>
+    </div>
+    <button class="btn btn-primary" onclick="qSaveTmpl()" style="width:100%">💾 Guardar cambios</button>
+  </div>
+</div>
+
+<!-- ── Modal buscador de links (#) ── -->
+<div class="modal-overlay" id="q-link-modal">
+  <div style="background:var(--bg2);border-radius:12px;padding:20px;width:440px;max-width:92vw;max-height:75vh;display:flex;flex-direction:column;gap:10px">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div style="font-size:14px;font-weight:600">🔗 Insertar link de publicación</div>
+      <button class="btn btn-ghost btn-xs" onclick="closeModal('q-link-modal')">✕</button>
+    </div>
+    <input type="text" id="q-link-search" placeholder="Buscar publicación por título..." style="font-size:12.5px;padding:8px 10px" oninput="qLinkSearch(this.value)">
+    <div id="q-link-results" style="overflow-y:auto;max-height:320px;border:1px solid var(--border);border-radius:6px"></div>
   </div>
 </div>
 
@@ -2412,30 +2463,54 @@ async function loadOrders(){await loadOrdersRecent();loadOrdersHistory();}
 
 async function loadQuestions(){
   try{
-    // Fecha límite: hace 30 días
-    const since=new Date(Date.now()-30*24*60*60*1000).toISOString();
+    // ISO 8601 con TZ que requiere ML: 2024-01-01T00:00:00.000-00:00
+    const since = new Date(Date.now()-30*24*60*60*1000);
+    const isoTZ = since.toISOString().replace('Z','-00:00');
 
-    // Traer pendientes y todas las recientes en paralelo, ordenadas desc por fecha
-    const [ua, rAll]=await Promise.all([
-      mlGet(`/questions/search?seller_id=${userId}&status=UNANSWERED&sort=date_created_desc&limit=50`),
-      mlGet(`/questions/search?seller_id=${userId}&sort=date_created_desc&limit=50`)
-    ]);
+    // Endpoint /my/ (no requiere seller_id explícito) + sort desc
+    let unanswered=[], allQ=[];
+    try{
+      const ua = await mlGet('/my/received_questions/search?status=UNANSWERED&sort=date_created_desc&limit=50&date_from='+encodeURIComponent(isoTZ));
+      console.log('[Q] UNANSWERED raw:', ua);
+      unanswered = ua.questions || ua.results || ua.data || [];
+    }catch(e){
+      console.warn('[Q] /my/ UNANSWERED falló, fallback:', e.message);
+      try{
+        const ua2 = await mlGet(`/questions/search?seller_id=${userId}&status=UNANSWERED&sort=date_created_desc&limit=50`);
+        unanswered = ua2.questions || ua2.results || [];
+      }catch(e2){ console.warn('[Q] fallback UNANSWERED:', e2.message); }
+    }
+    try{
+      const rAll = await mlGet('/my/received_questions/search?sort=date_created_desc&limit=50&date_from='+encodeURIComponent(isoTZ));
+      console.log('[Q] ALL raw:', rAll);
+      allQ = rAll.questions || rAll.results || rAll.data || [];
+    }catch(e){
+      console.warn('[Q] /my/ ALL falló, fallback:', e.message);
+      try{
+        const rAll2 = await mlGet(`/questions/search?seller_id=${userId}&sort=date_created_desc&limit=50`);
+        allQ = rAll2.questions || rAll2.results || [];
+      }catch(e2){ console.warn('[Q] fallback ALL:', e2.message); }
+    }
 
-    // Filtrar frontend: solo últimos 30 días
-    const cutoff=new Date(since);
-    const recent=(rAll.questions||[]).filter(q=>new Date(q.date_created)>=cutoff);
+    // Filtro frontend: sólo últimos 30 días (por si el API ignora date_from)
+    const cutoff = since.getTime();
+    allQ = allQ.filter(q => !q.date_created || new Date(q.date_created).getTime() >= cutoff);
 
-    // Pinear UNANSWERED al principio, luego el resto ordenado desc
-    const unanswered=recent.filter(q=>q.status==='UNANSWERED');
-    const answered=recent.filter(q=>q.status!=='UNANSWERED');
-    allQuestions=[...unanswered,...answered];
+    // UNANSWERED primero, luego el resto
+    const pend = allQ.filter(q=>q.status==='UNANSWERED');
+    const rest  = allQ.filter(q=>q.status!=='UNANSWERED');
+    allQuestions = [...pend, ...rest];
 
-    const pend=(ua.questions||[]).length;
-    document.getElementById('nb-q').textContent=pend;
-    document.getElementById('q-pend').textContent=pend;
-    document.getElementById('q-today').textContent=allQuestions.filter(q=>q.status==='ANSWERED'&&isToday(q.answer?.date_created)).length;
-    document.getElementById('q-avgtime').textContent=calcAvgRT()+'h';
-  }catch(e){console.error('questions',e);}
+    console.log('[Q] Total:', allQuestions.length, '| Sin responder:', pend.length);
+
+    // Badge: visible sólo si hay pendientes
+    const nbEl = document.getElementById('nb-q');
+    if(nbEl){ nbEl.textContent = pend.length; nbEl.style.display = pend.length > 0 ? '' : 'none'; }
+    const s=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
+    s('q-pend', pend.length);
+    s('q-today', allQuestions.filter(q=>q.status==='ANSWERED'&&isToday(q.answer?.date_created)).length);
+    s('q-avgtime', calcAvgRT()+'h');
+  }catch(e){ console.error('[Q] loadQuestions error:', e); }
 }
 
 function isToday(ds){if(!ds)return false;const d=new Date(ds),t=new Date();return d.getDate()===t.getDate()&&d.getMonth()===t.getMonth();}
@@ -4846,40 +4921,68 @@ async function doComp(){
   }catch(e){el.innerHTML='<div class="alert a-err">Error: '+e.message+'</div>';}
 }
 
-async function aiAnswerQ(id,text,btn){
-  btn.textContent='⏳ Generando...';btn.disabled=true;
-  try{
-    const r=await callClaude(`Sos vendedor de tazas con diseño en ML Argentina. Un comprador preguntó sobre tu publicación: "${text}".
+// ─── Tienda Impala AI context ──────────────────────────────
+const _IMPALA_CTX = `Somos Tienda Impala Design, estamos en Mendoza (zona Plaza Chile). No tenemos local físico. Hacemos envíos a todo el país. Las tazas mágicas son termosensibles (aparece el diseño con calor) y se envían en telgopor.
 
-Respondé de forma breve, amable y directa en español argentino. Máximo 2-3 oraciones. No uses saludos formales ni despedidas largas. Sé natural y vendedor. Si preguntan por personalización aclará que el diseño ya está definido y es tal cual se ve en las fotos.`);
-    const el=document.getElementById('ans-txt-'+id);
-    if(el)el.value=r;
-    const form=document.getElementById('ans-form-'+id);
-    if(form)form.style.display='block';
-    btn.textContent='✅ Sugerencia lista';btn.disabled=false;
-  }catch(e){btn.textContent='🤖 Sugerir con IA';btn.disabled=false;}
+Ejemplos de estilo de respuesta (tono amable, directo, argentino):
+- P: "¿Tienen local para ir a ver?" → R: "Hola. Local no tenemos, hacemos las entregas por el centro de Mendoza, a una cuadra de plaza Chile. La demo..."
+- P: "¿De dónde son?" → R: "Hola. Somos de Mendoza, Argentina. Hacemos envíos a todo el país a través de Mercadoenvíos. Esperamos tu compra. Saludos"
+- P: "¿Envían envuelta para regalo?" → R: "Hola. Buen día, no ofrecemos envoltura para regalo. La taza va protegida en telgopor para su traslado. Esperamos tu comp..."
+- P: "¿Es revelador con agua?" → R: "Buenas noches, exacto, aparece el diseño con bebida caliente. Tenemos stock disponible. Esperamos tu compra. Saludos"
+- P: "¿Hacen personalización?" → R: El diseño ya está definido y es tal cual se ve en las fotos. No hacemos personalización.
+- P: "¿No son de Buenos Aires?" → R: "Hola. No, de Mendoza. Saludos - Tienda Impala Design"
+- P: "¿Pueden enviar por correo argentino?" → R: "Hacemos envíos por MercadoEnvíos, al momento de la compra elegís dirección de entrega..."`;
+
+async function aiAnswerQ(id, btn){
+  // Obtener texto de la pregunta desde el DOM (evita problemas de escape en onclick)
+  const qCard = btn.closest('[data-qid]');
+  const text   = qCard ? (qCard.dataset.qtext||'') : '';
+  const itemId = qCard ? (qCard.dataset.itemid||'') : '';
+  btn.textContent='⏳ Generando...'; btn.disabled=true;
+
+  const qItem = itemId ? (allItems||[]).find(i=>String(i.id)===String(itemId)) : null;
+  const pubCtx = qItem
+    ? `
+Publicación: "${qItem.title}" · Precio: $${(qItem.price||0).toLocaleString('es-AR')} · Stock: ${qItem.available_quantity||0}`
+    : '';
+  const attrs = qItem && qItem.attributes ? ('\nAtributos: ' + (qItem.attributes||[]).slice(0,5).map(a=>a.id+': '+a.value_name).filter(v=>v.includes(': ')&&!v.endsWith(': ')).join(' | ')) : '';
+
+  try{
+    const nl = '\n';
+    const prompt = _IMPALA_CTX + pubCtx + attrs + nl + nl + 'Pregunta del comprador: "' + text + '"' + nl + nl + 'Respondé de forma breve (2-3 oraciones), amable y directa en español argentino. Sé natural y vendedor. Si preguntan por localización: estamos en Mendoza. Si preguntan por envíos: hacemos envíos a todo el país por Mercadoenvíos. Si preguntan por retiro: no tenemos local, entregamos en zona plaza Chile Mendoza. No menciones personalización a menos que pregunten.';
+    const r = await callClaude(prompt);
+    const ta = document.getElementById('ans-txt-'+id);
+    if(ta){ ta.value = r; document.getElementById('ans-form-'+id).style.display='block'; ta.focus(); }
+    btn.textContent='🤖 Sugerir con IA'; btn.disabled=false;
+  }catch(e){ btn.textContent='🤖 Sugerir con IA'; btn.disabled=false; }
 }
 
 async function submitAns(id){
-  const text=document.getElementById('ans-txt-'+id)?.value;
-  if(!text)return;
+  const ta = document.getElementById('ans-txt-'+id);
+  const text = ta?.value?.trim();
+  if(!text){ alert('Escribí una respuesta antes de enviar'); return; }
+  const btn = document.querySelector(`[onclick="submitAns(${id})"]`);
+  if(btn){ btn.textContent='⏳ Enviando...'; btn.disabled=true; }
   try{
     await mlPost('/answers',{question_id:id,text});
-    await loadQuestions();renderQuestions();
-  }catch(e){alert('Error al enviar');}
+    await loadQuestions(); renderQuestions();
+  }catch(e){
+    if(btn){ btn.textContent='✓ Enviar respuesta'; btn.disabled=false; }
+    alert('Error al enviar: '+e.message);
+  }
 }
 
 async function bulkAnswerIA(){
   const pend=allQuestions.filter(q=>q.status==='UNANSWERED');
   if(!pend.length){alert('No hay preguntas pendientes');return;}
-  if(!confirm(`¿Respondér las ${pend.length} preguntas pendientes con IA?`))return;
+  if(!confirm(`¿Responder las ${pend.length} preguntas pendientes con IA? (máx 5)`))return;
   for(const q of pend.slice(0,5)){
     try{
-      const r=await callClaude(`Sos vendedor de tazas con diseño en ML Argentina. Pregunta del comprador: "${q.text}". Respondé breve, amable y directo en español argentino. Si preguntan por personalización: el diseño ya está definido. Sin saludos largos.`);
+      const _nl='\n'; const r=await callClaude(_IMPALA_CTX+_nl+_nl+'Pregunta del comprador: "'+q.text+'"'+_nl+_nl+'Respondé breve, amable, español argentino. Máx 2-3 oraciones.');
       await mlPost('/answers',{question_id:q.id,text:r});
     }catch(e){console.error(e);}
   }
-  await loadQuestions();renderQuestions();
+  await loadQuestions(); renderQuestions();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -6077,50 +6180,212 @@ function filterQs(status,btn){
   renderQuestions();
 }
 
-function renderQuestions(){
-  let qs=[...(allQuestions||[])];
-  if(qFilter!=='all') qs=qs.filter(q=>q.status===qFilter);
-  // Más recientes primero
-  qs.sort((a,b)=>new Date(b.date_created)-new Date(a.date_created));
-  const el=document.getElementById('q-list');
-  if(!el)return;
-  if(!qs.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:16px 0">Sin preguntas en esta categoría</div>';return;}
+// ─── Quick-Reply LocalStorage helpers ──────────────────────────
+const QR_LS_KEY = 'mlp_quick_replies';
+const QR_DEFAULT = [
+  {label:'📦 Stock',     color:'#22c55e', text:'Sí, tenemos stock disponible. Esperamos tu compra. Saludos - Tienda Impala Design'},
+  {label:'🚚 Envío',     color:'#3b82f6', text:'Hacemos envíos a todo el país por MercadoEnvíos. La demora es de 3-4 días hábiles aprox.'},
+  {label:'📍 Ubicación', color:'#f59e0b', text:'Somos de Mendoza, zona plaza Chile. No tenemos local físico.'},
+  {label:'✨ Mágica',    color:'#8b5cf6', text:'Es termosensible: aparece el diseño al ponerle bebida caliente. Se envía protegida en telgopor.'},
+];
+function qGetQR(){ try{ return JSON.parse(localStorage.getItem(QR_LS_KEY)||'null')||QR_DEFAULT; }catch(e){ return QR_DEFAULT; } }
+function qSaveQR(arr){ localStorage.setItem(QR_LS_KEY, JSON.stringify(arr)); }
+
+const TMPL_LS_KEY = 'mlp_q_tmpl';
+function qGetTmpl(){
+  try{ return JSON.parse(localStorage.getItem(TMPL_LS_KEY)||'null')||{saludo:'Hola, gracias por tu consulta.',firma:'Esperamos tu compra. Saludos - Tienda Impala Design'}; }
+  catch(e){ return {saludo:'',firma:''}; }
+}
+function qSaveTmpl(){
+  const sal = document.getElementById('qtmpl-saludo')?.value||'';
+  const fir = document.getElementById('qtmpl-firma')?.value||'';
+  localStorage.setItem(TMPL_LS_KEY, JSON.stringify({saludo:sal,firma:fir}));
+  const rows = document.querySelectorAll('#qtmpl-qr-list [data-qr-idx]');
+  const qrs = [];
+  rows.forEach(row=>{
+    const label = row.querySelector('[data-field="label"]')?.value||'';
+    const text  = row.querySelector('[data-field="text"]')?.value||'';
+    const color = row.querySelector('[data-field="color"]')?.value||'#3b82f6';
+    if(label) qrs.push({label,color,text});
+  });
+  qSaveQR(qrs);
+  closeModal('q-tmpl-modal');
+  renderQuestions();
+}
+function qOpenTmpl(){
+  const tmpl = qGetTmpl();
+  const s = document.getElementById('qtmpl-saludo'); if(s) s.value = tmpl.saludo||'';
+  const f = document.getElementById('qtmpl-firma');  if(f) f.value = tmpl.firma||'';
+  qRenderTmplList();
+  openModal('q-tmpl-modal');
+}
+function qRenderTmplList(){
+  const list = document.getElementById('qtmpl-qr-list');
+  if(!list) return;
+  const qrs = qGetQR();
+  list.innerHTML = qrs.map((qr,i)=>`
+    <div data-qr-idx="${i}" style="display:grid;grid-template-columns:1fr 1fr 36px 28px;gap:6px;align-items:center;background:var(--bg3);padding:7px 9px;border-radius:6px">
+      <input data-field="label" type="text" value="${qr.label.replace(/"/g,'&quot;')}" placeholder="Nombre" style="font-size:11.5px;padding:5px 7px">
+      <input data-field="text"  type="text" value="${qr.text.replace(/"/g,'&quot;')}"  placeholder="Texto"  style="font-size:11.5px;padding:5px 7px">
+      <input data-field="color" type="color" value="${qr.color}" style="width:32px;height:28px;border:none;cursor:pointer;border-radius:4px">
+      <button onclick="qrDeleteRow(${i})" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:14px;padding:0">✕</button>
+    </div>`).join('');
+}
+function qrDeleteRow(i){
+  const qrs = qGetQR(); qrs.splice(i,1); qSaveQR(qrs); qRenderTmplList();
+}
+function qrAddNew(){
+  const label = document.getElementById('qr-new-label')?.value?.trim();
+  const text  = document.getElementById('qr-new-text')?.value?.trim();
+  const color = document.getElementById('qr-new-color')?.value||'#3b82f6';
+  if(!label||!text){ alert('Ingresá nombre y texto del botón'); return; }
+  const qrs = qGetQR(); qrs.push({label,color,text});
+  qSaveQR(qrs);
+  document.getElementById('qr-new-label').value='';
+  document.getElementById('qr-new-text').value='';
+  qRenderTmplList();
+}
+
+// ─── Insert text at cursor in a textarea ─────────────────────
+function qInsertAtCursor(taId, text){
+  const ta = document.getElementById(taId);
+  if(!ta) return;
+  const s = ta.selectionStart||0, e = ta.selectionEnd||0;
+  ta.value = ta.value.slice(0,s) + text + ta.value.slice(e);
+  ta.selectionStart = ta.selectionEnd = s + text.length;
+  ta.focus();
+}
+
+// ─── Open answer editor with template (cursor in middle) ─────
+function qOpenAnswer(id, itemId, fromId){
+  const form = document.getElementById('ans-form-'+id);
+  if(!form) return;
+  form.style.display='block';
+  const ta = document.getElementById('ans-txt-'+id);
+  if(!ta || ta.value.trim()) return;
+  const {saludo,firma} = qGetTmpl();
+  ta.value = saludo + '\n\n' + firma;
+  const pos = saludo.length + 2;
+  ta.focus();
+  ta.setSelectionRange(pos, pos);
+  if(fromId && ta.value.includes('@COMPRADOR')) qResolveComprador(id, fromId);
+}
+
+// ─── Replace @COMPRADOR with buyer nickname ───────────────────
+async function qResolveComprador(qId, fromId){
+  const ta = document.getElementById('ans-txt-'+qId);
+  if(!ta||!fromId) return;
   try{
-    el.innerHTML=qs.map(q=>{
-      const dt=q.date_created?new Date(q.date_created):null;
-      const dateStr=dt?dt.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit'})+' '+dt.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}):'—';
-      const isPend=q.status==='UNANSWERED';
-      const qItem = q.item_id ? (allItems||[]).find(function(i){return String(i?.id)===String(q.item_id);}) : null;
-      const qThumb = qItem?.thumbnail||'';
-      return `<div style="padding:12px 0;border-bottom:1px solid var(--border)">
-      <div style="display:flex;align-items:flex-start;gap:10px">
-        ${qThumb?`<img src="${qThumb}" width="44" height="44" loading="lazy" style="object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border);margin-top:2px" onerror="this.style.display='none'">`:''}
-        <div style="flex:1;min-width:0">
-          <div style="font-size:12.5px;font-weight:500;margin-bottom:4px">${q.text}</div>
-          <div style="font-size:10.5px;color:var(--text3);display:flex;gap:8px;align-items:center;margin-bottom:6px">
-            <span class="badge ${isPend?'bg-amber':'bg-green'}">${isPend?'⏳ Pendiente':'✅ Respondida'}</span>
-            <span>${dateStr}</span>
-            ${q.item_id?`<a href="https://www.mercadolibre.com.ar/ventas" target="_blank" style="color:var(--accent);font-size:10px">Ver pub</a>`:''}
-          </div>
-          ${q.answer?.text?`<div style="font-size:12px;color:var(--text3);padding:6px 10px;background:var(--bg3);border-radius:6px;border-left:2px solid var(--green)">↩ ${q.answer.text.slice(0,120)}</div>`:''}
-          ${isPend?`<div style="margin-top:8px">
-            <button class="btn btn-ghost btn-sm" onclick="aiAnswerQ(${q.id},'${q.text.replace(/'/g,"\\'").replace(/\n/g,' ')}',this)" style="margin-bottom:6px">🤖 Sugerir con IA</button>
-            <div id="ans-form-${q.id}" style="display:none;margin-top:6px">
-              <textarea id="ans-txt-${q.id}" rows="2" style="font-size:12px;margin-bottom:6px" placeholder="Respuesta sugerida..."></textarea>
-              <div style="display:flex;gap:6px">
-                <button class="btn btn-primary btn-sm" onclick="submitAns(${q.id})">✓ Enviar respuesta</button>
-                <button class="btn btn-ghost btn-sm" onclick="document.getElementById('ans-form-${q.id}').style.display='none'">Cancelar</button>
-              </div>
-            </div>
-          </div>`:''}
-        </div>
-        </div>
-        </div>
+    const u = await mlGet('/users/'+fromId);
+    const nick = u.nickname||'Comprador';
+    ta.value = ta.value.replace(/@COMPRADOR/g, nick);
+  }catch(e){ ta.value = ta.value.replace(/@COMPRADOR/g, 'Comprador'); }
+}
+
+// ─── Link modal ───────────────────────────────────────────────
+let _qLinkTargetId = null;
+function qOpenLink(taId){
+  _qLinkTargetId = taId;
+  openModal('q-link-modal');
+  const inp = document.getElementById('q-link-search');
+  if(inp){ inp.value=''; qLinkSearch(''); inp.focus(); }
+}
+function qLinkSearch(q){
+  const res = document.getElementById('q-link-results');
+  if(!res) return;
+  const term = q.toLowerCase();
+  const items = (allItems||[]).filter(i=>i.status==='active'&&(!term||i.title.toLowerCase().includes(term))).slice(0,10);
+  if(!items.length){ res.innerHTML='<div style="padding:12px;color:var(--text3);font-size:12px">Sin publicaciones activas</div>'; return; }
+  res.innerHTML = items.map(i=>`
+    <div onclick="qInsertLink('${i.id}')" style="padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);font-size:12px;display:flex;align-items:center;gap:8px"
+      onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''">
+      ${i.thumbnail?`<img src="${i.thumbnail}" width="32" height="32" style="object-fit:cover;border-radius:4px;flex-shrink:0" onerror="this.style.display='none'">`:''}
+      <div>
+        <div style="font-weight:500;line-height:1.3">${i.title.slice(0,55)}</div>
+        <div style="color:var(--text3);font-size:10.5px">$${(i.price||0).toLocaleString('es-AR')} · ${i.id}</div>
       </div>
-    </div>`;
+    </div>`).join('');
+}
+function qInsertLink(itemId){
+  const url = 'https://articulo.mercadolibre.com.ar/MLA-'+String(itemId).replace(/^MLA/i,'');
+  if(_qLinkTargetId) qInsertAtCursor(_qLinkTargetId, url);
+  closeModal('q-link-modal');
+}
+
+// ─── Main render ─────────────────────────────────────────────
+function renderQuestions(){
+  let qs = [...(allQuestions||[])];
+  if(qFilter==='UNANSWERED')      qs = qs.filter(q=>q.status==='UNANSWERED');
+  else if(qFilter==='ANSWERED')   qs = qs.filter(q=>q.status==='ANSWERED');
+  qs.sort((a,b)=>new Date(b.date_created)-new Date(a.date_created));
+
+  const el = document.getElementById('q-list');
+  if(!el) return;
+  if(!qs.length){
+    el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:16px 0">Sin preguntas en esta categoría (últimos 30 días)</div>';
+    return;
+  }
+
+  const qrs = qGetQR();
+
+  try{
+    el.innerHTML = qs.map(q=>{
+      const dt      = q.date_created ? new Date(q.date_created) : null;
+      const dateStr = dt ? dt.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit'})+' '+dt.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}) : '—';
+      const isPend  = q.status==='UNANSWERED';
+      const qItem   = q.item_id ? (allItems||[]).find(i=>String(i?.id)===String(q.item_id)) : null;
+      const qThumb  = qItem?.thumbnail||'';
+      const fromId  = (q.from&&q.from.id) ? String(q.from.id) : '';
+      const taId    = 'ans-txt-'+q.id;
+
+      const qrBar = qrs.map(qr=>
+        `<button class="btn btn-xs" style="background:${qr.color};color:#fff;border:none;font-size:10px;padding:3px 9px;white-space:nowrap"
+          onclick="qInsertAtCursor('${taId}','${qr.text.replace(/'/g,"&#39;")}');document.getElementById('ans-form-${q.id}').style.display='block'"
+        >${qr.label}</button>`
+      ).join('');
+
+      return `<div data-qid="${q.id}" data-qtext="${(q.text||'').replace(/"/g,'&quot;')}" data-itemid="${q.item_id||''}"
+        style="padding:12px 0;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:flex-start;gap:10px">
+          ${qThumb?`<img src="${qThumb}" width="44" height="44" loading="lazy"
+            style="object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border);margin-top:2px"
+            onerror="this.style.display='none'">`:''}
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12.5px;font-weight:500;margin-bottom:5px">${q.text||''}</div>
+            <div style="font-size:10.5px;color:var(--text3);display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap">
+              <span class="badge ${isPend?'bg-amber':'bg-green'}">${isPend?'⏳ Pendiente':'✅ Respondida'}</span>
+              <span>${dateStr}</span>
+              ${q.item_id?`<a href="https://articulo.mercadolibre.com.ar/MLA-${String(q.item_id).replace(/^MLA/i,'')}" target="_blank" style="color:var(--accent);font-size:10px;text-decoration:none">🔗 Ver pub</a>`:''}
+            </div>
+            ${q.answer&&q.answer.text?`<div style="font-size:12px;color:var(--text3);padding:6px 10px;background:var(--bg3);border-radius:6px;border-left:2px solid var(--green);margin-bottom:6px">↩ ${q.answer.text.slice(0,160)}</div>`:''}
+            ${isPend?`
+            <div style="margin-top:8px">
+              <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px;align-items:center">
+                ${qrBar}
+                <button class="btn btn-ghost btn-xs" style="font-size:10px"
+                  onclick="qOpenLink('${taId}')" title="Insertar link de publicación">🔗 #Link</button>
+                <button class="btn btn-ghost btn-xs" style="font-size:10px;background:#ede9fe;color:#7c3aed;border-color:#c4b5fd"
+                  onclick="aiAnswerQ(${q.id},this)">🤖 IA Impala</button>
+                <button class="btn btn-ghost btn-xs" style="font-size:10px"
+                  onclick="qOpenAnswer(${q.id},'${q.item_id||''}','${fromId}')">📝 Plantilla</button>
+              </div>
+              <div id="ans-form-${q.id}" style="display:none;margin-top:4px">
+                <textarea id="${taId}" rows="3"
+                  style="font-size:12px;margin-bottom:6px;width:100%;resize:vertical"
+                  placeholder="Escribí tu respuesta aquí..."></textarea>
+                <div style="display:flex;gap:6px;flex-wrap:wrap">
+                  <button class="btn btn-primary btn-sm" onclick="submitAns(${q.id})">✓ Enviar respuesta</button>
+                  <button class="btn btn-ghost btn-sm"
+                    onclick="document.getElementById('ans-form-${q.id}').style.display='none';document.getElementById('${taId}').value=''">Cancelar</button>
+                </div>
+              </div>
+            </div>`:''}
+          </div>
+        </div>
+      </div>`;
     }).join('');
   }catch(e){
-    console.warn('[renderQuestions] Error al renderizar preguntas:',e);
+    console.warn('[renderQuestions] error:', e);
     el.innerHTML='<div style="color:var(--red);font-size:12.5px;padding:16px 0">⚠ Error al mostrar las preguntas. Reintentá recargar.</div>';
   }
 }
