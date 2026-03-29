@@ -2111,13 +2111,37 @@ function showToast(msg,type){
 
 async function loadItemsFast(){
   try{
-    const first=await mlGet('/users/'+userId+'/items/search?search_type=scan&limit=100');
-    const ids=first.results||[];
-    if(!ids.length)return;
-    const r=await mlGet('/items?ids='+ids.join(',')+'&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations');
-    allItems=[];r.forEach(x=>{if(x.code===200)allItems.push(x.body);});
+    const first = await mlGet('/users/'+userId+'/items/search?search_type=scan&limit=100');
+    const ids   = first.results || [];
+    if(!ids.length) return;
+
+    // ML permite máximo 20 IDs por request — dividir en chunks y hacer en paralelo
+    const ATTRS = 'id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations';
+    const chunks = [];
+    for(let i=0; i<ids.length; i+=20) chunks.push(ids.slice(i, i+20));
+
+    const results = await Promise.allSettled(
+      chunks.map(chunk => mlGet('/items?ids='+chunk.join(',')+'&attributes='+ATTRS))
+    );
+
+    allItems = [];
+    results.forEach(res => {
+      if(res.status !== 'fulfilled') return;
+      const r = res.value;
+      // Guardia: ML puede devolver un objeto de error si algo falla
+      if(!Array.isArray(r)){ console.warn('[loadItemsFast] respuesta no es array:', r); return; }
+      r.forEach(x => {
+        if(x.code !== 200 || !x.body) return;
+        const item = x.body;
+        // Extraer SKU desde attributes (SELLER_SKU) o seller_custom_field
+        const skuAttr = (item.attributes||[]).find(a => a.id === 'SELLER_SKU');
+        item.sku = skuAttr?.value_name || item.seller_custom_field || '';
+        allItems.push(item);
+      });
+    });
+
     _updateItemsUI();
-  }catch(e){console.warn('[loadItemsFast]',e);}
+  }catch(e){ console.warn('[loadItemsFast]', e); }
 }
 
 async function loadItemsFull(){
@@ -2136,7 +2160,18 @@ async function loadItemsFull(){
     }
     allIds=[...new Set(allIds)];const full=[];
     for(let i=0;i<allIds.length;i+=20){
-      try{const r=await mlGet('/items?ids='+allIds.slice(i,i+20).join(',')+'&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations');r.forEach(x=>{if(x.code===200)full.push(x.body);});}catch(e){}
+      try{
+        const r=await mlGet('/items?ids='+allIds.slice(i,i+20).join(',')+'&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations');
+        if(!Array.isArray(r)){ console.warn('[loadItemsFull] chunk no es array:', r); continue; }
+        r.forEach(x=>{
+          if(x.code===200 && x.body){
+            const item=x.body;
+            const skuAttr=(item.attributes||[]).find(a=>a.id==='SELLER_SKU');
+            item.sku=skuAttr?.value_name||item.seller_custom_field||'';
+            full.push(item);
+          }
+        });
+      }catch(e){ console.warn('[loadItemsFull] chunk error:', e.message); }
       if(i>0&&i%200===0)await new Promise(r=>setTimeout(r,100));
     }
     allItems=full;_updateItemsUI();
@@ -2418,7 +2453,7 @@ async function loadQuestions(){
     try{
       const ua = await mlGet('/my/received_questions/search?status=UNANSWERED&limit=50&date_from='+encodeURIComponent(oneMonthAgo));
       console.log('[Q] UNANSWERED raw:', ua);
-      // ML devuelve { questions: [...] } o { results: [...] } según versión
+      // ML devuelve { questions: [...] } — "results" es el fallback por si cambia la API
       unanswered = ua.questions || ua.results || ua.data || [];
     }catch(e){
       console.warn('[Q] /my/ UNANSWERED falló, fallback:', e.message);
@@ -4087,10 +4122,9 @@ async function loadSEOMetrics(){
     if(seoState.tipoFilter && getPubType(i)!==seoState.tipoFilter) return false;
     if(searchQ){
       const tM = i.title.toLowerCase().includes(searchQ);
-      // SKU: buscar tanto en seller_custom_field como en atributo SELLER_SKU
-      const skuA = (i.attributes||[]).find(a=>a.id==='SELLER_SKU');
-      const skuV = (skuA?.value_name || i.seller_custom_field || '').toLowerCase();
-      const sM   = skuV.includes(searchQ);
+      // SKU: usar item.sku pre-computado en loadItemsFast/Full, o calcular como fallback
+      const skuVal = (i.sku || (()=>{ const a=(i.attributes||[]).find(a=>a.id==='SELLER_SKU'); return a?.value_name||i.seller_custom_field||''; })()).toLowerCase();
+      const sM   = skuVal.includes(searchQ);
       const iM   = String(i.id).toLowerCase().includes(searchQ);
       if(!tM && !sM && !iM) return false;
     }
