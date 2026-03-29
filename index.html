@@ -2412,9 +2412,24 @@ async function loadOrders(){await loadOrdersRecent();loadOrdersHistory();}
 
 async function loadQuestions(){
   try{
-    const ua=await mlGet(`/questions/search?seller_id=${userId}&status=UNANSWERED&limit=50`);
-    const rAll=await mlGet(`/questions/search?seller_id=${userId}&limit=50`);
-    allQuestions=rAll.questions||[];
+    // Fecha límite: hace 30 días
+    const since=new Date(Date.now()-30*24*60*60*1000).toISOString();
+
+    // Traer pendientes y todas las recientes en paralelo, ordenadas desc por fecha
+    const [ua, rAll]=await Promise.all([
+      mlGet(`/questions/search?seller_id=${userId}&status=UNANSWERED&sort=date_created_desc&limit=50`),
+      mlGet(`/questions/search?seller_id=${userId}&sort=date_created_desc&limit=50`)
+    ]);
+
+    // Filtrar frontend: solo últimos 30 días
+    const cutoff=new Date(since);
+    const recent=(rAll.questions||[]).filter(q=>new Date(q.date_created)>=cutoff);
+
+    // Pinear UNANSWERED al principio, luego el resto ordenado desc
+    const unanswered=recent.filter(q=>q.status==='UNANSWERED');
+    const answered=recent.filter(q=>q.status!=='UNANSWERED');
+    allQuestions=[...unanswered,...answered];
+
     const pend=(ua.questions||[]).length;
     document.getElementById('nb-q').textContent=pend;
     document.getElementById('q-pend').textContent=pend;
