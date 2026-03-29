@@ -2480,11 +2480,19 @@ async function loadQuestions(){
     allQuestions = allQ;
     const pend=unanswered.length;
     const nbEl=document.getElementById('nb-q');
-    if(nbEl){nbEl.textContent=pend;nbEl.style.display=pend>0?'flex':'none';}
-    document.getElementById('q-pend').textContent=pend;
-    document.getElementById('q-today').textContent=allQuestions.filter(q=>q.status==='ANSWERED'&&isToday(q.answer?.date_created)).length;
-    document.getElementById('q-avgtime').textContent=calcAvgRT()+'h';
-  }catch(e){console.error('questions',e);}
+    // FIX: badge visible si hay preguntas pendientes, oculto si no
+    if(nbEl){
+      nbEl.textContent=pend;
+      nbEl.style.display=pend>0?'inline-flex':'none';
+    }
+    const pEl=document.getElementById('q-pend'); if(pEl) pEl.textContent=pend;
+    const tEl=document.getElementById('q-today'); if(tEl) tEl.textContent=allQuestions.filter(q=>q.status==='ANSWERED'&&isToday(q.answer?.date_created)).length;
+    const aEl=document.getElementById('q-avgtime'); if(aEl) aEl.textContent=calcAvgRT()+'h';
+    // FIX: si la sección de preguntas está activa, renderizarla inmediatamente
+    if(document.getElementById('section-preguntas')?.classList.contains('active')){
+      renderQuestions();
+    }
+  }catch(e){console.error('[Questions]',e);}
 }
 
 function isToday(ds){if(!ds)return false;const d=new Date(ds),t=new Date();return d.getDate()===t.getDate()&&d.getMonth()===t.getMonth();}
@@ -3921,14 +3929,32 @@ function renderSEOTable(){
   const f=seoState.filter;
   const st=seoState.statusFilter;
 
+  // FIX: leer valores de filtros de precio y stock desde el HTML
+  const priceMinSeo = parseFloat(document.getElementById('seo-price-min')?.value) || 0;
+  const priceMaxSeo = parseFloat(document.getElementById('seo-price-max')?.value) || Infinity;
+  const stockMinSeo = document.getElementById('seo-stock-min')?.value !== '' ? parseFloat(document.getElementById('seo-stock-min')?.value) : NaN;
+  const stockMaxSeo = document.getElementById('seo-stock-max')?.value !== '' ? parseFloat(document.getElementById('seo-stock-max')?.value) : NaN;
+
   // 1. FILTRAR
   // Si no hay filtro de estado, mostrar solo active/paused (excluye closed/deleted)
   // Si hay filtro específico (incluyendo under_review/inactive), aplicar ese
   let items=allItems.filter(i=>{
     if(!st && (i.status==='closed'||i.status==='deleted'||i.status==='inactive')) return false;
-    if(searchQ&&!i.title.toLowerCase().includes(searchQ)) return false;
     if(st&&i.status!==st) return false;
     if(seoState.tipoFilter && getPubType(i)!==seoState.tipoFilter) return false;
+    // FIX: filtro por búsqueda inteligente — Título, ID (MLA...) y SKU
+    if(searchQ){
+      const titleMatch = i.title.toLowerCase().includes(searchQ);
+      const skuVal = (i.sku || (()=>{ const a=(i.attributes||[]).find(a=>a.id==='SELLER_SKU'); return a?.value_name||i.seller_custom_field||''; })()).toLowerCase();
+      const skuMatch = skuVal.includes(searchQ);
+      const idMatch  = String(i.id).toLowerCase().includes(searchQ);
+      if(!titleMatch && !skuMatch && !idMatch) return false;
+    }
+    // FIX: filtros de precio y stock operativos
+    if(priceMinSeo && (i.price||0) < priceMinSeo) return false;
+    if(isFinite(priceMaxSeo) && priceMaxSeo>0 && (i.price||0) > priceMaxSeo) return false;
+    if(!isNaN(stockMinSeo) && (i.available_quantity||0) < stockMinSeo) return false;
+    if(!isNaN(stockMaxSeo) && (i.available_quantity||0) > stockMaxSeo) return false;
     if(!f) return true;
     const sc=seoScore(i.title),qs=qualityScore(i),ch=qualityChecks(i);
     const hasErr=/[.!?,;:()]/.test(i.title)||i.title===i.title.toUpperCase();
@@ -4116,6 +4142,13 @@ async function loadSEOMetrics(){
   // Filtrar exactamente igual que renderSEOTable para obtener los ítems visibles
   const searchQ = (document.getElementById('seo-search')?.value||'').toLowerCase();
   const st = seoState.statusFilter;
+
+  // FIX: leer los valores de los inputs de filtro (evita ReferenceError)
+  const priceMin = parseFloat(document.getElementById('seo-price-min')?.value) || 0;
+  const priceMax = parseFloat(document.getElementById('seo-price-max')?.value) || Infinity;
+  const stockMin = document.getElementById('seo-stock-min')?.value !== '' ? parseFloat(document.getElementById('seo-stock-min')?.value) : NaN;
+  const stockMax = document.getElementById('seo-stock-max')?.value !== '' ? parseFloat(document.getElementById('seo-stock-max')?.value) : NaN;
+
   let filtered = allItems.filter(i=>{
     if(!st && (i.status==='closed'||i.status==='deleted'||i.status==='inactive')) return false;
     if(st && i.status!==st) return false;
@@ -6212,6 +6245,11 @@ function saveTmplConfig(){
 }
 
 function renderQuestions(){
+  // FIX: allQuestions es el array correcto — asegurar que existe y es array
+  if(!Array.isArray(allQuestions)){
+    console.warn('[renderQuestions] allQuestions no es un array:', typeof allQuestions);
+    allQuestions = [];
+  }
   let qs=[...allQuestions];
   if(qFilter==='UNANSWERED')qs=qs.filter(q=>q.status==='UNANSWERED');
   else if(qFilter==='ANSWERED')qs=qs.filter(q=>q.status==='ANSWERED');
@@ -6219,6 +6257,7 @@ function renderQuestions(){
   qs=qs.filter(q=>!q.date_created||new Date(q.date_created).getTime()>=oneMonth);
   qs.sort((a,b)=>new Date(b.date_created)-new Date(a.date_created));
   const el=document.getElementById('q-list');if(!el)return;
+  console.log('[renderQuestions] Renderizando', qs.length, 'preguntas (filtro:', qFilter+')');
   if(!qs.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:16px 0">Sin preguntas en esta categoría (último mes).</div>';return;}
   const qrs=getQuickReplies();
   el.innerHTML=qs.map(q=>{
