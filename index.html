@@ -896,12 +896,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <div class="card-sub" id="seo-result-count">—</div>
       </div>
       <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
-        <input type="text" id="seo-search" placeholder="Título, SKU o MLA..." style="width:175px;font-size:12px;padding:5px 26px 5px 9px" oninput="seoGoPage(1)">
-          <input type="number" id="seo-price-min" placeholder="$ Min" min="0" step="100" style="width:68px;font-size:12px;padding:5px 7px" oninput="seoGoPage(1)" title="Precio mínimo">
-          <input type="number" id="seo-price-max" placeholder="$ Máx" min="0" step="100" style="width:68px;font-size:12px;padding:5px 7px" oninput="seoGoPage(1)" title="Precio máximo">
-          <input type="number" id="seo-stock-min" placeholder="Stock≥" min="0" style="width:62px;font-size:12px;padding:5px 7px" oninput="seoGoPage(1)" title="Stock mínimo">
-          <input type="number" id="seo-stock-max" placeholder="Stock≤" min="0" style="width:62px;font-size:12px;padding:5px 7px" oninput="seoGoPage(1)" title="Stock máximo">
-          <button class="btn btn-ghost btn-xs" onclick="seoClearFilters()" style="font-size:10px;padding:4px 8px" title="Limpiar filtros">✕</button>
+        <input type="text" id="seo-search" placeholder="Buscar por título..." style="max-width:200px;font-size:12px;padding:5px 9px" oninput="seoGoPage(1)">
         <button class="btn btn-ghost btn-sm" onclick="loadSEOMetrics()" id="seo-metrics-btn" title="Cargar visitas reales de los últimos 7 días desde ML">📊 Cargar métricas</button>
         <button class="btn btn-ghost btn-sm" onclick="analyzeSEOAll()">↻ Actualizar</button>
       </div>
@@ -913,8 +908,8 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <th>Chars</th>
           <th onclick="seoSort('seo')"     style="cursor:pointer;user-select:none;white-space:nowrap">Score SEO <span id="seo-sort-seo" style="font-size:10px"></span></th>
           <th onclick="seoSort('quality')" style="cursor:pointer;user-select:none;white-space:nowrap">Calidad pub. <span id="seo-sort-quality" style="font-size:10px"></span></th>
-          <th onclick="seoSort('price')" style="cursor:pointer;user-select:none;white-space:nowrap" title="Precio actual">Precio ↕<span id="seo-sort-price" style="font-size:10px"></span></th>
-          <th onclick="seoSort('stock')" style="cursor:pointer;user-select:none;white-space:nowrap" title="Stock disponible">Stock ↕<span id="seo-sort-stock" style="font-size:10px"></span></th>
+          <th onclick="seoSort('price')" style="cursor:pointer;user-select:none;white-space:nowrap">Precio ↕</th>
+          <th onclick="seoSort('stock')" style="cursor:pointer;user-select:none;white-space:nowrap">Stock ↕</th>
           <th onclick="seoSort('sold')" style="cursor:pointer;user-select:none;white-space:nowrap" title="Total ventas históricas del ítem">Vendidas ↕<span id="seo-sort-sold" style="font-size:10px"></span></th>
           <th onclick="seoSort('sales7')" style="cursor:pointer;user-select:none;white-space:nowrap;background:#f0fdf4" title="Ventas últimos 7 días">Ventas 7d ↕<span id="seo-sort-sales7" style="font-size:10px"></span></th>
           <th onclick="seoSort('visits')" style="cursor:pointer;user-select:none;white-space:nowrap;background:#eff6ff" title="Visitas últimos 7 días">Visitas 7d ↕<span id="seo-sort-visits" style="font-size:10px"></span></th>
@@ -1234,7 +1229,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <button class="tab" onclick="filterQs('ANSWERED',this)">Respondidas</button>
         <button class="tab" onclick="filterQs('all',this)">Todas</button>
       </div>
-      <div style="display:flex;gap:6px"><button class="btn btn-ghost btn-sm" onclick="openTmplConfig()" title="Plantilla y respuestas rápidas">⚙️ Plantilla</button><button class="btn btn-primary btn-sm" onclick="bulkAnswerIA()">🤖 Responder todas con IA</button></div>
+      <button class="btn btn-primary btn-sm" onclick="bulkAnswerIA()">🤖 Responder todas con IA</button>
     </div>
     <div id="q-list"><div class="loading"><div class="spin"></div>Cargando...</div></div>
   </div>
@@ -2111,37 +2106,19 @@ function showToast(msg,type){
 
 async function loadItemsFast(){
   try{
-    const first = await mlGet('/users/'+userId+'/items/search?search_type=scan&limit=100');
-    const ids   = first.results || [];
-    if(!ids.length) return;
-
-    // ML permite máximo 20 IDs por request — dividir en chunks y hacer en paralelo
-    const ATTRS = 'id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations';
-    const chunks = [];
-    for(let i=0; i<ids.length; i+=20) chunks.push(ids.slice(i, i+20));
-
-    const results = await Promise.allSettled(
-      chunks.map(chunk => mlGet('/items?ids='+chunk.join(',')+'&attributes='+ATTRS))
-    );
-
-    allItems = [];
-    results.forEach(res => {
-      if(res.status !== 'fulfilled') return;
-      const r = res.value;
-      // Guardia: ML puede devolver un objeto de error si algo falla
-      if(!Array.isArray(r)){ console.warn('[loadItemsFast] respuesta no es array:', r); return; }
-      r.forEach(x => {
-        if(x.code !== 200 || !x.body) return;
-        const item = x.body;
-        // Extraer SKU desde attributes (SELLER_SKU) o seller_custom_field
-        const skuAttr = (item.attributes||[]).find(a => a.id === 'SELLER_SKU');
-        item.sku = skuAttr?.value_name || item.seller_custom_field || '';
-        allItems.push(item);
-      });
-    });
-
+    const first=await mlGet('/users/'+userId+'/items/search?search_type=scan&limit=100');
+    const ids=first.results||[];
+    if(!ids.length)return;
+    // Dividir en chunks de máx. 20 IDs (límite de la API de ML)
+    const chunks=[];
+    for(let i=0;i<ids.length;i+=20) chunks.push(ids.slice(i,i+20));
+    const results=await Promise.all(chunks.map(chunk=>
+      mlGet('/items?ids='+chunk.join(',')+'&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations')
+    ));
+    allItems=[];
+    results.forEach(r=>{ r.forEach(x=>{if(x.code===200)allItems.push(x.body);}); });
     _updateItemsUI();
-  }catch(e){ console.warn('[loadItemsFast]', e); }
+  }catch(e){console.warn('[loadItemsFast]',e);}
 }
 
 async function loadItemsFull(){
@@ -2160,18 +2137,7 @@ async function loadItemsFull(){
     }
     allIds=[...new Set(allIds)];const full=[];
     for(let i=0;i<allIds.length;i+=20){
-      try{
-        const r=await mlGet('/items?ids='+allIds.slice(i,i+20).join(',')+'&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations');
-        if(!Array.isArray(r)){ console.warn('[loadItemsFull] chunk no es array:', r); continue; }
-        r.forEach(x=>{
-          if(x.code===200 && x.body){
-            const item=x.body;
-            const skuAttr=(item.attributes||[]).find(a=>a.id==='SELLER_SKU');
-            item.sku=skuAttr?.value_name||item.seller_custom_field||'';
-            full.push(item);
-          }
-        });
-      }catch(e){ console.warn('[loadItemsFull] chunk error:', e.message); }
+      try{const r=await mlGet('/items?ids='+allIds.slice(i,i+20).join(',')+'&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations');r.forEach(x=>{if(x.code===200)full.push(x.body);});}catch(e){}
       if(i>0&&i%200===0)await new Promise(r=>setTimeout(r,100));
     }
     allItems=full;_updateItemsUI();
@@ -2446,53 +2412,15 @@ async function loadOrders(){await loadOrdersRecent();loadOrdersHistory();}
 
 async function loadQuestions(){
   try{
-    // ISO 8601 con timezone que exige ML: 2024-01-01T00:00:00.000-00:00
-    const oneMonthAgo = new Date(Date.now()-30*86400000).toISOString().replace('Z','-00:00');
-
-    let unanswered=[];
-    try{
-      const ua = await mlGet('/my/received_questions/search?status=UNANSWERED&limit=50&date_from='+encodeURIComponent(oneMonthAgo));
-      console.log('[Q] UNANSWERED raw:', ua);
-      // ML devuelve { questions: [...] } — "results" es el fallback por si cambia la API
-      unanswered = ua.questions || ua.results || ua.data || [];
-    }catch(e){
-      console.warn('[Q] /my/ UNANSWERED falló, fallback:', e.message);
-      try{
-        const ua2 = await mlGet(`/questions/search?seller_id=${userId}&status=UNANSWERED&limit=50`);
-        unanswered = ua2.questions || ua2.results || [];
-      }catch(e2){ console.warn('[Q] fallback UNANSWERED falló:', e2.message); }
-    }
-
-    let allQ=[];
-    try{
-      const rAll = await mlGet('/my/received_questions/search?limit=50&date_from='+encodeURIComponent(oneMonthAgo));
-      console.log('[Q] ALL raw:', rAll);
-      allQ = rAll.questions || rAll.results || rAll.data || [];
-    }catch(e){
-      console.warn('[Q] /my/ ALL falló, fallback:', e.message);
-      try{
-        const rAll2 = await mlGet(`/questions/search?seller_id=${userId}&limit=50`);
-        allQ = rAll2.questions || rAll2.results || [];
-      }catch(e2){ console.warn('[Q] fallback ALL falló:', e2.message); }
-    }
-
-    console.log('[Q] Total cargadas:', allQ.length, '| Sin responder:', unanswered.length);
-    allQuestions = allQ;
-    const pend=unanswered.length;
-    const nbEl=document.getElementById('nb-q');
-    // FIX: badge visible si hay preguntas pendientes, oculto si no
-    if(nbEl){
-      nbEl.textContent=pend;
-      nbEl.style.display=pend>0?'inline-flex':'none';
-    }
-    const pEl=document.getElementById('q-pend'); if(pEl) pEl.textContent=pend;
-    const tEl=document.getElementById('q-today'); if(tEl) tEl.textContent=allQuestions.filter(q=>q.status==='ANSWERED'&&isToday(q.answer?.date_created)).length;
-    const aEl=document.getElementById('q-avgtime'); if(aEl) aEl.textContent=calcAvgRT()+'h';
-    // FIX: si la sección de preguntas está activa, renderizarla inmediatamente
-    if(document.getElementById('section-preguntas')?.classList.contains('active')){
-      renderQuestions();
-    }
-  }catch(e){console.error('[Questions]',e);}
+    const ua=await mlGet(`/questions/search?seller_id=${userId}&status=UNANSWERED&limit=50`);
+    const rAll=await mlGet(`/questions/search?seller_id=${userId}&limit=50`);
+    allQuestions=rAll.questions||[];
+    const pend=(ua.questions||[]).length;
+    document.getElementById('nb-q').textContent=pend;
+    document.getElementById('q-pend').textContent=pend;
+    document.getElementById('q-today').textContent=allQuestions.filter(q=>q.status==='ANSWERED'&&isToday(q.answer?.date_created)).length;
+    document.getElementById('q-avgtime').textContent=calcAvgRT()+'h';
+  }catch(e){console.error('questions',e);}
 }
 
 function isToday(ds){if(!ds)return false;const d=new Date(ds),t=new Date();return d.getDate()===t.getDate()&&d.getMonth()===t.getMonth();}
@@ -3720,7 +3648,7 @@ function seoSort(col){
   if(seoState.sortCol===col) seoState.sortDir*=-1;
   else{ seoState.sortCol=col; seoState.sortDir=-1; }
   seoState.page=1;
-  ['seo','quality','price','stock','sold','sales7','visits','conv'].forEach(c=>{
+  ['seo','quality','sold','sales7','visits','conv'].forEach(c=>{
     const el=document.getElementById('seo-sort-'+c);
     if(el) el.innerHTML=sortArrow(c,seoState.sortCol,seoState.sortDir);
   });
@@ -3909,13 +3837,6 @@ function seoSetFilter(f){
   renderSEOTable();
 }
 
-function seoClearFilters(){
-  ["seo-search","seo-price-min","seo-price-max","seo-stock-min","seo-stock-max"].forEach(id=>{
-    const el=document.getElementById(id);if(el)el.value="";
-  });
-  seoGoPage(1);
-}
-
 function seoGoPage(n){
   seoState.page=n;
   renderSEOTable();
@@ -3929,32 +3850,19 @@ function renderSEOTable(){
   const f=seoState.filter;
   const st=seoState.statusFilter;
 
-  // FIX: leer valores de filtros de precio y stock desde el HTML
-  const priceMinSeo = parseFloat(document.getElementById('seo-price-min')?.value) || 0;
-  const priceMaxSeo = parseFloat(document.getElementById('seo-price-max')?.value) || Infinity;
-  const stockMinSeo = document.getElementById('seo-stock-min')?.value !== '' ? parseFloat(document.getElementById('seo-stock-min')?.value) : NaN;
-  const stockMaxSeo = document.getElementById('seo-stock-max')?.value !== '' ? parseFloat(document.getElementById('seo-stock-max')?.value) : NaN;
-
   // 1. FILTRAR
   // Si no hay filtro de estado, mostrar solo active/paused (excluye closed/deleted)
   // Si hay filtro específico (incluyendo under_review/inactive), aplicar ese
   let items=allItems.filter(i=>{
     if(!st && (i.status==='closed'||i.status==='deleted'||i.status==='inactive')) return false;
+    // Búsqueda multicriterio: título, ID (MLA...) y SKU (seller_custom_field)
+    if(searchQ&&!(
+      (i.title||'').toLowerCase().includes(searchQ)||
+      (i.id||'').toLowerCase().includes(searchQ)||
+      (i.seller_custom_field||'').toLowerCase().includes(searchQ)
+    )) return false;
     if(st&&i.status!==st) return false;
     if(seoState.tipoFilter && getPubType(i)!==seoState.tipoFilter) return false;
-    // FIX: filtro por búsqueda inteligente — Título, ID (MLA...) y SKU
-    if(searchQ){
-      const titleMatch = i.title.toLowerCase().includes(searchQ);
-      const skuVal = (i.sku || (()=>{ const a=(i.attributes||[]).find(a=>a.id==='SELLER_SKU'); return a?.value_name||i.seller_custom_field||''; })()).toLowerCase();
-      const skuMatch = skuVal.includes(searchQ);
-      const idMatch  = String(i.id).toLowerCase().includes(searchQ);
-      if(!titleMatch && !skuMatch && !idMatch) return false;
-    }
-    // FIX: filtros de precio y stock operativos
-    if(priceMinSeo && (i.price||0) < priceMinSeo) return false;
-    if(isFinite(priceMaxSeo) && priceMaxSeo>0 && (i.price||0) > priceMaxSeo) return false;
-    if(!isNaN(stockMinSeo) && (i.available_quantity||0) < stockMinSeo) return false;
-    if(!isNaN(stockMaxSeo) && (i.available_quantity||0) > stockMaxSeo) return false;
     if(!f) return true;
     const sc=seoScore(i.title),qs=qualityScore(i),ch=qualityChecks(i);
     const hasErr=/[.!?,;:()]/.test(i.title)||i.title===i.title.toUpperCase();
@@ -3975,12 +3883,12 @@ function renderSEOTable(){
       let va=0, vb=0;
       const ma = itemMetrics[a.id], mb = itemMetrics[b.id];
       if(seoState.sortCol==='seo')      { va=seoScore(a.title);          vb=seoScore(b.title); }
-      else if(seoState.sortCol==='price')  { va=a.price||0;                    vb=b.price||0; }
-      else if(seoState.sortCol==='stock')  { va=a.available_quantity||0;        vb=b.available_quantity||0; }
-      else if(seoState.sortCol==='sold')   { va=a.sold_quantity||0;             vb=b.sold_quantity||0; }
+      else if(seoState.sortCol==='sold')   { va=a.sold_quantity||0;           vb=b.sold_quantity||0; }
       else if(seoState.sortCol==='sales7') { va=ma?.sales||0;                 vb=mb?.sales||0; }
       else if(seoState.sortCol==='visits'){ va=ma?.visits||0;              vb=mb?.visits||0; }
       else if(seoState.sortCol==='conv') { va=ma?.conv||0;                 vb=mb?.conv||0; }
+      else if(seoState.sortCol==='price') { va=a.price||0;                 vb=b.price||0; }
+      else if(seoState.sortCol==='stock') { va=a.available_quantity??0;    vb=b.available_quantity??0; }
       else                               { va=qualityScore(a);             vb=qualityScore(b); }
       return seoState.sortDir*(vb-va);
     });
@@ -4022,9 +3930,6 @@ function renderSEOTable(){
 
     const eanP   = ch.find(c=>c.id==='ean');
     const hasClip= itemHasVideo(item);
-    // SKU: desde attributes (SELLER_SKU) o seller_custom_field
-    const skuAttr = (item.attributes||[]).find(a=>a.id==='SELLER_SKU');
-    const sku = skuAttr?.value_name || item.seller_custom_field || '';
     const editUrl= mlEditLink(item.id);
     const sT     = item.title.replace(/'/g,"\\'");
     const eanArg = eanP?"'faltante'":'null';
@@ -4049,7 +3954,6 @@ function renderSEOTable(){
             <div style="font-size:12px;font-weight:500;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.35" title="${item.title.replace(/"/g,'&quot;')}">${item.title}</div>
             <div style="font-size:10px;color:var(--text3);margin-top:2px;display:flex;gap:5px;flex-wrap:wrap">
               <span>${item.id}</span>
-              ${sku?'<span style="color:var(--accent)">SKU: '+sku+'</span>':''}
               ${clipBadge}
             </div>
           </div>
@@ -4066,11 +3970,11 @@ function renderSEOTable(){
           </div>
         </div>
       </td>
-      <td style="text-align:right;padding-right:10px">
-        <span style="font-size:12.5px;font-weight:700;color:var(--text)">$${(item.price||0).toLocaleString('es-AR')}</span>
+      <td style="text-align:right;white-space:nowrap">
+        <span style="font-size:12px;font-weight:600;color:var(--text)">$${(item.price||0).toLocaleString('es-AR')}</span>
       </td>
       <td style="text-align:center">
-        <span style="font-size:12.5px;font-weight:700;color:${(item.available_quantity||0)===0?'var(--red)':(item.available_quantity||0)<=3?'var(--amber)':'var(--text)'}">${item.available_quantity||0}</span>
+        <span style="font-size:12px;font-weight:600;color:${(item.available_quantity??0)===0?'var(--red)':(item.available_quantity??0)<=3?'var(--amber)':'var(--text)'}">${item.available_quantity??0}</span>
       </td>
       <td style="text-align:center">
         <span style="font-size:14px;font-weight:700;color:var(--text)">${item.sold_quantity||0}</span>
@@ -4115,7 +4019,6 @@ function renderSEOTable(){
     pgEl.innerHTML=b;
   }
 }
-
 function renderKWDensity(){
   const words={};
   allItems.forEach(i=>{
@@ -4142,29 +4045,11 @@ async function loadSEOMetrics(){
   // Filtrar exactamente igual que renderSEOTable para obtener los ítems visibles
   const searchQ = (document.getElementById('seo-search')?.value||'').toLowerCase();
   const st = seoState.statusFilter;
-
-  // FIX: leer los valores de los inputs de filtro (evita ReferenceError)
-  const priceMin = parseFloat(document.getElementById('seo-price-min')?.value) || 0;
-  const priceMax = parseFloat(document.getElementById('seo-price-max')?.value) || Infinity;
-  const stockMin = document.getElementById('seo-stock-min')?.value !== '' ? parseFloat(document.getElementById('seo-stock-min')?.value) : NaN;
-  const stockMax = document.getElementById('seo-stock-max')?.value !== '' ? parseFloat(document.getElementById('seo-stock-max')?.value) : NaN;
-
   let filtered = allItems.filter(i=>{
     if(!st && (i.status==='closed'||i.status==='deleted'||i.status==='inactive')) return false;
     if(st && i.status!==st) return false;
     if(seoState.tipoFilter && getPubType(i)!==seoState.tipoFilter) return false;
-    if(searchQ){
-      const tM = i.title.toLowerCase().includes(searchQ);
-      // SKU: usar item.sku pre-computado en loadItemsFast/Full, o calcular como fallback
-      const skuVal = (i.sku || (()=>{ const a=(i.attributes||[]).find(a=>a.id==='SELLER_SKU'); return a?.value_name||i.seller_custom_field||''; })()).toLowerCase();
-      const sM   = skuVal.includes(searchQ);
-      const iM   = String(i.id).toLowerCase().includes(searchQ);
-      if(!tM && !sM && !iM) return false;
-    }
-    if(priceMin && (i.price||0) < priceMin) return false;
-    if(isFinite(priceMax) && priceMax>0 && (i.price||0) > priceMax) return false;
-    if(!isNaN(stockMin) && stockMin!=='' && (i.available_quantity||0) < stockMin) return false;
-    if(!isNaN(stockMax) && stockMax!=='' && (i.available_quantity||0) > stockMax) return false;
+    if(searchQ && !i.title.toLowerCase().includes(searchQ)) return false;
     return true;
   });
 
@@ -6177,145 +6062,53 @@ function filterQs(status,btn){
   renderQuestions();
 }
 
-// ─── Quick Replies & Template (LocalStorage) ──────────────
-const QR_KEY='mlp_quick_replies',TMPL_KEY='mlp_q_template';
-const QR_DEFAULT=[
-  {label:'✅ Hay stock',text:'¡Sí, tenemos disponible! Podés comprarlo ahora mismo.',color:'#22c55e'},
-  {label:'❌ Sin stock',text:'Lamentablemente ese producto está agotado por el momento.',color:'#ef4444'},
-  {label:'📦 Envío',text:'El envío es a través de Mercado Envíos. El tiempo lo ves al comprar.',color:'#3b82f6'},
-  {label:'💳 Cuotas',text:'Podés pagar en cuotas con tarjeta vía Mercado Pago.',color:'#8b5cf6'},
-];
-function getQuickReplies(){try{return JSON.parse(localStorage.getItem(QR_KEY))||QR_DEFAULT;}catch(e){return QR_DEFAULT;}}
-function getTemplate(){try{return JSON.parse(localStorage.getItem(TMPL_KEY)||'{}');}catch(e){return {};}}
-
-function qInsertAtCursor(taId,text){
-  const ta=document.getElementById(taId);if(!ta)return;
-  const s=ta.selectionStart,e=ta.selectionEnd;
-  ta.value=ta.value.slice(0,s)+text+ta.value.slice(e);
-  ta.selectionStart=ta.selectionEnd=s+text.length;ta.focus();
-}
-async function qResolveComprador(taId,fromId){
-  const ta=document.getElementById(taId);
-  if(!ta||!fromId||!ta.value.includes('@COMPRADOR'))return;
-  try{const u=await mlGet('/users/'+fromId);ta.value=ta.value.replace(/@COMPRADOR/g,u.nickname||'Comprador');}
-  catch(e){ta.value=ta.value.replace(/@COMPRADOR/g,'Comprador');}
-}
-let _qLinkTaId=null;
-function qOpenLinkModal(taId){
-  _qLinkTaId=taId;
-  const m=document.getElementById('q-link-modal');if(m)m.classList.add('open');
-  const inp=document.getElementById('q-link-search');if(inp){inp.value='';inp.focus();qSearchLinks('');}
-}
-function qSearchLinks(q){
-  const res=document.getElementById('q-link-results');if(!res)return;
-  const matches=allItems.filter(i=>i.status==='active'&&(!q||i.title.toLowerCase().includes(q.toLowerCase()))).slice(0,8);
-  res.innerHTML=matches.map(i=>'<div onclick="qInsertLink(\''+i.id+'\')" style="padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);font-size:12px;display:flex;align-items:center;gap:8px" onmouseover="this.style.background=\'var(--bg3)\'" onmouseout="this.style.background=\'\'"><img src="'+( i.thumbnail||'')+'" width="32" height="32" style="object-fit:cover;border-radius:4px;flex-shrink:0" onerror="this.style.display=\'none\'"><div><div style="font-weight:500">'+i.title.slice(0,55)+'</div><div style="color:var(--text3);font-size:10px">'+i.id+' · $'+(i.price||0).toLocaleString('es-AR')+'</div></div></div>').join('')||'<div style="padding:12px;color:var(--text3);font-size:12px">Sin resultados</div>';
-}
-function qInsertLink(itemId){
-  const url='https://articulo.mercadolibre.com.ar/MLA-'+itemId.replace(/^MLA/i,'');
-  if(_qLinkTaId)qInsertAtCursor(_qLinkTaId,url);
-  closeModal('q-link-modal');
-}
-function qOpenAnswer(qId,fromId){
-  const form=document.getElementById('ans-form-'+qId);if(!form)return;
-  form.style.display='block';
-  const ta=document.getElementById('ans-txt-'+qId);if(!ta||ta.value)return;
-  const tmpl=getTemplate();
-  const saludo=tmpl.saludo||'Hola, gracias por tu consulta.';
-  const firma=tmpl.firma||'Saludos y buena compra.';
-  ta.value=saludo+'\n\n\n\n'+firma;
-  const pos=saludo.length+2;ta.focus();ta.setSelectionRange(pos,pos);
-  if(ta.value.includes('@COMPRADOR')&&fromId)qResolveComprador('ans-txt-'+qId,fromId);
-}
-function openTmplConfig(){
-  const tmpl=getTemplate(),qrs=getQuickReplies();
-  const s=document.getElementById('tmpl-saludo'),f=document.getElementById('tmpl-firma');
-  if(s)s.value=tmpl.saludo||'';if(f)f.value=tmpl.firma||'';
-  const list=document.getElementById('tmpl-qr-list');
-  if(list)list.innerHTML=qrs.map((qr,i)=>'<div style="display:flex;gap:6px;align-items:center"><input type="text" value="'+qr.label+'" id="qrl-'+i+'" style="width:120px;font-size:11px;padding:5px 7px" placeholder="Label"><input type="text" value="'+qr.text+'" id="qrt-'+i+'" style="flex:1;font-size:11px;padding:5px 7px" placeholder="Texto"><input type="color" value="'+qr.color+'" id="qrc-'+i+'" style="width:30px;height:30px;border:none;cursor:pointer"></div>').join('');
-  openModal('q-tmpl-modal');
-}
-function saveTmplConfig(){
-  const tmpl={saludo:document.getElementById('tmpl-saludo')?.value||'',firma:document.getElementById('tmpl-firma')?.value||''};
-  localStorage.setItem(TMPL_KEY,JSON.stringify(tmpl));
-  const qrs=getQuickReplies();
-  const newQrs=qrs.map((_,i)=>({label:document.getElementById('qrl-'+i)?.value||'',text:document.getElementById('qrt-'+i)?.value||'',color:document.getElementById('qrc-'+i)?.value||'#3b82f6'})).filter(qr=>qr.label);
-  localStorage.setItem(QR_KEY,JSON.stringify(newQrs));
-  closeModal('q-tmpl-modal');renderQuestions();
-}
-
 function renderQuestions(){
-  // FIX: allQuestions es el array correcto — asegurar que existe y es array
-  if(!Array.isArray(allQuestions)){
-    console.warn('[renderQuestions] allQuestions no es un array:', typeof allQuestions);
-    allQuestions = [];
-  }
-  let qs=[...allQuestions];
-  if(qFilter==='UNANSWERED')qs=qs.filter(q=>q.status==='UNANSWERED');
-  else if(qFilter==='ANSWERED')qs=qs.filter(q=>q.status==='ANSWERED');
-  const oneMonth=Date.now()-30*86400000;
-  qs=qs.filter(q=>!q.date_created||new Date(q.date_created).getTime()>=oneMonth);
+  let qs=[...(allQuestions||[])];
+  if(qFilter!=='all') qs=qs.filter(q=>q.status===qFilter);
+  // Más recientes primero
   qs.sort((a,b)=>new Date(b.date_created)-new Date(a.date_created));
-  const el=document.getElementById('q-list');if(!el)return;
-  console.log('[renderQuestions] Renderizando', qs.length, 'preguntas (filtro:', qFilter+')');
-  if(!qs.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:16px 0">Sin preguntas en esta categoría (último mes).</div>';return;}
-  const qrs=getQuickReplies();
-  el.innerHTML=qs.map(q=>{
-    const dt=q.date_created?new Date(q.date_created):null;
-    const dateStr=dt?dt.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit'})+' '+dt.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}):'—';
-    const isPend=q.status==='UNANSWERED';
-    const qItem=q.item_id?allItems.find(function(i){return String(i.id)===String(q.item_id);}):null;
-    const qThumb=qItem?(qItem.thumbnail||''):'';
-    const fromId=(q.from&&q.from.id)?q.from.id:'';
-    const itemUrl=q.item_id?'https://articulo.mercadolibre.com.ar/MLA-'+String(q.item_id).replace(/^MLA/i,''):null;
-    const qrHtml=qrs.map(qr=>'<button class="btn btn-xs" style="background:'+qr.color+';color:#fff;border:none;font-size:10px;padding:3px 8px" onclick="qInsertAtCursor(\'ans-txt-'+q.id+'\',\''+qr.text.replace(/'/g,'&#39;')+'\');document.getElementById(\'ans-form-'+q.id+'\').style.display=\'block\'">'+qr.label+'</button>').join('');
-    return '<div style="padding:12px 0;border-bottom:1px solid var(--border)">'
-      +'<div style="display:flex;align-items:flex-start;gap:10px">'
-      +(qThumb?'<img src="'+qThumb+'" width="44" height="44" loading="lazy" style="object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border);margin-top:2px" onerror="this.style.display=\'none\'">':'')
-      +'<div style="flex:1;min-width:0">'
-      +'<div style="font-size:12.5px;font-weight:500;margin-bottom:5px">'+q.text+'</div>'
-      +'<div style="font-size:10.5px;color:var(--text3);display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap">'
-      +'<span class="badge '+(isPend?'bg-amber':'bg-green')+'">'+(isPend?'⏳ Pendiente':'✅ Respondida')+'</span>'
-      +'<span>'+dateStr+'</span>'
-      +(itemUrl?'<a href="'+itemUrl+'" target="_blank" style="color:var(--accent);font-size:10px;text-decoration:none">🔗 Ver pub</a>':'')
-      +'</div>'
-      +(q.answer&&q.answer.text?'<div style="font-size:12px;color:var(--text3);padding:6px 10px;background:var(--bg3);border-radius:6px;border-left:2px solid var(--green);margin-bottom:6px">↩ '+q.answer.text.slice(0,160)+'</div>':'')
-      +(isPend
-        ?'<div style="margin-top:6px">'
-          +'<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:7px;align-items:center">'
-          +qrHtml
-          +'<button class="btn btn-ghost btn-xs" style="font-size:10px" onclick="qOpenLinkModal(\'ans-txt-'+q.id+'\')" title="Insertar link">🔗 #Link</button>'
-          +'<button class="btn btn-ghost btn-xs" style="font-size:10px;background:#ede9fe;color:#7c3aed;border-color:#c4b5fd" onclick="aiAnswerQSmart('+q.id+',\''+( q.item_id||'')+'\',this)">🤖 IA</button>'
-          +'<button class="btn btn-ghost btn-xs" style="font-size:10px" onclick="qOpenAnswer('+q.id+',\''+fromId+'\')" title="Plantilla base">📝 Plantilla</button>'
-          +'</div>'
-          +'<div id="ans-form-'+q.id+'" style="display:none;margin-top:4px">'
-          +'<textarea id="ans-txt-'+q.id+'" rows="3" style="font-size:12px;margin-bottom:6px;width:100%" placeholder="Escribí tu respuesta..."></textarea>'
-          +'<div style="display:flex;gap:6px">'
-          +'<button class="btn btn-primary btn-sm" onclick="submitAns('+q.id+')">✓ Enviar</button>'
-          +'<button class="btn btn-ghost btn-sm" onclick="document.getElementById(\'ans-form-'+q.id+'\').style.display=\'none\'">Cancelar</button>'
-          +'</div></div></div>'
-        :'')
-      +'</div></div></div>';
-  }).join('');
-}
-
-// IA contextualizada para responder preguntas
-async function aiAnswerQSmart(id, itemId, btn){
-  const ta=document.getElementById('ans-txt-'+id);
-  const qDiv=btn.closest('div[style*="padding:12px"]');
-  const text=qDiv?qDiv.querySelector('[style*="font-weight:500"]')?.textContent?.trim()||'':'';
-  btn.textContent='⏳...';btn.disabled=true;
-  const qItem=itemId?allItems.find(i=>String(i.id)===String(itemId)):null;
-  const ctx=qItem?'Publicación: "'+qItem.title+'" - Precio: $'+(qItem.price||0).toLocaleString('es-AR')+' - Stock: '+(qItem.available_quantity||0):'';
-  const nl='\n';
+  const el=document.getElementById('q-list');
+  if(!el)return;
+  if(!qs.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:16px 0">Sin preguntas en esta categoría</div>';return;}
   try{
-    const prompt='Sos vendedor en MercadoLibre Argentina.'+(ctx?nl+ctx:'')+nl+nl+'Pregunta del comprador: "'+text+'"'+nl+nl+'Respondé en 2-3 oraciones, amable, español argentino. Sé natural y vendedor.';
-    const r=await callClaude(prompt);
-    if(ta){ta.value=r;document.getElementById('ans-form-'+id).style.display='block';ta.focus();}
-    btn.textContent='🤖 IA';btn.disabled=false;
-  }catch(e){btn.textContent='🤖 IA';btn.disabled=false;}
+    el.innerHTML=qs.map(q=>{
+      const dt=q.date_created?new Date(q.date_created):null;
+      const dateStr=dt?dt.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit'})+' '+dt.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}):'—';
+      const isPend=q.status==='UNANSWERED';
+      const qItem = q.item_id ? (allItems||[]).find(function(i){return String(i?.id)===String(q.item_id);}) : null;
+      const qThumb = qItem?.thumbnail||'';
+      return `<div style="padding:12px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:flex-start;gap:10px">
+        ${qThumb?`<img src="${qThumb}" width="44" height="44" loading="lazy" style="object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border);margin-top:2px" onerror="this.style.display='none'">`:''}
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12.5px;font-weight:500;margin-bottom:4px">${q.text}</div>
+          <div style="font-size:10.5px;color:var(--text3);display:flex;gap:8px;align-items:center;margin-bottom:6px">
+            <span class="badge ${isPend?'bg-amber':'bg-green'}">${isPend?'⏳ Pendiente':'✅ Respondida'}</span>
+            <span>${dateStr}</span>
+            ${q.item_id?`<a href="https://www.mercadolibre.com.ar/ventas" target="_blank" style="color:var(--accent);font-size:10px">Ver pub</a>`:''}
+          </div>
+          ${q.answer?.text?`<div style="font-size:12px;color:var(--text3);padding:6px 10px;background:var(--bg3);border-radius:6px;border-left:2px solid var(--green)">↩ ${q.answer.text.slice(0,120)}</div>`:''}
+          ${isPend?`<div style="margin-top:8px">
+            <button class="btn btn-ghost btn-sm" onclick="aiAnswerQ(${q.id},'${q.text.replace(/'/g,"\\'").replace(/\n/g,' ')}',this)" style="margin-bottom:6px">🤖 Sugerir con IA</button>
+            <div id="ans-form-${q.id}" style="display:none;margin-top:6px">
+              <textarea id="ans-txt-${q.id}" rows="2" style="font-size:12px;margin-bottom:6px" placeholder="Respuesta sugerida..."></textarea>
+              <div style="display:flex;gap:6px">
+                <button class="btn btn-primary btn-sm" onclick="submitAns(${q.id})">✓ Enviar respuesta</button>
+                <button class="btn btn-ghost btn-sm" onclick="document.getElementById('ans-form-${q.id}').style.display='none'">Cancelar</button>
+              </div>
+            </div>
+          </div>`:''}
+        </div>
+        </div>
+        </div>
+      </div>
+    </div>`;
+    }).join('');
+  }catch(e){
+    console.warn('[renderQuestions] Error al renderizar preguntas:',e);
+    el.innerHTML='<div style="color:var(--red);font-size:12.5px;padding:16px 0">⚠ Error al mostrar las preguntas. Reintentá recargar.</div>';
+  }
 }
-
 function initAI(){
   aiHistory=[
     {role:'user',content:`Sistema: Actuá como un experto en ventas y posicionamiento en MercadoLibre Argentina (2026), especializado en productos con diseños impresos (tazas, regalos, merchandising).
@@ -7572,35 +7365,5 @@ function selectOptItem(id,title){
   });
 })();
 </script>
-
-<div class="modal-overlay" id="q-link-modal">
-  <div style="background:var(--bg2);border-radius:12px;padding:20px;width:420px;max-width:90vw;max-height:70vh;display:flex;flex-direction:column;gap:10px">
-    <div style="display:flex;justify-content:space-between;align-items:center">
-      <div style="font-size:14px;font-weight:600">🔗 Insertar link de publicación</div>
-      <button class="btn btn-ghost btn-xs" onclick="closeModal('q-link-modal')">✕</button>
-    </div>
-    <input type="text" id="q-link-search" placeholder="Buscar publicación..." style="font-size:12.5px;padding:8px 10px" oninput="qSearchLinks(this.value)">
-    <div id="q-link-results" style="overflow-y:auto;max-height:300px;border:1px solid var(--border);border-radius:6px"></div>
-  </div>
-</div>
-<div class="modal-overlay" id="q-tmpl-modal">
-  <div style="background:var(--bg2);border-radius:12px;padding:20px;width:480px;max-width:90vw;display:flex;flex-direction:column;gap:12px">
-    <div style="display:flex;justify-content:space-between;align-items:center">
-      <div style="font-size:14px;font-weight:600">⚙️ Plantilla y respuestas rápidas</div>
-      <button class="btn btn-ghost btn-xs" onclick="closeModal('q-tmpl-modal')">✕</button>
-    </div>
-    <div>
-      <label style="font-size:11px;font-weight:500;color:var(--text2);display:block;margin-bottom:3px">Saludo predefinido</label>
-      <input type="text" id="tmpl-saludo" style="width:100%;font-size:12px;padding:7px 9px" placeholder="Ej: Hola, gracias por tu consulta.">
-    </div>
-    <div>
-      <label style="font-size:11px;font-weight:500;color:var(--text2);display:block;margin-bottom:3px">Firma predefinida</label>
-      <input type="text" id="tmpl-firma" style="width:100%;font-size:12px;padding:7px 9px" placeholder="Ej: Saludos y buena compra.">
-    </div>
-    <div style="font-size:11.5px;font-weight:600;color:var(--text);margin-top:4px">Respuestas rápidas</div>
-    <div id="tmpl-qr-list" style="display:flex;flex-direction:column;gap:6px"></div>
-    <button class="btn btn-primary" onclick="saveTmplConfig()" style="width:100%">💾 Guardar</button>
-  </div>
-</div>
 </body>
 </html>
