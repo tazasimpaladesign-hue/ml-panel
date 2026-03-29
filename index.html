@@ -1229,7 +1229,9 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <button class="tab" onclick="filterQs('ANSWERED',this)">Respondidas</button>
         <button class="tab" onclick="filterQs('all',this)">Todas</button>
       </div>
-      <div style="display:flex;gap:6px;margin-left:auto">
+      <div style="display:flex;gap:6px;margin-left:auto;align-items:center">
+        <span id="q-sync-status" style="font-size:10px;color:var(--text3);display:none"></span>
+        <button id="q-sync-btn" class="btn btn-ghost btn-sm" onclick="qSyncNow()" title="Sincronizar configuración con la nube" style="font-size:13px;padding:4px 8px">☁️</button>
         <button class="btn btn-ghost btn-sm" onclick="qOpenTmpl()" title="Plantilla y respuestas rápidas" style="font-size:11px">⚙️ Plantilla</button>
         <button class="btn btn-primary btn-sm" onclick="bulkAnswerIA()">🤖 Responder todas con IA</button>
       </div>
@@ -1270,7 +1272,11 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <textarea id="qr-new-text" rows="2" placeholder="Texto a insertar al hacer clic..." style="font-size:12px;resize:vertical"></textarea>
       <button class="btn btn-primary btn-sm" onclick="qrAddNew()">+ Agregar botón</button>
     </div>
-    <button class="btn btn-primary" onclick="qSaveTmpl()" style="width:100%">💾 Guardar cambios</button>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-primary" onclick="qSaveTmpl()" style="flex:1">💾 Guardar en este dispositivo</button>
+      <button class="btn btn-ghost" onclick="qSaveTmpl(true)" title="Guardar y subir a la nube" style="font-size:12px;padding:7px 12px">☁️ Guardar + Nube</button>
+    </div>
+    <div id="qtmpl-sync-msg" style="font-size:11px;text-align:center;color:var(--text3);min-height:16px"></div>
   </div>
 </div>
 
@@ -6181,25 +6187,114 @@ function filterQs(status,btn){
 }
 
 // ─── Quick-Reply LocalStorage helpers ──────────────────────────
-const QR_LS_KEY = 'mlp_quick_replies';
+// ══════════════════════════════════════════════════════════
+// CLOUD SYNC — Configuración persistente via Cloudflare Worker
+// Usa /api/settings con Bearer token ML para identificar al usuario.
+// localStorage actúa como caché offline.
+// ══════════════════════════════════════════════════════════
+
+const QR_LS_KEY   = 'mlp_quick_replies';
+const TMPL_LS_KEY = 'mlp_q_tmpl';
+const SYNC_TS_KEY = 'mlp_settings_synced_at';
+
 const QR_DEFAULT = [
   {label:'📦 Stock',     color:'#22c55e', text:'Sí, tenemos stock disponible. Esperamos tu compra. Saludos - Tienda Impala Design'},
   {label:'🚚 Envío',     color:'#3b82f6', text:'Hacemos envíos a todo el país por MercadoEnvíos. La demora es de 3-4 días hábiles aprox.'},
   {label:'📍 Ubicación', color:'#f59e0b', text:'Somos de Mendoza, zona plaza Chile. No tenemos local físico.'},
   {label:'✨ Mágica',    color:'#8b5cf6', text:'Es termosensible: aparece el diseño al ponerle bebida caliente. Se envía protegida en telgopor.'},
 ];
-function qGetQR(){ try{ return JSON.parse(localStorage.getItem(QR_LS_KEY)||'null')||QR_DEFAULT; }catch(e){ return QR_DEFAULT; } }
-function qSaveQR(arr){ localStorage.setItem(QR_LS_KEY, JSON.stringify(arr)); }
 
-const TMPL_LS_KEY = 'mlp_q_tmpl';
+// ── Lectura local (siempre rápida, sin await) ───────────────
+function qGetQR(){
+  try{ return JSON.parse(localStorage.getItem(QR_LS_KEY)||'null')||QR_DEFAULT; }
+  catch(e){ return QR_DEFAULT; }
+}
 function qGetTmpl(){
   try{ return JSON.parse(localStorage.getItem(TMPL_LS_KEY)||'null')||{saludo:'Hola, gracias por tu consulta.',firma:'Esperamos tu compra. Saludos - Tienda Impala Design'}; }
   catch(e){ return {saludo:'',firma:''}; }
 }
-function qSaveTmpl(){
+
+// ── Escritura local ─────────────────────────────────────────
+function qSaveQR(arr)   { localStorage.setItem(QR_LS_KEY,   JSON.stringify(arr)); }
+function qWriteTmpl(obj){ localStorage.setItem(TMPL_LS_KEY, JSON.stringify(obj)); }
+
+// ── Leer configuración desde el Worker (KV remoto) ──────────
+async function loadRemoteSettings(){
+  if(!token) return null;
+  try{
+    const r = await fetch(WORKER+'/api/settings', {
+      headers:{ 'Authorization':'Bearer '+token }
+    });
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const d = await r.json();
+    if(d && d.quickReplies) localStorage.setItem(QR_LS_KEY,   JSON.stringify(d.quickReplies));
+    if(d && d.template)     localStorage.setItem(TMPL_LS_KEY, JSON.stringify(d.template));
+    if(d && (d.quickReplies||d.template)){
+      localStorage.setItem(SYNC_TS_KEY, Date.now().toString());
+      console.log('[Settings] Configuración cargada desde la nube ✓');
+      return d;
+    }
+    return null;
+  }catch(e){
+    console.warn('[Settings] No se pudo cargar desde la nube (usando localStorage):', e.message);
+    return null;
+  }
+}
+
+// ── Subir configuración al Worker (KV remoto) ───────────────
+async function saveRemoteSettings(qrs, tmpl){
+  if(!token) return false;
+  try{
+    const body = { quickReplies: qrs||qGetQR(), template: tmpl||qGetTmpl() };
+    const r = await fetch(WORKER+'/api/settings', {
+      method: 'POST',
+      headers:{ 'Authorization':'Bearer '+token, 'Content-Type':'application/json' },
+      body: JSON.stringify(body)
+    });
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    localStorage.setItem(SYNC_TS_KEY, Date.now().toString());
+    console.log('[Settings] Configuración guardada en la nube ✓');
+    return true;
+  }catch(e){
+    console.warn('[Settings] No se pudo guardar en la nube:', e.message);
+    return false;
+  }
+}
+
+// ── Botón "☁️ Sincronizar ahora" ────────────────────────────
+async function qSyncNow(){
+  const btn = document.getElementById('q-sync-btn');
+  const status = document.getElementById('q-sync-status');
+  if(btn){ btn.textContent='⏳'; btn.disabled=true; }
+  if(status){ status.textContent='Sincronizando...'; status.style.display=''; status.style.color='var(--text3)'; }
+  try{
+    // Intentar primero bajar (el servidor tiene prioridad en conflictos)
+    const remote = await loadRemoteSettings();
+    if(remote){
+      if(status){ status.textContent='✓ Configuración bajada de la nube'; status.style.color='var(--green)'; }
+      renderQuestions(); // refleja quick replies actualizados
+    } else {
+      // No hay nada en la nube — subir lo local
+      const ok = await saveRemoteSettings();
+      if(status){
+        status.textContent = ok ? '✓ Configuración local subida a la nube' : '⚠ Sin conexión con el Worker';
+        status.style.color = ok ? 'var(--green)' : 'var(--amber)';
+      }
+    }
+  }catch(e){
+    if(status){ status.textContent='✗ Error de sincronización'; status.style.color='var(--red)'; }
+  }
+  if(btn){ btn.textContent='☁️'; btn.disabled=false; }
+  setTimeout(()=>{ if(status) status.style.display='none'; }, 4000);
+}
+
+// ── Guardar plantilla (local + opcionalmente nube) ──────────
+async function qSaveTmpl(uploadToCloud){
   const sal = document.getElementById('qtmpl-saludo')?.value||'';
   const fir = document.getElementById('qtmpl-firma')?.value||'';
-  localStorage.setItem(TMPL_LS_KEY, JSON.stringify({saludo:sal,firma:fir}));
+  const tmpl = {saludo:sal, firma:fir};
+  qWriteTmpl(tmpl);
+
   const rows = document.querySelectorAll('#qtmpl-qr-list [data-qr-idx]');
   const qrs = [];
   rows.forEach(row=>{
@@ -6209,9 +6304,25 @@ function qSaveTmpl(){
     if(label) qrs.push({label,color,text});
   });
   qSaveQR(qrs);
+
+  const msg = document.getElementById('qtmpl-sync-msg');
+  if(uploadToCloud){
+    if(msg){ msg.textContent='⏳ Subiendo a la nube...'; msg.style.color='var(--text3)'; }
+    const ok = await saveRemoteSettings(qrs, tmpl);
+    if(msg){
+      msg.textContent = ok ? '✓ Guardado localmente y en la nube' : '⚠ Guardado local — no se pudo conectar al Worker';
+      msg.style.color = ok ? 'var(--green)' : 'var(--amber)';
+    }
+    setTimeout(()=>{ if(msg) msg.textContent=''; }, 3500);
+  } else {
+    if(msg){ msg.textContent='✓ Guardado en este dispositivo'; msg.style.color='var(--green)'; }
+    setTimeout(()=>{ if(msg) msg.textContent=''; }, 2000);
+  }
+
   closeModal('q-tmpl-modal');
   renderQuestions();
 }
+
 function qOpenTmpl(){
   const tmpl = qGetTmpl();
   const s = document.getElementById('qtmpl-saludo'); if(s) s.value = tmpl.saludo||'';
@@ -7634,6 +7745,10 @@ function selectOptItem(id,title){
     token = localStorage.getItem('ml_token_' + activeApp);
     currentAccount = ACCOUNTS.find(a => a.id === activeApp) || ACCOUNTS[0];
     await initApp();
+    // Sincronizar configuración desde la nube al arrancar (silencioso, no bloquea)
+    loadRemoteSettings().then(remote => {
+      if(remote) renderQuestions(); // refleja quick replies si los bajó
+    });
     // Restore section from URL hash
     const hash = window.location.hash.replace('#','');
     if(hash && document.getElementById('section-'+hash)) showSection(hash);
