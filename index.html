@@ -913,6 +913,8 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <th>Chars</th>
           <th onclick="seoSort('seo')"     style="cursor:pointer;user-select:none;white-space:nowrap">Score SEO <span id="seo-sort-seo" style="font-size:10px"></span></th>
           <th onclick="seoSort('quality')" style="cursor:pointer;user-select:none;white-space:nowrap">Calidad pub. <span id="seo-sort-quality" style="font-size:10px"></span></th>
+          <th onclick="seoSort('price')" style="cursor:pointer;user-select:none;white-space:nowrap" title="Precio actual">Precio ↕<span id="seo-sort-price" style="font-size:10px"></span></th>
+          <th onclick="seoSort('stock')" style="cursor:pointer;user-select:none;white-space:nowrap" title="Stock disponible">Stock ↕<span id="seo-sort-stock" style="font-size:10px"></span></th>
           <th onclick="seoSort('sold')" style="cursor:pointer;user-select:none;white-space:nowrap" title="Total ventas históricas del ítem">Vendidas ↕<span id="seo-sort-sold" style="font-size:10px"></span></th>
           <th onclick="seoSort('sales7')" style="cursor:pointer;user-select:none;white-space:nowrap;background:#f0fdf4" title="Ventas últimos 7 días">Ventas 7d ↕<span id="seo-sort-sales7" style="font-size:10px"></span></th>
           <th onclick="seoSort('visits')" style="cursor:pointer;user-select:none;white-space:nowrap;background:#eff6ff" title="Visitas últimos 7 días">Visitas 7d ↕<span id="seo-sort-visits" style="font-size:10px"></span></th>
@@ -2409,24 +2411,38 @@ async function loadOrders(){await loadOrdersRecent();loadOrdersHistory();}
 
 async function loadQuestions(){
   try{
-    const oneMonthAgo = new Date(Date.now()-30*86400000).toISOString().slice(0,10);
+    // ISO 8601 con timezone que exige ML: 2024-01-01T00:00:00.000-00:00
+    const oneMonthAgo = new Date(Date.now()-30*86400000).toISOString().replace('Z','-00:00');
+
     let unanswered=[];
     try{
-      const ua=await mlGet('/my/received_questions/search?status=UNANSWERED&limit=50&date_created_from='+oneMonthAgo);
-      unanswered=ua.questions||ua.data||[];
+      const ua = await mlGet('/my/received_questions/search?status=UNANSWERED&limit=50&date_from='+encodeURIComponent(oneMonthAgo));
+      console.log('[Q] UNANSWERED raw:', ua);
+      // ML devuelve { questions: [...] } o { results: [...] } según versión
+      unanswered = ua.questions || ua.results || ua.data || [];
     }catch(e){
-      const ua2=await mlGet(`/questions/search?seller_id=${userId}&status=UNANSWERED&limit=50`);
-      unanswered=ua2.questions||[];
+      console.warn('[Q] /my/ UNANSWERED falló, fallback:', e.message);
+      try{
+        const ua2 = await mlGet(`/questions/search?seller_id=${userId}&status=UNANSWERED&limit=50`);
+        unanswered = ua2.questions || ua2.results || [];
+      }catch(e2){ console.warn('[Q] fallback UNANSWERED falló:', e2.message); }
     }
+
     let allQ=[];
     try{
-      const rAll=await mlGet('/my/received_questions/search?limit=50&date_created_from='+oneMonthAgo);
-      allQ=rAll.questions||rAll.data||[];
+      const rAll = await mlGet('/my/received_questions/search?limit=50&date_from='+encodeURIComponent(oneMonthAgo));
+      console.log('[Q] ALL raw:', rAll);
+      allQ = rAll.questions || rAll.results || rAll.data || [];
     }catch(e){
-      const rAll2=await mlGet(`/questions/search?seller_id=${userId}&limit=50`);
-      allQ=rAll2.questions||[];
+      console.warn('[Q] /my/ ALL falló, fallback:', e.message);
+      try{
+        const rAll2 = await mlGet(`/questions/search?seller_id=${userId}&limit=50`);
+        allQ = rAll2.questions || rAll2.results || [];
+      }catch(e2){ console.warn('[Q] fallback ALL falló:', e2.message); }
     }
-    allQuestions=allQ;
+
+    console.log('[Q] Total cargadas:', allQ.length, '| Sin responder:', unanswered.length);
+    allQuestions = allQ;
     const pend=unanswered.length;
     const nbEl=document.getElementById('nb-q');
     if(nbEl){nbEl.textContent=pend;nbEl.style.display=pend>0?'flex':'none';}
@@ -3661,7 +3677,7 @@ function seoSort(col){
   if(seoState.sortCol===col) seoState.sortDir*=-1;
   else{ seoState.sortCol=col; seoState.sortDir=-1; }
   seoState.page=1;
-  ['seo','quality','sold','sales7','visits','conv'].forEach(c=>{
+  ['seo','quality','price','stock','sold','sales7','visits','conv'].forEach(c=>{
     const el=document.getElementById('seo-sort-'+c);
     if(el) el.innerHTML=sortArrow(c,seoState.sortCol,seoState.sortDir);
   });
@@ -3898,7 +3914,9 @@ function renderSEOTable(){
       let va=0, vb=0;
       const ma = itemMetrics[a.id], mb = itemMetrics[b.id];
       if(seoState.sortCol==='seo')      { va=seoScore(a.title);          vb=seoScore(b.title); }
-      else if(seoState.sortCol==='sold')   { va=a.sold_quantity||0;           vb=b.sold_quantity||0; }
+      else if(seoState.sortCol==='price')  { va=a.price||0;                    vb=b.price||0; }
+      else if(seoState.sortCol==='stock')  { va=a.available_quantity||0;        vb=b.available_quantity||0; }
+      else if(seoState.sortCol==='sold')   { va=a.sold_quantity||0;             vb=b.sold_quantity||0; }
       else if(seoState.sortCol==='sales7') { va=ma?.sales||0;                 vb=mb?.sales||0; }
       else if(seoState.sortCol==='visits'){ va=ma?.visits||0;              vb=mb?.visits||0; }
       else if(seoState.sortCol==='conv') { va=ma?.conv||0;                 vb=mb?.conv||0; }
@@ -3919,7 +3937,7 @@ function renderSEOTable(){
   const tbody=document.getElementById('seo-tbody');
   if(!tbody) return;
   if(!paged.length){
-    tbody.innerHTML='<tr><td colspan="10" style="text-align:center;padding:22px;color:var(--text3)">Sin resultados para este filtro</td></tr>';
+    tbody.innerHTML='<tr><td colspan="12" style="text-align:center;padding:22px;color:var(--text3)">Sin resultados para este filtro</td></tr>';
     const pg=document.getElementById('seo-pagination');if(pg)pg.innerHTML='';
     return;
   }
@@ -3943,6 +3961,9 @@ function renderSEOTable(){
 
     const eanP   = ch.find(c=>c.id==='ean');
     const hasClip= itemHasVideo(item);
+    // SKU: desde attributes (SELLER_SKU) o seller_custom_field
+    const skuAttr = (item.attributes||[]).find(a=>a.id==='SELLER_SKU');
+    const sku = skuAttr?.value_name || item.seller_custom_field || '';
     const editUrl= mlEditLink(item.id);
     const sT     = item.title.replace(/'/g,"\\'");
     const eanArg = eanP?"'faltante'":'null';
@@ -3967,6 +3988,7 @@ function renderSEOTable(){
             <div style="font-size:12px;font-weight:500;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.35" title="${item.title.replace(/"/g,'&quot;')}">${item.title}</div>
             <div style="font-size:10px;color:var(--text3);margin-top:2px;display:flex;gap:5px;flex-wrap:wrap">
               <span>${item.id}</span>
+              ${sku?'<span style="color:var(--accent)">SKU: '+sku+'</span>':''}
               ${clipBadge}
             </div>
           </div>
@@ -3982,6 +4004,12 @@ function renderSEOTable(){
             <div style="font-size:10px;color:var(--text3);margin-top:2px">${qs}/100 calidad</div>
           </div>
         </div>
+      </td>
+      <td style="text-align:right;padding-right:10px">
+        <span style="font-size:12.5px;font-weight:700;color:var(--text)">$${(item.price||0).toLocaleString('es-AR')}</span>
+      </td>
+      <td style="text-align:center">
+        <span style="font-size:12.5px;font-weight:700;color:${(item.available_quantity||0)===0?'var(--red)':(item.available_quantity||0)<=3?'var(--amber)':'var(--text)'}">${item.available_quantity||0}</span>
       </td>
       <td style="text-align:center">
         <span style="font-size:14px;font-weight:700;color:var(--text)">${item.sold_quantity||0}</span>
@@ -4058,9 +4086,12 @@ async function loadSEOMetrics(){
     if(st && i.status!==st) return false;
     if(seoState.tipoFilter && getPubType(i)!==seoState.tipoFilter) return false;
     if(searchQ){
-      const tM=i.title.toLowerCase().includes(searchQ);
-      const sM=(i.seller_custom_field||'').toLowerCase().includes(searchQ);
-      const iM=String(i.id).toLowerCase().includes(searchQ);
+      const tM = i.title.toLowerCase().includes(searchQ);
+      // SKU: buscar tanto en seller_custom_field como en atributo SELLER_SKU
+      const skuA = (i.attributes||[]).find(a=>a.id==='SELLER_SKU');
+      const skuV = (skuA?.value_name || i.seller_custom_field || '').toLowerCase();
+      const sM   = skuV.includes(searchQ);
+      const iM   = String(i.id).toLowerCase().includes(searchQ);
       if(!tM && !sM && !iM) return false;
     }
     if(priceMin && (i.price||0) < priceMin) return false;
