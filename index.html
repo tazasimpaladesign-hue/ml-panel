@@ -464,6 +464,15 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 .modal .btn-ghost{background:#f3f4f6;color:#1e293b;border:1px solid #d1d5db}
 .modal .btn-ghost:hover{background:#e5e7eb;color:#0f172a}
 .modal .alert.a-warn{background:#fffbeb;color:#78350f;border:1px solid #fde68a}
+
+/* ── Dashboard metric pills ── */
+.dash-pill{
+  padding:4px 11px;font-size:11px;border-radius:20px;cursor:pointer;
+  border:1px solid var(--border2);background:var(--bg3);color:var(--text2);
+  transition:all .15s;font-weight:500;
+}
+.dash-pill:hover{ border-color:var(--accent);color:var(--accent); }
+.dash-pill.active{ color:#fff!important;border-color:transparent; }
 </style>
 </head>
 <body>
@@ -566,7 +575,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   <div class="sb-sec">Gestión</div>
   <a class="nav" href="#ventas" id="nav-ventas" onclick="showSection('ventas');return false;"><span class="ni">🛍️</span>Ventas / Pedidos<span class="nb nb-amber" id="nb-ventas" style="display:none">0</span></a>
   <a class="nav" href="#preguntas" id="nav-preguntas" onclick="showSection('preguntas');return false;"><span class="ni">💬</span>Preguntas<span class="nb nb-red" id="nb-q">0</span></a>
-  <a class="nav" href="#mensajes" id="nav-mensajes" onclick="showSection('mensajes');return false;"><span class="ni">📬</span>Mensajes post-venta</a>
+  <a class="nav" href="#mensajes" id="nav-mensajes" onclick="showSection('mensajes');return false;"><span class="ni">📬</span>Mensajes post-venta<span class="nb nb-red" id="nb-msg" style="display:none">0</span></a>
   <a class="nav" href="#reputacion" id="nav-reputacion" onclick="showSection('reputacion');return false;"><span class="ni">⭐</span>Reputación</a>
   <a class="nav" href="#stock" id="nav-stock" onclick="showSection('stock');return false;"><span class="ni">📋</span>Stock</a>
   <a class="nav" href="#reclamos" id="nav-reclamos" onclick="showSection('reclamos');return false;"><span class="ni">🚨</span>Reclamos</a>
@@ -657,17 +666,22 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   <!-- ── Gráfico evolución + categorías ── -->
   <div class="g60 mb">
     <div class="card">
-      <div class="card-hd">
+      <div class="card-hd" style="flex-wrap:wrap;gap:8px">
         <div>
-          <div class="card-title">Evolución de ventas</div>
-          <div class="card-sub" id="dash-chart-sub">Últimos 30 días + período anterior</div>
-        </div>
-        <div class="tabs">
-          <button class="tab active" onclick="switchMainChart('revenue',this)">Ingresos</button>
-          <button class="tab" onclick="switchMainChart('units',this)">Unidades</button>
+          <div class="card-title">Evolución 30d vs 30d anteriores</div>
+          <div class="card-sub" id="dash-chart-sub"></div>
         </div>
       </div>
-      <div style="position:relative;height:210px"><canvas id="chart-main"></canvas></div>
+      <!-- Toggles de métricas (píldoras) -->
+      <div id="dash-metric-pills" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+        <button class="dash-pill active" data-metric="revenue"   onclick="dashTogglePill(this)" style="background:#4f8ef7;color:#fff">💰 Ingresos</button>
+        <button class="dash-pill"        data-metric="units"     onclick="dashTogglePill(this)">📦 Unidades</button>
+        <button class="dash-pill"        data-metric="orders"    onclick="dashTogglePill(this)">🛒 Ventas</button>
+        <button class="dash-pill"        data-metric="questions" onclick="dashTogglePill(this)">💬 Preguntas</button>
+        <button class="dash-pill"        data-metric="visits"    onclick="dashTogglePill(this)">👁 Visitas</button>
+        <button class="dash-pill"        data-metric="conv"      onclick="dashTogglePill(this)">📈 Performance</button>
+      </div>
+      <div style="position:relative;height:220px"><canvas id="chart-main"></canvas></div>
       <div id="dash-peak-info" style="font-size:11px;color:var(--text3);margin-top:6px;min-height:16px"></div>
     </div>
     <div class="card">
@@ -1481,7 +1495,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <div class="card-title">📬 Mensajes post-venta</div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-ghost btn-sm" onclick="renderMensajes()">↻ Actualizar</button>
-        <a href="https://www.mercadolibre.com.ar/mensajes" target="_blank" class="btn btn-primary btn-sm" style="text-decoration:none">📬 Abrir en ML</a>
+        <a href="https://myaccount.mercadolibre.com.ar/messaging/list" target="_blank" class="btn btn-primary btn-sm" style="text-decoration:none">📬 Abrir en ML</a>
       </div>
     </div>
     <div id="mensajes-list"><div class="loading"><div class="spin"></div>Cargando mensajes...</div></div>
@@ -1926,7 +1940,7 @@ function visibleItems(){
 let pubFilter='active', qFilter='UNANSWERED';
 let chartInstances={};
 let trackedKws=[];
-let activeRules=[];
+let activeRules=JSON.parse(localStorage.getItem('mlp_active_rules')||'[]');
 let aiHistory=[];
 
 // ═══════════════════════════════════════════════════════════
@@ -2727,78 +2741,203 @@ function renderDashKPIs(){
 }
 
 // ── Gráfico principal con comparación período anterior ──────
-let _dashChartMode = 'revenue';
+// ── Dashboard multi-metric chart ─────────────────────────────
+// Conjunto de métricas activas (pills). revenue activo por defecto.
+const _PILL_COLORS = {
+  revenue:   { border:'#4f8ef7', bg:'rgba(79,142,247,0.1)',   btnBg:'#4f8ef7' },
+  units:     { border:'#23d18b', bg:'rgba(35,209,139,0.1)',   btnBg:'#23d18b' },
+  orders:    { border:'#f5a623', bg:'rgba(245,166,35,0.08)',  btnBg:'#f5a623' },
+  questions: { border:'#f472b6', bg:'rgba(244,114,182,0.08)', btnBg:'#f472b6' },
+  visits:    { border:'#29d4c5', bg:'rgba(41,212,197,0.08)',  btnBg:'#29d4c5' },
+  conv:      { border:'#9d7bea', bg:'rgba(157,123,234,0.08)', btnBg:'#9d7bea' },
+};
+const _PILL_LABELS = {
+  revenue:'💰 Ingresos', units:'📦 Unidades', orders:'🛒 Ventas',
+  questions:'💬 Preguntas', visits:'👁 Visitas', conv:'📈 Performance (Conv%)',
+};
+let _activeMetrics = new Set(['revenue']); // pills activos
+let _dashChartMode = 'revenue'; // legado — mantener compatibilidad
+
+function dashTogglePill(btn){
+  const metric = btn.dataset.metric;
+  if(_activeMetrics.has(metric)){
+    if(_activeMetrics.size === 1) return; // al menos uno activo
+    _activeMetrics.delete(metric);
+    btn.classList.remove('active');
+    btn.style.background = '';
+    btn.style.color = '';
+  } else {
+    _activeMetrics.add(metric);
+    btn.classList.add('active');
+    btn.style.background = _PILL_COLORS[metric]?.btnBg||'#4f8ef7';
+    btn.style.color = '#fff';
+  }
+  renderMainChart();
+}
+
 function renderMainChart(mode){
-  _dashChartMode = mode || _dashChartMode;
-  const days = dashPeriodDays;
-  const labels=[], dataCurr={}, dataPrev={};
+  // Compatibilidad con llamadas antiguas
+  if(mode && typeof mode === 'string'){ _dashChartMode = mode; }
+
+  const days = 30; // siempre 30d vs 30d anteriores
+  const labels=[], keys=[];
   const now = new Date();
   for(let i=days-1;i>=0;i--){
     const d=new Date(now); d.setDate(d.getDate()-i);
     const k=d.toISOString().slice(0,10);
+    keys.push(k);
     labels.push(d.getDate()+'/'+(d.getMonth()+1));
-    dataCurr[k]=0; dataPrev[k]=0;
   }
 
   const currCutoff = new Date(Date.now()-days*86400000);
   const prevCutoff = new Date(Date.now()-2*days*86400000);
 
+  // Inicializar acumuladores
+  const acc = {};
+  for(const m of Object.keys(_PILL_COLORS)){
+    acc[m] = { curr:{}, prev:{} };
+    keys.forEach(k=>{ acc[m].curr[k]=0; acc[m].prev[k]=0; });
+  }
+
+  // Llenar desde órdenes
   allOrders.forEach(o=>{
     if(o.status==='cancelled'||o.status==='invalid') return;
     const ts = new Date(o.date_created||0);
-    const val = _dashChartMode==='revenue'?(o.total_amount||0):1;
-    // Período actual
     const kCurr = o.date_created?.slice(0,10);
-    if(kCurr && dataCurr[kCurr]!==undefined) dataCurr[kCurr]+=val;
-    // Período anterior -> desplazar al rango actual para comparación visual
+
+    if(kCurr && acc.revenue.curr[kCurr]!==undefined){
+      acc.revenue.curr[kCurr] += o.total_amount||0;
+      acc.orders.curr[kCurr]  += 1;
+      (o.order_items||[]).forEach(oi=>{ acc.units.curr[kCurr] += oi.quantity||1; });
+    }
     if(ts>=prevCutoff && ts<currCutoff){
       const shifted = new Date(ts.getTime()+days*86400000);
       const kPrev = shifted.toISOString().slice(0,10);
-      if(kPrev && dataPrev[kPrev]!==undefined) dataPrev[kPrev]+=val;
+      if(kPrev && acc.revenue.prev[kPrev]!==undefined){
+        acc.revenue.prev[kPrev] += o.total_amount||0;
+        acc.orders.prev[kPrev]  += 1;
+        (o.order_items||[]).forEach(oi=>{ acc.units.prev[kPrev] += oi.quantity||1; });
+      }
     }
   });
 
-  // Detectar pico
-  const vals = Object.values(dataCurr);
-  const maxVal = Math.max(...vals);
-  const maxDay = labels[vals.indexOf(maxVal)];
-  const peakEl = document.getElementById('dash-peak-info');
-  if(peakEl && maxVal>0)
-    peakEl.textContent = `📍 Mejor día: ${maxDay} — ${_dashChartMode==='revenue'?'$'+maxVal.toLocaleString('es-AR'):maxVal+' ventas'}`;
+  // Preguntas
+  (allQuestions||[]).forEach(q=>{
+    const k = q.date_created?.slice(0,10);
+    if(k && acc.questions.curr[k]!==undefined) acc.questions.curr[k]++;
+    const ts = new Date(q.date_created||0);
+    if(ts>=prevCutoff && ts<currCutoff){
+      const shifted = new Date(ts.getTime()+days*86400000);
+      const kPrev = shifted.toISOString().slice(0,10);
+      if(kPrev && acc.questions.prev[kPrev]!==undefined) acc.questions.prev[kPrev]++;
+    }
+  });
 
+  // Visitas: usar itemMetrics si existen (suma de todas las publicaciones por día)
+  // Como no tenemos series de visitas por día en la API, estimamos desde métricas cargadas
+  keys.forEach(k=>{
+    let v=0;
+    Object.values(itemMetrics||{}).forEach(m=>{ if(m?.visitsByDay?.[k]) v+=m.visitsByDay[k]; });
+    acc.visits.curr[k]=v;
+  });
+
+  // Performance = conv% = orders/visits*100 (si hay visitas) o revenue/orders (ticket)
+  keys.forEach(k=>{
+    const v = acc.visits.curr[k]||0;
+    const o = acc.orders.curr[k]||0;
+    acc.conv.curr[k] = v>0 ? parseFloat((o/v*100).toFixed(2)) : 0;
+  });
+
+  // Detectar mejor día (primera métrica activa)
+  const firstMetric = [..._activeMetrics][0];
+  const firstVals = Object.values(acc[firstMetric]?.curr||{});
+  const maxVal = Math.max(...firstVals, 0);
+  const maxIdx = firstVals.indexOf(maxVal);
+  const peakEl = document.getElementById('dash-peak-info');
+  if(peakEl){
+    if(maxVal > 0){
+      const fmt = firstMetric==='revenue' ? '$'+maxVal.toLocaleString('es-AR')
+                : firstMetric==='conv'    ? maxVal.toFixed(2)+'%'
+                : maxVal;
+      peakEl.textContent = `📍 Mejor día: ${labels[maxIdx]||'—'} — ${fmt} (${_PILL_LABELS[firstMetric]||firstMetric})`;
+    } else {
+      peakEl.textContent = '';
+    }
+  }
   const subEl = document.getElementById('dash-chart-sub');
-  if(subEl) subEl.textContent = `Últimos ${days} días vs período anterior`;
+  if(subEl) subEl.textContent = 'Últimos 30 días vs 30 días anteriores';
+
+  // Construir datasets
+  const datasets = [];
+  _activeMetrics.forEach(metric=>{
+    const col = _PILL_COLORS[metric];
+    const currData = keys.map(k=>acc[metric].curr[k]||0);
+    const prevData = keys.map(k=>acc[metric].prev[k]||0);
+    const hasAnyPrev = prevData.some(v=>v>0);
+    datasets.push({
+      label: _PILL_LABELS[metric]||metric,
+      data: currData,
+      borderColor: col.border,
+      backgroundColor: col.bg,
+      borderWidth: 2,
+      fill: _activeMetrics.size===1,
+      tension: .4,
+      pointRadius: 2,
+      pointBackgroundColor: col.border,
+      yAxisID: (metric==='conv'&&_activeMetrics.size>1) ? 'y2' : 'y',
+    });
+    if(hasAnyPrev && _activeMetrics.size===1){
+      datasets.push({
+        label: _PILL_LABELS[metric]+' (ant.)',
+        data: prevData,
+        borderColor: col.border.replace(')',', 0.4)').replace('rgb','rgba'),
+        backgroundColor: 'transparent',
+        borderWidth: 1.5,
+        borderDash: [4,3],
+        fill: false,
+        tension: .4,
+        pointRadius: 0,
+        yAxisID: 'y',
+      });
+    }
+  });
+
+  // Eje Y2 para conv% cuando hay otras métricas activas
+  const hasConv = _activeMetrics.has('conv') && _activeMetrics.size>1;
+  const scalesConf = {
+    y:  { ...tOpts(), position:'left',  ticks:{...tOpts().ticks, callback:v=>_activeMetrics.has('revenue')&&!hasConv?'$'+(v>=1000?(v/1000).toFixed(0)+'k':v):v} },
+    x:  tXOpts(),
+  };
+  if(hasConv) scalesConf.y2 = { ...tOpts(), position:'right', grid:{display:false}, ticks:{...tOpts().ticks, callback:v=>v+'%'} };
 
   makeChart('chart-main',{
     type:'line',
-    data:{
-      labels,
-      datasets:[
-        {label:'Período actual',data:Object.values(dataCurr),borderColor:'#4f8ef7',backgroundColor:'rgba(79,142,247,0.1)',borderWidth:2,fill:true,tension:.4,pointRadius:2,pointBackgroundColor:'#4f8ef7'},
-        {label:'Período anterior',data:Object.values(dataPrev),borderColor:'rgba(157,123,234,0.7)',backgroundColor:'transparent',borderWidth:1.5,borderDash:[4,3],fill:false,tension:.4,pointRadius:0}
-      ]
-    },
+    data:{ labels, datasets },
     options:{
       ...chartDefaults(),
+      interaction:{ mode:'index', intersect:false },
       plugins:{
-        legend:{display:true,position:'top',labels:{color:'#8892a8',font:{size:10},boxWidth:8,padding:8}},
+        legend:{ display:_activeMetrics.size>1, position:'top', labels:{color:'#8892a8',font:{size:10},boxWidth:8,padding:8} },
         tooltip:{
           callbacks:{
             label:(ctx)=>{
               const v=ctx.raw;
-              return ctx.dataset.label+': '+(_dashChartMode==='revenue'?'$'+v.toLocaleString('es-AR'):v+' ventas');
+              const m=datasets[ctx.datasetIndex]?.label||'';
+              if(m.includes('💰')||m.includes('Ingresos')) return m+': $'+v.toLocaleString('es-AR');
+              if(m.includes('Performance')||m.includes('conv')) return m+': '+v+'%';
+              return m+': '+v;
             }
           }
         }
       },
-      scales:{y:{...tOpts(),ticks:{...tOpts().ticks,callback:v=>_dashChartMode==='revenue'?'$'+(v>=1000?(v/1000).toFixed(0)+'k':v):v}},x:tXOpts()}
+      scales: scalesConf,
     }
   });
 }
 
 function switchMainChart(mode,btn){
-  document.querySelectorAll('#section-dashboard .tabs .tab').forEach(t=>t.classList.remove('active'));
-  if(btn) btn.classList.add('active');
+  // Compatibilidad: legado solo si se llama con modo
+  if(mode){ _dashChartMode=mode; }
   renderMainChart(mode);
 }
 
@@ -6227,14 +6366,27 @@ async function loadRemoteSettings(){
     });
     if(!r.ok) throw new Error('HTTP '+r.status);
     const d = await r.json();
-    if(d && d.quickReplies) localStorage.setItem(QR_LS_KEY,   JSON.stringify(d.quickReplies));
-    if(d && d.template)     localStorage.setItem(TMPL_LS_KEY, JSON.stringify(d.template));
-    if(d && (d.quickReplies||d.template)){
-      localStorage.setItem(SYNC_TS_KEY, Date.now().toString());
-      console.log('[Settings] Configuración cargada desde la nube ✓');
-      return d;
+    let loaded = false;
+    if(d.quickReplies){ localStorage.setItem(QR_LS_KEY,   JSON.stringify(d.quickReplies)); loaded=true; }
+    if(d.template)    { localStorage.setItem(TMPL_LS_KEY, JSON.stringify(d.template));     loaded=true; }
+    if(d.rpRules && Array.isArray(d.rpRules)){
+      rpRules = d.rpRules;
+      localStorage.setItem('rp_rules', JSON.stringify(rpRules));
+      loaded = true;
     }
-    return null;
+    if(d.activeRules && Array.isArray(d.activeRules)){
+      activeRules = d.activeRules;
+      localStorage.setItem('mlp_active_rules', JSON.stringify(activeRules));
+      loaded = true;
+    }
+    if(loaded){
+      localStorage.setItem(SYNC_TS_KEY, Date.now().toString());
+      console.log('[Settings] Configuración cargada desde la nube ✓', {
+        qr: d.quickReplies?.length||0,
+        rp: d.rpRules?.length||0,
+      });
+    }
+    return loaded ? d : null;
   }catch(e){
     console.warn('[Settings] No se pudo cargar desde la nube (usando localStorage):', e.message);
     return null;
@@ -6245,7 +6397,12 @@ async function loadRemoteSettings(){
 async function saveRemoteSettings(qrs, tmpl){
   if(!token) return false;
   try{
-    const body = { quickReplies: qrs||qGetQR(), template: tmpl||qGetTmpl() };
+    const body = {
+      quickReplies: qrs||qGetQR(),
+      template:     tmpl||qGetTmpl(),
+      rpRules:      rpRules||[],
+      activeRules:  activeRules||[],
+    };
     const r = await fetch(WORKER+'/api/settings', {
       method: 'POST',
       headers:{ 'Authorization':'Bearer '+token, 'Content-Type':'application/json' },
@@ -6253,7 +6410,7 @@ async function saveRemoteSettings(qrs, tmpl){
     });
     if(!r.ok) throw new Error('HTTP '+r.status);
     localStorage.setItem(SYNC_TS_KEY, Date.now().toString());
-    console.log('[Settings] Configuración guardada en la nube ✓');
+    console.log('[Settings] Todo guardado en la nube ✓');
     return true;
   }catch(e){
     console.warn('[Settings] No se pudo guardar en la nube:', e.message);
@@ -6721,32 +6878,47 @@ async function renderMensajes(){
   const el=document.getElementById('mensajes-list');
   if(!el)return;
   el.innerHTML='<div class="loading"><div class="spin"></div>Cargando mensajes...</div>';
+
+  const ML_MSG = 'https://myaccount.mercadolibre.com.ar/messaging/list';
+  let packs=[], unread=0;
+
   try{
-    // Intentar mensajes post-venta sin leer
-    let packs=[];
+    // Estrategia 1: traer packs con tag post_sale
     try{
-      const r=await mlGet('/messages/packs?tag=post_sale&role=seller&limit=50');
-      packs=r.data||[];
-    }catch(e){}
-    if(!packs.length){
+      const r2 = await mlGet('/messages/packs?tag=post_sale&role=seller&limit=50');
+      packs = r2.data||r2.results||[];
+      // Intentar también endpoint de no leídos para conteo preciso
       try{
-        const r2=await mlGet('/messages/packs?role=seller&limit=50');
-        packs=r2.data||[];
-      }catch(e){}
+        const r1 = await mlGet('/messages/packs?tag=post_sale&status=unread&role=seller&limit=50');
+        const up = r1.data||r1.results||[];
+        unread = up.length > 0 ? up.length : packs.filter(p=>p.status==='unread'||p.status==='UNREAD').length;
+      }catch(e1){
+        unread = packs.filter(p=>p.status==='unread'||p.status==='UNREAD').length;
+      }
+    }catch(e2){
+      // Estrategia 2: sin tag
+      const r3 = await mlGet('/messages/packs?role=seller&limit=50');
+      packs = r3.data||r3.results||[];
+      unread = packs.filter(p=>p.status==='unread'||p.status==='UNREAD').length;
     }
-    const unread=packs.filter(p=>p.status==='unread').length;
+
+    // Actualizar badge sidebar
+    const nbEl = document.getElementById('nb-msg');
+    if(nbEl){ nbEl.textContent=unread; nbEl.style.display=unread>0?'':'none'; }
+
     const safeSet=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
     safeSet('msg-unread',unread||'0');
     safeSet('msg-total',packs.length||'0');
+
     if(packs.length){
-      const last=packs[0]?.last_message?.date;
+      const last=packs.find(p=>p.last_message?.date)?.last_message?.date;
       safeSet('msg-last',last?new Date(last).toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'—');
       renderMsgPacks(packs,el);
     } else {
-      el.innerHTML='<div class="alert a-success">✅ Sin mensajes sin leer.</div><div style="margin-top:10px"><a href="https://www.mercadolibre.com.ar/mensajes" target="_blank" style="background:#3b82f6;color:#fff;padding:8px 16px;border-radius:6px;text-decoration:none;font-size:12px;display:inline-flex;align-items:center;gap:6px">📬 Abrir bandeja en ML</a></div>';
+      el.innerHTML='<div class="alert a-success">✅ Sin mensajes sin leer.</div><div style="margin-top:10px"><a href="'+ML_MSG+'" target="_blank" style="background:#3b82f6;color:#fff;padding:8px 16px;border-radius:6px;text-decoration:none;font-size:12px;display:inline-flex;align-items:center;gap:6px">📬 Abrir bandeja en ML</a></div>';
     }
   }catch(e){
-    el.innerHTML='<div class="alert a-info">ℹ️ Los mensajes requieren permiso especial de lectura de mensajes en la app ML. <a href="https://www.mercadolibre.com.ar/mensajes" target="_blank" style="color:#1d4ed8;font-weight:500">Ver directamente en ML -></a></div>';
+    el.innerHTML='<div class="alert a-info">ℹ️ Los mensajes requieren permiso especial en la app ML. <a href="'+ML_MSG+'" target="_blank" style="color:#1d4ed8;font-weight:500">Ver directamente en ML →</a></div>';
   }
 }
 function renderMsgPacks(packs,el){
@@ -6770,7 +6942,7 @@ function renderMsgPacks(packs,el){
           </div>
           ${p.last_message?.text?`<div style="font-size:12px;color:var(--text2);padding:6px 10px;background:var(--bg3);border-radius:6px;font-style:italic">"${p.last_message.text.slice(0,120)}"</div>`:''}
         </div>
-        <a href="https://www.mercadolibre.com.ar/mensajes" target="_blank" style="background:var(--bg3);color:var(--text2);border:1px solid var(--border2);padding:5px 10px;border-radius:6px;font-size:11px;text-decoration:none;flex-shrink:0;white-space:nowrap">Ver -></a>
+        <a href="https://myaccount.mercadolibre.com.ar/messaging/list" target="_blank" style="background:var(--accent);color:#fff;border:none;padding:5px 10px;border-radius:6px;font-size:11px;text-decoration:none;flex-shrink:0;white-space:nowrap">Ver →</a>
       </div>
     </div>`).join('')||'<div class="alert a-success">✅ Sin mensajes</div>';
 }
@@ -6788,6 +6960,8 @@ let rpLog = [];              // historial de logs en memoria
 // ── Persistencia ────────────────────────────────────────────────────
 function rpSaveRules(){
   localStorage.setItem('rp_rules', JSON.stringify(rpRules));
+  // Subir silenciosamente a la nube
+  if(token) saveRemoteSettings().catch(()=>{});
 }
 
 // ── Log de actividad ────────────────────────────────────────────────
@@ -7747,7 +7921,10 @@ function selectOptItem(id,title){
     await initApp();
     // Sincronizar configuración desde la nube al arrancar (silencioso, no bloquea)
     loadRemoteSettings().then(remote => {
-      if(remote) renderQuestions(); // refleja quick replies si los bajó
+      if(remote){
+        renderQuestions(); // refleja quick replies actualizados
+        if(remote.rpRules) { rpRenderList(); rpUpdateKPIs(); }
+      }
     });
     // Restore section from URL hash
     const hash = window.location.hash.replace('#','');
