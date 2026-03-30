@@ -570,7 +570,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   <div class="sb-sec">Gestión</div>
   <a class="nav" href="#ventas" id="nav-ventas" onclick="showSection('ventas');return false;"><span class="ni">🛍️</span>Ventas / Pedidos<span class="nb nb-amber" id="nb-ventas" style="display:none">0</span></a>
   <a class="nav" href="#preguntas" id="nav-preguntas" onclick="showSection('preguntas');return false;"><span class="ni">💬</span>Preguntas<span class="nb nb-red" id="nb-q">0</span></a>
-  <a class="nav" href="#mensajes" id="nav-mensajes" onclick="showSection('mensajes');return false;"><span class="ni">📬</span>Mensajes post-venta</a>
+  <a class="nav" href="#mensajes" id="nav-mensajes" onclick="showSection('mensajes');return false;"><span class="ni">🔔</span>Notificaciones<span class="nb nb-red" id="nb-msg" style="display:none">0</span></a>
   <a class="nav" href="#reputacion" id="nav-reputacion" onclick="showSection('reputacion');return false;"><span class="ni">⭐</span>Reputación</a>
   <a class="nav" href="#stock" id="nav-stock" onclick="showSection('stock');return false;"><span class="ni">📋</span>Stock</a>
   <a class="nav" href="#reclamos" id="nav-reclamos" onclick="showSection('reclamos');return false;"><span class="ni">🚨</span>Reclamos</a>
@@ -775,31 +775,99 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
 <!-- ═══════════════════════ EDICIÓN MASIVA ═══════════════════════ -->
 <div id="section-bulk" class="section fade-in">
+
+  <!-- ── Filtros avanzados ── -->
   <div class="card mb">
-    <div class="card-hd"><div class="card-title">✏️ Cambio masivo de precios</div></div>
-    <div class="fr">
+    <div class="card-hd" style="flex-wrap:wrap;gap:8px">
+      <div class="card-title">🔍 Filtrar publicaciones</div>
+      <button class="btn btn-ghost btn-sm" onclick="bulkClearFilters()">✕ Limpiar</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-top:8px">
       <div>
-        <div class="ff"><label>Seleccionar publicaciones</label>
-          <select id="bulk-sel-price" multiple style="height:160px">
-            <option value="all">Todas las activas</option>
-          </select>
-        </div>
+        <label style="font-size:11px;font-weight:500;display:block;margin-bottom:3px">Título / SKU / MLA</label>
+        <input type="text" id="bulk-filter-q" placeholder="Buscar..." style="width:100%;font-size:12px;padding:6px 8px" oninput="applyBulkFilters()">
       </div>
       <div>
-        <div class="fr">
-          <div><label>Tipo</label><select id="bpm-type"><option value="pct_up">Subir %</option><option value="pct_down">Bajar %</option><option value="fixed">Precio fijo</option></select></div>
-          <div><label>Valor</label><input type="number" id="bpm-val" placeholder="Ej: 10"></div>
+        <label style="font-size:11px;font-weight:500;display:block;margin-bottom:3px">Precio mínimo</label>
+        <input type="number" id="bulk-filter-pmin" placeholder="$ 0" min="0" style="width:100%;font-size:12px;padding:6px 8px" oninput="applyBulkFilters()">
+      </div>
+      <div>
+        <label style="font-size:11px;font-weight:500;display:block;margin-bottom:3px">Precio máximo</label>
+        <input type="number" id="bulk-filter-pmax" placeholder="$ ∞" min="0" style="width:100%;font-size:12px;padding:6px 8px" oninput="applyBulkFilters()">
+      </div>
+      <div>
+        <label style="font-size:11px;font-weight:500;display:block;margin-bottom:3px">Stock mínimo</label>
+        <input type="number" id="bulk-filter-smin" placeholder="0" min="0" style="width:100%;font-size:12px;padding:6px 8px" oninput="applyBulkFilters()">
+      </div>
+      <div>
+        <label style="font-size:11px;font-weight:500;display:block;margin-bottom:3px">Stock máximo</label>
+        <input type="number" id="bulk-filter-smax" placeholder="∞" min="0" style="width:100%;font-size:12px;padding:6px 8px" oninput="applyBulkFilters()">
+      </div>
+      <div>
+        <label style="font-size:11px;font-weight:500;display:block;margin-bottom:3px">Estado</label>
+        <select id="bulk-filter-status" style="width:100%;font-size:12px;padding:6px 8px" onchange="applyBulkFilters()">
+          <option value="">Todos</option>
+          <option value="active">Activas</option>
+          <option value="paused">Pausadas</option>
+        </select>
+      </div>
+    </div>
+    <div id="bulk-filter-count" style="font-size:12px;color:var(--text3);margin-top:10px;font-weight:500"></div>
+  </div>
+
+  <!-- ── Acciones rápidas masivas ── -->
+  <div class="card mb">
+    <div class="card-hd"><div class="card-title">⚡ Acciones sobre publicaciones filtradas</div></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:4px">
+
+      <!-- Pausa / Reactiva -->
+      <div style="padding:14px;background:var(--bg3);border-radius:8px;border:1px solid var(--border)">
+        <div style="font-size:13px;font-weight:600;margin-bottom:10px">📋 Cambiar estado</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-ghost btn-sm" style="background:#fff7ed;color:#92400e;border-color:#fde68a" onclick="bulkSetStatus('paused')">⏸ Pausar filtradas</button>
+          <button class="btn btn-ghost btn-sm" style="background:#f0fdf4;color:#166534;border-color:#bbf7d0" onclick="bulkSetStatus('active')">▶ Reactivar filtradas</button>
         </div>
-        <button class="btn btn-primary" style="width:100%;margin-top:4px" onclick="executeBulkPrice()">Aplicar cambio de precios</button>
-        <div id="bpm-result" style="margin-top:10px"></div>
+        <div id="bulk-status-result" style="margin-top:8px;font-size:12px;min-height:16px"></div>
+      </div>
+
+      <!-- Modificador de precios -->
+      <div style="padding:14px;background:var(--bg3);border-radius:8px;border:1px solid var(--border)">
+        <div style="font-size:13px;font-weight:600;margin-bottom:10px">💲 Modificar precios</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <div>
+            <label style="font-size:11px;font-weight:500;display:block;margin-bottom:3px">Valor</label>
+            <input type="number" id="bulk-price-val" placeholder="Ej: 10" min="0" style="width:90px;font-size:12px;padding:6px 8px">
+          </div>
+          <div>
+            <label style="font-size:11px;font-weight:500;display:block;margin-bottom:3px">Tipo</label>
+            <select id="bulk-price-type" style="font-size:12px;padding:6px 8px">
+              <option value="pct_up">Subir %</option>
+              <option value="pct_down">Bajar %</option>
+              <option value="fixed_add">Sumar $</option>
+              <option value="fixed_sub">Restar $</option>
+              <option value="set">Fijar precio $</option>
+            </select>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="bulkUpdatePrices()">Aplicar</button>
+        </div>
+        <div id="bulk-price-result" style="margin-top:8px;font-size:12px;min-height:16px"></div>
       </div>
     </div>
   </div>
+
+  <!-- ── Lista de publicaciones filtradas ── -->
   <div class="card">
-    <div class="card-hd"><div class="card-title">📋 Duplicar publicaciones</div></div>
-    <div class="alert a-info">ℹ️ Seleccioná publicaciones de la tabla y usá esta función para duplicarlas como borrador.</div>
-    <div id="dup-list"></div>
+    <div class="card-hd">
+      <div class="card-title">📋 Publicaciones filtradas</div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <label style="font-size:11px;color:var(--text3)"><input type="checkbox" id="bulk-check-all" onchange="bulkToggleAll(this)"> Seleccionar todo</label>
+      </div>
+    </div>
+    <div id="bulk-item-list" style="max-height:500px;overflow-y:auto">
+      <div style="color:var(--text3);font-size:12.5px;padding:16px 0">Aplicá un filtro para ver publicaciones.</div>
+    </div>
   </div>
+
 </div>
 
 <!-- ═══════════════════════ SEO ANALIZADOR ═══════════════════════ -->
@@ -1162,14 +1230,55 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
 <!-- ═══════════════════════ COMPETENCIA ═══════════════════════ -->
 <div id="section-competencia" class="section fade-in">
-  <div class="card mb">
-    <div class="card-hd"><div class="card-title">🎯 Análisis de competidores</div></div>
-    <div class="fr">
-      <div><label>Buscar producto</label><input type="text" id="comp-q" placeholder="Ej: taza mágica personalizada"></div>
-      <div style="display:flex;align-items:flex-end"><button class="btn btn-primary" style="width:100%" onclick="doComp()">Analizar</button></div>
+
+  <!-- Fila 1: Buscar en ML + Guardar competidor -->
+  <div class="g2 mb">
+    <div class="card">
+      <div class="card-hd"><div class="card-title">🔍 Análisis de mercado</div></div>
+      <div class="fr" style="margin-bottom:10px">
+        <div style="flex:1"><label>Buscar producto</label><input type="text" id="comp-q" placeholder="Ej: taza mágica personalizada" style="width:100%"></div>
+        <div style="display:flex;align-items:flex-end"><button class="btn btn-primary" onclick="doComp()">Analizar</button></div>
+      </div>
+      <div id="comp-out"></div>
     </div>
-    <div id="comp-out"></div>
+    <div class="card">
+      <div class="card-hd"><div class="card-title">💾 Guardar competidor</div></div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div>
+          <label style="font-size:11px;font-weight:500;display:block;margin-bottom:3px">Nombre</label>
+          <input type="text" id="comp-save-name" placeholder="Ej: Rival Principal" style="width:100%;font-size:12px;padding:7px 9px">
+        </div>
+        <div>
+          <label style="font-size:11px;font-weight:500;display:block;margin-bottom:3px">URL de ML</label>
+          <input type="text" id="comp-save-url" placeholder="https://articulo.mercadolibre.com.ar/MLA-..." style="width:100%;font-size:12px;padding:7px 9px">
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="saveCompetidor()">☁️ Guardar en la nube</button>
+        <div id="comp-save-result" style="font-size:11.5px;min-height:16px"></div>
+      </div>
+    </div>
   </div>
+
+  <!-- Fila 2: Consulta Express + Competidores guardados -->
+  <div class="g2 mb">
+    <div class="card">
+      <div class="card-hd"><div class="card-title">⚡ Consulta Express</div></div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <label style="font-size:11px;color:var(--text3)">Pegá un link de ML o un MLA ID para ver su info y reputación del vendedor</label>
+        <input type="text" id="comp-express-url" placeholder="https://articulo.mercadolibre.com.ar/MLA-..." style="font-size:12px;padding:7px 9px">
+        <button class="btn btn-primary btn-sm" onclick="compExpressLookup()">Consultar</button>
+        <div id="comp-express-out"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-hd">
+        <div class="card-title">📋 Competidores guardados</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadCompetidores()">↻</button>
+      </div>
+      <div id="comp-saved-list"><div style="color:var(--text3);font-size:12px;padding:8px 0">Cargando...</div></div>
+    </div>
+  </div>
+
+  <!-- Gráficos existentes -->
   <div class="g2">
     <div class="card">
       <div class="card-hd"><div class="card-title">Precio promedio de mercado</div></div>
@@ -1483,18 +1592,15 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <div id="section-mensajes" class="section fade-in">
   <div class="mgt mgt-3">
     <div class="mc c-amber"><div class="mc-label">Sin leer</div><div class="mc-val" id="msg-unread">—</div></div>
-    <div class="mc c-blue"><div class="mc-label">Total packs</div><div class="mc-val" id="msg-total">—</div></div>
+    <div class="mc c-blue"><div class="mc-label">Total</div><div class="mc-val" id="msg-total">—</div></div>
     <div class="mc c-green"><div class="mc-label">Última actividad</div><div class="mc-val" id="msg-last" style="font-size:14px">—</div></div>
   </div>
   <div class="card">
     <div class="card-hd">
-      <div class="card-title">📬 Mensajes post-venta</div>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-ghost btn-sm" onclick="renderMensajes()">↻ Actualizar</button>
-        <a href="https://www.mercadolibre.com.ar/mensajes" target="_blank" class="btn btn-primary btn-sm" style="text-decoration:none">📬 Abrir en ML</a>
-      </div>
+      <div class="card-title">🔔 Notificaciones</div>
+      <button class="btn btn-ghost btn-sm" onclick="renderMensajes()">↻ Actualizar</button>
     </div>
-    <div id="mensajes-list"><div class="loading"><div class="spin"></div>Cargando mensajes...</div></div>
+    <div id="mensajes-list"><div class="loading"><div class="spin"></div>Cargando...</div></div>
   </div>
 </div>
 
@@ -2590,29 +2696,19 @@ function deltaHtml(pct){
   return `<span class="delta ${cls}">${arrow}${Math.abs(pct)}%</span>`;
 }
 
-// ── Calcular business health score ────────────────────────
+// ── Calcular business health score usando atributo health de ML ─
 function calcBizScore(){
   const orders = dashOrders(dashPeriodDays);
-  const paid = orders.filter(o=>o.status==='paid'||o.status==='confirmed'||o.status==='delivered'||o.status==='shipped');
+  const paid = orders.filter(o=>['paid','confirmed','delivered','shipped'].includes(o.status));
   const activeItems = allItems.filter(i=>i.status==='active');
-  const seoAvg = activeItems.length ? Math.round(activeItems.reduce((s,i)=>s+seoScore(i.title),0)/activeItems.length) : 0;
   const pend = allQuestions.filter(q=>q.status==='UNANSWERED').length;
   const zeroStock = allItems.filter(i=>i.status==='active'&&(i.available_quantity||0)===0).length;
-  const zeroRatio = activeItems.length ? zeroStock/activeItems.length : 0;
-
-  let score = 50;
-  // Ventas: más ventas mejor (normalizado a ~50 ventas = máximo)
-  score += Math.min(20, Math.round(paid.length / Math.max(1, dashPeriodDays/30) * 2));
-  // SEO
-  score += Math.round(seoAvg/100*15);
-  // Preguntas sin responder (penaliza)
-  score -= Math.min(15, pend*3);
-  // Stock sin unidades (penaliza)
-  score -= Math.round(zeroRatio*20);
-
-  score = Math.max(0, Math.min(100, score));
-  const state = score>=70?['🟢','Saludable','#16a34a','#f0fdf4']:score>=45?['🟡','En riesgo','#92400e','#fffbeb']:['🔴','Crítico','#991b1b','#fef2f2'];
-  return {score, state, seoAvg, pend, zeroStock};
+  const healthScores = activeItems.map(i=>i.health!=null?i.health:qualityScore(i)/100);
+  const healthAvg = healthScores.length ? Math.round(healthScores.reduce((s,v)=>s+v,0)/healthScores.length*100) : 0;
+  const seoAvg = healthAvg;
+  const score = Math.max(0, Math.min(100, healthAvg));
+  const state = score>=80?['\U0001f7e2','Saludable','#16a34a','#f0fdf4']:score>=50?['\U0001f7e1','Regular','#92400e','#fffbeb']:['\U0001f534','Requiere Atenci\xf3n','#991b1b','#fef2f2'];
+  return {score, state, seoAvg, healthAvg, pend, zeroStock};
 }
 
 function renderBizScore(){
@@ -2639,7 +2735,7 @@ function renderBizScore(){
       <div style="display:flex;gap:14px;flex-wrap:wrap;margin-left:auto">
         <div style="text-align:center;padding:10px 16px;background:var(--bg3);border-radius:var(--r);border:1px solid var(--border)">
           <div style="font-size:20px;font-weight:700">${seoAvg}</div>
-          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em">SEO promedio</div>
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em">Calidad promedio</div>
         </div>
         <div style="text-align:center;padding:10px 16px;background:${pend>0?'#fffbeb':'var(--bg3)'};border-radius:var(--r);border:1px solid ${pend>0?'#fde68a':'var(--border)'};cursor:${pend>0?'pointer':'default'}" ${pend>0?'onclick="showSection(&quot;preguntas&quot;)"':''}>
           <div style="font-size:20px;font-weight:700;color:${pend>0?'#92400e':'var(--text)'}">${pend}</div>
@@ -3010,10 +3106,11 @@ function renderDashTopPubs(){
     const price = i?.price || 0;
     const thumb = i?.thumbnail || '';
     const status= i?.status || 'active';
-    const sc    = i ? seoScore(i.title) : 0;
-    const scC   = sc>=70?'var(--green)':sc>=40?'var(--amber)':'var(--red)';
+    const sc    = i ? (i.health!=null ? Math.round(i.health*100) : qualityScore(i)) : 0;
+    const scC   = sc>=80?'var(--green)':sc>=50?'var(--amber)':'var(--red)';
     const medal = idx===0?'🥇':idx===1?'🥈':idx===2?'🥉':String(idx+1);
-    const onCl  = i ? `onclick="quickOptimize('${i.id}','${title.replace(/'/g,"\\'")}')"`  : '';
+    const ctrlUrl= i ? 'https://www.mercadolibre.com.ar/items/control?item_id='+i.id : null;
+    const onCl  = ctrlUrl ? 'onclick="window.open(\''+ctrlUrl+'\',\'_blank\')"' : '';
     return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);'+(i?'cursor:pointer':'')+'" '+onCl+'>'
       +'<span style="font-size:'+(idx<3?'15':'12')+'px;font-weight:700;color:var(--text3);width:22px;text-align:center;flex-shrink:0">'+medal+'</span>'
       +'<div class="item-thumb" style="flex-shrink:0">'+(thumb?'<img src="'+thumb+'" onerror="this.parentElement.textContent=\'☕\'">':'☕')+'</div>'
@@ -3022,7 +3119,7 @@ function renderDashTopPubs(){
         +'<div style="font-size:10px;color:var(--text3);display:flex;gap:8px;margin-top:2px;flex-wrap:wrap">'
           +'<span style="color:var(--green);font-weight:600">▲ '+qty+' uds. (90d)</span>'
           +'<span>$'+price.toLocaleString('es-AR')+'</span>'
-          +(i?'<span style="color:'+scC+'">SEO '+sc+'</span>':'')
+          +(i?'<span style="color:'+scC+'">Calidad '+sc+'%</span>':'')
         +'</div>'
       +'</div>'
       +'<span class="badge '+(status==='active'?'bg-green':'bg-amber')+'" style="flex-shrink:0">'+(status==='active'?'●':'⏸')+'</span>'
@@ -5082,6 +5179,182 @@ async function loadTrends(){
   }
 }
 
+// ══════════════════════════════════════════════════════════
+// MÓDULO: COMPETIDORES GUARDADOS EN KV + CONSULTA EXPRESS
+// ══════════════════════════════════════════════════════════
+
+// ── Cargar competidores desde KV (via saveRemoteSettings / settings) ─
+let _savedCompetitors = [];
+
+async function loadCompetidores(){
+  const el = document.getElementById('comp-saved-list');
+  if(el) el.innerHTML='<div style="color:var(--text3);font-size:12px;padding:8px 0">Cargando...</div>';
+  try{
+    const r = await fetch(WORKER+'/api/settings',{ headers:{'Authorization':'Bearer '+token} });
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const d = await r.json();
+    _savedCompetitors = d.competitors||[];
+    renderCompetidores();
+  }catch(e){
+    if(el) el.innerHTML='<div style="color:var(--text3);font-size:12px;padding:8px 0">No se pudo cargar. Revisá la conexión.</div>';
+  }
+}
+
+function renderCompetidores(){
+  const el = document.getElementById('comp-saved-list');
+  if(!el) return;
+  if(!_savedCompetitors.length){
+    el.innerHTML='<div style="color:var(--text3);font-size:12px;padding:8px 0">No hay competidores guardados aún.</div>';
+    return;
+  }
+  el.innerHTML=_savedCompetitors.map((comp,i)=>`
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12.5px;font-weight:500">${comp.name}</div>
+        ${comp.url?`<a href="${comp.url}" target="_blank" style="font-size:11px;color:var(--accent);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;max-width:250px">${comp.url.slice(0,55)}...</a>`:''}
+      </div>
+      <button onclick="compExpressFromUrl('${comp.url||''}')" class="btn btn-ghost btn-xs" title="Consulta Express">⚡</button>
+      <button onclick="deleteCompetidor(${i})" class="btn btn-ghost btn-xs" style="color:var(--red);border-color:var(--red)">✕</button>
+    </div>`).join('');
+}
+
+async function saveCompetidor(){
+  const name = document.getElementById('comp-save-name')?.value?.trim();
+  const url  = document.getElementById('comp-save-url')?.value?.trim();
+  const res  = document.getElementById('comp-save-result');
+  if(!name){ if(res) res.textContent='⚠ Ingresá un nombre'; return; }
+
+  _cloudStatus('saving');
+  if(res){ res.textContent='⏳ Guardando...'; res.style.color='var(--text3)'; }
+
+  // Cargar lista actual primero para no pisar datos existentes
+  try{
+    const r0 = await fetch(WORKER+'/api/settings',{ headers:{'Authorization':'Bearer '+token} });
+    if(r0.ok){ const d0=await r0.json(); _savedCompetitors=d0.competitors||[]; }
+  }catch(e){}
+
+  _savedCompetitors.push({ name, url: url||'', addedAt: new Date().toISOString() });
+
+  try{
+    const r = await fetch(WORKER+'/api/settings',{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
+      body: JSON.stringify({
+        quickReplies:qGetQR(), template:qGetTmpl(),
+        rpRules:rpRules||[], activeRules:activeRules||[],
+        competitors:_savedCompetitors
+      })
+    });
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    _cloudStatus('ok');
+    if(res){ res.textContent='✅ Guardado en la nube'; res.style.color='var(--green)'; }
+    if(document.getElementById('comp-save-name')) document.getElementById('comp-save-name').value='';
+    if(document.getElementById('comp-save-url'))  document.getElementById('comp-save-url').value='';
+    renderCompetidores();
+  }catch(e){
+    _cloudStatus('error');
+    if(res){ res.textContent='❌ Error: '+e.message; res.style.color='var(--red)'; }
+  }
+  setTimeout(()=>{ if(res) res.textContent=''; }, 4000);
+}
+
+async function deleteCompetidor(idx){
+  if(!confirm('¿Eliminar este competidor?')) return;
+  _savedCompetitors.splice(idx,1);
+  _cloudStatus('saving');
+  try{
+    await fetch(WORKER+'/api/settings',{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
+      body:JSON.stringify({
+        quickReplies:qGetQR(),template:qGetTmpl(),
+        rpRules:rpRules||[],activeRules:activeRules||[],
+        competitors:_savedCompetitors
+      })
+    });
+    _cloudStatus('ok');
+  }catch(e){ _cloudStatus('error'); }
+  renderCompetidores();
+}
+
+function compExpressFromUrl(url){
+  const inp=document.getElementById('comp-express-url');
+  if(inp) inp.value=url||'';
+  compExpressLookup();
+}
+
+async function compExpressLookup(){
+  const inp = document.getElementById('comp-express-url')?.value?.trim()||'';
+  const out = document.getElementById('comp-express-out');
+  if(!out) return;
+  if(!inp){ out.innerHTML='<div style="color:var(--text3);font-size:12px">Ingresá una URL o MLA ID.</div>'; return; }
+
+  // Extraer MLA ID
+  let mlaId = null;
+  const m = inp.match(/MLA[-]?(\d+)/i);
+  if(m) mlaId='MLA'+m[1];
+  else if(/^\d{8,}$/.test(inp.trim())) mlaId='MLA'+inp.trim();
+
+  if(!mlaId){ out.innerHTML='<div class="alert a-warn">⚠ No se pudo extraer un MLA ID de la URL.</div>'; return; }
+
+  out.innerHTML='<div class="loading"><div class="spin"></div>Consultando...</div>';
+
+  try{
+    // Usar la IP del cliente via corsproxy.io para evitar 403 de ML
+    const apiUrl = 'https://corsproxy.io/?'+encodeURIComponent('https://api.mercadolibre.com/items/'+mlaId+'?attributes=id,title,price,available_quantity,sold_quantity,seller_id,thumbnail,permalink,seller');
+    const r = await fetch(apiUrl, { signal: AbortSignal.timeout(10000) });
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const item = await r.json();
+    if(item.error) throw new Error(item.message||item.error);
+
+    // Reputación del vendedor
+    let repHtml='';
+    if(item.seller_id||item.seller?.id){
+      try{
+        const sellerId=item.seller_id||item.seller?.id;
+        const repUrl='https://corsproxy.io/?'+encodeURIComponent('https://api.mercadolibre.com/users/'+sellerId+'/seller_reputation');
+        const r2=await fetch(repUrl,{signal:AbortSignal.timeout(6000)});
+        if(r2.ok){
+          const rep=await r2.json();
+          const level=rep.level_id||'—';
+          const lvlColor={'1_red':'var(--red)','2_orange':'#f97316','3_yellow':'var(--amber)','4_light_green':'var(--green)','5_green':'#16a34a'}[level]||'var(--text2)';
+          repHtml=`<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px">
+            <div style="padding:6px 12px;background:var(--bg3);border-radius:6px;text-align:center">
+              <div style="font-size:11px;color:var(--text3)">Reputación</div>
+              <div style="font-weight:700;color:${lvlColor}">${level.replace(/_/g,' ')}</div>
+            </div>
+            ${rep.power_seller_status?`<div style="padding:6px 12px;background:var(--bg3);border-radius:6px;text-align:center">
+              <div style="font-size:11px;color:var(--text3)">Power Seller</div>
+              <div style="font-weight:700;color:var(--green)">${rep.power_seller_status}</div>
+            </div>`:''}
+            ${rep.metrics?.claims?.rate!=null?`<div style="padding:6px 12px;background:var(--bg3);border-radius:6px;text-align:center">
+              <div style="font-size:11px;color:var(--text3)">Reclamos</div>
+              <div style="font-weight:700">${(rep.metrics.claims.rate*100).toFixed(2)}%</div>
+            </div>`:''}
+          </div>`;
+        }
+      }catch(e){ repHtml='<div style="font-size:11px;color:var(--text3);margin-top:6px">Reputación no disponible</div>'; }
+    }
+
+    out.innerHTML=`
+      <div style="display:flex;gap:10px;margin-top:10px;align-items:flex-start">
+        ${item.thumbnail?`<img src="${item.thumbnail}" width="56" height="56" style="object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border)">`:''}
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600;margin-bottom:4px">${item.title||mlaId}</div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--text2)">
+            <span>💲 <b>$${(item.price||0).toLocaleString('es-AR')}</b></span>
+            <span>📦 Stock: ${item.available_quantity??'—'}</span>
+            <span>🛒 Vendidas: ${item.sold_quantity||0}</span>
+          </div>
+          ${repHtml}
+          ${item.permalink?`<a href="${item.permalink}" target="_blank" class="btn btn-ghost btn-xs" style="margin-top:8px;text-decoration:none">Ver en ML →</a>`:''}
+        </div>
+      </div>`;
+  }catch(e){
+    out.innerHTML='<div class="alert a-err">❌ Error: '+e.message+'</div>';
+  }
+}
+
 async function doComp(){
   const q=(document.getElementById('comp-q')||{}).value?.trim();
   if(!q){alert('Ingresá un producto');return;}
@@ -6241,11 +6514,162 @@ function setBulkTab(tab,btn){
   ['precio','titulo','estado'].forEach(t=>document.getElementById('bulk-'+t).style.display=t===tab?'block':'none');
 }
 
-function executeBulkPrice(){
-  const type=document.getElementById('bpm-type').value;
-  const val=parseFloat(document.getElementById('bpm-val').value)||0;
-  const el=document.getElementById('bpm-result');
-  el.innerHTML=`<div class="alert a-success">✅ Cambio de precio ${type==='pct_up'?'subido':type==='pct_down'?'bajado':'fijado'} en ${val} — ${allItems.filter(i=>i.status==='active').length} publicaciones afectadas</div>`;
+// ══════════════════════════════════════════════════════════
+// EDICIÓN MASIVA — Filtros + Acciones
+// ══════════════════════════════════════════════════════════
+let _bulkFiltered = []; // ítems que pasan el filtro activo
+
+function bulkClearFilters(){
+  ['bulk-filter-q','bulk-filter-pmin','bulk-filter-pmax','bulk-filter-smin','bulk-filter-smax'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.value='';
+  });
+  const st=document.getElementById('bulk-filter-status'); if(st) st.value='';
+  _bulkFiltered=[];
+  const el=document.getElementById('bulk-item-list');
+  if(el) el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:16px 0">Aplicá un filtro para ver publicaciones.</div>';
+  const cnt=document.getElementById('bulk-filter-count'); if(cnt) cnt.textContent='';
+}
+
+function applyBulkFilters(){
+  const q     = (document.getElementById('bulk-filter-q')?.value||'').trim().toLowerCase();
+  const pMin  = parseFloat(document.getElementById('bulk-filter-pmin')?.value)||0;
+  const pMax  = parseFloat(document.getElementById('bulk-filter-pmax')?.value)||Infinity;
+  const sMin  = parseFloat(document.getElementById('bulk-filter-smin')?.value);
+  const sMax  = parseFloat(document.getElementById('bulk-filter-smax')?.value);
+  const st    = document.getElementById('bulk-filter-status')?.value||'';
+
+  _bulkFiltered = allItems.filter(i=>{
+    if(q){
+      const skuA=(i.attributes||[]).find(a=>a.id==='SELLER_SKU');
+      const sku=(skuA?.value_name||i.seller_custom_field||'').toLowerCase();
+      if(!i.title.toLowerCase().includes(q) && !sku.includes(q) && !String(i.id).includes(q)) return false;
+    }
+    if(pMin && (i.price||0)<pMin) return false;
+    if(isFinite(pMax) && pMax>0 && (i.price||0)>pMax) return false;
+    if(!isNaN(sMin) && sMin!=='' && (i.available_quantity||0)<sMin) return false;
+    if(!isNaN(sMax) && sMax!=='' && (i.available_quantity||0)>sMax) return false;
+    if(st && i.status!==st) return false;
+    return true;
+  });
+
+  const cnt=document.getElementById('bulk-filter-count');
+  if(cnt) cnt.textContent = _bulkFiltered.length+' publicaciones coinciden';
+
+  renderBulkList();
+}
+
+function renderBulkList(){
+  const el=document.getElementById('bulk-item-list');
+  if(!el) return;
+  if(!_bulkFiltered.length){
+    el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:16px 0">Sin resultados para estos filtros.</div>';
+    return;
+  }
+  el.innerHTML=_bulkFiltered.map(i=>{
+    const qty=i.available_quantity??0;
+    const qColor=qty===0?'var(--red)':qty<=3?'var(--amber)':'var(--green)';
+    return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">'
+      +'<input type="checkbox" class="bulk-item-cb" value="'+i.id+'" style="flex-shrink:0">'
+      +(i.thumbnail?'<img src="'+i.thumbnail+'" width="36" height="36" style="object-fit:cover;border-radius:4px;flex-shrink:0" onerror="this.style.display=\'none\'">':'')
+      +'<div style="flex:1;min-width:0">'
+        +'<div style="font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+i.title+'</div>'
+        +'<div style="font-size:10.5px;color:var(--text3);display:flex;gap:8px;margin-top:2px">'
+          +'<span>'+i.id+'</span>'
+          +'<span>$'+(i.price||0).toLocaleString('es-AR')+'</span>'
+          +'<span style="color:'+qColor+'">Stock: '+qty+'</span>'
+        +'</div>'
+      +'</div>'
+      +'<span class="badge '+(i.status==='active'?'bg-green':'bg-amber')+'" style="flex-shrink:0">'+(i.status==='active'?'● Activa':'⏸ Pausada')+'</span>'
+      +'</div>';
+  }).join('');
+}
+
+function bulkToggleAll(cb){
+  document.querySelectorAll('.bulk-item-cb').forEach(c=>{ c.checked=cb.checked; });
+}
+
+function _bulkSelected(){
+  // Si hay checkboxes marcados → usar esos; si no → usar todos los filtrados
+  const checked=[...document.querySelectorAll('.bulk-item-cb:checked')].map(c=>c.value);
+  if(checked.length) return _bulkFiltered.filter(i=>checked.includes(i.id));
+  return _bulkFiltered;
+}
+
+async function bulkSetStatus(newStatus){
+  const targets=_bulkSelected();
+  if(!targets.length){ alert('Aplicá un filtro primero para seleccionar publicaciones.'); return; }
+  const label=newStatus==='active'?'reactivar':'pausar';
+  if(!confirm('¿Seguro que querés '+label+' '+targets.length+' publicaciones?')) return;
+
+  _cloudStatus('saving');
+  const res=document.getElementById('bulk-status-result');
+  if(res) res.innerHTML='⏳ Procesando '+targets.length+' publicaciones...';
+
+  let ok=0, fail=0;
+  for(const item of targets){
+    try{
+      const r=await fetch(WORKER+'/api/items/'+item.id,{
+        method:'PUT',
+        headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
+        body:JSON.stringify({status:newStatus})
+      });
+      const d=await r.json();
+      if(d.error||!r.ok) throw new Error(d.message||d.error||'HTTP '+r.status);
+      item.status=newStatus; ok++;
+    }catch(e){ console.warn('[Bulk status]',item.id,e.message); fail++; }
+    await new Promise(r=>setTimeout(r,150)); // rate limit
+  }
+  _cloudStatus(fail===0?'ok':'error');
+  if(res) res.innerHTML=(fail===0?'✅':'⚠️')+' '+ok+' actualizadas'+( fail>0?' · '+fail+' fallaron':'');
+  renderBulkList();
+}
+
+async function bulkUpdatePrices(){
+  const targets=_bulkSelected();
+  if(!targets.length){ alert('Aplicá un filtro primero para seleccionar publicaciones.'); return; }
+  const val=parseFloat(document.getElementById('bulk-price-val')?.value||'0');
+  const type=document.getElementById('bulk-price-type')?.value||'pct_up';
+  if(!val||val<=0){ alert('Ingresá un valor mayor a 0.'); return; }
+
+  const typeLabel={'pct_up':'subir '+val+'%','pct_down':'bajar '+val+'%','fixed_add':'sumar $'+val,'fixed_sub':'restar $'+val,'set':'fijar en $'+val}[type]||type;
+  if(!confirm('¿Seguro que querés '+typeLabel+' a '+targets.length+' publicaciones?')) return;
+
+  _cloudStatus('saving');
+  const res=document.getElementById('bulk-price-result');
+  if(res) res.innerHTML='⏳ Actualizando precios...';
+
+  let ok=0, fail=0;
+  for(const item of targets){
+    let newPrice;
+    const cur=item.price||0;
+    if(type==='pct_up')    newPrice=Math.round(cur*(1+val/100));
+    else if(type==='pct_down') newPrice=Math.round(cur*(1-val/100));
+    else if(type==='fixed_add') newPrice=Math.round(cur+val);
+    else if(type==='fixed_sub') newPrice=Math.max(1,Math.round(cur-val));
+    else newPrice=Math.round(val); // set
+    if(newPrice<=0) newPrice=1;
+    try{
+      const r=await fetch(WORKER+'/api/items/'+item.id,{
+        method:'PUT',
+        headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
+        body:JSON.stringify({price:newPrice})
+      });
+      const d=await r.json();
+      if(d.error||!r.ok) throw new Error(d.message||d.error||'HTTP '+r.status);
+      item.price=newPrice; ok++;
+    }catch(e){ console.warn('[Bulk price]',item.id,e.message); fail++; }
+    await new Promise(r=>setTimeout(r,150));
+  }
+  _cloudStatus(fail===0?'ok':'error');
+  if(res) res.innerHTML=(fail===0?'✅':'⚠️')+' '+ok+' precios actualizados'+(fail>0?' · '+fail+' fallaron':'');
+  renderBulkList();
+}
+
+// Compatibilidad con código antiguo
+function executeBulkPrice(){ bulkUpdatePrices(); }
+function setBulkTab(tab,btn){
+  document.querySelectorAll('#modal-bulk .tab').forEach(t=>t.classList.remove('active'));
+  if(btn) btn.classList.add('active');
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -6465,6 +6889,8 @@ async function saveRemoteSettings(qrs, tmpl){
       template:     tmpl||qGetTmpl(),
       rpRules:      rpRules||[],
       activeRules:  activeRules||[],
+      competitors:  (_savedCompetitors||[]),
+      competitors:  _savedCompetitors||[],
     };
     const r = await fetch(WORKER+'/api/settings', {
       method: 'POST',
@@ -6823,7 +7249,7 @@ const titles={
   competencia:['🎯 Competencia','Análisis de competidores y precios'],
   ventas:['🛍️ Ventas / Pedidos','Historial completo · 18 meses'],
   preguntas:['💬 Preguntas','Gestión y respuesta con IA'],
-  mensajes:['📬 Mensajes post-venta','Comunicación con compradores'],
+  mensajes:['🔔 Notificaciones','Notificaciones y mensajes de ML'],
   reputacion:['⭐ Reputación','Indicadores oficiales de ML'],
   stock:['📋 Control de stock','Alertas y actualización de inventario'],
   reclamos:['🚨 Reclamos','Gestión de disputas'],
@@ -6938,40 +7364,122 @@ async function doMktAnalysis(){
   }catch(e){el.innerHTML='<div class="alert a-err">Error: '+e.message+'</div>';}
 }
 
-// ── Mensajes ──
+// ── Notificaciones ──────────────────────────────────────────
 async function renderMensajes(){
-  const el=document.getElementById('mensajes-list');
-  if(!el)return;
-  el.innerHTML='<div class="loading"><div class="spin"></div>Cargando mensajes...</div>';
-  let packs=[], unread=0;
+  const el = document.getElementById('mensajes-list');
+  if(!el) return;
+  el.innerHTML = '<div class="loading"><div class="spin"></div>Cargando notificaciones...</div>';
+
+  let notifs = [], unread = 0;
+
+  // Estrategia 1: endpoint de notificaciones del usuario
   try{
-    // Sin tag=post_sale: ML a veces oculta mensajes si se forza ese filtro
-    const r = await mlGet('/messages/packs?role=seller&limit=50');
-    packs = r.data||r.results||[];
-    // Conteo de no leídos via endpoint dedicado (más preciso)
-    try{
-      const ru = await mlGet('/messages/packs?role=seller&status=unread&limit=50');
-      unread = (ru.data||ru.results||[]).length;
-    }catch(e){ unread = packs.filter(p=>p.status==='unread'||p.status==='UNREAD').length; }
+    const r = await mlGet('/users/'+userId+'/notifications?limit=50&mark_as_read=false');
+    notifs = r.results||r.notifications||r.data||[];
+    unread = notifs.filter(n=>!n.is_read&&n.status!=='read').length;
+    console.log('[Notificaciones] raw:', r, '| total:', notifs.length, '| sin leer:', unread);
   }catch(e){
-    console.warn('[Mensajes] API falló:', e.message);
+    console.warn('[Notificaciones] endpoint falló, fallback a mensajes:', e.message);
+    // Fallback: usar mensajes post-venta
+    try{
+      const r2 = await mlGet('/messages/packs?role=seller&limit=50');
+      const packs = r2.data||r2.results||[];
+      unread = packs.filter(p=>p.status==='unread'||p.status==='UNREAD').length;
+      // Convertir packs al formato de notificaciones
+      notifs = packs.map(p=>{
+        let orderId = p.order_id||p.resource_id||null;
+        if(!orderId&&p.resource){ const m=String(p.resource).match(/orders\/(\d+)/i); if(m) orderId=m[1]; }
+        return {
+          _type:'message', _orderId:orderId, is_read:p.status!=='unread',
+          subject:p.subject||'Mensaje post-venta',
+          date:p.last_message?.date||p.date_created,
+          participants:(p.participants||[]).map(x=>x.nickname).filter(Boolean).join(', '),
+          preview:p.last_message?.text||'',
+        };
+      });
+    }catch(e2){ console.warn('[Notif] fallback también falló:', e2.message); }
   }
 
-  // Actualizar badge del sidebar
+  // Badge sidebar
   const nbEl = document.getElementById('nb-msg');
   if(nbEl){ nbEl.textContent=unread; nbEl.style.display=unread>0?'':'none'; }
 
-  const safeSet=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
-  safeSet('msg-unread', unread||'0');
-  safeSet('msg-total',  packs.length||'0');
+  const ss=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
+  ss('msg-unread', unread||'0');
+  ss('msg-total',  notifs.length||'0');
+  const lastDate = notifs.find(n=>n.date||n.date_created)?.date||notifs.find(n=>n.date||n.date_created)?.date_created;
+  ss('msg-last', lastDate?new Date(lastDate).toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'—');
 
-  if(!packs.length){
-    el.innerHTML='<div class="alert a-success">✅ Sin mensajes.<br><small style="opacity:.7">Si esperás mensajes, revisá los permisos de la app ML en Mis aplicaciones.</small></div>';
+  if(!notifs.length){
+    el.innerHTML='<div class="alert a-success">✅ Sin notificaciones recientes.</div>';
     return;
   }
-  const last=packs.find(p=>p.last_message?.date)?.last_message?.date;
-  safeSet('msg-last', last?new Date(last).toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'—');
-  renderMsgPacks(packs,el);
+  renderNotifList(notifs, el);
+}
+
+function renderNotifList(notifs, el){
+  // Ordenar: no leídas primero, luego por fecha
+  const sorted = [...notifs].sort((a,b)=>{
+    const aRead = a.is_read||a.status==='read';
+    const bRead = b.is_read||b.status==='read';
+    if(!aRead&&bRead) return -1;
+    if(aRead&&!bRead) return 1;
+    return new Date(b.date||b.date_created||0)-new Date(a.date||a.date_created||0);
+  });
+
+  el.innerHTML = sorted.map(n=>{
+    const isRead = n.is_read||n.status==='read';
+    const dateStr = (n.date||n.date_created)
+      ? new Date(n.date||n.date_created).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})
+      : '—';
+
+    // Determinar URL de destino según tipo
+    let linkUrl = null, linkLabel = 'Ver →';
+    const type = n.type||n._type||'';
+    const resourceId = n.resource_id||n._orderId||null;
+
+    if(type==='messages'||type==='message'||n._orderId){
+      linkUrl = resourceId
+        ? 'https://www.mercadolibre.com.ar/ventas/'+resourceId+'/detalle'
+        : 'https://www.mercadolibre.com.ar/ventas';
+      linkLabel = '💬 Ver mensaje';
+    } else if(type==='orders'||type==='order'||String(n.topic||'').includes('order')){
+      linkUrl = resourceId ? 'https://www.mercadolibre.com.ar/ventas/'+resourceId+'/detalle' : null;
+      linkLabel = '🛒 Ver orden';
+    } else if(type==='questions'||String(n.topic||'').includes('question')){
+      linkUrl = null; // nav interna
+      linkLabel = '💬 Ver pregunta';
+    } else if(resourceId){
+      linkUrl = 'https://www.mercadolibre.com.ar/ventas/'+resourceId+'/detalle';
+    }
+
+    const badge = isRead
+      ? '<span class="badge bg-gray" style="font-size:9px">Leída</span>'
+      : '<span class="badge bg-red" style="font-size:9px">● Sin leer</span>';
+
+    const actionBtn = linkUrl
+      ? '<a href="'+linkUrl+'" target="_blank" style="background:var(--accent);color:#fff;border:none;padding:5px 12px;border-radius:6px;font-size:11px;text-decoration:none;flex-shrink:0;font-weight:500">'+linkLabel+'</a>'
+      : (!linkUrl&&type==='questions'
+          ? '<button onclick="showSection(\'preguntas\')" class="btn btn-ghost btn-sm" style="font-size:11px;flex-shrink:0">'+linkLabel+'</button>'
+          : '');
+
+    return '<div style="padding:12px 0;border-bottom:1px solid var(--border)">'
+      +'<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">'
+      +'<div style="flex:1;min-width:0">'
+      +'<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap">'
+      +badge
+      +'<span style="font-size:12.5px;font-weight:500">'+(n.subject||n.title||n.topic||type||'Notificación')+'</span>'
+      +'</div>'
+      +'<div style="font-size:11px;color:var(--text3);margin-bottom:4px">'
+      +(n.participants||n.buyer?.nickname?n.participants||n.buyer?.nickname+' · ':'')
+      +dateStr
+      +(resourceId?' <span style="opacity:.4">· #'+resourceId+'</span>':'')
+      +'</div>'
+      +((n.preview||n.body)?'<div style="font-size:12px;color:var(--text2);padding:5px 9px;background:var(--bg3);border-radius:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:420px">'+(n.preview||n.body||'').slice(0,100)+'</div>':'')
+      +'</div>'
+      +actionBtn
+      +'</div></div>';
+  }).join('')||'<div class="alert a-success">✅ Sin notificaciones</div>';
 }
 function renderMsgPacks(packs,el){
   const sorted=[...packs].sort((a,b)=>{
@@ -7996,4 +8504,4 @@ function selectOptItem(id,title){
 })();
 </script>
 </body>
-</html>
+</html>  if(id==='competencia'){ loadCompetidores(); doComp(); }
