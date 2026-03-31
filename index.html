@@ -1585,55 +1585,35 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   </div>
 </div>
 
-<!-- ═════════ PUBLICIDAD ═════════ -->
+<!-- ═══════════════════════ PUBLICIDAD ═══════════════════════ -->
 <div id="section-publicidad" class="section fade-in">
-
-  <div id="ads-loading" class="loading">
-    <div class="spin"></div> Cargando métricas de publicidad...
+  <div class="alert a-info">ℹ️ Product Ads de ML requiere cuenta habilitada. Los datos de ACOS/TACOS se calculan estimando CPC promedio del mercado.</div>
+  <div class="mgt mgt-5">
+    <div class="mc c-blue"><div class="mc-label">Inversión estimada</div><div class="mc-val" id="ads-inv">—</div></div>
+    <div class="mc c-green"><div class="mc-label">Ingresos por Ads</div><div class="mc-val" id="ads-rev">—</div></div>
+    <div class="mc c-amber"><div class="mc-label">ACOS estimado</div><div class="mc-val" id="ads-acos">—</div></div>
+    <div class="mc c-purple"><div class="mc-label">TACOS estimado</div><div class="mc-val" id="ads-tacos">—</div></div>
+    <div class="mc c-teal"><div class="mc-label">ROI estimado</div><div class="mc-val" id="ads-roi">—</div></div>
   </div>
-
-  <div id="ads-dashboard" style="display:none">
-
-    <div class="mgt">
-      <div class="mc c-blue">
-        <div class="mc-label">Inversión</div>
-        <div class="mc-val" id="ads-spend">—</div>
-      </div>
-      <div class="mc c-green">
-        <div class="mc-label">Ventas</div>
-        <div class="mc-val" id="ads-revenue">—</div>
-      </div>
-      <div class="mc c-amber">
-        <div class="mc-label">ACOS</div>
-        <div class="mc-val" id="ads-acos">—</div>
-      </div>
-      <div class="mc c-purple">
-        <div class="mc-label">ROAS</div>
-        <div class="mc-val" id="ads-roas">—</div>
-      </div>
-    </div>
-
-    <div class="card mb">
-      <div class="card-title">Impresiones vs Clics</div>
-      <canvas id="ads-chart"></canvas>
-    </div>
-
-    <div class="card mb">
-      <div class="card-title">Campaña</div>
-      <input type="number" id="ads-budget">
-      <a href="#" onclick="saveBudget()">Guardar</a>
-      <input type="checkbox" id="ads-campaign-toggle" onchange="toggleCampaign()">
-    </div>
-
+  <div class="g2 mb">
     <div class="card">
-      <table>
-        <tbody id="ads-table"></tbody>
-      </table>
+      <div class="card-hd"><div class="card-title">Configurar Product Ads</div></div>
+      <div class="ff"><label>Presupuesto diario ($)</label><input type="number" id="ads-budget" value="500"></div>
+      <div class="ff"><label>Publicaciones a promocionar</label>
+        <select id="ads-items-sel" multiple style="height:120px"></select>
+      </div>
+      <button class="btn btn-primary" style="width:100%" onclick="calcAds()">Calcular ROI estimado</button>
     </div>
-
+    <div class="card">
+      <div class="card-hd"><div class="card-title">Performance por publicación</div></div>
+      <div id="ads-perf"></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-hd"><div class="card-title">ACOS vs TACOS — últimos 30 días</div></div>
+    <div style="position:relative;height:180px"><canvas id="chart-ads"></canvas></div>
   </div>
 </div>
-
 
 <!-- ═══════════════════════ FACTURACIÓN ═══════════════════════ -->
 <div id="section-facturacion" class="section fade-in">
@@ -2002,102 +1982,6 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
   </div><!-- /content -->
 </div><!-- /main -->
-
-const ADS_BASE = 'https://api.mercadolibre.com/advertising/product_ads';
-
-async function loadPublicidad(){
-  document.getElementById('ads-loading').style.display='flex';
-
-  await Promise.all([
-    loadMetrics(),
-    loadCampaign(),
-    loadAds()
-  ]);
-
-  document.getElementById('ads-loading').style.display='none';
-  document.getElementById('ads-dashboard').style.display='block';
-}
-
-async function loadMetrics(){
-  const res = await fetch(`${ADS_BASE}/ads/metrics`,{
-    headers:{Authorization:`Bearer ${accessToken}`}
-  });
-  const d = await res.json();
-
-  const spend = d.spend||0;
-  const revenue = d.revenue||0;
-
-  document.getElementById('ads-spend').innerText=spend;
-  document.getElementById('ads-revenue').innerText=revenue;
-
-  document.getElementById('ads-acos').innerText=(spend/revenue*100||0).toFixed(2)+'%';
-  document.getElementById('ads-roas').innerText=(revenue/spend||0).toFixed(2);
-}
-
-async function loadCampaign(){
-  const res = await fetch(`${ADS_BASE}/campaigns`,{
-    headers:{Authorization:`Bearer ${accessToken}`}
-  });
-  const d = await res.json();
-  const c = d.results[0];
-
-  window.currentCampaignId = c.id;
-  document.getElementById('ads-budget').value=c.daily_budget;
-}
-
-async function saveBudget(){
-  const val = document.getElementById('ads-budget').value;
-  await fetch(`${ADS_BASE}/campaigns/${currentCampaignId}`,{
-    method:'PUT',
-    headers:{'Content-Type':'application/json',Authorization:`Bearer ${accessToken}`},
-    body:JSON.stringify({daily_budget:Number(val)})
-  });
-  alert('OK');
-}
-
-async function toggleCampaign(){
-  const status = document.getElementById('ads-campaign-toggle').checked?'active':'paused';
-
-  await fetch(`${ADS_BASE}/campaigns/${currentCampaignId}`,{
-    method:'PUT',
-    headers:{'Content-Type':'application/json',Authorization:`Bearer ${accessToken}`},
-    body:JSON.stringify({status})
-  });
-}
-
-async function loadAds(){
-  const res = await fetch(`${ADS_BASE}/ads/search`,{
-    headers:{Authorization:`Bearer ${accessToken}`}
-  });
-  const d = await res.json();
-
-  const t = document.getElementById('ads-table');
-  t.innerHTML='';
-
-  d.results.forEach(ad=>{
-    t.innerHTML+=`<tr>
-      <td>${ad.title}</td>
-      <td>${ad.status}</td>
-      <td>${ad.clicks}</td>
-      <td><input type='checkbox' ${ad.status==='active'?'checked':''} onchange="toggleAd('${ad.id}',this.checked)"></td>
-    </tr>`;
-  });
-}
-
-async function toggleAd(id,enabled){
-  await fetch(`${ADS_BASE}/ads`,{
-    method:'PUT',
-    headers:{'Content-Type':'application/json',Authorization:`Bearer ${accessToken}`},
-    body:JSON.stringify({ads:[{id,status:enabled?'active':'paused'}]})
-  });
-}
-
-/* AUTOMATICO */
-const oldShowSection = window.showSection;
-window.showSection = function(section){
-  oldShowSection(section);
-  if(section==='publicidad') loadPublicidad();
-}
 
 <script>
 // ═══════════════════════════════════════════════════════════
