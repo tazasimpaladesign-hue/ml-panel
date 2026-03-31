@@ -1,21 +1,4 @@
-function _renderWooHistory() {
-  var el = document.getElementById('woo-history-list');
-  if (!el) return;
-  if (!_wooImportHistory.length) { el.innerHTML = 'Sin historial todavia.'; return; }
-  el.innerHTML = _wooImportHistory.slice(0, 8).map(function(h){
-    var t   = h.title.length > 48 ? h.title.slice(0,48) + '...' : h.title;
-    var link= h.editUrl
-      ? ' <a href="' + h.editUrl + '" target="_blank" style="font-size:10px;color:var(--accent)">Editar</a>'
-      : '';
-    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)">'
-      + '<div style="min-width:0">'
-        + '<div style="font-size:12px;font-weight:500;color:var(--text)">' + t + link + '</div>'
-        + '<div style="font-size:10.5px;color:var(--text3)">' + h.itemId + (h.wc_id ? ' &rarr; WC #'+h.wc_id : '') + ' &middot; ' + h.date + '</div>'
-      + '</div>'
-      + '<div style="font-size:13px;font-weight:700;color:var(--green);white-space:nowrap;margin-left:8px">$' + Number(h.price).toLocaleString('es-AR') + '</div>'
-    + '</div>';
-  }).join('');
-}<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -2123,7 +2106,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <label>Link de MercadoLibre o ID (MLA-XXXXXXX)</label>
         <input type="text" id="woo-url-input" placeholder="https://articulo.mercadolibre.com.ar/MLA-... o MLA123456789" style="font-size:13px">
       </div>
-      <button class="btn btn-primary" onclick="fetchPreviewML()" id="btn-fetch-woo" style="white-space:nowrap;height:38px">&#x1F50D; Obtener datos</button>
+      <button class="btn btn-primary" onclick="fetchPreviewML()" id="btn-fetch-woo" style="white-space:nowrap;height:38px">Obtener datos</button>
     </div>
     <div id="woo-preview-container"></div>
   </div>
@@ -8988,57 +8971,68 @@ async function fetchPreviewML() {
   try {
     var title = '', price = 0, thumbnail = '', permalink = '';
     var numId = itemId.replace(/^MLA/i, '');
-
-    // 1. Buscar en allItems (cache en memoria)
     var local = allItems.find(function(i){ return String(i.id) === numId; });
     if (local) {
       title     = local.title || '';
       price     = local.price || 0;
-      thumbnail = local.thumbnail || (local.pictures && local.pictures[0] && local.pictures[0].url) || '';
+      thumbnail = (local.pictures && local.pictures[0] && local.pictures[0].secure_url)
+                  || local.thumbnail || '';
       permalink = local.permalink || '';
     } else {
-      // 2. Fallback via Worker /scrape
       var res  = await fetch(WORKER + '/scrape/' + itemId);
       var data = await res.json();
-      if (data.price) {
-        price = data.price;
-        title = data.title || itemId;
-      } else {
-        throw new Error(data.error || 'No se pudo obtener el precio desde ML');
-      }
+      if (data.price) { price = data.price; title = data.title || itemId; }
+      else throw new Error(data.error || 'No se pudo obtener el precio desde ML');
     }
 
-    // Calcular precio Woo con margen
+    // Calcular precio Woo con margen inicial
     var autoMargin = document.getElementById('woo-auto-margin').checked;
     var margin     = parseFloat(document.getElementById('woo-margin').value) || 0;
-    var wooPrice   = (autoMargin && price > 0)
-      ? Math.ceil(price * (1 + margin / 100) / 10) * 10
-      : price;
+    var wooPrice   = (autoMargin && price > 0) ? Math.ceil(price * (1 + margin / 100) / 10) * 10 : price;
 
     var thumbHtml = thumbnail
-      ? '<img src="' + thumbnail + '" style="width:96px;height:96px;object-fit:cover;border-radius:8px;border:1px solid #e2e8f0;flex-shrink:0">'
+      ? '<img src="' + thumbnail + '" style="width:88px;height:88px;object-fit:cover;border-radius:8px;border:1px solid #e2e8f0;flex-shrink:0">'
       : '<div class="woo-preview-img">&#x1F6D2;</div>';
 
-    var marginNote = (margin > 0 && autoMargin) ? ' &middot; Margen: +' + margin + '%' : '';
-    var mlLink     = permalink ? '<a href="' + permalink + '" target="_blank" class="btn btn-ghost btn-sm" style="text-decoration:none">Ver en ML &#x2197;</a>' : '';
-    var safeTitle  = title.replace(/'/g, "\\'");
+    var mlPriceFormatted = price.toLocaleString('es-AR');
+    var safeTitle = title.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 
-    container.innerHTML =
-      '<div class="woo-preview-card">' +
-        thumbHtml +
-        '<div class="woo-preview-body">' +
-          '<div class="woo-preview-title">' + (title || itemId) + '</div>' +
-          '<div class="woo-ml-price">Precio en ML: <b>$' + price.toLocaleString('es-AR') + '</b>' + marginNote + '</div>' +
-          '<div class="woo-price-row" style="margin-top:10px">' +
-            '<label>Precio en WooCommerce (ARS):</label>' +
-            '<input type="number" class="woo-price-input" id="woo-final-price" value="' + wooPrice + '" min="1" step="50">' +
-          '</div>' +
-          '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
-            '<button class="btn-woo-publish" onclick="publishToWoo(\'' + itemId + '\',\'' + safeTitle + '\')">&#x1F680; Publicar en WooCommerce</button>' +
-            mlLink +
-          '</div>' +
-        '</div>' +
-      '</div>';
+    // Tarjeta de preview con control de precio dual: % Y valor fijo
+    var html = [];
+    html.push('<div class="woo-preview-card">');
+    html.push(thumbHtml);
+    html.push('<div class="woo-preview-body">');
+    html.push('<div class="woo-preview-title">' + (title || itemId) + '</div>');
+    html.push('<div class="woo-ml-price">Precio en ML: <b>$' + mlPriceFormatted + '</b></div>');
+
+    // Fila de precio con dos modos
+    html.push('<div style="margin-top:10px;margin-bottom:12px">');
+    html.push('<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">');
+    html.push('<label style="font-size:11px;color:#475569;white-space:nowrap;margin:0">Precio Woo (ARS):</label>');
+    html.push('<input type="number" class="woo-price-input" id="woo-final-price" value="' + wooPrice + '" min="1" step="50" oninput="wooSyncPriceFromFixed(' + price + ')">');
+    html.push('</div>');
+
+    // Sliders / inputs para modo porcentaje
+    html.push('<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">');
+    html.push('<label style="font-size:11px;color:#475569;margin:0">Margen %:</label>');
+    html.push('<input type="range" id="woo-margin-slider" min="0" max="100" step="5" value="' + Math.round(margin) + '"');
+    html.push(' oninput="wooSyncPriceFromMargin(' + price + ')" style="width:100px;cursor:pointer">');
+    html.push('<span id="woo-margin-pct" style="font-size:12px;font-weight:700;color:var(--accent);min-width:36px">+' + Math.round(margin) + '%</span>');
+    html.push('<span style="font-size:10.5px;color:#94a3b8">(o escribi el precio directamente arriba)</span>');
+    html.push('</div>');
+    html.push('</div>');
+
+    // Boton publicar
+    html.push('<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">');
+    html.push('<button class="btn-woo-publish" onclick="publishToWoo(\'' + itemId + '\',\'' + safeTitle + '\')">Publicar en WooCommerce</button>');
+    if (permalink) {
+      html.push('<a href="' + permalink + '" target="_blank" class="btn btn-ghost btn-sm" style="text-decoration:none">Ver en ML</a>');
+    }
+    html.push('</div>');
+
+    html.push('</div>'); // woo-preview-body
+    html.push('</div>'); // woo-preview-card
+    container.innerHTML = html.join('');
 
   } catch(e) {
     container.innerHTML = '<div class="alert a-red" style="margin-top:10px">Error: ' + e.message + '</div>';
@@ -9048,113 +9042,70 @@ async function fetchPreviewML() {
   }
 }
 
+// Sincroniza el precio desde el slider de margen
+function wooSyncPriceFromMargin(mlPrice) {
+  var slider = document.getElementById('woo-margin-slider');
+  var input  = document.getElementById('woo-final-price');
+  var pct    = document.getElementById('woo-margin-pct');
+  if (!slider || !input) return;
+  var margin   = parseFloat(slider.value) || 0;
+  if (pct) pct.textContent = '+' + margin + '%';
+  var newPrice = Math.ceil(mlPrice * (1 + margin / 100) / 10) * 10;
+  input.value  = newPrice;
+}
+
+// Sincroniza el slider cuando el usuario escribe el precio manualmente
+function wooSyncPriceFromFixed(mlPrice) {
+  var slider = document.getElementById('woo-margin-slider');
+  var input  = document.getElementById('woo-final-price');
+  var pct    = document.getElementById('woo-margin-pct');
+  if (!slider || !input || !mlPrice) return;
+  var fixedPrice = parseFloat(input.value) || 0;
+  var margin     = mlPrice > 0 ? Math.round(((fixedPrice / mlPrice) - 1) * 100) : 0;
+  if (margin < 0)   margin = 0;
+  if (margin > 100) margin = 100;
+  slider.value = margin;
+  if (pct) pct.textContent = '+' + margin + '%';
+}
+
 async function publishToWoo(itemId, title) {
   var priceInput = document.getElementById('woo-final-price');
   var price      = priceInput ? parseFloat(priceInput.value) : 0;
   var category   = (document.getElementById('woo-category') || {}).value || '';
-
-  if (!price || price <= 0) {
-    showToast('Ingresa un precio valido antes de publicar', 'warn');
-    return;
-  }
-
-  // Bloquear el boton mientras se procesa
+  if (!price || price <= 0) { showToast('Ingresa un precio valido antes de publicar', 'warn'); return; }
   var btn = document.querySelector('.btn-woo-publish');
   if (btn) { btn.disabled = true; btn.textContent = 'Publicando...'; }
-
   try {
-    // Reunir datos del producto desde allItems (cache en memoria)
-    var numId   = itemId.replace(/^MLA/i, '');
-    var local   = allItems.find(function(i){ return String(i.id) === numId; });
-    var images  = [];
-    var attrs   = [];
-    var stock   = 1;
-    var description = '';
-
+    var numId  = itemId.replace(/^MLA/i, '');
+    var local  = allItems.find(function(i){ return String(i.id) === numId; });
+    var images = [], attrs = [], stock = 1, description = '';
     if (local) {
-      // Imagenes: preferir pictures de alta calidad sobre thumbnail
       if (local.pictures && local.pictures.length) {
-        images = local.pictures
-          .map(function(p){ return p.secure_url || p.url || ''; })
-          .filter(Boolean);
-      } else if (local.thumbnail) {
-        images = [local.thumbnail];
-      }
-      attrs  = local.attributes || [];
-      stock  = local.available_quantity || 1;
-
-      // Intentar obtener la descripcion desde ML (con el token activo)
+        images = local.pictures.map(function(p){ return p.secure_url || p.url || ''; }).filter(Boolean);
+      } else if (local.thumbnail) { images = [local.thumbnail]; }
+      attrs = local.attributes || [];
+      stock = local.available_quantity || 1;
       try {
-        var descRes = await fetch(WORKER + '/api/items/' + local.id + '/description', {
-          headers: { 'Authorization': 'Bearer ' + token }
-        });
-        if (descRes.ok) {
-          var descData = await descRes.json();
-          description = descData.plain_text || '';
-        }
-      } catch(e) { /* sin descripcion, no es critico */ }
+        var dRes = await fetch(WORKER + '/api/items/' + local.id + '/description', { headers: { 'Authorization': 'Bearer ' + token } });
+        if (dRes.ok) { var dData = await dRes.json(); description = dData.plain_text || ''; }
+      } catch(e) {}
     }
-
-    // Llamar al Worker para crear el producto en WooCommerce
-    var payload = {
-      title:       title,
-      price:       price,
-      stock:       stock,
-      description: description,
-      images:      images,
-      attributes:  attrs,
-      category:    category
-    };
-
-    var res  = await fetch(WORKER + '/woo/import', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(payload)
-    });
+    var payload = { title: title, price: price, stock: stock, description: description, images: images, attributes: attrs, category: category };
+    var res  = await fetch(WORKER + '/woo/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     var data = await res.json();
-
-    if (res.status === 409) {
-      // Producto duplicado
-      showToast('Ya existe ese producto en WooCommerce (omitido)', 'warn');
-      return;
-    }
-
-    if (!res.ok || !data.ok) {
-      throw new Error(data.error || data.message || 'Error desconocido');
-    }
-
-    // Exito
-    var wc_id  = data.wc_id;
-    var editUrl= data.wc_edit_url;
-
-    _wooImportHistory.unshift({
-      itemId:   itemId,
-      title:    title,
-      price:    price,
-      category: category,
-      wc_id:    wc_id,
-      editUrl:  editUrl,
-      date:     new Date().toLocaleString('es-AR')
-    });
+    if (res.status === 409) { showToast('Ya existe ese producto en WooCommerce (omitido)', 'warn'); return; }
+    if (!res.ok || !data.ok) throw new Error(data.error || data.message || 'Error desconocido');
+    var wc_id = data.wc_id, editUrl = data.wc_edit_url;
+    _wooImportHistory.unshift({ itemId: itemId, title: title, price: price, category: category, wc_id: wc_id, editUrl: editUrl, date: new Date().toLocaleString('es-AR') });
     _renderWooHistory();
-
-    showToast('Producto creado en Woo como BORRADOR (ID #' + wc_id + ')', 'success');
-
-    // Mostrar link de edicion directa en Woo
-    var container = document.getElementById('woo-preview-container');
-    if (container) {
-      container.innerHTML += '<div class="alert a-success" style="margin-top:10px">'
-        + 'Producto creado como BORRADOR en WooCommerce (ID #' + wc_id + ')'
-        + (editUrl ? ' &mdash; <a href="' + editUrl + '" target="_blank" style="color:var(--green)">Editar en WordPress</a>' : '')
-        + '</div>';
+    showToast('Creado en Woo como BORRADOR (ID #' + wc_id + ')', 'success');
+    var ctr = document.getElementById('woo-preview-container');
+    if (ctr) {
+      var link = editUrl ? ' &mdash; <a href="' + editUrl + '" target="_blank" style="color:var(--green)">Editar en WordPress</a>' : '';
+      ctr.innerHTML += '<div class="alert a-success" style="margin-top:10px">Creado como BORRADOR en WooCommerce (ID #' + wc_id + ')' + link + '</div>';
     }
-
   } catch(e) {
     showToast('Error al publicar: ' + e.message, 'warn');
-    var container = document.getElementById('woo-preview-container');
-    if (container) {
-      container.innerHTML += '<div class="alert a-red" style="margin-top:10px">Error: ' + e.message + '</div>';
-    }
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Publicar en WooCommerce'; }
   }
@@ -9163,16 +9114,24 @@ function _renderWooHistory() {
   var el = document.getElementById('woo-history-list');
   if (!el) return;
   if (!_wooImportHistory.length) { el.innerHTML = 'Sin historial todavia.'; return; }
-  el.innerHTML = _wooImportHistory.slice(0, 5).map(function(h){
-    var t = h.title.length > 45 ? h.title.slice(0,45) + '...' : h.title;
-    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)">' +
-      '<div>' +
-        '<div style="font-size:12px;font-weight:500;color:var(--text)">' + t + '</div>' +
-        '<div style="font-size:10.5px;color:var(--text3)">' + h.itemId + ' &middot; ' + h.date + '</div>' +
-      '</div>' +
-      '<div style="font-size:13px;font-weight:700;color:var(--green);white-space:nowrap">$' + Number(h.price).toLocaleString('es-AR') + '</div>' +
-    '</div>';
-  }).join('');
+  var rows = [];
+  var items = _wooImportHistory.slice(0, 8);
+  for (var i = 0; i < items.length; i++) {
+    var h   = items[i];
+    var t   = h.title.length > 48 ? h.title.slice(0,48) + '...' : h.title;
+    var lnk = h.editUrl ? ' <a href="' + h.editUrl + '" target="_blank" style="font-size:10px;color:var(--accent)">Editar</a>' : '';
+    var wid = h.wc_id ? ' &rarr; WC #' + h.wc_id : '';
+    var row = [];
+    row.push('<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)">');
+    row.push('<div style="min-width:0">');
+    row.push('<div style="font-size:12px;font-weight:500;color:var(--text)">' + t + lnk + '</div>');
+    row.push('<div style="font-size:10.5px;color:var(--text3)">' + h.itemId + wid + ' &middot; ' + h.date + '</div>');
+    row.push('</div>');
+    row.push('<div style="font-size:13px;font-weight:700;color:var(--green);white-space:nowrap;margin-left:8px">$' + Number(h.price).toLocaleString('es-AR') + '</div>');
+    row.push('</div>');
+    rows.push(row.join(''));
+  }
+  el.innerHTML = rows.join('');
 }
 
 </script>
