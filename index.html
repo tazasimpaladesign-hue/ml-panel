@@ -1,4 +1,21 @@
-<!DOCTYPE html>
+function _renderWooHistory() {
+  var el = document.getElementById('woo-history-list');
+  if (!el) return;
+  if (!_wooImportHistory.length) { el.innerHTML = 'Sin historial todavia.'; return; }
+  el.innerHTML = _wooImportHistory.slice(0, 8).map(function(h){
+    var t   = h.title.length > 48 ? h.title.slice(0,48) + '...' : h.title;
+    var link= h.editUrl
+      ? ' <a href="' + h.editUrl + '" target="_blank" style="font-size:10px;color:var(--accent)">Editar</a>'
+      : '';
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)">'
+      + '<div style="min-width:0">'
+        + '<div style="font-size:12px;font-weight:500;color:var(--text)">' + t + link + '</div>'
+        + '<div style="font-size:10.5px;color:var(--text3)">' + h.itemId + (h.wc_id ? ' &rarr; WC #'+h.wc_id : '') + ' &middot; ' + h.date + '</div>'
+      + '</div>'
+      + '<div style="font-size:13px;font-weight:700;color:var(--green);white-space:nowrap;margin-left:8px">$' + Number(h.price).toLocaleString('es-AR') + '</div>'
+    + '</div>';
+  }).join('');
+}<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -9031,25 +9048,117 @@ async function fetchPreviewML() {
   }
 }
 
-function publishToWoo(itemId, title) {
-  var price    = (document.getElementById('woo-final-price') || {}).value || 0;
-  var category = (document.getElementById('woo-category') || {}).value || 'general';
+async function publishToWoo(itemId, title) {
+  var priceInput = document.getElementById('woo-final-price');
+  var price      = priceInput ? parseFloat(priceInput.value) : 0;
+  var category   = (document.getElementById('woo-category') || {}).value || '';
 
-  _wooImportHistory.unshift({
-    itemId:   itemId,
-    title:    title,
-    price:    price,
-    category: category,
-    date:     new Date().toLocaleString('es-AR')
-  });
-  _renderWooHistory();
+  if (!price || price <= 0) {
+    showToast('Ingresa un precio valido antes de publicar', 'warn');
+    return;
+  }
 
-  showToast('Conectando con el servidor de WooCommerce...', 'info');
-  setTimeout(function(){
-    showToast('Listo para publicar: "' + title.slice(0,40) + '..." a $' + Number(price).toLocaleString('es-AR'), 'success');
-  }, 1800);
+  // Bloquear el boton mientras se procesa
+  var btn = document.querySelector('.btn-woo-publish');
+  if (btn) { btn.disabled = true; btn.textContent = 'Publicando...'; }
+
+  try {
+    // Reunir datos del producto desde allItems (cache en memoria)
+    var numId   = itemId.replace(/^MLA/i, '');
+    var local   = allItems.find(function(i){ return String(i.id) === numId; });
+    var images  = [];
+    var attrs   = [];
+    var stock   = 1;
+    var description = '';
+
+    if (local) {
+      // Imagenes: preferir pictures de alta calidad sobre thumbnail
+      if (local.pictures && local.pictures.length) {
+        images = local.pictures
+          .map(function(p){ return p.secure_url || p.url || ''; })
+          .filter(Boolean);
+      } else if (local.thumbnail) {
+        images = [local.thumbnail];
+      }
+      attrs  = local.attributes || [];
+      stock  = local.available_quantity || 1;
+
+      // Intentar obtener la descripcion desde ML (con el token activo)
+      try {
+        var descRes = await fetch(WORKER + '/api/items/' + local.id + '/description', {
+          headers: { 'Authorization': 'Bearer ' + token }
+        });
+        if (descRes.ok) {
+          var descData = await descRes.json();
+          description = descData.plain_text || '';
+        }
+      } catch(e) { /* sin descripcion, no es critico */ }
+    }
+
+    // Llamar al Worker para crear el producto en WooCommerce
+    var payload = {
+      title:       title,
+      price:       price,
+      stock:       stock,
+      description: description,
+      images:      images,
+      attributes:  attrs,
+      category:    category
+    };
+
+    var res  = await fetch(WORKER + '/woo/import', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(payload)
+    });
+    var data = await res.json();
+
+    if (res.status === 409) {
+      // Producto duplicado
+      showToast('Ya existe ese producto en WooCommerce (omitido)', 'warn');
+      return;
+    }
+
+    if (!res.ok || !data.ok) {
+      throw new Error(data.error || data.message || 'Error desconocido');
+    }
+
+    // Exito
+    var wc_id  = data.wc_id;
+    var editUrl= data.wc_edit_url;
+
+    _wooImportHistory.unshift({
+      itemId:   itemId,
+      title:    title,
+      price:    price,
+      category: category,
+      wc_id:    wc_id,
+      editUrl:  editUrl,
+      date:     new Date().toLocaleString('es-AR')
+    });
+    _renderWooHistory();
+
+    showToast('Producto creado en Woo como BORRADOR (ID #' + wc_id + ')', 'success');
+
+    // Mostrar link de edicion directa en Woo
+    var container = document.getElementById('woo-preview-container');
+    if (container) {
+      container.innerHTML += '<div class="alert a-success" style="margin-top:10px">'
+        + 'Producto creado como BORRADOR en WooCommerce (ID #' + wc_id + ')'
+        + (editUrl ? ' &mdash; <a href="' + editUrl + '" target="_blank" style="color:var(--green)">Editar en WordPress</a>' : '')
+        + '</div>';
+    }
+
+  } catch(e) {
+    showToast('Error al publicar: ' + e.message, 'warn');
+    var container = document.getElementById('woo-preview-container');
+    if (container) {
+      container.innerHTML += '<div class="alert a-red" style="margin-top:10px">Error: ' + e.message + '</div>';
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Publicar en WooCommerce'; }
+  }
 }
-
 function _renderWooHistory() {
   var el = document.getElementById('woo-history-list');
   if (!el) return;
