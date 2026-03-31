@@ -8960,15 +8960,11 @@ function wooCleanTitle(raw) {
   var killWords = [
     new RegExp('\\benv\\u00edo\\s+gratis\\b', 'gi'),
     new RegExp('\\benvio\\s+gratis\\b', 'gi'),
-    new RegExp('\\benv\\u00edo\\b', 'gi'),
     new RegExp('\\bcuotas?\\b', 'gi'),
     new RegExp('\\bfull\\b', 'gi'),
     new RegExp('\\bstock\\b', 'gi'),
-    new RegExp('\\boriginal\\b', 'gi'),
     new RegExp('\\boferta\\b', 'gi'),
     new RegExp('\\bpromo\\b', 'gi'),
-    new RegExp('\\bpromocion\\b', 'gi'),
-    new RegExp('\\bpromo\\u00f3n\\b', 'gi'),
     new RegExp('\\bexclusivo\\b', 'gi'),
     new RegExp('\\bpersonaliz(ado|able)\\b', 'gi'),
     new RegExp('\\balta\\s+calidad\\b', 'gi'),
@@ -8976,7 +8972,6 @@ function wooCleanTitle(raw) {
     new RegExp('[|\\-]{2,}', 'g'),
   ];
   killWords.forEach(function(re){ t = t.replace(re, ''); });
-  // Colapsar espacios multiples
   t = t.replace(/\s{2,}/g, ' ').trim();
   return t;
 }
@@ -8993,94 +8988,119 @@ async function fetchPreviewML() {
   }
 
   btn.disabled    = true;
-  btn.textContent = 'Consultando API...';
-  container.innerHTML = '<div class="alert a-info" style="margin-top:10px">Consultando la API de MercadoLibre...</div>';
+  btn.textContent = 'Consultando...';
 
-  // Datos que se van a reunir
   var title = '', rawTitle = '', price = 0, pictures = [], permalink = '', description = '', attributes = [], stock = 1;
 
-  try {
-    // ── 1. Datos del item via API de ML (con token activo) ────────
-    var itemRes = await fetch(WORKER + '/api/items/' + itemId, {
-      headers: {
-        'Authorization': 'Bearer ' + token,
-        'Accept': 'application/json'
+  // ESTRATEGIA 1: buscar en allItems (productos propios ya en memoria)
+  // allItems.id tiene formato completo 'MLA123456789'
+  var local = allItems.find(function(i){
+    return String(i.id) === itemId || String(i.id) === itemId.replace(/^MLA/i,'');
+  });
+
+  if (local) {
+    rawTitle   = local.title || '';
+    price      = local.price || 0;
+    permalink  = local.permalink || '';
+    stock      = local.available_quantity || 1;
+    attributes = local.attributes || [];
+    if (local.pictures && local.pictures.length) {
+      local.pictures.forEach(function(p){
+        var u = p.secure_url || p.url || '';
+        if (u) pictures.push(u);
+      });
+    }
+    if (!pictures.length && local.thumbnail) pictures.push(local.thumbnail);
+    // Descripcion del producto propio via Worker proxy
+    try {
+      var dRes = await fetch(WORKER + '/api/items/' + local.id + '/description',
+        { headers: { 'Authorization': 'Bearer ' + token } });
+      if (dRes.ok) { var dData = await dRes.json(); description = dData.plain_text || ''; }
+    } catch(e) {}
+
+  } else {
+    // ESTRATEGIA 2: ML API via Worker proxy (con token)
+    container.innerHTML = '<div class="alert a-info" style="margin-top:10px">Consultando la API de MercadoLibre...</div>';
+    var mlData = null;
+
+    try {
+      var r1 = await fetch(WORKER + '/api/items/' + itemId,
+        { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' } });
+      if (r1.ok) {
+        mlData = await r1.json();
       }
-    });
+    } catch(e) {}
 
-    if (!itemRes.ok) {
-      // Si el token no tiene permiso (403) intentamos el Worker /scrape como fallback
-      if (itemRes.status === 403 || itemRes.status === 401) {
-        container.innerHTML = '<div class="alert a-info" style="margin-top:10px">Token sin permiso directo, usando scraper...</div>';
-        var scrapeRes  = await fetch(WORKER + '/scrape/' + itemId);
-        var scrapeData = await scrapeRes.json();
-        rawTitle = scrapeData.title || itemId;
-        price    = scrapeData.price || 0;
-      } else {
-        throw new Error('API ML HTTP ' + itemRes.status);
-      }
-    } else {
-      var item = await itemRes.json();
-
-      // Extraer campos clave
-      rawTitle   = item.title || '';
-      price      = item.price || 0;
-      permalink  = item.permalink || '';
-      stock      = item.available_quantity || 1;
-      attributes = item.attributes || [];
-
-      // Fotos: usar pictures (alta res) o thumbnail como fallback
-      if (item.pictures && item.pictures.length) {
-        item.pictures.forEach(function(p) {
-          var url = p.secure_url || p.url || '';
-          if (url) pictures.push(url);
-        });
-      } else if (item.thumbnail) {
-        pictures.push(item.thumbnail);
-      }
-
-      // ── 2. Descripcion (endpoint separado en la API de ML) ────────
+    // ESTRATEGIA 3: endpoint publico sin autenticacion
+    // (funciona para cualquier publicacion activa, incluso de la competencia)
+    if (!mlData) {
+      container.innerHTML = '<div class="alert a-info" style="margin-top:10px">Probando endpoint publico...</div>';
       try {
-        var descRes = await fetch(WORKER + '/api/items/' + itemId + '/description', {
-          headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' }
-        });
-        if (descRes.ok) {
-          var descData = await descRes.json();
-          description = descData.plain_text || '';
-        }
-      } catch(e) { /* descripcion no critica */ }
+        var r2 = await fetch(WORKER + '/pub/items/' + itemId,
+          { headers: { 'Accept': 'application/json' } });
+        if (r2.ok) mlData = await r2.json();
+      } catch(e) {}
     }
 
-  } catch(e) {
-    console.warn('[fetchPreviewML] error:', e.message);
-    container.innerHTML = '<div class="alert a-red" style="margin-top:10px">Error al consultar ML: ' + e.message + '</div>';
-    btn.disabled = false; btn.textContent = 'Obtener datos';
-    return;
+    if (mlData && !mlData.error) {
+      rawTitle   = mlData.title || '';
+      price      = mlData.price || 0;
+      permalink  = mlData.permalink || '';
+      stock      = mlData.available_quantity || 1;
+      attributes = mlData.attributes || [];
+      if (mlData.pictures && mlData.pictures.length) {
+        mlData.pictures.forEach(function(p){
+          var u = p.secure_url || p.url || '';
+          if (u) pictures.push(u);
+        });
+      }
+      if (!pictures.length && mlData.thumbnail) pictures.push(mlData.thumbnail);
+      // Descripcion
+      try {
+        var r3 = await fetch(WORKER + '/api/items/' + itemId + '/description',
+          { headers: { 'Authorization': 'Bearer ' + token } });
+        if (r3.ok) { var d3 = await r3.json(); description = d3.plain_text || ''; }
+      } catch(e) {}
+
+    } else {
+      // ESTRATEGIA 4: scraper HTML (ultimo recurso)
+      container.innerHTML = '<div class="alert a-info" style="margin-top:10px">Usando scraper como alternativa...</div>';
+      var scraped = false;
+      try {
+        var r4  = await fetch(WORKER + '/scrape/' + itemId);
+        var sd  = await r4.json();
+        if (sd.price || sd.title) {
+          rawTitle = sd.title || itemId;
+          price    = sd.price || 0;
+          scraped  = true;
+        }
+      } catch(e) {}
+
+      if (!scraped) {
+        // Ninguna estrategia funciono: mostrar tarjeta con precio manual
+        rawTitle = itemId;
+        price    = 0;
+      }
+    }
   }
 
-  // ── 3. Limpiar titulo para Woo ────────────────────────────────────
+  // Limpiar titulo
   title = wooCleanTitle(rawTitle);
 
-  // ── 4. Calcular precio Woo con margen ────────────────────────────
+  // Precio con margen
   var autoMargin = document.getElementById('woo-auto-margin').checked;
   var margin     = parseFloat(document.getElementById('woo-margin').value) || 0;
   var wooPrice   = (price > 0 && autoMargin) ? Math.ceil(price * (1 + margin / 100) / 10) * 10 : price;
 
-  // ── 5. Guardar en contexto global (evita problemas de comillas en onclick) ──
+  // Guardar contexto global
   window._wooCurrentItem = {
-    itemId:      itemId,
-    title:       title,
-    rawTitle:    rawTitle,
-    price:       wooPrice,
-    mlPrice:     price,
-    pictures:    pictures,
-    description: description,
-    attributes:  attributes,
-    stock:       stock,
-    permalink:   permalink
+    itemId: itemId, title: title, rawTitle: rawTitle,
+    price: wooPrice, mlPrice: price,
+    pictures: pictures, description: description,
+    attributes: attributes, stock: stock, permalink: permalink
   };
 
-  // ── 6. Construir tarjeta de preview ──────────────────────────────
+  // Labels
   var mlPriceLabel = price > 0
     ? 'Precio en ML: <b>$' + price.toLocaleString('es-AR') + '</b>'
     : '<span style="color:var(--amber);font-weight:600">Precio no encontrado &mdash; ingresar manualmente</span>';
@@ -9095,7 +9115,7 @@ async function fetchPreviewML() {
     ? '<img src="' + pictures[0] + '" style="width:96px;height:96px;object-fit:cover;border-radius:8px;border:1px solid #e2e8f0;flex-shrink:0" onerror="this.style.background=\'#f1f5f9\'">'
     : '<div class="woo-preview-img">&#x1F4F7;</div>';
 
-  // Strip de miniaturas adicionales (hasta 4 extras)
+  // Miniaturas adicionales
   var thumbsHtml = '';
   if (pictures.length > 1) {
     thumbsHtml += '<div style="display:flex;gap:4px;margin-top:8px;flex-wrap:wrap">';
@@ -9103,20 +9123,16 @@ async function fetchPreviewML() {
     for (var pi = 0; pi < extras.length; pi++) {
       thumbsHtml += '<img src="' + extras[pi] + '" style="width:40px;height:40px;object-fit:cover;border-radius:5px;border:1px solid #e2e8f0" onerror="this.style.display=\'none\'">';
     }
-    if (pictures.length > 5) {
-      thumbsHtml += '<div style="width:40px;height:40px;border-radius:5px;border:1px solid #e2e8f0;background:#f1f5f9;display:flex;align-items:center;justify-content:center;font-size:11px;color:#64748b">+' + (pictures.length - 5) + '</div>';
-    }
+    if (pictures.length > 5) thumbsHtml += '<div style="width:40px;height:40px;border-radius:5px;border:1px solid #e2e8f0;background:#f1f5f9;display:flex;align-items:center;justify-content:center;font-size:11px;color:#64748b">+' + (pictures.length - 5) + '</div>';
     thumbsHtml += '<span style="font-size:10px;color:var(--text3);align-self:center;margin-left:4px">' + pictures.length + ' fotos</span>';
     thumbsHtml += '</div>';
   }
 
-  // Badge de origen del titulo
-  var titleDiff = rawTitle !== title;
-  var cleanBadge = titleDiff
-    ? '<span style="font-size:9px;background:var(--green-g);color:var(--green);padding:2px 6px;border-radius:10px;margin-left:6px;font-weight:700">Limpio</span>'
-    : '';
+  // Badge limpieza de titulo
+  var titleDiff  = rawTitle !== title;
+  var cleanBadge = titleDiff ? '<span style="font-size:9px;background:var(--green-g);color:var(--green);padding:2px 6px;border-radius:10px;margin-left:6px;font-weight:700">Limpio</span>' : '';
 
-  // Descripcion snippet (primeros 120 chars)
+  // Snippet descripcion
   var descSnippet = '';
   if (description) {
     var snip = description.slice(0, 120).trim();
@@ -9128,18 +9144,11 @@ async function fetchPreviewML() {
   html.push('<div class="woo-preview-card">');
   html.push(mainThumb);
   html.push('<div class="woo-preview-body">');
-
-  // Titulo con badge de limpieza
   html.push('<div class="woo-preview-title">' + title + cleanBadge + '</div>');
-  if (titleDiff) {
-    html.push('<div style="font-size:10px;color:var(--text4);margin-bottom:4px">Original: ' + rawTitle.slice(0, 80) + (rawTitle.length > 80 ? '...' : '') + '</div>');
-  }
-
+  if (titleDiff) html.push('<div style="font-size:10px;color:var(--text4);margin-bottom:4px">Original ML: ' + rawTitle.slice(0,80) + (rawTitle.length>80?'...':'') + '</div>');
   html.push('<div class="woo-ml-price">' + mlPriceLabel + '</div>');
   html.push(thumbsHtml);
   html.push(descSnippet);
-
-  // Control de precio
   html.push('<div style="margin-top:10px;margin-bottom:12px">');
   html.push('<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">');
   html.push('<label style="font-size:11px;color:#475569;white-space:nowrap;margin:0">Precio Woo (ARS):</label>');
@@ -9152,19 +9161,14 @@ async function fetchPreviewML() {
   html.push('<span style="font-size:10.5px;color:#94a3b8">(o escribi el precio directamente)</span>');
   html.push('</div>');
   html.push('</div>');
-
-  // Boton (onclick asignado despues del render para evitar problemas de comillas)
   html.push('<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">');
   html.push('<button class="btn-woo-publish" id="btn-woo-publish-action">Publicar en WooCommerce</button>');
-  if (permalink) {
-    html.push('<a href="' + permalink + '" target="_blank" class="btn btn-ghost btn-sm" style="text-decoration:none">Ver en ML</a>');
-  }
+  if (permalink) html.push('<a href="' + permalink + '" target="_blank" class="btn btn-ghost btn-sm" style="text-decoration:none">Ver en ML</a>');
   html.push('</div>');
   html.push('</div>');
   html.push('</div>');
   container.innerHTML = html.join('');
 
-  // Asignar onclick DESPUES de insertar en el DOM
   var pubBtn = document.getElementById('btn-woo-publish-action');
   if (pubBtn) pubBtn.onclick = function() { publishToWoo(); };
 
@@ -9181,11 +9185,8 @@ function wooSyncPriceFromMargin(mlPrice) {
   if (pct) pct.textContent = '+' + margin + '%';
   if (mlPrice > 0) {
     input.value = Math.ceil(mlPrice * (1 + margin / 100) / 10) * 10;
-    input.style.background  = '#f8fafc';
-    input.style.borderColor = 'var(--accent)';
-    input.style.color       = '#0f172a';
+    input.style.background = '#f8fafc'; input.style.borderColor = 'var(--accent)'; input.style.color = '#0f172a';
   }
-  // Actualizar precio en contexto global
   if (window._wooCurrentItem) window._wooCurrentItem.price = parseFloat(input.value) || 0;
 }
 
@@ -9194,13 +9195,11 @@ function wooSyncPriceFromFixed(mlPrice) {
   var input  = document.getElementById('woo-final-price');
   var pct    = document.getElementById('woo-margin-pct');
   if (!slider || !input) return;
-  input.style.background  = '#f8fafc';
-  input.style.borderColor = 'var(--accent)';
-  input.style.color       = '#0f172a';
+  input.style.background = '#f8fafc'; input.style.borderColor = 'var(--accent)'; input.style.color = '#0f172a';
   if (mlPrice > 0) {
     var fixedPrice = parseFloat(input.value) || 0;
-    var margin     = fixedPrice > 0 ? Math.round(((fixedPrice / mlPrice) - 1) * 100) : 0;
-    slider.value   = Math.max(0, Math.min(100, margin));
+    var margin = fixedPrice > 0 ? Math.round(((fixedPrice/mlPrice)-1)*100) : 0;
+    slider.value = Math.max(0, Math.min(100, margin));
     if (pct) pct.textContent = '+' + Math.max(0, Math.min(100, margin)) + '%';
   }
   if (window._wooCurrentItem) window._wooCurrentItem.price = parseFloat(input.value) || 0;
