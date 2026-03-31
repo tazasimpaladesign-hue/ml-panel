@@ -8946,18 +8946,19 @@ function selectOptItem(id,title){
 var _wooImportHistory = [];
 
 function _parseMLId(input) {
-  input = (input || '').trim();
-  var m = input.match(/MLA-?(\d+)/i);
+  if (!input) return null;
+  var clean = input.trim().split('?')[0].split('#')[0];
+  var m = clean.match(/MLA-?(\d+)/i);
   if (m) return 'MLA' + m[1];
-  if (/^\d{8,12}$/.test(input)) return 'MLA' + input;
+  if (/^\d{8,12}$/.test(clean.trim())) return 'MLA' + clean.trim();
   return null;
 }
 
-// Limpia el titulo de ML antes de mostrarlo en la preview de Woo
+// Limpia el titulo de ML antes de mostrarlo en Woo
 function wooCleanTitle(raw) {
   if (!raw) return '';
   var t = raw;
-  var killWords = [
+  var kill = [
     new RegExp('\\benv\\u00edo\\s+gratis\\b', 'gi'),
     new RegExp('\\benvio\\s+gratis\\b', 'gi'),
     new RegExp('\\bcuotas?\\b', 'gi'),
@@ -8971,11 +8972,11 @@ function wooCleanTitle(raw) {
     new RegExp('\\bimperdible\\b', 'gi'),
     new RegExp('[|\\-]{2,}', 'g'),
   ];
-  killWords.forEach(function(re){ t = t.replace(re, ''); });
-  t = t.replace(/\s{2,}/g, ' ').trim();
-  return t;
+  kill.forEach(function(re){ t = t.replace(re, ''); });
+  return t.replace(/\s{2,}/g, ' ').trim();
 }
 
+// Extrae el ID limpio MLA12345678 de cualquier URL o texto
 async function fetchPreviewML() {
   var raw       = document.getElementById('woo-url-input').value;
   var itemId    = _parseMLId(raw);
@@ -8989,13 +8990,14 @@ async function fetchPreviewML() {
 
   btn.disabled    = true;
   btn.textContent = 'Consultando...';
+  container.innerHTML = '<div class="alert a-info" style="margin-top:10px">Buscando producto...</div>';
 
-  var title = '', rawTitle = '', price = 0, pictures = [], permalink = '', description = '', attributes = [], stock = 1;
+  var rawTitle = '', price = 0, pictures = [], permalink = '', description = '', attributes = [], stock = 1;
 
-  // ESTRATEGIA 1: buscar en allItems (productos propios ya en memoria)
-  // allItems.id tiene formato completo 'MLA123456789'
-  var local = allItems.find(function(i){
-    return String(i.id) === itemId || String(i.id) === itemId.replace(/^MLA/i,'');
+  // ── PASO 1: buscar en allItems (productos propios ya en memoria) ──────
+  var local = allItems.find(function(i) {
+    var sid = String(i.id);
+    return sid === itemId || sid === itemId.replace(/^MLA/i, '');
   });
 
   if (local) {
@@ -9005,13 +9007,13 @@ async function fetchPreviewML() {
     stock      = local.available_quantity || 1;
     attributes = local.attributes || [];
     if (local.pictures && local.pictures.length) {
-      local.pictures.forEach(function(p){
+      local.pictures.forEach(function(p) {
         var u = p.secure_url || p.url || '';
         if (u) pictures.push(u);
       });
     }
     if (!pictures.length && local.thumbnail) pictures.push(local.thumbnail);
-    // Descripcion del producto propio via Worker proxy
+    // Descripcion del producto propio via Worker
     try {
       var dRes = await fetch(WORKER + '/api/items/' + local.id + '/description',
         { headers: { 'Authorization': 'Bearer ' + token } });
@@ -9019,80 +9021,49 @@ async function fetchPreviewML() {
     } catch(e) {}
 
   } else {
-    // ESTRATEGIA 2: ML API via Worker proxy (con token)
-    container.innerHTML = '<div class="alert a-info" style="margin-top:10px">Consultando la API de MercadoLibre...</div>';
-    var mlData = null;
-
+    // ── PASO 2: API publica de ML via proxy CORS (allorigins.win) ─────────
+    // allorigins actua como intermediario: el browser llama a allorigins,
+    // allorigins llama a ML, devuelve la respuesta en data.contents.
+    // Esto evita tanto el CORS del browser como los bloqueos de Cloudflare.
+    container.innerHTML = '<div class="alert a-info" style="margin-top:10px">Consultando API de MercadoLibre...</div>';
     try {
-      var r1 = await fetch(WORKER + '/api/items/' + itemId,
-        { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' } });
-      if (r1.ok) {
-        mlData = await r1.json();
-      }
-    } catch(e) {}
+      var mlUrl    = 'https://api.mercadolibre.com/items/' + itemId;
+      var proxyUrl = 'https://api.allorigins.win/get?url=' + encodeURIComponent(mlUrl);
+      var proxyRes = await fetch(proxyUrl);
+      if (!proxyRes.ok) throw new Error('Proxy HTTP ' + proxyRes.status);
+      var proxyData = await proxyRes.json();
+      // allorigins envuelve la respuesta de ML en proxyData.contents (string JSON)
+      var mlData = JSON.parse(proxyData.contents);
 
-    // ESTRATEGIA 3: endpoint publico sin autenticacion
-    // (funciona para cualquier publicacion activa, incluso de la competencia)
-    if (!mlData) {
-      container.innerHTML = '<div class="alert a-info" style="margin-top:10px">Probando endpoint publico...</div>';
-      try {
-        var r2 = await fetch(WORKER + '/pub/items/' + itemId,
-          { headers: { 'Accept': 'application/json' } });
-        if (r2.ok) mlData = await r2.json();
-      } catch(e) {}
-    }
+      if (mlData.error) throw new Error(mlData.message || mlData.error);
 
-    if (mlData && !mlData.error) {
       rawTitle   = mlData.title || '';
       price      = mlData.price || 0;
       permalink  = mlData.permalink || '';
       stock      = mlData.available_quantity || 1;
       attributes = mlData.attributes || [];
+
       if (mlData.pictures && mlData.pictures.length) {
-        mlData.pictures.forEach(function(p){
+        mlData.pictures.forEach(function(p) {
           var u = p.secure_url || p.url || '';
           if (u) pictures.push(u);
         });
       }
       if (!pictures.length && mlData.thumbnail) pictures.push(mlData.thumbnail);
-      // Descripcion
-      try {
-        var r3 = await fetch(WORKER + '/api/items/' + itemId + '/description',
-          { headers: { 'Authorization': 'Bearer ' + token } });
-        if (r3.ok) { var d3 = await r3.json(); description = d3.plain_text || ''; }
-      } catch(e) {}
 
-    } else {
-      // ESTRATEGIA 4: scraper HTML (ultimo recurso)
-      container.innerHTML = '<div class="alert a-info" style="margin-top:10px">Usando scraper como alternativa...</div>';
-      var scraped = false;
-      try {
-        var r4  = await fetch(WORKER + '/scrape/' + itemId);
-        var sd  = await r4.json();
-        if (sd.price || sd.title) {
-          rawTitle = sd.title || itemId;
-          price    = sd.price || 0;
-          scraped  = true;
-        }
-      } catch(e) {}
-
-      if (!scraped) {
-        // Ninguna estrategia funciono: mostrar tarjeta con precio manual
-        rawTitle = itemId;
-        price    = 0;
-      }
+    } catch(e) {
+      container.innerHTML = '<div class="alert a-red" style="margin-top:10px">No se pudo obtener el producto. Verifica el ID o el link. (' + e.message + ')</div>';
+      btn.disabled = false; btn.textContent = 'Obtener datos';
+      return;
     }
   }
 
-  // Limpiar titulo
-  title = wooCleanTitle(rawTitle);
-
-  // Precio con margen
+  // ── Procesar y renderizar ─────────────────────────────────────────────
+  var title      = wooCleanTitle(rawTitle);
   var autoMargin = document.getElementById('woo-auto-margin').checked;
   var margin     = parseFloat(document.getElementById('woo-margin').value) || 0;
   var wooPrice   = (price > 0 && autoMargin) ? Math.ceil(price * (1 + margin / 100) / 10) * 10 : price;
 
-  // Guardar contexto global
   window._wooCurrentItem = {
     itemId: itemId, title: title, rawTitle: rawTitle,
     price: wooPrice, mlPrice: price,
@@ -9100,7 +9071,6 @@ async function fetchPreviewML() {
     attributes: attributes, stock: stock, permalink: permalink
   };
 
-  // Labels
   var mlPriceLabel = price > 0
     ? 'Precio en ML: <b>$' + price.toLocaleString('es-AR') + '</b>'
     : '<span style="color:var(--amber);font-weight:600">Precio no encontrado &mdash; ingresar manualmente</span>';
@@ -9108,37 +9078,25 @@ async function fetchPreviewML() {
   var priceStyle = price > 0
     ? 'font-size:18px;font-weight:700;color:#0f172a;background:#f8fafc;border:2px solid var(--accent);border-radius:8px;padding:6px 12px;width:160px;font-family:var(--mono)'
     : 'font-size:18px;font-weight:700;color:#92400e;background:#fffbeb;border:2px solid var(--amber);border-radius:8px;padding:6px 12px;width:160px;font-family:var(--mono)';
-  var priceAttr = price > 0 ? 'value="' + wooPrice + '"' : 'placeholder="Cargar precio manualmente"';
+  var priceAttr  = price > 0 ? 'value="' + wooPrice + '"' : 'placeholder="Cargar precio manualmente"';
 
-  // Imagen principal
   var mainThumb = pictures.length
     ? '<img src="' + pictures[0] + '" style="width:96px;height:96px;object-fit:cover;border-radius:8px;border:1px solid #e2e8f0;flex-shrink:0" onerror="this.style.background=\'#f1f5f9\'">'
     : '<div class="woo-preview-img">&#x1F4F7;</div>';
 
-  // Miniaturas adicionales
   var thumbsHtml = '';
   if (pictures.length > 1) {
-    thumbsHtml += '<div style="display:flex;gap:4px;margin-top:8px;flex-wrap:wrap">';
+    thumbsHtml = '<div style="display:flex;gap:4px;margin-top:8px;flex-wrap:wrap">';
     var extras = pictures.slice(1, 5);
-    for (var pi = 0; pi < extras.length; pi++) {
+    for (var pi = 0; pi < extras.length; pi++)
       thumbsHtml += '<img src="' + extras[pi] + '" style="width:40px;height:40px;object-fit:cover;border-radius:5px;border:1px solid #e2e8f0" onerror="this.style.display=\'none\'">';
-    }
-    if (pictures.length > 5) thumbsHtml += '<div style="width:40px;height:40px;border-radius:5px;border:1px solid #e2e8f0;background:#f1f5f9;display:flex;align-items:center;justify-content:center;font-size:11px;color:#64748b">+' + (pictures.length - 5) + '</div>';
-    thumbsHtml += '<span style="font-size:10px;color:var(--text3);align-self:center;margin-left:4px">' + pictures.length + ' fotos</span>';
-    thumbsHtml += '</div>';
+    if (pictures.length > 5) thumbsHtml += '<div style="width:40px;height:40px;border-radius:5px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;font-size:11px;color:#64748b">+' + (pictures.length-5) + '</div>';
+    thumbsHtml += '<span style="font-size:10px;color:var(--text3);align-self:center;margin-left:4px">' + pictures.length + ' fotos</span></div>';
   }
 
-  // Badge limpieza de titulo
   var titleDiff  = rawTitle !== title;
   var cleanBadge = titleDiff ? '<span style="font-size:9px;background:var(--green-g);color:var(--green);padding:2px 6px;border-radius:10px;margin-left:6px;font-weight:700">Limpio</span>' : '';
-
-  // Snippet descripcion
-  var descSnippet = '';
-  if (description) {
-    var snip = description.slice(0, 120).trim();
-    if (description.length > 120) snip += '...';
-    descSnippet = '<div style="font-size:10.5px;color:var(--text3);margin-top:6px;line-height:1.5;border-left:2px solid var(--border2);padding-left:8px">' + snip + '</div>';
-  }
+  var descSnippet = description ? '<div style="font-size:10.5px;color:var(--text3);margin-top:6px;line-height:1.5;border-left:2px solid var(--border2);padding-left:8px">' + description.slice(0,120).trim() + (description.length>120?'...':'') + '</div>' : '';
 
   var html = [];
   html.push('<div class="woo-preview-card">');
@@ -9159,21 +9117,16 @@ async function fetchPreviewML() {
   html.push('<input type="range" id="woo-margin-slider" min="0" max="100" step="5" value="' + Math.round(margin) + '" oninput="wooSyncPriceFromMargin(' + price + ')" style="width:100px;cursor:pointer">');
   html.push('<span id="woo-margin-pct" style="font-size:12px;font-weight:700;color:var(--accent);min-width:40px">+' + Math.round(margin) + '%</span>');
   html.push('<span style="font-size:10.5px;color:#94a3b8">(o escribi el precio directamente)</span>');
-  html.push('</div>');
-  html.push('</div>');
+  html.push('</div></div>');
   html.push('<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">');
   html.push('<button class="btn-woo-publish" id="btn-woo-publish-action">Publicar en WooCommerce</button>');
   if (permalink) html.push('<a href="' + permalink + '" target="_blank" class="btn btn-ghost btn-sm" style="text-decoration:none">Ver en ML</a>');
-  html.push('</div>');
-  html.push('</div>');
-  html.push('</div>');
+  html.push('</div></div></div>');
   container.innerHTML = html.join('');
 
   var pubBtn = document.getElementById('btn-woo-publish-action');
   if (pubBtn) pubBtn.onclick = function() { publishToWoo(); };
-
-  btn.disabled    = false;
-  btn.textContent = 'Obtener datos';
+  btn.disabled = false; btn.textContent = 'Obtener datos';
 }
 
 function wooSyncPriceFromMargin(mlPrice) {
@@ -9185,7 +9138,7 @@ function wooSyncPriceFromMargin(mlPrice) {
   if (pct) pct.textContent = '+' + margin + '%';
   if (mlPrice > 0) {
     input.value = Math.ceil(mlPrice * (1 + margin / 100) / 10) * 10;
-    input.style.background = '#f8fafc'; input.style.borderColor = 'var(--accent)'; input.style.color = '#0f172a';
+    input.style.cssText += ';background:#f8fafc;border-color:var(--accent);color:#0f172a';
   }
   if (window._wooCurrentItem) window._wooCurrentItem.price = parseFloat(input.value) || 0;
 }
@@ -9195,10 +9148,10 @@ function wooSyncPriceFromFixed(mlPrice) {
   var input  = document.getElementById('woo-final-price');
   var pct    = document.getElementById('woo-margin-pct');
   if (!slider || !input) return;
-  input.style.background = '#f8fafc'; input.style.borderColor = 'var(--accent)'; input.style.color = '#0f172a';
+  input.style.cssText += ';background:#f8fafc;border-color:var(--accent);color:#0f172a';
   if (mlPrice > 0) {
     var fixedPrice = parseFloat(input.value) || 0;
-    var margin = fixedPrice > 0 ? Math.round(((fixedPrice/mlPrice)-1)*100) : 0;
+    var margin = fixedPrice > 0 ? Math.round(((fixedPrice / mlPrice) - 1) * 100) : 0;
     slider.value = Math.max(0, Math.min(100, margin));
     if (pct) pct.textContent = '+' + Math.max(0, Math.min(100, margin)) + '%';
   }
