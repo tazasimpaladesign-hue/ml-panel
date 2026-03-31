@@ -2244,12 +2244,16 @@ async function loadItemsFast(){
     // Dividir en chunks de máx. 20 IDs (límite de la API de ML)
     const chunks=[];
     for(let i=0;i<ids.length;i+=20) chunks.push(ids.slice(i,i+20));
+    // _nocache rompe cualquier caché de red/Worker — health incluido en atributos
+    const nc=Date.now();
     const results=await Promise.all(chunks.map(chunk=>
-      mlGet('/items?ids='+chunk.join(',')+'&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations')
+      mlGet('/items?ids='+chunk.join(',')+'&include_attributes=all&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations,health&_nocache='+nc)
     ));
     allItems=[];
     results.forEach(r=>{ r.forEach(x=>{if(x.code===200)allItems.push(x.body);}); });
     _updateItemsUI();
+    // Actualizar score de salud en pantalla inmediatamente con datos frescos
+    refreshHealthScores();
   }catch(e){console.warn('[loadItemsFast]',e);}
 }
 
@@ -2269,10 +2273,16 @@ async function loadItemsFull(){
     }
     allIds=[...new Set(allIds)];const full=[];
     for(let i=0;i<allIds.length;i+=20){
-      try{const r=await mlGet('/items?ids='+allIds.slice(i,i+20).join(',')+'&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations');r.forEach(x=>{if(x.code===200)full.push(x.body);});}catch(e){}
+      try{
+        const nc=Date.now();
+        const r=await mlGet('/items?ids='+allIds.slice(i,i+20).join(',')+'&include_attributes=all&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations,health&_nocache='+nc);
+        r.forEach(x=>{if(x.code===200)full.push(x.body);});
+      }catch(e){}
       if(i>0&&i%200===0)await new Promise(r=>setTimeout(r,100));
     }
     allItems=full;_updateItemsUI();
+    // Actualizar health scores con datos recién bajados de ML
+    refreshHealthScores();
     console.log('[loadItemsFull]',allItems.length);
   }catch(e){console.error('[loadItemsFull]',e);}
 }
@@ -2399,7 +2409,91 @@ function stamp(){
 // LOAD — compatibilidad con refreshAll y otras llamadas
 async function loadItems(){await loadItemsFull();}
 
-// ── Cargar métricas de visitas/ventas para publicaciones (7 días) ──
+// refreshAll con refresh de health obligatorio
+async function refreshAll(){
+  await Promise.all([loadItemsFast(), loadOrdersRecent(), loadQuestions()]);
+  renderDashboard();
+  // Forzar re-fetch de health scores ignorando cualquier caché
+  _healthRefreshRunning = false;
+  refreshHealthScores();
+  loadItemsFull();
+  loadOrdersHistory();
+  stamp();
+}
+
+// ═══════════════════════════════════════════════════════════
+// HEALTH REFRESH — actualiza i.health desde ML API en background
+// Lee el campo numérico `health` (0-1) y lo multiplica ×100 para %
+// ═══════════════════════════════════════════════════════════
+let _healthRefreshRunning = false;
+
+async function refreshHealthScores(){
+  if(_healthRefreshRunning){ console.log('[Health] Ya corriendo, skip'); return; }
+  _healthRefreshRunning = true;
+  console.log('[Health] Iniciando refresh de health scores...');
+
+  const active = allItems.filter(i => i.status === 'active');
+  if(!active.length){ _healthRefreshRunning = false; return; }
+
+  let updated = 0;
+
+  // Lotes de 5 para no saturar el Worker (el endpoint individual devuelve health confiable)
+  for(let i = 0; i < active.length; i += 5){
+    const batch = active.slice(i, i + 5);
+    await Promise.allSettled(batch.map(async item => {
+      try{
+        // _nocache con timestamp único por ítem garantiza respuesta fresca de ML
+        const nc = Date.now();
+        const fresh = await mlGet(
+          '/items/' + item.id +
+          '?include_attributes=all&attributes=id,health,status,available_quantity&_nocache=' + nc
+        );
+        // health es un número entre 0 y 1 (ej: 0.85 = 85%)
+        if(fresh && typeof fresh.health === 'number'){
+          item.health = fresh.health;          // actualizar objeto en allItems
+          updated++;
+        } else if(fresh && fresh.health === null){
+          item.health = null;                  // ML devolvió null explícito — respetar
+        }
+      }catch(e){
+        console.warn('[Health] Error ítem', item.id, '—', e.message);
+      }
+    }));
+
+    // Cada 5 ítems actualizar el BizScore en pantalla sin esperar el final
+    if(i % 20 === 0 && i > 0){
+      renderBizScore();
+      if(document.getElementById('section-dashboard')?.classList.contains('active')){
+        renderDashTopPubs();
+      }
+    }
+
+    // Delay anti-429 entre lotes
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  // Render final con todos los datos frescos
+  renderBizScore();
+  if(document.getElementById('section-dashboard')?.classList.contains('active')){
+    renderDashTopPubs();
+  }
+  if(document.getElementById('section-seo')?.classList.contains('active')){
+    renderSEOSection();
+  }
+
+  console.log('[Health] Refresh completo — actualizados:', updated, '/', active.length);
+  _healthRefreshRunning = false;
+}
+
+// Helper: devuelve el health de un ítem como porcentaje (0-100)
+// Prioriza i.health (0-1 de ML) sobre qualityScore local
+function itemHealthPct(item){
+  if(!item) return 0;
+  if(typeof item.health === 'number') return Math.round(item.health * 100);
+  return qualityScore(item);
+}
+
+
 // Endpoint: GET /items/{id}/visits?date_from=...&date_to=...
 // Se llama bajo demanda para la vista SEO (en lotes para evitar rate limit)
 // ── Métricas reales de visitas/ventas (últimos 7 días) ─────
@@ -2661,8 +2755,9 @@ function calcBizScore(){
   const activeItems = allItems.filter(i=>i.status==='active');
   const pend = allQuestions.filter(q=>q.status==='UNANSWERED').length;
   const zeroStock = allItems.filter(i=>i.status==='active'&&(i.available_quantity||0)===0).length;
-  const healthScores = activeItems.map(i=>i.health!=null?i.health:qualityScore(i)/100);
-  const healthAvg = healthScores.length ? Math.round(healthScores.reduce((s,v)=>s+v,0)/healthScores.length*100) : 0;
+  // Usar itemHealthPct() que lee i.health (0-1 de ML) × 100, con fallback a qualityScore local
+  const healthScores = activeItems.map(i => itemHealthPct(i));
+  const healthAvg = healthScores.length ? Math.round(healthScores.reduce((s,v)=>s+v,0)/healthScores.length) : 0;
   const seoAvg = healthAvg;
   const score = Math.max(0, Math.min(100, healthAvg));
   const state = score>=80?['🟢','Saludable','#16a34a','#f0fdf4']:score>=50?['🟡','Regular','#92400e','#fffbeb']:['🔴','Requiere Atención','#991b1b','#fef2f2'];
@@ -3065,7 +3160,7 @@ function renderDashTopPubs(){
     const price = i?.price || 0;
     const thumb = i?.thumbnail || '';
     const status= i?.status || 'active';
-    const sc    = i ? (i.health!=null ? Math.round(i.health*100) : qualityScore(i)) : 0;
+    const sc    = itemHealthPct(i);  // lee i.health (0-1) × 100, fallback a qualityScore local
     const scC   = sc>=80?'var(--green)':sc>=50?'var(--amber)':'var(--red)';
     const medal = idx===0?'🥇':idx===1?'🥈':idx===2?'🥉':String(idx+1);
     const editUrl = i ? 'https://www.mercadolibre.com.ar/publicaciones/'+i.id+'/modificar' : null;
@@ -7101,14 +7196,6 @@ function showSection(id){
   if(id==='tendencias') loadTrends();
   if(id==='publicidad'){calcAds();populateAdsSelect();}
   if(id==='bulk') renderPubs();
-}
-
-async function refreshAll(){
-  if(!token)return;
-  document.getElementById('last-upd').textContent='Actualizando...';
-  await Promise.all([loadItems(),loadOrders(),loadQuestions()]);
-  renderDashboard();
-  stamp();
 }
 
 // ═══════════════════════════════════════════════════════════
