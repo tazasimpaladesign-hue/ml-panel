@@ -602,7 +602,6 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <span id="cloud-sync-status" title="Estado de sincronización con la nube"
         style="font-size:12px;color:var(--text3);cursor:default;padding:4px 8px;border-radius:6px;transition:all .3s;user-select:none">☁️</span>
       <button class="btn btn-ghost btn-sm" onclick="refreshAll()">↻ Actualizar</button>
-      <button class="btn btn-primary btn-sm" onclick="openModal('modal-gen')">✨ Nuevo producto IA</button>
     </div>
   </div>
 
@@ -1260,15 +1259,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
   <!-- Fila 2: Consulta Express + Competidores guardados -->
   <div class="g2 mb">
-    <div class="card">
-      <div class="card-hd"><div class="card-title">⚡ Consulta Express</div></div>
-      <div style="display:flex;flex-direction:column;gap:8px">
-        <label style="font-size:11px;color:var(--text3)">Pegá un link de ML o un MLA ID para ver su info y reputación del vendedor</label>
-        <input type="text" id="comp-express-url" placeholder="https://articulo.mercadolibre.com.ar/MLA-..." style="font-size:12px;padding:7px 9px">
-        <button class="btn btn-primary btn-sm" onclick="compExpressLookup()">Consultar</button>
-        <div id="comp-express-out"></div>
-      </div>
-    </div>
+
     <div class="card">
       <div class="card-hd">
         <div class="card-title">📋 Competidores guardados</div>
@@ -2707,7 +2698,7 @@ function calcBizScore(){
   const healthAvg = healthScores.length ? Math.round(healthScores.reduce((s,v)=>s+v,0)/healthScores.length*100) : 0;
   const seoAvg = healthAvg;
   const score = Math.max(0, Math.min(100, healthAvg));
-  const state = score>=80?['\U0001f7e2','Saludable','#16a34a','#f0fdf4']:score>=50?['\U0001f7e1','Regular','#92400e','#fffbeb']:['\U0001f534','Requiere Atenci\xf3n','#991b1b','#fef2f2'];
+  const state = score>=80?['🟢','Saludable','#16a34a','#f0fdf4']:score>=50?['🟡','Regular','#92400e','#fffbeb']:['🔴','Requiere Atención','#991b1b','#fef2f2'];
   return {score, state, seoAvg, healthAvg, pend, zeroStock};
 }
 
@@ -2730,6 +2721,7 @@ function renderBizScore(){
         <div>
           <div style="font-size:16px;font-weight:700;color:${color}">${emoji} Estado ${label}</div>
           <div style="font-size:12px;color:var(--text2);margin-top:4px">Salud general del negocio</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:6px">* Promedio de calidad de publicación del catálogo activo.</div>
         </div>
       </div>
       <div style="display:flex;gap:14px;flex-wrap:wrap;margin-left:auto">
@@ -3109,8 +3101,8 @@ function renderDashTopPubs(){
     const sc    = i ? (i.health!=null ? Math.round(i.health*100) : qualityScore(i)) : 0;
     const scC   = sc>=80?'var(--green)':sc>=50?'var(--amber)':'var(--red)';
     const medal = idx===0?'🥇':idx===1?'🥈':idx===2?'🥉':String(idx+1);
-    const ctrlUrl= i ? 'https://www.mercadolibre.com.ar/items/control?item_id='+i.id : null;
-    const onCl  = ctrlUrl ? 'onclick="window.open(\''+ctrlUrl+'\',\'_blank\')"' : '';
+    const editUrl = i ? 'https://www.mercadolibre.com.ar/publicaciones/'+i.id+'/modificar' : null;
+    const onCl   = editUrl ? 'onclick="window.open(\''+editUrl+'\',\'_blank\')"' : '';
     return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);'+(i?'cursor:pointer':'')+'" '+onCl+'>'
       +'<span style="font-size:'+(idx<3?'15':'12')+'px;font-weight:700;color:var(--text3);width:22px;text-align:center;flex-shrink:0">'+medal+'</span>'
       +'<div class="item-thumb" style="flex-shrink:0">'+(thumb?'<img src="'+thumb+'" onerror="this.parentElement.textContent=\'☕\'">':'☕')+'</div>'
@@ -5213,7 +5205,6 @@ function renderCompetidores(){
         <div style="font-size:12.5px;font-weight:500">${comp.name}</div>
         ${comp.url?`<a href="${comp.url}" target="_blank" style="font-size:11px;color:var(--accent);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;max-width:250px">${comp.url.slice(0,55)}...</a>`:''}
       </div>
-      <button onclick="compExpressFromUrl('${comp.url||''}')" class="btn btn-ghost btn-xs" title="Consulta Express">⚡</button>
       <button onclick="deleteCompetidor(${i})" class="btn btn-ghost btn-xs" style="color:var(--red);border-color:var(--red)">✕</button>
     </div>`).join('');
 }
@@ -5275,182 +5266,6 @@ async function deleteCompetidor(idx){
     _cloudStatus('ok');
   }catch(e){ _cloudStatus('error'); }
   renderCompetidores();
-}
-
-function compExpressFromUrl(url){
-  const inp=document.getElementById('comp-express-url');
-  if(inp) inp.value=url||'';
-  compExpressLookup();
-}
-
-async function compExpressLookup(){
-  const inp = document.getElementById('comp-express-url')?.value?.trim()||'';
-  const out = document.getElementById('comp-express-out');
-  if(!out) return;
-  if(!inp){ out.innerHTML='<div style="color:var(--text3);font-size:12px">Ingresá una URL o MLA ID.</div>'; return; }
-
-  // Extraer MLA ID
-  let mlaId = null;
-  const m = inp.match(/MLA[-]?(\d+)/i);
-  if(m) mlaId='MLA'+m[1];
-  else if(/^\d{8,}$/.test(inp.trim())) mlaId='MLA'+inp.trim();
-
-  if(!mlaId){ out.innerHTML='<div class="alert a-warn">⚠ No se pudo extraer un MLA ID de la URL.</div>'; return; }
-
-  out.innerHTML='<div class="loading"><div class="spin"></div>Consultando...</div>';
-
-  try{
-    // Usar la IP del cliente via corsproxy.io para evitar 403 de ML
-    const apiUrl = 'https://corsproxy.io/?'+encodeURIComponent('https://api.mercadolibre.com/items/'+mlaId+'?attributes=id,title,price,available_quantity,sold_quantity,seller_id,thumbnail,permalink,seller');
-    const r = await fetch(apiUrl, { signal: AbortSignal.timeout(10000) });
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    const item = await r.json();
-    if(item.error) throw new Error(item.message||item.error);
-
-    // Reputación del vendedor
-    let repHtml='';
-    if(item.seller_id||item.seller?.id){
-      try{
-        const sellerId=item.seller_id||item.seller?.id;
-        const repUrl='https://corsproxy.io/?'+encodeURIComponent('https://api.mercadolibre.com/users/'+sellerId+'/seller_reputation');
-        const r2=await fetch(repUrl,{signal:AbortSignal.timeout(6000)});
-        if(r2.ok){
-          const rep=await r2.json();
-          const level=rep.level_id||'—';
-          const lvlColor={'1_red':'var(--red)','2_orange':'#f97316','3_yellow':'var(--amber)','4_light_green':'var(--green)','5_green':'#16a34a'}[level]||'var(--text2)';
-          repHtml=`<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px">
-            <div style="padding:6px 12px;background:var(--bg3);border-radius:6px;text-align:center">
-              <div style="font-size:11px;color:var(--text3)">Reputación</div>
-              <div style="font-weight:700;color:${lvlColor}">${level.replace(/_/g,' ')}</div>
-            </div>
-            ${rep.power_seller_status?`<div style="padding:6px 12px;background:var(--bg3);border-radius:6px;text-align:center">
-              <div style="font-size:11px;color:var(--text3)">Power Seller</div>
-              <div style="font-weight:700;color:var(--green)">${rep.power_seller_status}</div>
-            </div>`:''}
-            ${rep.metrics?.claims?.rate!=null?`<div style="padding:6px 12px;background:var(--bg3);border-radius:6px;text-align:center">
-              <div style="font-size:11px;color:var(--text3)">Reclamos</div>
-              <div style="font-weight:700">${(rep.metrics.claims.rate*100).toFixed(2)}%</div>
-            </div>`:''}
-          </div>`;
-        }
-      }catch(e){ repHtml='<div style="font-size:11px;color:var(--text3);margin-top:6px">Reputación no disponible</div>'; }
-    }
-
-    out.innerHTML=`
-      <div style="display:flex;gap:10px;margin-top:10px;align-items:flex-start">
-        ${item.thumbnail?`<img src="${item.thumbnail}" width="56" height="56" style="object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border)">`:''}
-        <div style="flex:1;min-width:0">
-          <div style="font-size:13px;font-weight:600;margin-bottom:4px">${item.title||mlaId}</div>
-          <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--text2)">
-            <span>💲 <b>$${(item.price||0).toLocaleString('es-AR')}</b></span>
-            <span>📦 Stock: ${item.available_quantity??'—'}</span>
-            <span>🛒 Vendidas: ${item.sold_quantity||0}</span>
-          </div>
-          ${repHtml}
-          ${item.permalink?`<a href="${item.permalink}" target="_blank" class="btn btn-ghost btn-xs" style="margin-top:8px;text-decoration:none">Ver en ML →</a>`:''}
-        </div>
-      </div>`;
-  }catch(e){
-    out.innerHTML='<div class="alert a-err">❌ Error: '+e.message+'</div>';
-  }
-}
-
-async function doComp(){
-  const q=(document.getElementById('comp-q')||{}).value?.trim();
-  if(!q){alert('Ingresá un producto');return;}
-  const el=document.getElementById('comp-out')||document.getElementById('comp-results');
-  if(!el)return;
-  el.innerHTML='<div class="loading"><div class="spin"></div>Buscando...</div>';
-  try{
-    const r=await mlGet('/sites/MLA/search?q='+encodeURIComponent(q)+'&limit=20&sort=relevance');
-    const items=r.results||[];
-    if(!items.length){el.innerHTML='<div class="alert a-warn">Sin resultados para "'+q+'"</div>';return;}
-    const prices=items.map(i=>i.price||0).filter(Boolean);
-    const avg=Math.round(prices.reduce((s,p)=>s+p,0)/Math.max(prices.length,1));
-    const myM=allItems.find(i=>i.title?.toLowerCase().includes(q.toLowerCase().split(' ')[0]));
-    let html=(myM?'<div class="alert a-info" style="margin-bottom:10px">📦 Tu pub similar: <b>'+myM.title?.slice(0,50)+'</b> — $'+(myM.price||0).toLocaleString('es-AR')+'</div>':'');
-    html+='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px">';
-    html+='<div style="background:#eff6ff;border-radius:8px;padding:12px"><div style="font-size:10px;color:#6b7280;text-transform:uppercase">Precio prom</div><div style="font-size:20px;font-weight:700">$'+avg.toLocaleString('es-AR')+'</div></div>';
-    html+='<div style="background:#ecfdf5;border-radius:8px;padding:12px"><div style="font-size:10px;color:#6b7280;text-transform:uppercase">Mínimo</div><div style="font-size:20px;font-weight:700">$'+Math.min(...prices).toLocaleString('es-AR')+'</div></div>';
-    html+='<div style="background:#fffbeb;border-radius:8px;padding:12px"><div style="font-size:10px;color:#6b7280;text-transform:uppercase">Máximo</div><div style="font-size:20px;font-weight:700">$'+Math.max(...prices).toLocaleString('es-AR')+'</div></div></div>';
-    html+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>';
-    ['Título','Precio','Ventas','Envío','vs tuyo'].forEach(h=>html+='<th style="text-align:left;padding:7px;border-bottom:2px solid #e5e7eb;white-space:nowrap">'+h+'</th>');
-    html+='</tr></thead><tbody>';
-    items.forEach(i=>{
-      const diff=myM&&myM.price?((i.price-myM.price)/myM.price*100).toFixed(1):null;
-      html+='<tr style="border-bottom:1px solid #f3f4f6"><td style="padding:7px;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><a href="'+(i.permalink||'#')+'" target="_blank" style="color:#3b82f6">'+i.title+'</a></td>';
-      html+='<td style="padding:7px;font-weight:600">$'+(i.price||0).toLocaleString('es-AR')+'</td>';
-      html+='<td style="padding:7px;text-align:center">'+(i.sold_quantity||0)+'</td>';
-      html+='<td style="padding:7px;text-align:center">'+(i.shipping?.free_shipping?'<span style="background:#d1fae5;color:#065f46;padding:2px 6px;border-radius:8px;font-size:10px">Gratis</span>':'—')+'</td>';
-      html+='<td style="padding:7px;text-align:center">'+(diff?'<span style="background:'+(parseFloat(diff)>0?'#d1fae5':parseFloat(diff)<-10?'#fee2e2':'#fef3c7')+';padding:2px 6px;border-radius:8px;font-size:10px">'+(diff>0?'+':'')+diff+'%</span>':'—')+'</td></tr>';
-    });
-    html+='</tbody></table></div>';
-    el.innerHTML=html;
-  }catch(e){el.innerHTML='<div class="alert a-err">Error: '+e.message+'</div>';}
-}
-
-// ─── Tienda Impala AI context ──────────────────────────────
-const _IMPALA_CTX = `Somos Tienda Impala Design, estamos en Mendoza (zona Plaza Chile). No tenemos local físico. Hacemos envíos a todo el país. Las tazas mágicas son termosensibles (aparece el diseño con calor) y se envían en telgopor.
-
-Ejemplos de estilo de respuesta (tono amable, directo, argentino):
-- P: "¿Tienen local para ir a ver?" → R: "Hola. Local no tenemos, hacemos las entregas por el centro de Mendoza, a una cuadra de plaza Chile. La demo..."
-- P: "¿De dónde son?" → R: "Hola. Somos de Mendoza, Argentina. Hacemos envíos a todo el país a través de Mercadoenvíos. Esperamos tu compra. Saludos"
-- P: "¿Envían envuelta para regalo?" → R: "Hola. Buen día, no ofrecemos envoltura para regalo. La taza va protegida en telgopor para su traslado. Esperamos tu comp..."
-- P: "¿Es revelador con agua?" → R: "Buenas noches, exacto, aparece el diseño con bebida caliente. Tenemos stock disponible. Esperamos tu compra. Saludos"
-- P: "¿Hacen personalización?" → R: El diseño ya está definido y es tal cual se ve en las fotos. No hacemos personalización.
-- P: "¿No son de Buenos Aires?" → R: "Hola. No, de Mendoza. Saludos - Tienda Impala Design"
-- P: "¿Pueden enviar por correo argentino?" → R: "Hacemos envíos por MercadoEnvíos, al momento de la compra elegís dirección de entrega..."`;
-
-async function aiAnswerQ(id, btn){
-  // Obtener texto de la pregunta desde el DOM (evita problemas de escape en onclick)
-  const qCard = btn.closest('[data-qid]');
-  const text   = qCard ? (qCard.dataset.qtext||'') : '';
-  const itemId = qCard ? (qCard.dataset.itemid||'') : '';
-  btn.textContent='⏳ Generando...'; btn.disabled=true;
-
-  const qItem = itemId ? (allItems||[]).find(i=>String(i.id)===String(itemId)) : null;
-  const pubCtx = qItem
-    ? `
-Publicación: "${qItem.title}" · Precio: $${(qItem.price||0).toLocaleString('es-AR')} · Stock: ${qItem.available_quantity||0}`
-    : '';
-  const attrs = qItem && qItem.attributes ? ('\nAtributos: ' + (qItem.attributes||[]).slice(0,5).map(a=>a.id+': '+a.value_name).filter(v=>v.includes(': ')&&!v.endsWith(': ')).join(' | ')) : '';
-
-  try{
-    const nl = '\n';
-    const prompt = _IMPALA_CTX + pubCtx + attrs + nl + nl + 'Pregunta del comprador: "' + text + '"' + nl + nl + 'Respondé de forma breve (2-3 oraciones), amable y directa en español argentino. Sé natural y vendedor. Si preguntan por localización: estamos en Mendoza. Si preguntan por envíos: hacemos envíos a todo el país por Mercadoenvíos. Si preguntan por retiro: no tenemos local, entregamos en zona plaza Chile Mendoza. No menciones personalización a menos que pregunten.';
-    const r = await callClaude(prompt);
-    const ta = document.getElementById('ans-txt-'+id);
-    if(ta){ ta.value = r; document.getElementById('ans-form-'+id).style.display='block'; ta.focus(); }
-    btn.textContent='🤖 Sugerir con IA'; btn.disabled=false;
-  }catch(e){ btn.textContent='🤖 Sugerir con IA'; btn.disabled=false; }
-}
-
-async function submitAns(id){
-  const ta = document.getElementById('ans-txt-'+id);
-  const text = ta?.value?.trim();
-  if(!text){ alert('Escribí una respuesta antes de enviar'); return; }
-  const btn = document.querySelector(`[onclick="submitAns(${id})"]`);
-  if(btn){ btn.textContent='⏳ Enviando...'; btn.disabled=true; }
-  try{
-    await mlPost('/answers',{question_id:id,text});
-    await loadQuestions(); renderQuestions();
-  }catch(e){
-    if(btn){ btn.textContent='✓ Enviar respuesta'; btn.disabled=false; }
-    alert('Error al enviar: '+e.message);
-  }
-}
-
-async function bulkAnswerIA(){
-  const pend=allQuestions.filter(q=>q.status==='UNANSWERED');
-  if(!pend.length){alert('No hay preguntas pendientes');return;}
-  if(!confirm(`¿Responder las ${pend.length} preguntas pendientes con IA? (máx 5)`))return;
-  for(const q of pend.slice(0,5)){
-    try{
-      const _nl='\n'; const r=await callClaude(_IMPALA_CTX+_nl+_nl+'Pregunta del comprador: "'+q.text+'"'+_nl+_nl+'Respondé breve, amable, español argentino. Máx 2-3 oraciones.');
-      await mlPost('/answers',{question_id:q.id,text:r});
-    }catch(e){console.error(e);}
-  }
-  await loadQuestions(); renderQuestions();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -7332,39 +7147,7 @@ function switchAccount(){
 // BOOT
 // ═══════════════════════════════════════════════════════════
 
-// ── Análisis de Mercado ──
-async function doMktAnalysis(){
-  const q=document.getElementById('mkt-q')?.value?.trim();
-  if(!q){alert('Ingresá una categoría o producto');return;}
-  const el=document.getElementById('mkt-out');
-  if(!el)return;
-  el.innerHTML='<div class="loading"><div class="spin"></div>Analizando mercado...</div>';
-  try{
-    const r=await mlGet('/sites/MLA/search?q='+encodeURIComponent(q)+'&limit=50&sort=relevance');
-    const items=r.results||[];
-    if(!items.length){el.innerHTML='<div class="alert a-warn">Sin resultados para "'+q+'"</div>';return;}
-    const prices=items.map(i=>i.price||0).filter(Boolean);
-    const avg=Math.round(prices.reduce((s,p)=>s+p,0)/Math.max(prices.length,1));
-    const sellers={};items.forEach(i=>{if(i.seller?.nickname)sellers[i.seller.nickname]=(sellers[i.seller.nickname]||0)+1;});
-    const topS=Object.entries(sellers).sort((a,b)=>b[1]-a[1]).slice(0,5);
-    let html='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:10px 0">';
-    html+='<div style="background:#eff6ff;border-radius:8px;padding:12px"><div style="font-size:10px;color:#6b7280;text-transform:uppercase;margin-bottom:4px">Total</div><div style="font-size:20px;font-weight:700">'+(r.paging?.total||0).toLocaleString('es-AR')+'</div></div>';
-    html+='<div style="background:#ecfdf5;border-radius:8px;padding:12px"><div style="font-size:10px;color:#6b7280;text-transform:uppercase;margin-bottom:4px">Precio prom</div><div style="font-size:20px;font-weight:700">$'+avg.toLocaleString('es-AR')+'</div></div>';
-    html+='<div style="background:#fffbeb;border-radius:8px;padding:12px"><div style="font-size:10px;color:#6b7280;text-transform:uppercase;margin-bottom:4px">Envío gratis</div><div style="font-size:20px;font-weight:700">'+items.filter(i=>i.shipping?.free_shipping).length+'/'+items.length+'</div></div>';
-    html+='<div style="background:#f5f3ff;border-radius:8px;padding:12px"><div style="font-size:10px;color:#6b7280;text-transform:uppercase;margin-bottom:4px">Con ventas</div><div style="font-size:20px;font-weight:700">'+items.filter(i=>i.sold_quantity>0).length+'</div></div></div>';
-    html+='<div style="display:grid;grid-template-columns:1.5fr 1fr;gap:12px"><div>';
-    html+='<div style="font-size:13px;font-weight:600;margin-bottom:8px">Top publicaciones</div><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>';
-    ['Título','Precio','Ventas','Envío'].forEach(h=>html+='<th style="text-align:left;padding:6px;border-bottom:2px solid #e5e7eb">'+h+'</th>');
-    html+='</tr></thead><tbody>';
-    items.slice(0,15).forEach(i=>{html+='<tr style="border-bottom:1px solid #f3f4f6"><td style="padding:6px;max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><a href="'+(i.permalink||'#')+'" target="_blank" style="color:#3b82f6;font-size:11.5px">'+i.title+'</a></td><td style="padding:6px">$'+(i.price||0).toLocaleString('es-AR')+'</td><td style="padding:6px;text-align:center">'+(i.sold_quantity||0)+'</td><td style="padding:6px;text-align:center">'+(i.shipping?.free_shipping?'✅':'—')+'</td></tr>';});
-    html+='</tbody></table></div></div><div><div style="font-size:13px;font-weight:600;margin-bottom:8px">Vendedores activos</div>';
-    topS.forEach(([nick,n])=>{html+='<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #f3f4f6"><span style="font-size:12px;font-weight:500">'+nick+'</span><span style="background:#dbeafe;color:#1d4ed8;padding:2px 7px;border-radius:8px;font-size:10px">'+n+' pubs</span></div>';});
-    html+='</div></div>';
-    el.innerHTML=html;
-  }catch(e){el.innerHTML='<div class="alert a-err">Error: '+e.message+'</div>';}
-}
 
-// ── Notificaciones ──────────────────────────────────────────
 async function renderMensajes(){
   const el = document.getElementById('mensajes-list');
   if(!el) return;
@@ -7419,7 +7202,9 @@ async function renderMensajes(){
 
 function renderNotifList(notifs, el){
   // Ordenar: no leídas primero, luego por fecha
+  // Solo mostrar las últimas 10 notificaciones
   const sorted = [...notifs].sort((a,b)=>{
+
     const aRead = a.is_read||a.status==='read';
     const bRead = b.is_read||b.status==='read';
     if(!aRead&&bRead) return -1;
@@ -7427,7 +7212,7 @@ function renderNotifList(notifs, el){
     return new Date(b.date||b.date_created||0)-new Date(a.date||a.date_created||0);
   });
 
-  el.innerHTML = sorted.map(n=>{
+  el.innerHTML = sorted.slice(0, 10).map(n=>{
     const isRead = n.is_read||n.status==='read';
     const dateStr = (n.date||n.date_created)
       ? new Date(n.date||n.date_created).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})
