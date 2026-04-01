@@ -9147,26 +9147,71 @@ async function wooOptimizeField(field) {
   var sugg = document.getElementById('woo-ai-sugg-' + field);
   if (!btn || !sugg) return;
   btn.disabled = true; btn.textContent = 'Optimizando...';
-  var isTitle = field === 'title';
-  var current = isTitle
-    ? ((document.getElementById('woo-title-input') || {}).value || item.title)
-    : ((document.getElementById('woo-desc-input') || {}).value || item.description || '');
-  var prompt = isTitle
-    ? 'Sos un experto en SEO para WooCommerce. Optimiza este titulo de producto para Google: "' + current + '". Elimina muletillas de MercadoLibre (envio gratis, cuotas, stock, full, etc). Max 60 caracteres. Solo devuelve el titulo optimizado, sin explicaciones ni comillas.'
-    : 'Sos un experto en copywriting y SEO para WooCommerce Argentina. '
-    + 'A partir de este titulo de producto: "' + item.title + '", '
-    + 'genera una descripcion de producto siguiendo EXACTAMENTE esta estructura:\n'
-    + '1) Un titulo atractivo corto relacionado SOLO a ese producto.\n'
-    + '2) Un parrafo persuasivo conectando ese producto especifico con la emocion del comprador (regalo, identidad, pasion).\n'
-    + '3) Una lista de exactamente 5 caracteristicas deducidas del titulo (formato: - Caracteristica: descripcion breve).\n'
-    + '4) Un call to action final de compra (ej: Regalo ideal, agregalo al carrito).\n'
-    + 'PROHIBIDO: mencionar el catalogo general de la tienda, otros productos, otros nichos o listas genericas. '
-    + 'Escribi en espanol argentino informal. Devuelve SOLO la descripcion, sin explicaciones previas ni comillas externas.';
+
+  // El titulo limpio es la unica fuente de verdad para ambos prompts
+  var titleInput   = document.getElementById('woo-title-input');
+  var productTitle = (titleInput ? titleInput.value.trim() : '') || item.title || item.rawTitle || '';
+  var isTitle      = field === 'title';
+
+  var prompt;
+  if (isTitle) {
+    // Prompt de titulo: SEO corto, sin muletillas de ML
+    prompt = 'Sos un experto en SEO para WooCommerce. '
+           + 'Optimiza este titulo de producto para Google: "' + productTitle + '". '
+           + 'Elimina muletillas de ML (envio gratis, cuotas, stock, full, etc). '
+           + 'Maximo 60 caracteres. Devuelve SOLO el titulo optimizado, sin comillas ni explicaciones.';
+  } else {
+    // Prompt de descripcion: estructura completa basada UNICAMENTE en el titulo
+    prompt = 'Actuá como un experto en copywriting para e-commerce y SEO. '
+    + 'Tenes un UNICO dato: el titulo del producto: "' + productTitle + '". '
+    + 'A partir de ESE titulo (y SOLO ese titulo), redactá una descripcion completa para WooCommerce. '
+    + 'REGLAS ABSOLUTAS:\n'
+    + '- PROHIBIDO mencionar otros productos, marcas o categorias que NO aparezcan en el titulo.\n'
+    + '- Si el titulo dice "Taza Boca", NO menciones San Lorenzo, Demon Slayer ni nada ajeno.\n'
+    + '- Usa <b> en titulos de seccion y datos clave (material, capacidad, etc).\n'
+    + '- Tono argentino, cercano pero profesional. Nada de "querido cliente".\n\n'
+    + 'ESTRUCTURA EXACTA (respetá exactamente este orden y deja DOS saltos de linea entre cada seccion):\n\n'
+    + '<b>Titulo ganador:</b>\n'
+    + 'Redacta un titulo SEO que expanda el original con emocion (ej: "Jarro Termico San Lorenzo: El Ciclon en tu escritorio").\n\n'
+    + '<b>Introduccion emocional:</b>\n'
+    + 'Un parrafo de 2-3 oraciones que conecte ese producto especifico con la pasion del usuario (domingo de partido, recuerdo de infancia, orgullo del club, etc).\n\n'
+    + '<b>Caracteristicas del articulo:</b>\n'
+    + 'Lista de 5 a 7 vinas tecnicas deducidas del tipo de producto del titulo. '
+    + 'Formato: - <b>Nombre del atributo:</b> valor o descripcion breve. '
+    + '(Inferir segun tipo: taza=ceramica/capacidad/apto microondas, termico=acero inox/capacidad/horas de calor, etc.)\n\n'
+    + '<b>Para quien es ideal:</b>\n'
+    + 'Definir el publico en 2 oraciones: fans, coleccionistas, regalo de cumpleanos, etc. Relacionado al tema del titulo.\n\n'
+    + '<b>Garantia Tienda Impala:</b>\n'
+    + 'Incluir siempre este texto: "Enviamos con embalaje de seguridad anti-roturas. '
+    +   'Nuestros productos son de calidad premium con sublimado de alta durabilidad que no se borra con el uso diario."\n\n'
+    + '<b>Tips de cuidado:</b>\n'
+    + 'Segun el tipo de producto del titulo: '
+    +   'Si es ceramica (taza, jarro): "Lavar a mano con esponja suave. Apto microondas (sin partes metalicas). No lavar en lavavajillas." '
+    +   'Si es termico (jarro termico, botella): "Lavar a mano. No apto microondas. No sumergir la base." '
+    +   'Si es acrilico o vidrio: "Fragil, manipular con cuidado. No apto microondas ni lavavajillas."\n\n'
+    + 'Devuelve SOLO el texto final. Sin explicaciones, sin "Aqui la descripcion:", sin comillas externas. '
+    + 'Respeta exactamente los saltos de linea dobles entre secciones.';
+  }
+
   try {
+    // callClaude con null history = contexto limpio, sin historial del chat general
     var result = await callClaude(prompt, null);
+    var cleaned = result ? result.trim() : '';
+
     sugg.style.display = 'block';
     var textEl = document.getElementById('woo-ai-text-' + field);
-    if (textEl) textEl.textContent = result.trim();
+    if (textEl) {
+      if (isTitle) {
+        // Titulo: texto plano
+        textEl.textContent = cleaned;
+      } else {
+        // Descripcion: preservar <b> tags y saltos de linea
+        // Convertir \n a <br> para mostrar en el div de preview
+        textEl.innerHTML = cleaned.replace(/\n/g, '<br>');
+        // Guardar el texto con \n en data attr para que wooAcceptSuggestion lo use en el textarea
+        textEl.setAttribute('data-raw', cleaned);
+      }
+    }
   } catch(e) {
     showToast('Error al contactar la IA: ' + e.message, 'warn');
   } finally {
@@ -9178,15 +9223,18 @@ function wooAcceptSuggestion(field) {
   var textEl = document.getElementById('woo-ai-text-' + field);
   var sugg   = document.getElementById('woo-ai-sugg-' + field);
   if (!textEl) return;
-  var val = textEl.textContent.trim();
   if (field === 'title') {
+    // Titulo: texto plano
+    var val = textEl.textContent.trim();
     var inp = document.getElementById('woo-title-input');
     if (inp) { inp.value = val; wooCharCounter(inp); }
     if (window._wooCurrentItem) window._wooCurrentItem.title = val;
   } else {
-    var ta = document.getElementById('woo-desc-input');
-    if (ta) ta.value = val;
-    if (window._wooCurrentItem) window._wooCurrentItem.description = val;
+    // Descripcion: usar data-raw que tiene \n originales y tags <b> intactos
+    var raw = textEl.getAttribute('data-raw') || textEl.textContent;
+    var ta  = document.getElementById('woo-desc-input');
+    if (ta) ta.value = raw.trim();
+    if (window._wooCurrentItem) window._wooCurrentItem.description = raw.trim();
   }
   if (sugg) sugg.style.display = 'none';
 }
