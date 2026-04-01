@@ -2173,7 +2173,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <div class="woo-controls-grid" style="margin-bottom:10px">
         <div class="ff" style="margin:0">
           <label>Margen sobre precio ML (%)</label>
-          <input type="number" id="woo-margin" value="15" min="0" max="200"
+          <input type="number" id="woo-margin" value="" min="0" max="200" placeholder="0"
             oninput="wooRecalcPrice()" style="width:100%">
         </div>
         <div class="ff" style="margin:0">
@@ -2446,7 +2446,7 @@ async function pollNewData(){
     await loadShippingStatuses(fresh.filter(o=>o.shipping?.id));
     _updateVentasBadge();
     const now=new Date();
-    const mesOrders=allOrders.filter(o=>new Date(o.date_created)>=new Date(now.getFullYear(),now.getMonth(),1));
+    const arNow=nowAR();const mesOrders=allOrders.filter(o=>dateAR(o.date_created)>=new Date(Date.UTC(arNow.getUTCFullYear(),arNow.getUTCMonth(),1)));
     _updateOrdersUI(mesOrders);
     if(document.getElementById('section-ventas')?.classList.contains('active'))renderVentasTable();
     if(document.getElementById('section-dashboard')?.classList.contains('active'))renderDashboard();
@@ -2577,7 +2577,8 @@ async function loadOrdersHistory(){
     const recent=allOrders.filter(o=>o.shipping?.id&&!o.shipping._statusLoaded&&new Date(o.date_created)>new Date(Date.now()-30*24*3600*1000));
     await loadShippingStatuses(recent);
     const now=new Date();
-    _updateOrdersUI(allOrders.filter(o=>new Date(o.date_created)>=new Date(now.getFullYear(),now.getMonth(),1)));
+    var arNow2=nowAR();
+    _updateOrdersUI(allOrders.filter(o=>dateAR(o.date_created)>=new Date(Date.UTC(arNow2.getUTCFullYear(),arNow2.getUTCMonth(),1))));
     _updateVentasBadge();
     if(document.getElementById('section-ventas')?.classList.contains('active'))renderVentasTable();
   }catch(e){console.error('[loadOrdersHistory]',e);}
@@ -2761,7 +2762,7 @@ function metricsToCache(id, data){
 async function loadPubMetricsBatch(ids){
   if(!userId || !ids || !ids.length) return;
 
-  const now   = new Date();
+  const now   = nowAR();
   const from7 = new Date(now - 7*86400000);
   const from14= new Date(now - 14*86400000);
 
@@ -2769,7 +2770,7 @@ async function loadPubMetricsBatch(ids){
   const salesMap7 = {}, salesMap_prev = {};
   allOrders.forEach(o => {
     if(o.status === 'cancelled' || o.status === 'invalid') return;
-    const dt = new Date(o.date_created||0);
+    const dt = dateAR(o.date_created||0);
     (o.order_items||[]).forEach(oi => {
       const rawId = oi.item && oi.item.id;
       if(!rawId) return;
@@ -2928,7 +2929,43 @@ async function loadQuestions(){
   }catch(e){ console.error('[Q] loadQuestions error:', e); }
 }
 
-function isToday(ds){if(!ds)return false;const d=new Date(ds),t=new Date();return d.getDate()===t.getDate()&&d.getMonth()===t.getMonth();}
+// Helper: devuelve un Date ajustado a UTC-3 (Argentina/Mendoza)
+// Usado en todos los filtros de fecha para evitar desfase al medianoche
+function nowAR() {
+  var d = new Date();
+  // Obtener offset local en minutos y calcular diferencia con UTC-3 (-180 min)
+  var localOffset = d.getTimezoneOffset(); // positivo si west of UTC
+  var arOffset    = 180;                    // UTC-3 = 180 min west
+  var diffMs      = (localOffset - arOffset) * 60 * 1000;
+  return new Date(d.getTime() + diffMs);
+}
+
+// Convierte un string ISO de ML a Date en hora Argentina
+function dateAR(isoStr) {
+  if (!isoStr) return new Date(0);
+  // ML devuelve fechas en UTC (terminan en Z o +00:00)
+  // Restamos 3 horas para obtener la hora local de Argentina
+  var d = new Date(isoStr);
+  return new Date(d.getTime() - 3 * 60 * 60 * 1000);
+}
+
+// Clave YYYY-MM-DD en hora Argentina (para agrupacion por dia en graficos)
+function dayKeyAR(isoStr) {
+  var d = dateAR(isoStr);
+  var yy = d.getUTCFullYear();
+  var mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  var dd = String(d.getUTCDate()).padStart(2, '0');
+  return yy + '-' + mm + '-' + dd;
+}
+
+function isToday(ds) {
+  if (!ds) return false;
+  var d = dateAR(ds);
+  var t = nowAR();
+  return d.getUTCDate() === t.getUTCDate()
+      && d.getUTCMonth() === t.getUTCMonth()
+      && d.getUTCFullYear() === t.getUTCFullYear();
+}
 
 function calcAvgRT(){
   const a=allQuestions.filter(q=>q.status==='ANSWERED'&&q.answer?.date_created);
@@ -3169,7 +3206,7 @@ function renderMainChart(mode){
   const now = new Date();
   for(let i=days-1;i>=0;i--){
     const d=new Date(now); d.setDate(d.getDate()-i);
-    const k=d.toISOString().slice(0,10);
+    const k=dayKeyAR(d.toISOString());
     keys.push(k);
     labels.push(d.getDate()+'/'+(d.getMonth()+1));
   }
@@ -6692,7 +6729,7 @@ function renderFacturacion(){
       <td>${o.buyer&&o.buyer.nickname?o.buyer.nickname:'—'}</td>
       <td style="font-weight:600;color:var(--green)">$${(o.total_amount||0).toLocaleString('es-AR')}</td>
       <td><span class="badge ${o.status==='paid'?'bg-green':'bg-amber'}">${o.status||'—'}</span></td>
-      <td style="color:var(--text3)">${o.date_created?new Date(o.date_created).toLocaleDateString('es-AR'):''}</td>
+      <td style="color:var(--text3)">${o.date_created?dateAR(o.date_created).toLocaleDateString('es-AR',{timeZone:'UTC'}):''}</td>
     </tr>`;
   }).join('');
 
@@ -7705,8 +7742,8 @@ async function sendAI(){
     const active=allItems.filter(i=>i.status==='active').length;
     const paused=allItems.filter(i=>i.status==='paused').length;
     const totalSold=allItems.reduce((s,i)=>s+(i.sold_quantity||0),0);
-    const now=new Date();
-    const ordMes=allOrders.filter(o=>{const d=new Date(o.date_created);return d.getFullYear()===now.getFullYear()&&d.getMonth()===now.getMonth();}).length;
+    const now=nowAR();
+    const ordMes=allOrders.filter(o=>{const d=dateAR(o.date_created);return d.getUTCFullYear()===now.getUTCFullYear()&&d.getUTCMonth()===now.getUTCMonth();}).length;
     const sinStock=allItems.filter(i=>i.status==='active'&&(i.available_quantity||0)===0).length;
     const pending=allQuestions.filter(q=>q.status==='UNANSWERED').length;
     if(!active&&!totalSold)return '';
@@ -9048,8 +9085,13 @@ function wooCleanTitle(raw) {
 
 // Formula: (mlPrice * margenFactor) - descuento%, redondeado al multiplo de 10
 function wooCalcPrice(mlPrice) {
-  var margin   = parseFloat(document.getElementById('woo-margin').value) || 0;
-  var discount = parseFloat(document.getElementById('woo-discount').value) || 0;
+  var mEl      = document.getElementById('woo-margin');
+  var dEl      = document.getElementById('woo-discount');
+  var mVal     = mEl ? mEl.value.trim() : '';
+  var dVal     = dEl ? dEl.value.trim() : '';
+  var margin   = (mVal === '' || isNaN(parseFloat(mVal))) ? 0 : parseFloat(mVal);
+  var discount = (dVal === '' || isNaN(parseFloat(dVal))) ? 0 : parseFloat(dVal);
+  if (mlPrice <= 0) return 0;
   var withMargin    = mlPrice * (1 + margin / 100);
   var afterDiscount = withMargin * (1 - discount / 100);
   return Math.ceil(afterDiscount / 10) * 10;
@@ -9111,7 +9153,15 @@ async function wooOptimizeField(field) {
     : ((document.getElementById('woo-desc-input') || {}).value || item.description || '');
   var prompt = isTitle
     ? 'Sos un experto en SEO para WooCommerce. Optimiza este titulo de producto para Google: "' + current + '". Elimina muletillas de MercadoLibre (envio gratis, cuotas, stock, full, etc). Max 60 caracteres. Solo devuelve el titulo optimizado, sin explicaciones ni comillas.'
-    : 'Sos un experto en SEO para WooCommerce. Reescribi esta descripcion para SEO organico de Google: "' + current.slice(0,600) + '". Elimina referencias a MercadoLibre. Devuelve solo la descripcion optimizada.';
+    : 'Sos un experto en copywriting y SEO para WooCommerce Argentina. '
+    + 'A partir de este titulo de producto: "' + item.title + '", '
+    + 'genera una descripcion de producto siguiendo EXACTAMENTE esta estructura:\n'
+    + '1) Un titulo atractivo corto relacionado SOLO a ese producto.\n'
+    + '2) Un parrafo persuasivo conectando ese producto especifico con la emocion del comprador (regalo, identidad, pasion).\n'
+    + '3) Una lista de exactamente 5 caracteristicas deducidas del titulo (formato: - Caracteristica: descripcion breve).\n'
+    + '4) Un call to action final de compra (ej: Regalo ideal, agregalo al carrito).\n'
+    + 'PROHIBIDO: mencionar el catalogo general de la tienda, otros productos, otros nichos o listas genericas. '
+    + 'Escribi en espanol argentino informal. Devuelve SOLO la descripcion, sin explicaciones previas ni comillas externas.';
   try {
     var result = await callClaude(prompt, null);
     sugg.style.display = 'block';
