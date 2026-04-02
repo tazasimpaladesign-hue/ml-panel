@@ -548,6 +548,89 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 .btn-woo-publish:hover{background:#1ab97a;transform:translateY(-1px);box-shadow:0 4px 16px rgba(35,209,139,.4)}
 .btn-woo-publish:disabled{opacity:.5;cursor:not-allowed;transform:none}
 
+
+/* ── GESTOR DE TAREAS v2 (tablero estilo Keep) ── */
+#task-board {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: flex-start;
+  min-height: 200px;
+  padding: 4px 0 80px 0;
+}
+.task-note {
+  width: 220px;
+  min-height: 130px;
+  border-radius: 10px;
+  padding: 12px 14px 10px;
+  box-shadow: 0 3px 10px rgba(0,0,0,.18), 0 1px 3px rgba(0,0,0,.12);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  cursor: grab;
+  transition: box-shadow .15s, transform .1s;
+  position: relative;
+  user-select: none;
+}
+.task-note:active { cursor: grabbing; transform: scale(1.03); box-shadow: 0 8px 24px rgba(0,0,0,.28); }
+.task-note.dragging { opacity: .55; transform: rotate(2deg); }
+.task-note.done-note { opacity: .65; }
+.task-note.done-note .note-text { text-decoration: line-through; color: #888; }
+.note-color-bar {
+  display: flex; gap: 5px; margin-bottom: 2px;
+}
+.note-color-dot {
+  width: 13px; height: 13px; border-radius: 50%;
+  cursor: pointer; border: 2px solid transparent;
+  transition: border-color .12s, transform .1s;
+}
+.note-color-dot:hover { transform: scale(1.25); }
+.note-color-dot.active { border-color: #333; }
+.note-text {
+  font-size: 13px; font-weight: 500; color: #1a1a2e;
+  line-height: 1.5; flex: 1; word-break: break-word;
+}
+.note-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 10px; color: #666; margin-top: 4px;
+}
+.note-check {
+  width: 15px; height: 15px; cursor: pointer; accent-color: #23d18b;
+}
+.note-del {
+  background: none; border: none; font-size: 14px;
+  cursor: pointer; color: #999; padding: 0;
+  line-height: 1; transition: color .12s;
+}
+.note-del:hover { color: #e53; }
+/* Papelera drop zone */
+#task-trash {
+  position: fixed;
+  bottom: 28px; right: 28px;
+  width: 58px; height: 58px;
+  border-radius: 50%;
+  background: #fee2e2;
+  border: 2px dashed #f87171;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 26px;
+  cursor: default;
+  transition: background .15s, transform .15s, border-color .15s;
+  z-index: 200;
+  opacity: 0;
+  pointer-events: none;
+}
+#task-trash.visible { opacity: 1; pointer-events: auto; }
+#task-trash.over { background: #fca5a5; border-color: #dc2626; transform: scale(1.18); }
+/* Indicador de guardado */
+#task-save-btn {
+  font-size: 18px; cursor: pointer; background: none; border: none;
+  padding: 2px 6px; border-radius: 6px; transition: color .2s;
+  color: var(--text3);
+}
+#task-save-btn:hover { color: var(--accent); }
+#task-save-btn.saving { animation: task-pulse .5s ease-in-out 3; color: var(--green); }
+@keyframes task-pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
 </style>
 </head>
 <body>
@@ -2208,74 +2291,52 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
 
 <div id="section-tareas" class="section fade-in">
-  <div class="g2" style="align-items:start">
 
-    <!-- Panel de nueva tarea -->
-    <div class="card">
-      <div class="card-hd">
-        <div>
-          <div class="card-title">&#x2705; Gestor de Tareas</div>
-          <div class="card-sub">Sincronizado en la nube &mdash; disponible en cualquier PC</div>
-        </div>
-        <button class="btn btn-ghost btn-sm" onclick="fetchTasks()">&#x21BB; Actualizar</button>
+  <!-- Header bar -->
+  <div class="card mb" style="padding:14px 18px">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <div style="flex:1;min-width:200px">
+        <div class="card-title" style="margin-bottom:2px">&#x1F4CC; Tablero de Notas</div>
+        <div class="card-sub">Notas sincronizadas en la nube &mdash; disponibles en cualquier PC</div>
       </div>
-
-      <div style="display:flex;gap:8px;margin-bottom:16px">
-        <input type="text" id="task-new-input"
-          placeholder="Nueva tarea..."
-          style="flex:1;font-size:13px"
-          onkeydown="if(event.key==='Enter')addTask()">
-        <button class="btn btn-primary" onclick="addTask()" style="white-space:nowrap">+ Agregar</button>
+      <!-- Stats pills -->
+      <div style="display:flex;gap:8px;align-items:center">
+        <span class="badge bg-amber" id="task-count-pending" style="font-size:11px;padding:4px 10px">0 pendientes</span>
+        <span class="badge bg-green" id="task-count-done"    style="font-size:11px;padding:4px 10px">0 listas</span>
       </div>
-
-      <div id="task-loading" style="display:none" class="alert a-info">Cargando tareas...</div>
-      <div id="task-error"   style="display:none" class="alert a-red"></div>
-
-      <!-- Pendientes -->
-      <div style="margin-bottom:14px">
-        <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">
-          Pendientes <span id="task-count-pending" class="badge bg-amber" style="font-size:9px"></span>
-        </div>
-        <div id="task-list-pending">
-          <div style="font-size:12.5px;color:var(--text3);padding:8px 0">Sin tareas pendientes</div>
-        </div>
-      </div>
-
-      <!-- Completadas -->
-      <div>
-        <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">
-          Completadas <span id="task-count-done" class="badge bg-green" style="font-size:9px"></span>
-        </div>
-        <div id="task-list-done">
-          <div style="font-size:12.5px;color:var(--text3);padding:8px 0">Sin tareas completadas</div>
-        </div>
+      <!-- Action buttons -->
+      <div style="display:flex;gap:6px;align-items:center">
+        <button id="task-save-btn" onclick="pushFullBackup()" title="Guardar en la nube ahora">&#x1F4BE;</button>
+        <button class="btn btn-ghost btn-sm" onclick="fetchTasks()" title="Traer datos actualizados de la nube">&#x21BB; Sincronizar</button>
       </div>
     </div>
 
-    <!-- Info / stats -->
-    <div class="card">
-      <div class="card-hd"><div class="card-title">&#x1F4CA; Resumen</div></div>
-      <div class="mgt mgt-3" style="margin-bottom:0">
-        <div class="mc c-amber">
-          <div class="mc-label">Pendientes</div>
-          <div class="mc-val" id="task-stat-pending">0</div>
-        </div>
-        <div class="mc c-green">
-          <div class="mc-label">Completadas</div>
-          <div class="mc-val" id="task-stat-done">0</div>
-        </div>
-        <div class="mc c-blue">
-          <div class="mc-label">Total</div>
-          <div class="mc-val" id="task-stat-total">0</div>
-        </div>
+    <!-- Add note bar -->
+    <div style="display:flex;gap:8px;margin-top:14px;align-items:center;flex-wrap:wrap">
+      <input type="text" id="task-new-input"
+        placeholder="Escribi una nueva nota y pres&#225; Enter..."
+        style="flex:1;min-width:180px;font-size:13px"
+        onkeydown="if(event.key==='Enter')addTask()">
+      <!-- Color picker for new note -->
+      <div style="display:flex;gap:5px;align-items:center">
+        <div class="note-color-dot active" style="background:#fff5cc" id="new-color-y" onclick="setNewColor('y')" title="Amarillo"></div>
+        <div class="note-color-dot"        style="background:#ccffcc" id="new-color-g" onclick="setNewColor('g')" title="Verde"></div>
+        <div class="note-color-dot"        style="background:#ffcccc" id="new-color-r" onclick="setNewColor('r')" title="Rojo"></div>
+        <div class="note-color-dot"        style="background:#cce5ff" id="new-color-b" onclick="setNewColor('b')" title="Azul"></div>
       </div>
-      <div style="margin-top:16px;font-size:11px;color:var(--text3);line-height:1.7">
-        <b>Backup en la nube:</b> Cada cambio se guarda autom&#225;ticamente en Cloudflare KV.<br>
-        <b>Multi-PC:</b> Los datos se sincronizan en todos los dispositivos al hacer clic en &#x21BB; Actualizar.
-      </div>
+      <button class="btn btn-primary" onclick="addTask()" style="white-space:nowrap">+ Agregar nota</button>
     </div>
 
+    <div id="task-loading" style="display:none;margin-top:10px" class="alert a-info">&#x23F3; Sincronizando con la nube...</div>
+    <div id="task-error"   style="display:none;margin-top:10px" class="alert a-red"></div>
   </div>
+
+  <!-- Board -->
+  <div id="task-board" ondragover="event.preventDefault()" ondrop="onBoardDrop(event)"></div>
+
+  <!-- Papelera (aparece durante drag) -->
+  <div id="task-trash" ondragover="trashOver(event)" ondragleave="trashLeave(event)" ondrop="trashDrop(event)">&#x1F5D1;</div>
+
 </div>
 
   </div><!-- /content -->
@@ -9730,11 +9791,23 @@ async function submitAns(questionId) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// GESTOR DE TAREAS — Cloud backup via Cloudflare KV
+// GESTOR DE NOTAS v2 — Tablero estilo Keep, Cloud KV backup, Drag & Drop
 // ═══════════════════════════════════════════════════════════════════════════════
-var _tasks = [];
 
-// Fecha en UTC-3 (Argentina)
+var _tasks       = [];
+var _dragTaskId  = null;
+var _newColor    = 'y';           // color seleccionado para nueva nota
+var _autoSaveTid = null;          // timer del autoguardado
+
+// Mapa de colores
+var NOTE_COLORS = {
+  'y': '#fff5cc',  // amarillo
+  'g': '#ccffcc',  // verde
+  'r': '#ffcccc',  // rojo
+  'b': '#cce5ff'   // azul
+};
+
+// ── Fecha UTC-3 Argentina ─────────────────────────────────────────────────────
 function _taskDateAR() {
   var d    = new Date();
   var arMs = d.getTime() - (3 * 60 * 60 * 1000);
@@ -9747,12 +9820,22 @@ function _taskDateAR() {
   return dd + '/' + mm + '/' + yy + ' ' + hh + ':' + mi;
 }
 
-// Genera un ID unico simple
+// ── ID unico ──────────────────────────────────────────────────────────────────
 function _taskId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
-// ── fetchTasks: GET /api/tasks (requiere token ML para auth en KV) ────────────
+// ── setNewColor — selector de color para nueva nota ──────────────────────────
+function setNewColor(c) {
+  _newColor = c;
+  document.querySelectorAll('.note-color-dot').forEach(function(d) {
+    d.classList.remove('active');
+  });
+  var el = document.getElementById('new-color-' + c);
+  if (el) el.classList.add('active');
+}
+
+// ── fetchTasks — GET /api/tasks (KV global compartido) ───────────────────────
 async function fetchTasks() {
   var loadEl = document.getElementById('task-loading');
   var errEl  = document.getElementById('task-error');
@@ -9765,15 +9848,18 @@ async function fetchTasks() {
     var data = await res.json();
     if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
     _tasks = Array.isArray(data.tasks) ? data.tasks : [];
-    _renderTasks();
+    _renderBoard();
   } catch(e) {
-    if (errEl) { errEl.textContent = 'Error al cargar tareas: ' + e.message; errEl.style.display = 'block'; }
+    if (errEl) {
+      errEl.textContent = 'Error al sincronizar: ' + e.message;
+      errEl.style.display = 'block';
+    }
   } finally {
     if (loadEl) loadEl.style.display = 'none';
   }
 }
 
-// ── saveTasks: POST /api/tasks — guarda el array completo en KV ───────────────
+// ── saveTasks — POST /api/tasks ───────────────────────────────────────────────
 async function saveTasks() {
   try {
     await fetch(WORKER + '/api/tasks', {
@@ -9786,91 +9872,186 @@ async function saveTasks() {
   }
 }
 
+// ── pushFullBackup — guardado manual (boton disquete) ────────────────────────
+async function pushFullBackup() {
+  var btn = document.getElementById('task-save-btn');
+  if (btn) { btn.classList.add('saving'); }
+  await saveTasks();
+  showToast('Guardado en la nube correctamente', 'success');
+  setTimeout(function() {
+    if (btn) btn.classList.remove('saving');
+  }, 1600);
+}
+
 // ── addTask ───────────────────────────────────────────────────────────────────
 function addTask() {
-  var inp   = document.getElementById('task-new-input');
+  var inp  = document.getElementById('task-new-input');
   if (!inp) return;
-  var text  = inp.value.trim();
-  if (!text) { showToast('Escriabi el texto de la tarea', 'warn'); return; }
-  _tasks.unshift({ id: _taskId(), text: text, checked: false, date: _taskDateAR() });
+  var text = inp.value.trim();
+  if (!text) { showToast('Escrib\u00ed el texto de la nota', 'warn'); return; }
+  _tasks.unshift({
+    id:      _taskId(),
+    text:    text,
+    checked: false,
+    color:   _newColor,
+    date:    _taskDateAR(),
+    order:   Date.now()
+  });
   inp.value = '';
-  _renderTasks();
+  _renderBoard();
   saveTasks();
-  showToast('Tarea agregada', 'success');
 }
 
 // ── toggleTask ────────────────────────────────────────────────────────────────
 function toggleTask(id) {
-  var t = _tasks.find(function(x){ return x.id === id; });
+  var t = _tasks.find(function(x) { return x.id === id; });
   if (!t) return;
-  t.checked = !t.checked;
+  t.checked  = !t.checked;
   t.doneDate = t.checked ? _taskDateAR() : null;
-  _renderTasks();
+  _renderBoard();
   saveTasks();
 }
 
 // ── deleteTask ────────────────────────────────────────────────────────────────
 function deleteTask(id) {
-  _tasks = _tasks.filter(function(t){ return t.id !== id; });
-  _renderTasks();
+  _tasks = _tasks.filter(function(t) { return t.id !== id; });
+  _renderBoard();
+  saveTasks();
+  showToast('Nota eliminada', 'info');
+}
+
+// ── changeNoteColor ───────────────────────────────────────────────────────────
+function changeNoteColor(id, color) {
+  var t = _tasks.find(function(x) { return x.id === id; });
+  if (!t) return;
+  t.color = color;
+  _renderBoard();
   saveTasks();
 }
 
-// ── _renderTasks ──────────────────────────────────────────────────────────────
-function _renderTasks() {
-  var pending  = _tasks.filter(function(t){ return !t.checked; });
-  var done     = _tasks.filter(function(t){ return  t.checked; });
+// ── _renderBoard — genera las tarjetas post-it ────────────────────────────────
+function _renderBoard() {
+  var board = document.getElementById('task-board');
+  if (!board) return;
 
-  var pEl = document.getElementById('task-list-pending');
-  var dEl = document.getElementById('task-list-done');
+  var pending = _tasks.filter(function(t) { return !t.checked; });
+  var done    = _tasks.filter(function(t) { return  t.checked; });
+
+  // Actualizar badges
   var cpEl = document.getElementById('task-count-pending');
   var cdEl = document.getElementById('task-count-done');
-  var spEl = document.getElementById('task-stat-pending');
-  var sdEl = document.getElementById('task-stat-done');
-  var stEl = document.getElementById('task-stat-total');
-
-  if (cpEl) cpEl.textContent = pending.length || '';
-  if (cdEl) cdEl.textContent = done.length    || '';
-  if (spEl) spEl.textContent = pending.length;
-  if (sdEl) sdEl.textContent = done.length;
-  if (stEl) stEl.textContent = _tasks.length;
+  if (cpEl) cpEl.textContent = pending.length + ' pendiente' + (pending.length !== 1 ? 's' : '');
+  if (cdEl) cdEl.textContent = done.length + ' lista' + (done.length !== 1 ? 's' : '');
 
   // Badge sidebar
   var nb = document.getElementById('nb-tareas');
   if (nb) {
-    nb.textContent = pending.length || '';
-    nb.style.display = pending.length ? '' : 'none';
+    nb.textContent    = pending.length || '';
+    nb.style.display  = pending.length ? '' : 'none';
   }
 
-  function taskRow(t) {
-    var chkStyle = t.checked
-      ? 'text-decoration:line-through;color:var(--text3);'
-      : '';
-    var row = [];
-    row.push('<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">');
-    row.push('<input type="checkbox"' + (t.checked ? ' checked' : '') +
-             ' onchange="toggleTask(\'' + t.id + '\')" style="width:16px;height:16px;flex-shrink:0;cursor:pointer;accent-color:var(--green)">');
-    row.push('<div style="flex:1;min-width:0">');
-    row.push('<div style="font-size:13px;' + chkStyle + '">' + t.text + '</div>');
-    row.push('<div style="font-size:10px;color:var(--text4)">' + t.date +
-             (t.doneDate ? ' &mdash; completada ' + t.doneDate : '') + '</div>');
-    row.push('</div>');
-    row.push('<button onclick="deleteTask(\'' + t.id + '\')" class="btn btn-danger btn-xs" title="Eliminar">&#x2715;</button>');
-    row.push('</div>');
-    return row.join('');
+  if (!_tasks.length) {
+    board.innerHTML = '<div style="width:100%;text-align:center;padding:40px 0;color:var(--text3);font-size:13px">No hay notas todav&#237;a. Agreg&#225; la primera arriba &#x1F447;</div>';
+    return;
   }
 
-  if (pEl) {
-    pEl.innerHTML = pending.length
-      ? pending.map(taskRow).join('')
-      : '<div style="font-size:12.5px;color:var(--text3);padding:8px 0">Sin tareas pendientes</div>';
-  }
-  if (dEl) {
-    dEl.innerHTML = done.length
-      ? done.map(taskRow).join('')
-      : '<div style="font-size:12.5px;color:var(--text3);padding:8px 0">Sin tareas completadas</div>';
-  }
+  board.innerHTML = _tasks.map(function(t) {
+    var bg       = NOTE_COLORS[t.color] || NOTE_COLORS['y'];
+    var doneClass= t.checked ? ' done-note' : '';
+    var chkAttr  = t.checked ? ' checked' : '';
+
+    // Color dots
+    var dots = Object.keys(NOTE_COLORS).map(function(c) {
+      var activeClass = (t.color === c) ? ' active' : '';
+      return '<div class="note-color-dot' + activeClass + '" style="background:' + NOTE_COLORS[c] + '"'
+           + ' onclick="changeNoteColor(\'' + t.id + '\',\'' + c + '\')" title="Cambiar color"></div>';
+    }).join('');
+
+    var dateStr = t.date || '';
+    if (t.checked && t.doneDate) dateStr += ' \u2713 ' + t.doneDate;
+
+    return '<div class="task-note' + doneClass + '"'
+         + ' id="note-' + t.id + '"'
+         + ' style="background:' + bg + '"'
+         + ' draggable="true"'
+         + ' ondragstart="noteDragStart(event,\'' + t.id + '\')"'
+         + ' ondragend="noteDragEnd(event)">'
+         + '<div class="note-color-bar">' + dots + '</div>'
+         + '<div class="note-text">' + t.text + '</div>'
+         + '<div class="note-footer">'
+         +   '<span>' + dateStr + '</span>'
+         +   '<div style="display:flex;gap:6px;align-items:center">'
+         +     '<input type="checkbox" class="note-check"' + chkAttr
+         +       ' onchange="toggleTask(\'' + t.id + '\')" title="Marcar como lista">'
+         +     '<button class="note-del" onclick="deleteTask(\'' + t.id + '\')" title="Eliminar">&#x2715;</button>'
+         +   '</div>'
+         + '</div>'
+         + '</div>';
+  }).join('');
 }
+
+// ── DRAG & DROP ───────────────────────────────────────────────────────────────
+function noteDragStart(event, id) {
+  _dragTaskId = id;
+  var el = document.getElementById('note-' + id);
+  if (el) el.classList.add('dragging');
+  event.dataTransfer.effectAllowed = 'move';
+  // Mostrar papelera
+  var trash = document.getElementById('task-trash');
+  if (trash) trash.classList.add('visible');
+}
+
+function noteDragEnd(event) {
+  var el = _dragTaskId ? document.getElementById('note-' + _dragTaskId) : null;
+  if (el) el.classList.remove('dragging');
+  var trash = document.getElementById('task-trash');
+  if (trash) { trash.classList.remove('visible'); trash.classList.remove('over'); }
+  _dragTaskId = null;
+}
+
+function onBoardDrop(event) {
+  event.preventDefault();
+  // Reorder: move dragged note to front
+  if (!_dragTaskId) return;
+  _tasks = _tasks.filter(function(t) { return t.id !== _dragTaskId; })
+                 .concat(_tasks.filter(function(t) { return t.id === _dragTaskId; }));
+  // Reverse so dragged goes to front
+  var dragged = _tasks.pop();
+  _tasks.unshift(dragged);
+  _renderBoard();
+  saveTasks();
+}
+
+function trashOver(event) {
+  event.preventDefault();
+  var trash = document.getElementById('task-trash');
+  if (trash) trash.classList.add('over');
+}
+
+function trashLeave(event) {
+  var trash = document.getElementById('task-trash');
+  if (trash) trash.classList.remove('over');
+}
+
+function trashDrop(event) {
+  event.preventDefault();
+  if (!_dragTaskId) return;
+  deleteTask(_dragTaskId);
+  _dragTaskId = null;
+  var trash = document.getElementById('task-trash');
+  if (trash) { trash.classList.remove('visible'); trash.classList.remove('over'); }
+}
+
+// ── Autoguardado cada 5 minutos ───────────────────────────────────────────────
+function _startAutoSave() {
+  if (_autoSaveTid) clearInterval(_autoSaveTid);
+  _autoSaveTid = setInterval(function() {
+    if (_tasks.length) saveTasks();
+  }, 5 * 60 * 1000);
+}
+
+// Arrancar autoguardado cuando el modulo se inicializa
+_startAutoSave();
 
 </script>
 </body>
