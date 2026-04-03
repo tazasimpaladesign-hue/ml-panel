@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>ML Panel Pro v2 — Tienda Impala</title>
+<title>ML Panel Pro — Panel Maestro</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
@@ -639,15 +639,11 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <div id="login-screen">
   <div class="login-box fade-in">
     <div class="login-logo">🚀</div>
-    <div class="login-title">ML Panel Pro v2</div>
+    <div class="login-title" id="login-title">ML Panel Pro</div>
     <div class="login-sub">Centro de control avanzado para Mercado Libre Argentina. SEO, IA, automatizaciones y más.</div>
-    <div style="font-size:13px;color:var(--text2);margin-bottom:14px">Elegí la cuenta a conectar:</div>
-    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px">
-      <button class="btn-ml" onclick="startOAuth('5818174126848543')" style="background:#ffe600">
-        <span style="font-size:18px">🟡</span> TIENDA IMPALA 2
-      </button>
-      <button class="btn-ml" onclick="startOAuth('5770335587905717')" style="background:#1dd18b;color:#001a0d">
-        <span style="font-size:18px">🟢</span> IMPALA DESIGN 1
+    <div style="margin-bottom:16px">
+      <button class="btn-ml" id="login-btn" onclick="startOAuth(APP_CONFIG.APP_ID)" style="background:#ffe600">
+        <span style="font-size:18px">🔑</span> <span id="login-btn-label">Conectar cuenta</span>
       </button>
     </div>
     <div class="login-note">OAuth 2.0 oficial · No almacenamos contraseñas</div>
@@ -704,7 +700,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <div><div class="sb-title">ML Panel Pro</div><div class="sb-ver">v2.0 · Argentina 2026</div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
-    <div><div class="sb-store-name" id="sb-store">Tienda Impala</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
+    <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
     <span style="color:var(--text3);font-size:11px">●●</span>
   </a>
   <button id="switch-account-btn" onclick="switchAccount()" style="display:none;margin:4px 10px 0;padding:7px 12px;background:var(--bg4);border:1px solid var(--border2);border-radius:var(--rs);font-size:11px;color:var(--text2);cursor:pointer;width:calc(100% - 20px);text-align:left;font-family:var(--font)">
@@ -2333,17 +2329,45 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
 <script>
 // ═══════════════════════════════════════════════════════════
-// CONFIG
+// APP_CONFIG — ÚNICO LUGAR CON DATOS ESPECÍFICOS DE LA CUENTA
+// Editá este bloque para configurar una instancia nueva.
 // ═══════════════════════════════════════════════════════════
-const WORKER = 'https://ml-oauth.tazasimpaladesign.workers.dev';
-const REDIR = window.location.origin + window.location.pathname;
+const APP_CONFIG = {
 
-// ── Cuentas registradas ──────────────────────────────────
-const ACCOUNTS = [
-  { id: '5818174126848543', name: 'TIENDA IMPALA 2',  color: '#4f8ef7' },
-  { id: '5770335587905717', name: 'IMPALA DESIGN 1',        color: '#23d18b' },
-];
-let currentAccount = null; // { id, name, color }
+  // ── Worker de Cloudflare ────────────────────────────────
+  // Reemplazá con la URL de TU Worker
+  WORKER: 'https://worker-impaladesign-1.tazasimpaladesign.workers.dev',
+
+  // ── MercadoLibre App ID ─────────────────────────────────
+  // El mismo valor que ML_CLIENT_ID en las Variables de Entorno del Worker
+  APP_ID: '5770335587905717', // <--- No olvides completar este ID
+
+  // ── Nombre de la tienda (aparece en sidebar y login) ────
+  STORE_NAME: 'Impala Design',
+
+  // ── Color del nombre en sidebar (#hex) ──────────────────
+  STORE_COLOR: '#4f8ef7',
+};
+
+  // ── Categorías WooCommerce ──────────────────────────────
+  // id: ID de la categoría en tu WordPress
+  // name: nombre interno
+  // label: texto que ve el usuario en los chips de selección
+  WOO_CATS: [
+    { id: 121,  name: 'Tazas',   label: 'Tazas'          },
+    { id: 8029, name: 'Jarros',  label: 'Jarros Térmicos' },
+    { id: 124,  name: 'Botellas',label: 'Botellas'        },
+    { id: 125,  name: 'Chops',   label: 'Chops'           },
+    { id: 2648, name: 'Combos',  label: 'Combos'          },
+  ],
+};
+
+// Alias de compatibilidad — el resto del código usa estas variables directamente
+const WORKER = APP_CONFIG.WORKER;
+const REDIR  = window.location.origin + window.location.pathname;
+
+// currentAccount se llena dinámicamente al conectar (no hardcodeado)
+let currentAccount = null;
 
 let token=null, userId=null, userData=null;
 let allItems=[], allOrders=[], allQuestions=[];
@@ -2432,7 +2456,7 @@ async function exchangeCode(code){
       localStorage.setItem('ml_active_app', appId);
       if(d.refresh_token) localStorage.setItem('ml_refresh_' + appId, d.refresh_token);
       window.history.replaceState({}, '', window.location.pathname);
-      currentAccount = ACCOUNTS.find(a => a.id === appId) || ACCOUNTS[0];
+      currentAccount = { id: APP_CONFIG.APP_ID, name: APP_CONFIG.STORE_NAME, color: APP_CONFIG.STORE_COLOR };
       await initApp();
     } else {
       alert('Error al obtener token: ' + JSON.stringify(d));
@@ -2515,8 +2539,8 @@ async function initApp(){
   document.getElementById('login-screen').style.display='none';
   userData=await mlGet('/users/me');
   userId=userData.id;
-  const acctName = currentAccount?.name || userData.nickname || 'Tu tienda';
-  const acctColor = currentAccount?.color || 'var(--accent)';
+  const acctName  = APP_CONFIG.STORE_NAME  || userData.nickname || 'Tu tienda';
+  const acctColor = APP_CONFIG.STORE_COLOR || 'var(--accent)';
   document.getElementById('sb-store').textContent = acctName;
   document.getElementById('sb-store').style.color = acctColor;
   const switchBtn = document.getElementById('switch-account-btn');
@@ -9246,7 +9270,7 @@ function selectOptItem(id,title){
     await exchangeCode(code);
   } else if(activeApp && localStorage.getItem('ml_token_' + activeApp)){
     token = localStorage.getItem('ml_token_' + activeApp);
-    currentAccount = ACCOUNTS.find(a => a.id === activeApp) || ACCOUNTS[0];
+    currentAccount = { id: APP_CONFIG.APP_ID, name: APP_CONFIG.STORE_NAME, color: APP_CONFIG.STORE_COLOR };
     await initApp();
     // Sincronizar configuración desde la nube al arrancar (silencioso, no bloquea)
     fetchBackup();
@@ -10152,6 +10176,26 @@ document.addEventListener('keydown', function(e) {
 
 // Arrancar autoguardado
 _startAutoSave();
+
+// ── Inicializar UI de login con datos de APP_CONFIG ───────────────────────────
+(function() {
+  var titleEl = document.getElementById('login-title');
+  var btnLabel = document.getElementById('login-btn-label');
+  var sbStore  = document.getElementById('sb-store');
+  if (titleEl)  titleEl.textContent  = 'ML Panel Pro — ' + APP_CONFIG.STORE_NAME;
+  if (btnLabel) btnLabel.textContent = 'Conectar ' + APP_CONFIG.STORE_NAME;
+  if (sbStore)  { sbStore.textContent = APP_CONFIG.STORE_NAME; sbStore.style.color = APP_CONFIG.STORE_COLOR; }
+  // Generar chips de categorías WooCommerce dinámicamente desde APP_CONFIG
+  var wooContainer = document.querySelector('.woo-cats');
+  if (wooContainer && APP_CONFIG.WOO_CATS && APP_CONFIG.WOO_CATS.length) {
+    wooContainer.innerHTML = APP_CONFIG.WOO_CATS.map(function(cat) {
+      return '<label class="woo-cat-chip" id="wcat-' + cat.name.toLowerCase() + '">'
+        + '<input type="checkbox" value="' + cat.id + '" data-name="' + cat.name + '" onchange="wooToggleCat(this)"> '
+        + cat.label
+        + '</label>';
+    }).join('');
+  }
+})();
 
 </script>
 </body>
