@@ -5581,13 +5581,29 @@ async function loadTrends(){
       catName = catData.name || catId;
     }catch(e){}
 
-    // Fetch de tendencias
+    // Fetch de tendencias — con fallback a categoria padre si la hija no tiene datos
     let keywords = [];
     try{
       const trends = await mlGet('/trends/MLA/'+catId);
       keywords = Array.isArray(trends) ? trends.slice(0,10) : [];
     }catch(e){
       console.warn('[Tendencias] cat '+catId+':', e.message);
+    }
+    // Si no hay keywords, intentar con la categoria padre
+    if(!keywords.length){
+      try{
+        const catInfo = await mlGet('/categories/'+catId);
+        const parentId = catInfo.path_from_root && catInfo.path_from_root.length >= 2
+          ? catInfo.path_from_root[catInfo.path_from_root.length - 2].id
+          : null;
+        if(parentId && parentId !== catId){
+          console.log('[Tendencias] Fallback a categoria padre:', parentId);
+          const parentTrends = await mlGet('/trends/MLA/'+parentId);
+          keywords = Array.isArray(parentTrends) ? parentTrends.slice(0,10) : [];
+        }
+      }catch(pe){
+        console.warn('[Tendencias] Fallback padre fallido:', pe.message);
+      }
     }
 
     const cardCount = allItems.filter(i=>i.category_id===catId).length;
@@ -5616,7 +5632,9 @@ async function loadTrends(){
               </a>`;
             }).join('')
           + '</div>'
-        : '<div style="color:var(--text3);font-size:12px">Sin datos de tendencias para esta categoría.</div>'
+        : '<div style="color:var(--text3);font-size:12px">Sin tendencias disponibles para esta categor&#237;a. '
+            + 'Intent&#225; con otra categor&#237;a o revis&#225; que el ID sea correcto.'
+            + '</div>'
       }`;
     el.appendChild(card);
 
@@ -6362,7 +6380,21 @@ async function loadFestivos(){
     {d:'08/12/2026',n:'Inmaculada Concepcion de Maria',                  t:'O'},
     {d:'25/12/2026',n:'Navidad',                                         t:'O'},
   ];
-  const rows = festivos.map(function(f){
+  // Fecha hoy en Argentina (UTC-3)
+  var todayAR = new Date(Date.now() - 3 * 60 * 60 * 1000);
+  todayAR.setUTCHours(0, 0, 0, 0);
+
+  // Filtrar: solo mostrar feriados presentes o futuros
+  var futuros = festivos.filter(function(f) {
+    var parts  = f.d.split('/');
+    var fDate  = new Date(Date.UTC(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0])));
+    return fDate >= todayAR;
+  });
+
+  // Si todos pasaron, mostrar igual (evita pantalla vacia)
+  var toShow = futuros.length ? futuros : festivos;
+
+  var rows = toShow.map(function(f){
     var isO = f.t==='O';
     var bg     = isO ? '#fef2f2' : '#fffbeb';
     var border = isO ? '#fecaca' : '#fde68a';
@@ -6370,9 +6402,18 @@ async function loadFestivos(){
     var badge  = isO
       ? '<span class="badge" style="font-size:9px;background:#fee2e2;color:#991b1b">Obligatorio</span>'
       : '<span class="badge" style="font-size:9px;background:#fef3c7;color:#78350f">Puente</span>';
+
+    // Calcular dia de la semana
+    var parts = f.d.split('/');
+    var fDate = new Date(Date.UTC(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0])));
+    var weekday = fDate.toLocaleDateString('es-AR', { weekday: 'long', timeZone: 'UTC' });
+    // Capitalizar primera letra
+    weekday = weekday.charAt(0).toUpperCase() + weekday.slice(1);
+    var dateLabel = f.d + ' (' + weekday + ')';
+
     return '<div style="display:flex;align-items:center;gap:10px;padding:7px 10px;'
       + 'background:'+bg+';border:1px solid '+border+';border-left:3px solid '+dot+';border-radius:var(--rs)">'
-      + '<span style="font-family:var(--mono);font-size:11.5px;font-weight:600;min-width:82px;color:var(--text)">'+f.d+'</span>'
+      + '<span style="font-family:var(--mono);font-size:11.5px;font-weight:600;min-width:160px;color:var(--text)">'+dateLabel+'</span>'
       + '<span style="font-size:12px;color:var(--text2);flex:1">'+f.n+'</span>'
       + badge
       + '</div>';
@@ -6589,20 +6630,43 @@ function renderAdsChartPlaceholder(days){
 
 // ── 2. Campaña y presupuesto ──────────────────────────────
 async function fetchAdsCampaign(){
+  var el = document.getElementById('ads-campaign-status');
   try{
-    const data = await mlGet('/advertising/product_ads/campaigns?limit=1');
-    const campaigns = data.results || data.data || data.campaigns || [];
+    // Intentar endpoint principal de Product Ads
+    var data;
+    try {
+      data = await mlGet('/advertising/product_ads/campaigns?limit=10&status=active');
+    } catch(e1) {
+      if (e1.message && e1.message.includes('403')) {
+        var msg = '<div class="alert a-warn" style="margin:12px 0">'
+          + '<b>Sin permisos de Publicidad:</b> Tu token de ML no tiene el scope de Advertising habilitado. '
+          + 'Reconect&#225; la cuenta desde la p&#225;gina de aplicaciones de ML.'
+          + '</div>';
+        if (el) el.innerHTML = msg;
+        console.warn('[Ads] 403 — token sin permiso de Advertising');
+        return;
+      }
+      // Fallback a endpoint alternativo
+      try {
+        data = await mlGet('/advertising/product_ads/campaigns?limit=10');
+      } catch(e2) {
+        throw e2;
+      }
+    }
+    var campaigns = data.results || data.data || data.campaigns || [];
+    console.log('[Ads] Campaigns recibidos:', campaigns.length, campaigns);
     if(campaigns.length){
-      const c = campaigns[0];
-      _ads.campaignId     = c.id;
-      _ads.campaignStatus = c.status;
-      _ads.budget         = c.daily_budget;
-      renderCampaignStatus(c);
+      var camp = campaigns[0];
+      _ads.campaignId     = camp.id;
+      _ads.campaignStatus = camp.status;
+      _ads.budget         = camp.daily_budget;
+      renderCampaignStatus(camp);
     } else {
       renderCampaignStatusEmpty();
     }
   }catch(e){
     console.warn('[Ads] fetchAdsCampaign error:', e.message);
+    if (el) el.innerHTML = '<div class="alert a-warn">No se pudo cargar la campa&#241;a: ' + e.message + '</div>';
     renderCampaignStatusEmpty();
   }
 }
@@ -7516,9 +7580,13 @@ async function loadRemoteSettings(){
     const d = await r.json();
     if(d && d.quickReplies) localStorage.setItem(QR_LS_KEY,   JSON.stringify(d.quickReplies));
     if(d && d.template)     localStorage.setItem(TMPL_LS_KEY, JSON.stringify(d.template));
-    if(d && (d.quickReplies||d.template)){
+    // Restaurar reglas — solo si el KV devuelve datos (no sobreescribir con null)
+    if(d && Array.isArray(d.rpRules))    { rpRules = d.rpRules; localStorage.setItem('rp_rules', JSON.stringify(rpRules)); }
+    if(d && Array.isArray(d.activeRules)){ activeRules = d.activeRules; }
+    if(d && Array.isArray(d.competitors)){ _savedCompetitors = d.competitors; }
+    if(d && (d.quickReplies||d.template||d.rpRules||d.activeRules)){
       localStorage.setItem(SYNC_TS_KEY, Date.now().toString());
-      console.log('[Settings] Configuración cargada desde la nube ✓');
+      console.log('[Settings] Configuracion cargada desde la nube OK');
       return d;
     }
     return null;
@@ -8029,50 +8097,75 @@ function switchAccount(){
 async function renderMensajes(){
   const el = document.getElementById('mensajes-list');
   if(!el) return;
+  if(!userId){ el.innerHTML='<div class="alert a-warn">Inicia sesion para ver notificaciones.</div>'; return; }
   el.innerHTML = '<div class="loading"><div class="spin"></div>Cargando notificaciones...</div>';
 
-  let notifs = [], unread = 0;
+  var notifs = [];
+  var unread  = 0;
 
-  // Estrategia 1: endpoint de notificaciones del usuario
+  // ── Fuente 1: Mensajes post-venta (packs) ──────────────────────────────────
   try{
-    const r = await mlGet('/users/'+userId+'/notifications?limit=50&mark_as_read=false');
-    notifs = r.results||r.notifications||r.data||[];
-    unread = notifs.filter(n=>!n.is_read&&n.status!=='read').length;
-    console.log('[Notificaciones] raw:', r, '| total:', notifs.length, '| sin leer:', unread);
-  }catch(e){
-    console.warn('[Notificaciones] endpoint falló, fallback a mensajes:', e.message);
-    // Fallback: usar mensajes post-venta
-    try{
-      const r2 = await mlGet('/messages/packs?role=seller&limit=50');
-      const packs = r2.data||r2.results||[];
-      unread = packs.filter(p=>p.status==='unread'||p.status==='UNREAD').length;
-      // Convertir packs al formato de notificaciones
-      notifs = packs.map(p=>{
-        let orderId = p.order_id||p.resource_id||null;
-        if(!orderId&&p.resource){ const m=String(p.resource).match(/orders\/(\d+)/i); if(m) orderId=m[1]; }
-        return {
-          _type:'message', _orderId:orderId, is_read:p.status!=='unread',
-          subject:p.subject||'Mensaje post-venta',
-          date:p.last_message?.date||p.date_created,
-          participants:(p.participants||[]).map(x=>x.nickname).filter(Boolean).join(', '),
-          preview:p.last_message?.text||'',
-        };
+    const r = await mlGet('/messages/packs?role=seller&limit=50&tag=post_sale');
+    const packs = (r && (r.data||r.results)) || [];
+    packs.forEach(function(p){
+      var isUnread = p.status === 'unread' || p.status === 'UNREAD';
+      if(isUnread) unread++;
+      var orderId = p.order_id||p.resource_id||null;
+      if(!orderId && p.resource){
+        var m = String(p.resource).match(/orders\/(\d+)/i);
+        if(m) orderId = m[1];
+      }
+      notifs.push({
+        _source: 'message',
+        _orderId: orderId,
+        is_read:  !isUnread,
+        subject:  p.subject || 'Mensaje post-venta',
+        date:     (p.last_message && p.last_message.date) || p.date_created || '',
+        preview:  (p.last_message && p.last_message.text) || '',
+        from:     (p.participants||[]).map(function(x){ return x.nickname; }).filter(Boolean).join(', '),
       });
-    }catch(e2){ console.warn('[Notif] fallback también falló:', e2.message); }
+    });
+    console.log('[Notif] Mensajes packs:', packs.length, '| sin leer:', unread);
+  }catch(e){
+    console.warn('[Notif] /messages/packs error:', e.message);
   }
 
-  // Badge sidebar
+  // ── Fuente 2: Ordenes pagadas recientes (ultimas 24 h) ─────────────────────
+  try{
+    var since = new Date(Date.now() - 24*60*60*1000).toISOString();
+    const ro = await mlGet('/orders/search?seller='+userId+'&order.status=paid&order.date_created.from='+encodeURIComponent(since)+'&sort=date_desc&limit=10');
+    const orders = ro.results||[];
+    orders.forEach(function(o){
+      // Solo agregar si no viene ya de mensajes
+      notifs.push({
+        _source: 'order',
+        _orderId: o.id,
+        is_read: true,
+        subject: 'Nueva venta: ' + ((o.order_items&&o.order_items[0]&&o.order_items[0].item&&o.order_items[0].item.title)||'—'),
+        date:    o.date_created||'',
+        preview: '$' + (o.total_amount||0).toLocaleString('es-AR') + ' — ' + (o.status||''),
+        from:    o.buyer&&o.buyer.nickname ? o.buyer.nickname : '',
+      });
+    });
+    console.log('[Notif] Ordenes recientes:', orders.length);
+  }catch(e){
+    console.warn('[Notif] /orders/search error:', e.message);
+  }
+
+  // Ordenar por fecha desc
+  notifs.sort(function(a,b){ return new Date(b.date||0) - new Date(a.date||0); });
+
+  // Badges y contadores
   const nbEl = document.getElementById('nb-msg');
   if(nbEl){ nbEl.textContent=unread; nbEl.style.display=unread>0?'':'none'; }
-
-  const ss=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
+  const ss = function(id,v){ var e=document.getElementById(id); if(e) e.textContent=v; };
   ss('msg-unread', unread||'0');
   ss('msg-total',  notifs.length||'0');
-  const lastDate = notifs.find(n=>n.date||n.date_created)?.date||notifs.find(n=>n.date||n.date_created)?.date_created;
-  ss('msg-last', lastDate?new Date(lastDate).toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'—');
+  var last = notifs.find(function(n){ return n.date; });
+  ss('msg-last', last ? new Date(last.date).toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—');
 
   if(!notifs.length){
-    el.innerHTML='<div class="alert a-success">✅ Sin notificaciones recientes.</div>';
+    el.innerHTML='<div class="alert a-success">&#x2705; Sin notificaciones en las ultimas 24 h.</div>';
     return;
   }
   renderNotifList(notifs, el);
@@ -8187,7 +8280,10 @@ function renderMsgPacks(packs,el){
 // ══════════════════════════════════════════════════════════════════════
 
 // ── Estado global del módulo ────────────────────────────────────────
-let rpRules = JSON.parse(localStorage.getItem('rp_rules') || '[]');
+let rpRules = (function(){
+  try { var s = localStorage.getItem('rp_rules'); return s ? JSON.parse(s) : null; }
+  catch(e){ return null; }
+})();
 let rpSelectedRule = null;   // ID de la regla actualmente abierta en detalle
 let rpLog = [];              // historial de logs en memoria
 
@@ -8330,6 +8426,7 @@ function rpRenderList(){
   const count = document.getElementById('rp-rules-count');
   if(!el) return;
 
+  if(!rpRules) rpRules = [];
   const active = rpRules.filter(r=>r.status==='active').length;
   const paused = rpRules.filter(r=>r.status==='paused').length;
   if(count) count.textContent = `${rpRules.length} regla${rpRules.length!==1?'s':''} · ${active} activa${active!==1?'s':''} · ${paused} pausada${paused!==1?'s':''}`;
@@ -9154,8 +9251,14 @@ function selectOptItem(id,title){
     // Sincronizar configuración desde la nube al arrancar (silencioso, no bloquea)
     fetchBackup();
     loadRemoteSettings().then(remote => {
-      if(remote) renderQuestions(); // refleja quick replies si los bajó
+      if(remote) renderQuestions();
     });
+    // Si rpRules es null (primera vez, KV sin datos), cargar defaults
+    if(rpRules === null) {
+      rpRules = [];
+      console.log('[Reglas] Primera vez — sin reglas guardadas');
+    }
+    // Nunca sobreescribir [] — si el usuario borro todo, respetarlo
     // Restore section from URL hash
     const hash = window.location.hash.replace('#','');
     if(hash && document.getElementById('section-'+hash)) showSection(hash);
@@ -9833,9 +9936,17 @@ async function fetchBackup() {
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     var data = await res.json();
+    console.log('[Backup] Datos recibidos del KV:', Object.keys(data), '| tasks:', (data.tasks||[]).length);
+    // Tareas del tablero
     _tasks = Array.isArray(data.tasks) ? data.tasks : [];
     _renderBoard();
-    // Mostrar ultima sincronizacion en topbar
+    // Restaurar reglas si vinieron en el backup
+    if (Array.isArray(data.rpRules) && data.rpRules.length) {
+      rpRules = data.rpRules;
+      localStorage.setItem('rp_rules', JSON.stringify(rpRules));
+    }
+    if (Array.isArray(data.activeRules)) activeRules = data.activeRules;
+    if (Array.isArray(data.competitors))  _savedCompetitors = data.competitors;
     if (data.savedAt) {
       var updEl = document.getElementById('last-upd');
       if (updEl) updEl.textContent = 'Nube: ' + (data.savedAt || '—');
@@ -9859,22 +9970,38 @@ async function pushFullBackup() {
   var btn = document.getElementById('global-save-btn');
   if (btn) btn.classList.add('saving');
   try {
-    var payload = { tasks: _tasks, savedAt: _taskDateAR() };
+    // Payload unificado: tareas + reglas + config en un solo POST
+    var payload = {
+      tasks:        _tasks,
+      rpRules:      typeof rpRules      !== 'undefined' ? rpRules      : [],
+      activeRules:  typeof activeRules  !== 'undefined' ? activeRules  : [],
+      competitors:  typeof _savedCompetitors !== 'undefined' ? _savedCompetitors : [],
+      quickReplies: (function(){ try{ return JSON.parse(localStorage.getItem(QR_LS_KEY)||'[]'); }catch(e){ return []; } })(),
+      template:     (function(){ try{ return JSON.parse(localStorage.getItem(TMPL_LS_KEY)||'{}'); }catch(e){ return {}; } })(),
+      savedAt:      _taskDateAR()
+    };
+    console.log('[Backup] Enviando payload al Worker:', Object.keys(payload), '| tasks:', payload.tasks.length);
     var res = await fetch(WORKER + '/api/backup', {
       method:  'POST',
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
       body:    JSON.stringify(payload)
     });
+    var resText = await res.text();
+    console.log('[Backup] Worker response status:', res.status, '| body:', resText.slice(0, 200));
     if (!res.ok) {
-      var d = await res.json().catch(function(){ return {}; });
-      throw new Error(d.error || 'HTTP ' + res.status);
+      var errData = {};
+      try { errData = JSON.parse(resText); } catch(e) {}
+      var errMsg = 'Error ' + res.status + ': ' + (errData.error || resText.slice(0,100) || 'respuesta vacia');
+      console.error('[Backup] FALLO:', errMsg);
+      showToast('No se pudo guardar: ' + errMsg, 'warn');
+      return;
     }
-    // Actualizar timestamp en topbar
     var updEl = document.getElementById('last-upd');
     if (updEl) updEl.textContent = 'Guardado ' + _taskDateAR();
     showToast('Guardado en la nube', 'success');
   } catch(e) {
-    showToast('Error al guardar: ' + e.message, 'warn');
+    console.error('[Backup] Error de red:', e);
+    showToast('Error de red al guardar: ' + e.message, 'warn');
   } finally {
     setTimeout(function() { if (btn) btn.classList.remove('saving'); }, 1800);
   }
