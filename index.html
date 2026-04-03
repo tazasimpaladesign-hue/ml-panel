@@ -2288,8 +2288,6 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     </div>
   </div>
 </div>
-</div>
-
 
 <div id="section-tareas" class="section fade-in">
 
@@ -9824,6 +9822,7 @@ function setNewColor(c) {
 
 // ── fetchBackup — GET /api/backup → pobla _tasks y renderiza ─────────────────
 async function fetchBackup() {
+  if (!token) return; // Sin token no hay KV que consultar
   var loadEl = document.getElementById('task-loading');
   var errEl  = document.getElementById('task-error');
   if (loadEl) loadEl.style.display = 'block';
@@ -9836,6 +9835,11 @@ async function fetchBackup() {
     var data = await res.json();
     _tasks = Array.isArray(data.tasks) ? data.tasks : [];
     _renderBoard();
+    // Mostrar ultima sincronizacion en topbar
+    if (data.savedAt) {
+      var updEl = document.getElementById('last-upd');
+      if (updEl) updEl.textContent = 'Nube: ' + (data.savedAt || '—');
+    }
   } catch(e) {
     if (errEl) { errEl.textContent = 'Error al sincronizar: ' + e.message; errEl.style.display = 'block'; }
   } finally {
@@ -9848,6 +9852,10 @@ var fetchTasks = fetchBackup;
 
 // ── pushFullBackup — POST /api/backup con todo el estado ─────────────────────
 async function pushFullBackup() {
+  if (!token) {
+    showToast('Inicia sesion primero para guardar en la nube', 'warn');
+    return;
+  }
   var btn = document.getElementById('global-save-btn');
   if (btn) btn.classList.add('saving');
   try {
@@ -9857,7 +9865,13 @@ async function pushFullBackup() {
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
       body:    JSON.stringify(payload)
     });
-    if (!res.ok) { var d = await res.json(); throw new Error(d.error || 'HTTP ' + res.status); }
+    if (!res.ok) {
+      var d = await res.json().catch(function(){ return {}; });
+      throw new Error(d.error || 'HTTP ' + res.status);
+    }
+    // Actualizar timestamp en topbar
+    var updEl = document.getElementById('last-upd');
+    if (updEl) updEl.textContent = 'Guardado ' + _taskDateAR();
     showToast('Guardado en la nube', 'success');
   } catch(e) {
     showToast('Error al guardar: ' + e.message, 'warn');
