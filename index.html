@@ -1853,11 +1853,12 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <div class="card-hd"><div class="card-title">Facturación mensual</div></div>
     <div style="position:relative;height:220px"><canvas id="chart-fac"></canvas></div>
   </div>
+  <div id="fac-invoice-detail" class="card mb" style="padding:14px 18px;min-height:48px"><!-- cargado por renderFacturacion --></div>
   <div class="card">
     <div class="card-hd"><div class="card-title">Órdenes del mes</div></div>
     <div class="tw">
       <table>
-        <thead><tr><th>#Orden</th><th>Producto</th><th>Comprador</th><th>Monto</th><th>Estado</th><th>Fecha</th></tr></thead>
+        <thead><tr><th>#Orden</th><th>Producto</th><th>Comprador</th><th>Monto</th><th>Estado</th><th>Envío</th><th>Fecha</th></tr></thead>
         <tbody id="fac-tbody"></tbody>
       </table>
     </div>
@@ -2190,18 +2191,29 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
 <!-- ═══════════════════════ ALERTAS ═══════════════════════ -->
 <div id="section-alertas" class="section fade-in">
-  <div class="mgt mgt-3" id="alerts-metrics" style="display:none">
-    <div class="mc c-red"><div class="mc-label">Críticas</div><div class="mc-val" id="alm-critical">0</div></div>
-    <div class="mc c-amber"><div class="mc-label">Importantes</div><div class="mc-val" id="alm-warn">0</div></div>
-    <div class="mc c-blue"><div class="mc-label">Total</div><div class="mc-val" id="alm-total">0</div></div>
+  <!-- Filtros por categoria -->
+  <div id="alerts-filter-bar" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+    <button class="btn btn-primary btn-sm" id="af-all"       onclick="setAlertFilter('all',this)">★ Todas</button>
+    <button class="btn btn-ghost btn-sm"   id="af-stock"     onclick="setAlertFilter('stock',this)">📦 Stock Bajo</button>
+    <button class="btn btn-ghost btn-sm"   id="af-paused"    onclick="setAlertFilter('paused',this)">⏸ Pausadas</button>
+    <button class="btn btn-ghost btn-sm"   id="af-quality"   onclick="setAlertFilter('quality',this)">🔴 Mala Calidad</button>
+    <button class="btn btn-ghost btn-sm"   id="af-preguntas" onclick="setAlertFilter('preguntas',this)">💬 Preguntas</button>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+      <span id="alm-total-pill" style="font-size:11px;color:var(--text3)"></span>
+      <button class="btn btn-ghost btn-sm" onclick="refreshAlerts()">&#8635; Actualizar</button>
+    </div>
+  </div>
+  <!-- IDs ocultos para compatibilidad con codigo existente -->
+  <div style="display:none">
+    <span id="alm-critical">0</span><span id="alm-warn">0</span><span id="alm-total">0</span>
+    <div id="alerts-metrics"></div>
   </div>
   <div class="card">
     <div class="card-hd">
       <div>
         <div class="card-title">🔔 Alertas activas</div>
-        <div class="card-sub">Cada alerta lleva directo al módulo correcto — resolvé en 1 clic</div>
+        <div class="card-sub" id="alerts-filter-label">Filtrá por categoría · Resolvé en 1 clic</div>
       </div>
-      <button class="btn btn-ghost btn-sm" onclick="refreshAlerts()">↻ Actualizar</button>
     </div>
     <div id="alerts-list"><div class="loading"><div class="spin"></div>Verificando alertas...</div></div>
   </div>
@@ -2598,23 +2610,42 @@ async function pollNewData(){
     if(pend>prev)showToast('💬 Nueva pregunta ('+pend+' pendientes)','warn');
     document.getElementById('nb-q').textContent=pend;
     if(pend!==prev&&document.getElementById('section-preguntas')?.classList.contains('active'))renderQuestions();
+    // Mensajes post-venta no leidos
+    try{
+      const recentIds=(fresh.length?fresh:allOrders.slice(0,5)).map(o=>o.id).filter(Boolean);
+      for(const ordId of recentIds.slice(0,3)){
+        const msgs=await mlGet('/messages/orders/'+ordId+'?mark_as_read=false&limit=5');
+        const unread=(msgs.messages||[]).filter(m=>m.status==='unread'&&m.from&&m.from.user_id!==userId);
+        if(unread.length){
+          showToast('✉️ Mensaje post-venta de '+unread[0].from.nickname+' (Orden #'+ordId+')','info');
+          break; // una notif por poll es suficiente
+        }
+      }
+    }catch(e){ console.warn('[Poll msgs]',e.message); }
     stamp();
   }catch(e){console.warn('[Poll]',e.message);}
 }
 
 function showToast(msg,type){
-  const cfg={success:['#f0fdf4','#166534','#bbf7d0'],warn:['#fffbeb','#78350f','#fde68a'],info:['#eff6ff','#1e40af','#bfdbfe']};
+  const cfg={success:['#f0fdf4','#166534','#bbf7d0'],warn:['#fffbeb','#78350f','#fde68a'],info:['#eff6ff','#1e40af','#bfdbfe'],error:['#fef2f2','#991b1b','#fecaca']};
   const[bg,col,bdr]=cfg[type]||cfg.info;
+  // Sonido corto no bloqueante
+  try{ new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg').play().catch(()=>{}); }catch(e){}
   const t=document.createElement('div');
-  t.style.position='fixed';t.style.bottom='24px';t.style.right='24px';
-  t.style.zIndex='9999';t.style.background=bg;t.style.color=col;
-  t.style.border='1px solid '+bdr;t.style.borderRadius='10px';
-  t.style.padding='12px 18px';t.style.fontSize='13px';t.style.fontWeight='500';
-  t.style.boxShadow='0 4px 16px rgba(0,0,0,.12)';t.style.maxWidth='340px';
-  t.style.lineHeight='1.4';t.style.fontFamily='inherit';
+  t.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;background:'+bg+
+    ';color:'+col+';border:1px solid '+bdr+';border-radius:10px;padding:12px 38px 12px 16px;'+
+    'font-size:13px;font-weight:500;box-shadow:0 4px 16px rgba(0,0,0,.15);max-width:340px;'+
+    'line-height:1.4;font-family:inherit;transition:opacity .2s';
+  // Boton X — persiste hasta que el usuario lo cierra
+  const x=document.createElement('button');
+  x.textContent='×';
+  x.style.cssText='position:absolute;top:5px;right:10px;background:none;border:none;color:'+
+    col+';font-size:20px;font-weight:700;cursor:pointer;line-height:1;padding:0;opacity:.7';
+  x.onclick=()=>{ t.style.opacity='0'; setTimeout(()=>t.remove(),200); };
   t.textContent=msg;
+  t.appendChild(x);
   document.body.appendChild(t);
-  setTimeout(()=>t.remove(),5000);
+  // Sin setTimeout — el toast es persistente hasta clic en X
 }
 
 async function loadItemsFast(){
@@ -6913,31 +6944,81 @@ function buildAdsChart(){}
 // ═══════════════════════════════════════════════════════════
 // FACTURACIÓN
 // ═══════════════════════════════════════════════════════════
-function renderFacturacion(){
-  const total=allOrders.reduce((s,o)=>s+(o.total_amount||0),0);
-  document.getElementById('fac-hist').textContent='$'+total.toLocaleString('es-AR');
-  document.getElementById('fac-prev').textContent='—';
+async function renderFacturacion(){
+  // ── Calculos desde ordenes propias ──────────────────────────────
+  const arNow = nowAR();
+  const thisMon = arNow.getUTCMonth(), thisYr = arNow.getUTCFullYear();
+  const prevDate = new Date(Date.UTC(thisYr, thisMon-1, 1));
+  const prevMon  = prevDate.getUTCMonth(), prevYr = prevDate.getUTCFullYear();
+
+  const mesOrders  = allOrders.filter(o=>{ const d=dateAR(o.date_created); return d.getUTCFullYear()===thisYr && d.getUTCMonth()===thisMon; });
+  const prevOrders = allOrders.filter(o=>{ const d=dateAR(o.date_created); return d.getUTCFullYear()===prevYr && d.getUTCMonth()===prevMon; });
+  const totalMes   = mesOrders.reduce((s,o)=>s+(o.total_amount||0),0);
+  const totalPrev  = prevOrders.reduce((s,o)=>s+(o.total_amount||0),0);
+  const totalHist  = allOrders.reduce((s,o)=>s+(o.total_amount||0),0);
+
+  ssT('fac-mes',  '$'+totalMes.toLocaleString('es-AR'));
+  ssT('fac-prev', '$'+totalPrev.toLocaleString('es-AR'));
+  ssT('fac-hist', '$'+totalHist.toLocaleString('es-AR'));
+
+  // ── Detalle de facturas ML (API billing) ─────────────────────────
+  const facDetailEl = document.getElementById('fac-invoice-detail');
+  if(facDetailEl){
+    facDetailEl.innerHTML='<div class="loading"><div class="spin"></div>Cargando facturación ML...</div>';
+    try{
+      const inv = await mlGet('/billing/invoices/periods?limit=3');
+      const periods = inv.results||inv.periods||[];
+      if(periods.length){
+        facDetailEl.innerHTML = '<div style="font-size:12.5px;font-weight:600;margin-bottom:10px">\uD83D\uDCC4 Per\u00edodos de facturaci\u00f3n ML</div>' +
+          periods.map(p=>`
+            <div style="display:flex;justify-content:space-between;align-items:center;
+              padding:10px 0;border-bottom:1px solid var(--border)">
+              <div>
+                <div style="font-size:13px;font-weight:500">${p.name||p.period||'Per\u00edodo'}</div>
+                <div style="font-size:11px;color:var(--text3);margin-top:3px">
+                  Vence: ${p.due_date?new Date(p.due_date).toLocaleDateString('es-AR'):'\u2014'}
+                  &nbsp;\u00b7&nbsp; Estado:&nbsp;<span class="badge ${p.status==='paid'?'bg-green':'bg-amber'}">${p.status||'\u2014'}</span>
+                  ${p.detail?'&nbsp;\u00b7&nbsp;<span style="font-size:10px">'+p.detail+'</span>':''}
+                </div>
+              </div>
+              <div style="font-weight:700;color:var(--green);font-size:15px">
+                $${((p.total_amount||p.amount||0)).toLocaleString('es-AR')}
+              </div>
+            </div>`).join('');
+      } else {
+        facDetailEl.innerHTML='<div style="color:var(--text3);font-size:12px;padding:8px 0">Sin per\u00edodos de facturaci\u00f3n ML disponibles para este perfil.</div>';
+      }
+    }catch(e){
+      console.warn('[Facturaci\u00f3n] API billing no disponible:',e.message);
+      facDetailEl.innerHTML='<div style="color:var(--text3);font-size:12px;padding:8px 0">\u2139\uFE0F Datos de facturaci\u00f3n ML no disponibles en este plan. Los montos reflejan tus \u00f3rdenes de ML.</div>';
+    }
+  }
+
+  // ── Tabla de ordenes del mes ──────────────────────────────────────
   const tbody=document.getElementById('fac-tbody');
-  tbody.innerHTML=allOrders.map(o=>{
-    const facTitle = o.order_items && o.order_items[0] ? (o.order_items[0].item && o.order_items[0].item.title ? o.order_items[0].item.title.slice(0,40) : '—') : '—';
-    const facThumb = o.order_items && o.order_items[0] && o.order_items[0].item ? (o.order_items[0].item.thumbnail||'') : '';
+  tbody.innerHTML=mesOrders.map(o=>{
+    const facTitle = o.order_items&&o.order_items[0]&&o.order_items[0].item ? (o.order_items[0].item.title||'\u2014').slice(0,40) : '\u2014';
+    const facThumb = o.order_items&&o.order_items[0]&&o.order_items[0].item ? (o.order_items[0].item.thumbnail||'') : '';
+    const shipState = o.shipping&&o.shipping.status ? o.shipping.status : '';
     return `<tr>
       <td style="font-family:var(--mono);font-size:11px">#${o.id}</td>
       <td style="max-width:190px">
         <div style="display:flex;align-items:center;gap:8px">
           ${facThumb?`<img src="${facThumb}" width="36" height="36" loading="lazy"
             style="object-fit:cover;border-radius:5px;flex-shrink:0;border:1px solid var(--border)"
-            onerror="this.style.display='none'">`:''}
+            onerror="this.style.display='none'">`:''}\
           <span style="overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-size:12px;line-height:1.35">${facTitle}</span>
         </div>
       </td>
-      <td>${o.buyer&&o.buyer.nickname?o.buyer.nickname:'—'}</td>
+      <td>${o.buyer&&o.buyer.nickname?o.buyer.nickname:'\u2014'}</td>
       <td style="font-weight:600;color:var(--green)">$${(o.total_amount||0).toLocaleString('es-AR')}</td>
-      <td><span class="badge ${o.status==='paid'?'bg-green':'bg-amber'}">${o.status||'—'}</span></td>
+      <td><span class="badge ${o.status==='paid'?'bg-green':'bg-amber'}">${o.status||'\u2014'}</span></td>
+      <td style="font-size:11px">${shipState?`<span class="badge bg-blue">${shipState}</span>`:'\u2014'}</td>
       <td style="color:var(--text3)">${o.date_created?dateAR(o.date_created).toLocaleDateString('es-AR',{timeZone:'UTC'}):''}</td>
     </tr>`;
   }).join('');
 
+  // ── Grafico mensual ──────────────────────────────────────────────
   const months={};
   for(let i=5;i>=0;i--){const d=new Date();d.setMonth(d.getMonth()-i);const k=d.getMonth()+'-'+d.getFullYear();months[k]={label:d.toLocaleDateString('es-AR',{month:'short'}),val:0};}
   allOrders.forEach(o=>{const d=new Date(o.date_created||'');const k=d.getMonth()+'-'+d.getFullYear();if(months[k])months[k].val+=o.total_amount||0;});
@@ -6991,6 +7072,16 @@ function deleteRule(id){
 // ═══════════════════════════════════════════════════════════
 // ALERTAS ACTIVAS v2 — accionables, navegación inteligente
 // ═══════════════════════════════════════════════════════════
+
+var _alertFilter = 'all';
+
+function setAlertFilter(filter, btn) {
+  _alertFilter = filter;
+  document.querySelectorAll('#alerts-filter-bar button').forEach(b => {
+    b.className = b.id === 'af-'+filter ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm';
+  });
+  refreshAlerts();
+}
 
 function refreshAlerts(){
   const alerts = [];
@@ -7089,6 +7180,22 @@ function refreshAlerts(){
   // ── Ordenar: primero críticas, luego importantes ───────
   alerts.sort((a, b) => a.priority - b.priority);
 
+  // ── Filtro activo (botones de categoria) ────────────────
+  let filteredAlerts = alerts;
+  if(_alertFilter === 'stock')     filteredAlerts = alerts.filter(a => a.category === 'stock');
+  if(_alertFilter === 'paused')    filteredAlerts = alerts.filter(a => a.category === 'paused');
+  if(_alertFilter === 'quality')   filteredAlerts = alerts.filter(a => a.category === 'quality');
+  if(_alertFilter === 'preguntas') filteredAlerts = alerts.filter(a => a.category === 'preguntas');
+
+  // Actualizar pill de total
+  const pillEl = document.getElementById('alm-total-pill');
+  if(pillEl) pillEl.textContent = filteredAlerts.length + ' alerta' + (filteredAlerts.length !== 1 ? 's' : '') + ' · ' + alerts.length + ' total';
+
+  // Actualizar label descriptivo
+  const filterLabels = {all:'Todas las alertas activas', stock:'Publicaciones con stock bajo o sin stock', paused:'Publicaciones pausadas', quality:'Publicaciones con mala calidad SEO', preguntas:'Preguntas sin responder'};
+  const labelEl = document.getElementById('alerts-filter-label');
+  if(labelEl) labelEl.textContent = filterLabels[_alertFilter] || 'Filtrá por categoría';
+
   // ── Actualizar badge del sidebar ───────────────────────
   const nbEl = document.getElementById('nb-alerts');
   if (nbEl) nbEl.textContent = alerts.length;
@@ -7122,8 +7229,8 @@ function refreshAlerts(){
   if (!el) return;
 
   // ── Sin alertas ────────────────────────────────────────
-  if (!alerts.length) {
-    el.innerHTML = '<div class="alert a-success" style="margin-bottom:0">✅ No hay alertas activas. ¡Todo en orden!</div>';
+  if (!filteredAlerts.length) {
+    el.innerHTML = alerts.length ? '<div class="alert a-info" style="margin-bottom:0">Sin alertas en esta categoría. Probá el filtro ★ Todas.</div>' : '<div class="alert a-success" style="margin-bottom:0">✅ No hay alertas activas. ¡Todo en orden!</div>';
     return;
   }
 
@@ -7143,7 +7250,7 @@ function refreshAlerts(){
   };
 
   // ── Render cards ───────────────────────────────────────
-  const cards = alerts.map(a => {
+  const cards = filteredAlerts.map(a => {
     const p = PRI[a.priority] || PRI[3];
     const safeId    = (a.item_id    || '').replace(/'/g, "\\'");
     const safeTitle = (a.item_title || '').replace(/'/g, "\\'");
@@ -7388,9 +7495,13 @@ async function bulkSetStatus(newStatus){
 async function bulkUpdatePrices(){
   const targets=_bulkSelected();
   if(!targets.length){ alert('Aplicá un filtro primero para seleccionar publicaciones.'); return; }
-  const val=parseFloat(document.getElementById('bulk-price-val')?.value||'0');
-  const type=document.getElementById('bulk-price-type')?.value||'pct_up';
-  if(!val||val<=0){ alert('Ingresá un valor mayor a 0.'); return; }
+  // Fix: dos inputs con mismo ID — leer todos y tomar el primero con valor valido
+  const _bulkValEls  = document.querySelectorAll('#bulk-price-val');
+  const _bulkTypeEls = document.querySelectorAll('#bulk-price-type');
+  let val = 0;
+  _bulkValEls.forEach(el => { const v = Number(el.value); if(v > 0 && !val) val = v; });
+  const type = (_bulkTypeEls[_bulkTypeEls.length-1]?.value) || 'pct_up';
+  if(!val || val <= 0){ alert('Ingresá un valor mayor a 0.'); return; }
 
   const typeLabel={'pct_up':'subir '+val+'%','pct_down':'bajar '+val+'%','fixed_add':'sumar $'+val,'fixed_sub':'restar $'+val,'set':'fijar en $'+val}[type]||type;
   if(!confirm('¿Seguro que querés '+typeLabel+' a '+targets.length+' publicaciones?')) return;
@@ -7893,7 +8004,7 @@ function renderQuestions(){
                 <button class="btn btn-ghost btn-xs" style="font-size:10px"
                   onclick="qOpenAnswer(${q.id},'${q.item_id||''}','${fromId}')">📝 Plantilla</button>
               </div>
-              <div id="ans-form-${q.id}" style="display:none;margin-top:4px">
+              <div id="ans-form-${q.id}" style="display:${isPend?'block':'none'};margin-top:4px">
                 <textarea id="${taId}" rows="3"
                   style="font-size:12px;margin-bottom:6px;width:100%;resize:vertical"
                   placeholder="Escribí tu respuesta aquí..."></textarea>
@@ -8079,7 +8190,7 @@ function showSection(id){
   if(id==='horarios') { loadHorarios(); loadFestivos(); }
   if(id==='facturacion') renderFacturacion();
   if(id==='alertas') refreshAlerts();
-  if(id==='tendencias') loadTrends();
+  if(id==='tendencias'){ if(allItems&&allItems.length) loadTrends(); else loadItemsFast().then(()=>loadTrends()); }
   if(id==='publicidad'){loadAdsData();}
   if(id==='bulk') renderPubs();
 }
@@ -9274,7 +9385,18 @@ function selectOptItem(id,title){
     // Sincronizar configuración desde la nube al arrancar (silencioso, no bloquea)
     fetchBackup();
     loadRemoteSettings().then(remote => {
-      if(remote) renderQuestions();
+      if(!remote) return;
+      // Refrescar módulos que dependen de los settings remotos
+      renderQuestions();
+      // Actualizar panel de Respuestas Rápidas si está visible
+      if(typeof renderQRPanel === 'function') renderQRPanel();
+      // Actualizar competidores si hay datos nuevos
+      if(remote.competitors && typeof renderCompetitors === 'function') renderCompetitors();
+      // Indicar sync exitoso al usuario sin interrumpirlo
+      _cloudStatus('ok');
+      console.log('[Boot] Sync remoto aplicado: QRs, reglas, competidores actualizados.');
+    }).catch(e => {
+      console.warn('[Boot] Sync remoto falló (usando localStorage):', e.message);
     });
     // Si rpRules es null (primera vez, KV sin datos), cargar defaults
     if(rpRules === null) {
