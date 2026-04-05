@@ -737,6 +737,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   <div class="sb-sec">Monetización</div>
   <a class="nav" href="#publicidad" id="nav-publicidad" onclick="showSection('publicidad');loadAdsData();return false;"><span class="ni">📢</span>Publicidad</a>
   <a class="nav" href="#facturacion" id="nav-facturacion" onclick="showSection('facturacion');return false;"><span class="ni">💰</span>Facturación</a>
+  <a class="nav" href="#profit-calculator" id="nav-profit-calculator" onclick="showSection('profit-calculator');return false;"><span class="ni">🧮</span>Rentabilidad<span class="nb nb-green">NEW</span></a>
 
   <div class="sb-sec">Automatización</div>
   <a class="nav" href="#repricing" id="nav-repricing" onclick="showSection('repricing');return false;"><span class="ni">💲</span>Precios automáticos<span class="nb nb-purple">NEW</span></a>
@@ -2297,6 +2298,106 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   </div>
 </div>
 
+
+<!-- ═══════════════════════ CALCULADORA DE RENTABILIDAD ═══════════════════════ -->
+<div id="section-profit-calculator" class="section fade-in">
+
+  <!-- KPI row -->
+  <div class="mgt" style="grid-template-columns:repeat(4,1fr);margin-bottom:18px" id="pc-kpi-row">
+    <div class="mc c-blue"><div class="mc-label">Costo total</div><div class="mc-val" id="pc-kpi-cost">—</div></div>
+    <div class="mc c-green"><div class="mc-label">Precio ML Clásica</div><div class="mc-val" id="pc-kpi-ml-c">—</div></div>
+    <div class="mc c-purple"><div class="mc-label">Precio ML Premium</div><div class="mc-val" id="pc-kpi-ml-p">—</div></div>
+    <div class="mc c-teal"><div class="mc-label">Precio Woo</div><div class="mc-val" id="pc-kpi-woo">—</div></div>
+  </div>
+
+  <div class="g2" style="align-items:flex-start;gap:16px">
+
+    <!-- Inputs -->
+    <div>
+      <div class="card mb">
+        <div class="card-hd"><div class="card-title">📦 Costos del producto</div></div>
+
+        <div class="ff">
+          <label style="font-size:13px;font-weight:600">Costo base del producto en blanco ($)</label>
+          <input type="number" id="pc-costo" placeholder="Ej: 1200" min="0" step="10"
+            style="font-size:18px;font-weight:700;padding:10px 14px;border:2px solid var(--accent)"
+            oninput="pcCalc()">
+        </div>
+
+        <div class="g2" style="gap:10px;margin-top:4px">
+          <div class="ff">
+            <label>Costo impresión/sublimación ($)</label>
+            <input type="number" id="pc-impresion" value="300" min="0" oninput="pcCalc()">
+          </div>
+          <div class="ff">
+            <label>Packaging telgopor ($)</label>
+            <input type="number" id="pc-packaging" value="180" min="0" oninput="pcCalc()">
+          </div>
+        </div>
+
+        <div class="sep"></div>
+        <div class="card-title" style="font-size:12px;margin-bottom:8px">📋 Impuestos y cargas</div>
+        <div class="g2" style="gap:10px">
+          <div class="ff">
+            <label>IIBB Multilateral (%)</label>
+            <input type="number" id="pc-iibb" value="3.5" min="0" max="10" step="0.1" oninput="pcCalc()">
+          </div>
+          <div class="ff">
+            <label>Débito/Crédito (%)</label>
+            <input type="number" id="pc-debcred" value="1.2" min="0" max="5" step="0.1" oninput="pcCalc()">
+          </div>
+        </div>
+        <div class="ff" style="margin-top:8px">
+          <label>Margen de ganancia deseado (%)</label>
+          <input type="range" id="pc-margen" min="20" max="120" value="60" step="5" oninput="pcMargenLabel();pcCalc()">
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text3)">
+            <span>20%</span><span id="pc-margen-val" style="font-weight:700;color:var(--accent);font-size:13px">60%</span><span>120%</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-hd"><div class="card-title">🚚 Configuración de envío ML</div></div>
+        <div class="g2" style="gap:10px">
+          <div class="ff">
+            <label>Umbral envío gratis ML ($)</label>
+            <input type="number" id="pc-umbral" value="8000" min="0" oninput="pcCalc()">
+          </div>
+          <div class="ff">
+            <label>Costo envío promedio ($)</label>
+            <input type="number" id="pc-envio" value="1200" min="0" oninput="pcCalc()">
+          </div>
+        </div>
+        <div class="ff" style="margin-top:4px">
+          <label>Comisión pasarela WooCommerce / MercadoPago (%)</label>
+          <input type="number" id="pc-woo-com" value="5.99" min="0" max="15" step="0.01" oninput="pcCalc()">
+        </div>
+      </div>
+    </div>
+
+    <!-- Resultados -->
+    <div>
+      <div class="card mb">
+        <div class="card-hd">
+          <div class="card-title">📊 Matriz de precios por canal</div>
+          <button class="btn btn-ghost btn-sm" onclick="pcReset()">↺ Reset</button>
+        </div>
+        <div id="pc-matrix-table">
+          <div style="color:var(--text3);font-size:12.5px;padding:20px 0;text-align:center">Ingresá el costo base para ver los precios sugeridos</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-hd"><div class="card-title">💡 Insight automático</div></div>
+        <div id="pc-insight" style="font-size:12.5px;color:var(--text3);line-height:1.7">
+          Los cálculos aparecerán acá una vez que ingreses el costo del producto.
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
 <div id="section-tareas" class="section fade-in">
 
   <!-- Barra de control compacta -->
@@ -2569,6 +2670,8 @@ async function initApp(){
   loadTrends();
   // POLLING: auto-actualizar cada 60s
   startPolling();
+  // Settings auto-save cada 60 min
+  _startSettingsAutoSave();
 }
 
 let _pollingInterval=null;
@@ -2593,7 +2696,7 @@ async function pollNewData(){
     });
     if(hasNew){
       const n=fresh[0];
-      showToast('🛍️ Nueva venta: '+(n.order_items?.[0]?.item?.title||'').slice(0,40)+' $'+(n.total_amount||0).toLocaleString('es-AR'),'success');
+      showToast('🛍️ Nueva venta: '+(n.order_items?.[0]?.item?.title||'').slice(0,40)+' $'+(n.total_amount||0).toLocaleString('es-AR'),'success','alert');
     }
     // Actualizar shipping de las frescas
     await loadShippingStatuses(fresh.filter(o=>o.shipping?.id));
@@ -2607,7 +2710,7 @@ async function pollNewData(){
     const uq=await mlGet('/questions/search?seller_id='+userId+'&status=UNANSWERED&limit=50');
     const pend=(uq.questions||[]).length;
     const prev=parseInt(document.getElementById('nb-q')?.textContent)||0;
-    if(pend>prev)showToast('💬 Nueva pregunta ('+pend+' pendientes)','warn');
+    if(pend>prev)showToast('💬 Nueva pregunta ('+pend+' pendientes)','warn','alert');
     document.getElementById('nb-q').textContent=pend;
     if(pend!==prev&&document.getElementById('section-preguntas')?.classList.contains('active'))renderQuestions();
     // Mensajes post-venta no leidos
@@ -2617,7 +2720,7 @@ async function pollNewData(){
         const msgs=await mlGet('/messages/orders/'+ordId+'?mark_as_read=false&limit=5');
         const unread=(msgs.messages||[]).filter(m=>m.status==='unread'&&m.from&&m.from.user_id!==userId);
         if(unread.length){
-          showToast('✉️ Mensaje post-venta de '+unread[0].from.nickname+' (Orden #'+ordId+')','info');
+          showToast('✉️ Mensaje post-venta de '+unread[0].from.nickname+' (Orden #'+ordId+')','info','alert');
           break; // una notif por poll es suficiente
         }
       }
@@ -2626,17 +2729,18 @@ async function pollNewData(){
   }catch(e){console.warn('[Poll]',e.message);}
 }
 
-function showToast(msg,type){
+function showToast(msg,type,sound){
   const cfg={success:['#f0fdf4','#166534','#bbf7d0'],warn:['#fffbeb','#78350f','#fde68a'],info:['#eff6ff','#1e40af','#bfdbfe'],error:['#fef2f2','#991b1b','#fecaca']};
   const[bg,col,bdr]=cfg[type]||cfg.info;
-  // Sonido corto no bloqueante
-  try{ new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg').play().catch(()=>{}); }catch(e){}
+  // Sonido: 'alert' = alarma larga para ventas/msgs; cualquier otro valor = silencioso
+  if(sound==='alert'){
+    try{ new Audio('https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg').play().catch(()=>{}); }catch(e){}
+  }
   const t=document.createElement('div');
   t.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;background:'+bg+
     ';color:'+col+';border:1px solid '+bdr+';border-radius:10px;padding:12px 38px 12px 16px;'+
-    'font-size:13px;font-weight:500;box-shadow:0 4px 16px rgba(0,0,0,.15);max-width:340px;'+
+    'font-size:13px;font-weight:500;box-shadow:0 4px 16px rgba(0,0,0,.18);max-width:340px;'+
     'line-height:1.4;font-family:inherit;transition:opacity .2s';
-  // Boton X — persiste hasta que el usuario lo cierra
   const x=document.createElement('button');
   x.textContent='×';
   x.style.cssText='position:absolute;top:5px;right:10px;background:none;border:none;color:'+
@@ -6986,7 +7090,7 @@ async function renderFacturacion(){
               </div>
             </div>`).join('');
       } else {
-        facDetailEl.innerHTML='<div style="color:var(--text3);font-size:12px;padding:8px 0">Sin per\u00edodos de facturaci\u00f3n ML disponibles para este perfil.</div>';
+        facDetailEl.innerHTML='<div class="alert a-info" style="margin:0">Sin facturas pendientes para este perfil.</div>';
       }
     }catch(e){
       console.warn('[Facturaci\u00f3n] API billing no disponible:',e.message);
@@ -8111,6 +8215,222 @@ function buildAlgoFactors(){
 // ═══════════════════════════════════════════════════════════
 // ANTHROPIC API HELPER
 // ═══════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════
+// CALCULADORA DE RENTABILIDAD OMNICANAL — Impala Design
+// ═══════════════════════════════════════════════════════════
+
+function pcN(id){ return parseFloat(document.getElementById(id)?.value||'0')||0; }
+
+function pcMargenLabel(){
+  var v = document.getElementById('pc-margen')?.value||'60';
+  var el = document.getElementById('pc-margen-val');
+  if(el) el.textContent = v+'%';
+}
+
+function pcReset(){
+  ['pc-costo','pc-impresion','pc-packaging','pc-iibb','pc-debcred','pc-woo-com','pc-umbral','pc-envio'].forEach(function(id){
+    var el = document.getElementById(id);
+    if(el){ el.value = {
+      'pc-impresion':'300','pc-packaging':'180','pc-iibb':'3.5','pc-debcred':'1.2',
+      'pc-woo-com':'5.99','pc-umbral':'8000','pc-envio':'1200','pc-costo':''
+    }[id]||''; }
+  });
+  var mg = document.getElementById('pc-margen'); if(mg) mg.value=60;
+  pcMargenLabel(); pcCalc();
+}
+
+function pcCalc(){
+  var costo      = pcN('pc-costo');
+  var impresion  = pcN('pc-impresion');
+  var packaging  = pcN('pc-packaging');
+  var iibbPct    = pcN('pc-iibb')    / 100;
+  var debCredPct = pcN('pc-debcred') / 100;
+  var margenPct  = (parseFloat(document.getElementById('pc-margen')?.value||'60')) / 100;
+  var umbral     = pcN('pc-umbral');
+  var costoEnvio = pcN('pc-envio');
+  var wooCom     = pcN('pc-woo-com') / 100;
+
+  var costoBase = costo + impresion + packaging;
+
+  // KPI costo total
+  var kpiCost = document.getElementById('pc-kpi-cost');
+  if(kpiCost) kpiCost.textContent = costo>0 ? '$'+Math.round(costoBase).toLocaleString('es-AR') : '\u2014';
+
+  if(!costo){ 
+    var tbl=document.getElementById('pc-matrix-table');
+    if(tbl) tbl.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:20px 0;text-align:center">Ingres\u00e1 el costo base para ver los precios sugeridos</div>';
+    return;
+  }
+
+  // ── Comisiones ML (Argentina 2025) ──────────────────────────────
+  // Cl\u00e1sica: 10% comisi\u00f3n + flat fee $500 si precio < $7000
+  // Premium:  17% comisi\u00f3n (incluye env\u00edo gratis al comprador)
+  var ML_CLASICA_COM = 0.10;
+  var ML_PREMIUM_COM = 0.17;
+  var ML_FLAT_FEE    = 500;   // si precio < umbral flat fee (aprox $7000)
+  var ML_FLAT_UMBRAL = 7000;
+
+  // Funci\u00f3n genérica: dado costoBase + margen + comision%, retorna precio sugerido
+  // precio = costoBase*(1+margen) / (1 - comision - iibb - debcred)
+  function precioSugerido(cb, margen, com, extra){
+    extra = extra||0;
+    var denom = 1 - com - iibbPct - debCredPct;
+    if(denom<=0) return 0;
+    return Math.ceil((cb*(1+margen) + extra) / denom / 10) * 10; // redondear a decena
+  }
+
+  // ── ML Cl\u00e1sica ────────────────────────────────────────────────
+  var pClasica = precioSugerido(costoBase, margenPct, ML_CLASICA_COM, 0);
+  // Si precio < umbral flat fee, agregar flat fee al costo
+  if(pClasica < ML_FLAT_UMBRAL) pClasica = precioSugerido(costoBase, margenPct, ML_CLASICA_COM, ML_FLAT_FEE);
+  var envioClasica = pClasica < umbral ? costoEnvio : 0; // si no llega al umbral free, el vendedor asume envio
+  var margenRealClasica = pClasica > 0 ? ((pClasica*(1-ML_CLASICA_COM-iibbPct-debCredPct) - costoBase - envioClasica) / pClasica * 100) : 0;
+
+  // ── ML Premium ────────────────────────────────────────────────
+  // Premium siempre incluye env\u00edo gratis al comprador (ML lo descuenta)
+  var pPremium = precioSugerido(costoBase, margenPct, ML_PREMIUM_COM, 0);
+  var margenRealPremium = pPremium>0 ? ((pPremium*(1-ML_PREMIUM_COM-iibbPct-debCredPct) - costoBase) / pPremium * 100) : 0;
+
+  // ── WooCommerce ───────────────────────────────────────────────
+  var pWoo = precioSugerido(costoBase, margenPct, wooCom, 0);
+  var margenRealWoo = pWoo>0 ? ((pWoo*(1-wooCom-iibbPct-debCredPct) - costoBase) / pWoo * 100) : 0;
+
+  // ── Mayorista ──────────────────────────────────────────────────
+  var margenMay = Math.max(margenPct * 0.4, 0.15); // 40% del margen normal, min 15%
+  var pMay = Math.ceil(costoBase*(1+margenMay)/10)*10;
+  var margenRealMay = pMay>0 ? ((pMay - costoBase)/pMay*100) : 0;
+
+  // ── KPIs top ─────────────────────────────────────────────────
+  function ks(id,val){ var e=document.getElementById(id); if(e)e.textContent='$'+Math.round(val).toLocaleString('es-AR'); }
+  ks('pc-kpi-ml-c',pClasica); ks('pc-kpi-ml-p',pPremium); ks('pc-kpi-woo',pWoo);
+
+  // ── Badge de margen ───────────────────────────────────────────
+  function margenBadge(m){
+    if(m>=40) return '<span class="badge bg-green">'+m.toFixed(1)+'%</span>';
+    if(m>=25) return '<span class="badge bg-amber">'+m.toFixed(1)+'%</span>';
+    return '<span class="badge bg-red">'+m.toFixed(1)+'%</span>';
+  }
+
+  // ── Tabla de matriz ───────────────────────────────────────────
+  var rows = [
+    { canal:'ML Cl\u00e1sica', precio:pClasica,  com:(ML_CLASICA_COM*100).toFixed(0)+'%'+(pClasica<ML_FLAT_UMBRAL?' + flat $'+ML_FLAT_FEE:''), envio:envioClasica>0?'$'+envioClasica.toLocaleString('es-AR'):'Incluido en umbral', margen:margenRealClasica, icon:'\U0001f7e1' },
+    { canal:'ML Premium',   precio:pPremium, com:(ML_PREMIUM_COM*100).toFixed(0)+'%',  envio:'Gratis al comprador', margen:margenRealPremium, icon:'\U0001f535' },
+    { canal:'WooCommerce',  precio:pWoo,     com:(wooCom*100).toFixed(2)+'%',           envio:'A cargo del cliente', margen:margenRealWoo,     icon:'\U0001f7e3' },
+    { canal:'Mayorista',    precio:pMay,     com:'Sin comisi\u00f3n',                   envio:'Sin env\u00edo inclui\u00edo', margen:margenRealMay, icon:'\u26aa' },
+  ];
+
+  var tbl = document.getElementById('pc-matrix-table');
+  if(!tbl) return;
+  tbl.innerHTML = '<div class="tw"><table><thead><tr>'+
+    '<th>Canal</th><th>Precio sugerido</th><th>Comisión/Pasarela</th><th>Envío</th><th>Margen real</th>'+
+    '</tr></thead><tbody>'+
+    rows.map(function(r){
+      return '<tr>'+
+        '<td><span style="font-size:15px">'+r.icon+'</span> <strong>'+r.canal+'</strong></td>'+
+        '<td style="font-weight:700;font-size:15px;color:var(--green)">$'+Math.round(r.precio).toLocaleString('es-AR')+'</td>'+
+        '<td style="font-size:11.5px;color:var(--text3)">'+r.com+'</td>'+
+        '<td style="font-size:11.5px">'+r.envio+'</td>'+
+        '<td>'+margenBadge(r.margen)+'</td>'+
+        '</tr>';
+    }).join('')+
+    '</tbody></table></div>';
+
+  // ── Insight autom\u00e1tico ──────────────────────────────────────
+  var insight = '';
+  var bestPrice  = Math.max(pClasica, pPremium, pWoo);
+  var worstMargen= Math.min(margenRealClasica, margenRealPremium);
+  if(margenRealClasica < 20)
+    insight += '\u26a0\uFE0F El margen en <strong>ML Cl\u00e1sica</strong> est\u00e1 por debajo del 20% — consider\u00e1 subir el precio o bajar el costo.<br>';
+  if(pClasica < umbral)
+    insight += '\U0001f4e6 El precio ML Cl\u00e1sica sugerido (<strong>$'+Math.round(pClasica).toLocaleString('es-AR')+'</strong>) no alcanza el umbral de env\u00edo gratis ($'+umbral.toLocaleString('es-AR')+') — el costo de env\u00edo impacta en tu margen.<br>';
+  if(pPremium > umbral)
+    insight += '\u2705 Con ML Premium el comprador recibe env\u00edo gratis y el precio est\u00e1 por encima del umbral de $'+umbral.toLocaleString('es-AR')+'.<br>';
+  if(margenRealWoo > margenRealClasica + 5)
+    insight += '\U0001f4a1 WooCommerce te da <strong>'+((margenRealWoo-margenRealClasica)).toFixed(1)+'pp</strong> m\u00e1s de margen que ML Cl\u00e1sica a igual precio.<br>';
+  if(!insight) insight = '\u2705 Los m\u00e1rgenes est\u00e1n saludables en todos los canales para el costo ingresado.';
+
+  var insightEl = document.getElementById('pc-insight');
+  if(insightEl) insightEl.innerHTML = insight;
+}
+
+// ═══════════════════════════════════════════════════════════
+// IA IMPALA — aiAnswerQ con Cerebro Tienda Impala
+// ═══════════════════════════════════════════════════════════
+async function aiAnswerQ(qId, btn){
+  var taId   = 'ans-txt-'+qId;
+  var formId = 'ans-form-'+qId;
+  var formEl = document.getElementById(formId);
+  var taEl   = document.getElementById(taId);
+
+  // Mostrar el form si estuviera cerrado
+  if(formEl) formEl.style.display='block';
+
+  // Buscar la pregunta en el array
+  var q = (allQuestions||[]).find(function(x){ return String(x.id)===String(qId); });
+  var questionText = q ? (q.text||'') : '';
+  var itemTitle    = '';
+  if(q && q.item_id){
+    var item = (allItems||[]).find(function(i){ return String(i.id)===String(q.item_id); });
+    itemTitle = item ? (item.title||'') : '';
+  }
+
+  if(btn){ btn.disabled=true; btn.textContent='\u23F3 Pensando...'; }
+  if(taEl){ taEl.value=''; taEl.placeholder='La IA est\u00e1 generando la respuesta...'; }
+
+  try{
+    // Detectar tema de la pregunta
+    var qLow = questionText.toLowerCase();
+    var esMagica   = /m\u00e1gic|magico|magica|termosens|aparece|sale|diseño|cambia|caliente|agua/.test(qLow);
+    var esEnvio    = /envi|demor|llega|cuanto tarda|plazo|despacho/.test(qLow);
+    var esPersonal = /personaliz|nombre|texto|dedic|encarg/.test(qLow);
+    var esRetiro   = /retiro|busco|pasar|local|donde est\u00e1n/.test(qLow);
+
+    var contextHint = '';
+    if(esMagica)   contextHint = 'La pregunta es sobre c\u00f3mo funciona el dise\u00f1o termosensibl: el dise\u00f1o APARECE al contacto con agua/l\u00edquido caliente, y desaparece con el frio. Explicar esto con entusiasmo.';
+    if(esEnvio)    contextHint = 'La pregunta es sobre envio. Aclarar que los env\u00edos salen en caja de telgopor para protecci\u00f3n, generalmente por Correio Argentino o Mercado Env\u00edos, 3-7 d\u00edas h\u00e1biles.';
+    if(esPersonal) contextHint = 'La pregunta es sobre personalizaci\u00f3n. Aclarar que todos los dise\u00f1os son fijos ya impresos, NO se puede personalizar con nombres ni textos adicionales.';
+    if(esRetiro)   contextHint = 'La pregunta es sobre retiro. Informar que NO tenemos local. Las entregas presenciales son \u00fanicamente en Plaza Chile, Mendoza capital, a coordinar por mensaje.';
+
+    var systemPrompt = 'Sos el asistente de ventas de Tienda Impala Design, Mendoza, Argentina.\n'+
+      'Solo respond\u00e9 sobre nuestros productos: tazas cer\u00e1micas con dise\u00f1o sublimado, tazas m\u00e1gicas (termosensibles), jarros t\u00e9rmicos, botellitas y chops de cerveza personalizados.\n'+
+      'NO tenemos local f\u00edsico. Entregas presenciales \u00fanicamente en Plaza Chile, Mendoza.\n'+
+      'Los env\u00edos se realizan en caja de telgopor para protecci\u00f3n del producto.\n'+
+      'Nunca brindes datos de contacto externos ni redes sociales.\n'+
+      'Tono: amable, cercano y vendedor. Responsi\u00f3 en espa\u00f1ol argentino, sin formalismos.\n'+
+      'M\u00e1ximo 3 oraciones por respuesta. No uses emojis en exceso.\n'+
+      (contextHint ? '\nCONTEXTO ADICIONAL: '+contextHint : '');
+
+    var userMsg = 'Producto: '+( itemTitle||'(sin especificar)' )+'\nPregunta del comprador: '+questionText+'\n\nEscrib\u00ed una respuesta corta y directa para enviarle al comprador en MercadoLibre.';
+
+    var r = await fetch(WORKER+'/ai', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        system:   systemPrompt,
+        messages: [{role:'user', content:userMsg}],
+        max_tokens:150,
+        temperature:0.4
+      })
+    });
+    var d = await r.json();
+    var text = '';
+    if(d && d.content) text = d.content.map(function(x){ return x.text||''; }).join('').trim();
+    // Limpieza de muletillas
+    var cpats=[
+      new RegExp('[\\u00bf?]En qu[\\u00e9] (m[\\u00e1]s )?puedo (ayudarte|asistirte)[^.?!]*[.?!]?','gi'),
+      new RegExp('Si (necesit[\\u00e1]s|ten[\\u00e9]s)[^.!?]*[.!?]','gi'),
+    ];
+    cpats.forEach(function(p){ text=text.replace(p,'').trim(); });
+    if(taEl){ taEl.value=text; taEl.placeholder='Escribi tu respuesta ac\u00e1...'; }
+    if(formEl) formEl.style.display='block';
+  }catch(e){
+    if(taEl){ taEl.placeholder='Error de IA: '+e.message; }
+    console.warn('[aiAnswerQ]',e);
+  }
+  if(btn){ btn.disabled=false; btn.textContent='\U0001f916 IA Impala'; }
+}
+
 async function callClaude(prompt, history){
   const messages = history || [{role:'user', content:prompt}];
   let r, rawText;
@@ -8161,7 +8481,8 @@ const titles={
   reglas:['⚙️ Reglas automáticas','Automatizaciones de precios y respuestas'],
   alertas:['🔔 Alertas','Centro de notificaciones'],
   'woo-import':['&#x1F6D2; Importar a WooCommerce','Trae tus publicaciones de ML a tu tienda propia'],
-  'tareas':['&#x2705; Gestor de Tareas','Pendientes y completadas - sincronizadas en la nube']
+  'tareas':['&#x2705; Gestor de Tareas','Pendientes y completadas - sincronizadas en la nube'],
+  'profit-calculator':['🧮 Calculadora de Rentabilidad','Precios sugeridos por canal con márgenes reales']
 };
 
 function showSection(id){
@@ -10282,12 +10603,29 @@ function trashDrop(event)  {
   if (trash) { trash.classList.remove('visible'); trash.classList.remove('over'); }
 }
 
-// ── Autoguardado cada 2 minutos ───────────────────────────────────────────────
+// ── Autoguardado de tareas cada 5 min (solo tareas, no settings) ──────────────
 function _startAutoSave() {
   if (_autoSaveTid) clearInterval(_autoSaveTid);
   _autoSaveTid = setInterval(function() {
     if (_tasks.length && token) pushFullBackup();
-  }, 2 * 60 * 1000);
+  }, 5 * 60 * 1000);
+}
+
+// ── Autoguardado de SETTINGS en la nube cada 60 minutos ───────────────────────
+var _SETTINGS_AUTOSAVE_KEY = 'mlp_settings_last_autosave';
+var _settingsAutoSaveTid   = null;
+function _startSettingsAutoSave(){
+  if(_settingsAutoSaveTid) clearInterval(_settingsAutoSaveTid);
+  _settingsAutoSaveTid = setInterval(function(){
+    if(!token) return;
+    var last = parseInt(localStorage.getItem(_SETTINGS_AUTOSAVE_KEY)||'0');
+    var now  = Date.now();
+    if(now - last < 60 * 60 * 1000) return; // menos de 60 min -> skip
+    localStorage.setItem(_SETTINGS_AUTOSAVE_KEY, String(now));
+    saveRemoteSettings().then(function(ok){
+      if(ok) console.log('[AutoSync] Settings guardados en la nube (60 min).');
+    }).catch(function(e){ console.warn('[AutoSync]',e.message); });
+  }, 5 * 60 * 1000); // tick cada 5 min, guarda solo si pasaron 60 min
 }
 
 // Ctrl+S global para guardar
