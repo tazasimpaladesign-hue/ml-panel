@@ -3906,6 +3906,34 @@ async function renderCatChart(){
 // ── Shared dashboard panel row builder ─────────────────────
 // Colores unificados según spec:
 //   visitas/unidades: negro bold | precio: verde ML bold | calidad: naranja bold
+
+// ── Trend / Ranking system ─────────────────────────────────────────────────
+// Stores previous rank positions in localStorage to show ↑↓ arrows
+var _RANK_TOP_KEY    = 'impala_rank_toppubs';
+var _RANK_VISITS_KEY = 'impala_rank_visits';
+
+function savePrevRanks(key, orderedIds){
+  try{
+    var map = {};
+    orderedIds.forEach(function(id,i){ map[String(id)] = i; });
+    localStorage.setItem(key, JSON.stringify(map));
+  }catch(e){}
+}
+
+function loadPrevRanks(key){
+  try{ return JSON.parse(localStorage.getItem(key)||'{}'); }catch(e){ return {}; }
+}
+
+// Returns: '⬆' (green), '⬇' (red), or '' (same/new)
+function trendArrow(prevRanks, itemId, currentIdx){
+  var id  = String(itemId);
+  if(prevRanks[id] === undefined) return '';            // new entry — no arrow
+  var prev = prevRanks[id];
+  if(prev === currentIdx) return '';                    // same position
+  return prev > currentIdx
+    ? '<span style="color:#00a650;font-weight:700;font-size:11px" title="Subió '+(prev-currentIdx)+' posiciones">⬆</span>'
+    : '<span style="color:#e74c3c;font-weight:700;font-size:11px" title="Bajó '+(currentIdx-prev)+' posiciones">⬇</span>';
+}
 var DASH_C_METRIC = 'color:#1a1a1a;font-weight:700';   // negro legible (dark+light mode)
 var DASH_C_PRICE  = 'color:#00a650;font-weight:700';   // verde ML
 var DASH_C_QUAL   = 'color:#ff7733;font-weight:700';   // naranja calidad
@@ -3933,63 +3961,51 @@ function renderDashTopPubs(){
     return;
   }
   const cutoff = Date.now() - (90*24*60*60*1000);
-  const ordenesFiltradas = allOrders.filter(o =>
+  const salesMap = {};
+  allOrders.filter(o =>
     ['paid','confirmed','delivered','shipped'].includes(o.status) &&
     new Date(o.date_created||0).getTime() >= cutoff
-  );
-  const salesMap = {};
-  ordenesFiltradas.forEach(o => {
+  ).forEach(o => {
     (o.order_items||[]).forEach(oi => {
       const id = oi.item?.id; if(!id) return;
       salesMap[id] = (salesMap[id]||0) + (oi.quantity||1);
     });
   });
+
   const ranked = Object.entries(salesMap).sort((a,b)=>b[1]-a[1]).slice(0,50);
   if(!ranked.length){
     el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:10px 0">Sin ventas en los últimos 90 días.</div>';
     return;
   }
+
+  // Load previous ranks for trend arrows
+  const prevRanks = loadPrevRanks(_RANK_TOP_KEY);
+  // Save current ranks for next load
+  savePrevRanks(_RANK_TOP_KEY, ranked.map(([id])=>id));
+
   el.style.maxHeight='480px'; el.style.overflowY='auto';
   el.innerHTML = ranked.map(([itemId,qty],idx)=>{
-    const i      = allItems.find(x=>String(x.id)===String(itemId));
-    const title  = i?.title||'MLA '+itemId;
-    const price  = i?.price||0;
-    const thumb  = i?.thumbnail||'';
-    const sc     = itemHealthPct(i);
-    const editUrl= i ? 'https://www.mercadolibre.com.ar/publicaciones/'+i.id+'/modificar' : null;
-    const medal  = idx===0?'🥇':idx===1?'🥈':idx===2?'🥉':String(idx+1);
-    const metric =
+    const i       = allItems.find(x=>String(x.id)===String(itemId));
+    const title   = i?.title||'MLA '+itemId;
+    const price   = i?.price||0;
+    const thumb   = i?.thumbnail||'';
+    const sc      = itemHealthPct(i);
+    const editUrl = i ? 'https://www.mercadolibre.com.ar/publicaciones/'+i.id+'/modificar' : null;
+    const medal   = idx===0?'🥇':idx===1?'🥈':idx===2?'🥉':(idx+1);
+    const arrow   = trendArrow(prevRanks, itemId, idx);
+    const metric  =
       '<span style="'+DASH_C_METRIC+'">'+qty+' uds</span>'
       +' · <span style="'+DASH_C_PRICE+'">$'+price.toLocaleString('es-AR')+'</span>'
       +(sc!=null?' · <span style="'+DASH_C_QUAL+'">Calidad: '+sc+'%</span>':'');
-    return '<span style="font-size:'+(idx<3?'15':'12')+'px;font-weight:700;color:var(--text3);width:22px;text-align:center;flex-shrink:0;display:flex;align-items:center;justify-content:center">'+medal+'</span>'
-      + dashRow(thumb, title, editUrl, metric, i?.status==='active'!==false);
-  }).map((row,idx)=>{
-    // Wrap with medal span alongside dashRow output
-    const parts = ranked[idx];
-    return row; // already built above — rebuild properly:
-  });
-  // Rebuild cleanly
-  el.innerHTML = ranked.map(([itemId,qty],idx)=>{
-    const i      = allItems.find(x=>String(x.id)===String(itemId));
-    const title  = i?.title||'MLA '+itemId;
-    const price  = i?.price||0;
-    const thumb  = i?.thumbnail||'';
-    const sc     = itemHealthPct(i);
-    const editUrl= i ? 'https://www.mercadolibre.com.ar/publicaciones/'+i.id+'/modificar' : null;
-    const medal  = idx===0?'🥇':idx===1?'🥈':idx===2?'🥉':(idx+1);
-    const metric =
-      '<span style="'+DASH_C_METRIC+'">'+qty+' uds</span>'
-      +' · <span style="'+DASH_C_PRICE+'">$'+price.toLocaleString('es-AR')+'</span>'
-      +(sc!=null?' · <span style="'+DASH_C_QUAL+'">Calidad: '+sc+'%</span>':'');
-    const onCl   = editUrl ? 'onclick="window.open(\''+editUrl+'\',\'_blank\')"' : '';
-    const imgEl  = thumb ? '<img src="'+thumb+'" onerror="this.parentElement.textContent=\'☕\'">':'☕';
-    return '<div style="display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid var(--border);'+(editUrl?'cursor:pointer;':'')+'" '+onCl+'>'
-      +'<span style="font-size:'+(idx<3?'15':'12')+'px;font-weight:700;color:var(--text3);width:22px;text-align:center;flex-shrink:0">'+medal+'</span>'
+    const onCl    = editUrl ? 'onclick="window.open(\''+editUrl+'\',\'_blank\')"' : '';
+    const imgEl   = thumb ? '<img src="'+thumb+'" onerror="this.parentElement.textContent=\'☕\'">':'☕';
+    return '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);'+(editUrl?'cursor:pointer;':'')+'" '+onCl+'>'
+      +'<span style="font-size:'+(idx<3?'15':'12')+'px;font-weight:700;color:var(--text3);width:20px;text-align:center;flex-shrink:0">'+medal+'</span>'
+      +(arrow?'<span style="width:14px;flex-shrink:0">'+arrow+'</span>':'<span style="width:14px;flex-shrink:0"></span>')
       +'<div class="item-thumb" style="flex-shrink:0">'+imgEl+'</div>'
       +'<div style="flex:1;min-width:0">'
         +'<div style="font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+title+'</div>'
-        +'<div style="font-size:10px;margin-top:2px;display:flex;gap:6px;flex-wrap:wrap">'+metric+'</div>'
+        +'<div style="font-size:10px;margin-top:2px;display:flex;gap:5px;flex-wrap:wrap">'+metric+'</div>'
       +'</div>'
       +'<span class="badge '+(i?.status==='active'?'bg-green':'bg-amber')+'" style="flex-shrink:0">'+(i?.status==='active'?'●':'⏸')+'</span>'
       +'</div>';
@@ -9683,60 +9699,62 @@ async function loadMostVisited(forceRefresh){
   var el = document.getElementById('dash-most-visited');
   if(!el) return;
 
-  // Cache hit — render immediately without flicker
+  // Serve cache instantly (no flicker)
   if(_mostVisitedCache && !forceRefresh){
     renderMostVisited(_mostVisitedCache);
     return;
   }
 
-  if(!token || !userId){
-    el.innerHTML='<div style="color:var(--text3);font-size:12px;padding:10px 0">Iniciá sesión para ver visitas.</div>';
-    return;
-  }
+  if(!token||!userId) return;
   if(_mostVisitedLoading) return;
   _mostVisitedLoading = true;
 
-  // Only show spinner if panel is empty
   if(!el.querySelector('.item-thumb')){
-    el.innerHTML='<div class="loading"><div class="spin"></div>Cargando visitas reales (15 días)...</div>';
+    el.innerHTML='<div class="loading"><div class="spin"></div>Cargando visitas reales...</div>';
   }
 
   try{
-    var toDate   = new Date().toISOString().slice(0,10);
-    var fromDate = new Date(Date.now()-15*24*60*60*1000).toISOString().slice(0,10);
+    // ── Step 1: Get top 50 popular items for this seller ───────────────
+    var searchR = await mlGet('/sites/MLA/search?seller_id='+userId+'&sort=popularity&limit=50');
+    var items   = searchR.results||[];
+    if(!items.length) throw new Error('El vendedor no tiene publicaciones activas');
 
-    console.log('[MostVisited] Fetching real visits', fromDate, 'to', toDate);
+    var ids = items.map(function(i){ return i.id; }).join(',');
 
-    var r = await mlGet(
-      '/users/'+userId+'/items_visits?date_from='+fromDate+'&date_to='+toDate+'&limit=50'
+    // ── Step 2: Fetch real visit counts for those IDs (last 15 days) ───
+    var now     = new Date();
+    var toISO   = now.toISOString();
+    var fromISO = new Date(now.getTime() - 15*24*60*60*1000).toISOString();
+
+    var visitsR = await mlGet(
+      '/items/visits?ids='+encodeURIComponent(ids)
+      +'&date_from='+encodeURIComponent(fromISO)
+      +'&date_to='+encodeURIComponent(toISO)
     );
 
-    // Defensive: locate the array in the response regardless of wrapper key
-    var list = r.items_visits || r.results || r.data || r;
-
+    // ── Step 3: Extract visit list ──────────────────────────────────────
+    var list = visitsR.results || visitsR.visits_detail || visitsR;
     if(!Array.isArray(list)){
       throw new Error('Formato de API no reconocido — la respuesta no contiene un array de visitas');
     }
 
-    if(!list.length){
-      el.innerHTML='<div class="alert a-info" style="margin:0;font-size:12px">'
-        +'Sin visitas registradas en los últimos 15 días ('+fromDate+' a '+toDate+').</div>';
-      _mostVisitedLoading = false;
-      return;
-    }
+    console.log('[MostVisited] real visits from API:', list.length, 'items');
 
-    // Normalize entries: {itemId, visits}
-    var normalized = list.map(function(v){
-      return {
-        itemId: String(v.item_id||v.id||v.item||''),
-        visits: Number(v.total_visits||v.visits||v.quantity||0)
-      };
-    }).filter(function(v){ return v.itemId && v.visits > 0; });
+    // ── Step 4: Build {itemId, visits} and sort desc ───────────────────
+    var visitMap = {};
+    list.forEach(function(v){
+      var id  = String(v.item_id||v.id||'');
+      var cnt = Number(v.total_visits||v.visits||v.quantity||0);
+      if(id) visitMap[id] = (visitMap[id]||0) + cnt;
+    });
 
-    // Sort desc by visits
-    normalized.sort(function(a,b){ return b.visits - a.visits; });
+    var normalized = Object.keys(visitMap).map(function(id){
+      return { itemId:id, visits:visitMap[id] };
+    }).sort(function(a,b){ return b.visits-a.visits; }).slice(0,50);
 
-    _mostVisitedCache = normalized.slice(0,50);
+    if(!normalized.length) throw new Error('La API devolvió 0 visitas para el período solicitado');
+
+    _mostVisitedCache = normalized;
     renderMostVisited(_mostVisitedCache);
 
   }catch(e){
@@ -9754,13 +9772,17 @@ async function loadMostVisited(forceRefresh){
 
 function renderMostVisited(data){
   var el = document.getElementById('dash-most-visited');
-  if(!el || !data) return;
+  if(!el||!data) return;
   if(!data.length){
     el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:10px 0">Sin visitas en los últimos 15 días.</div>';
     return;
   }
 
-  el.innerHTML = data.map(function(v){
+  // Trend arrows
+  var prevRanks = loadPrevRanks(_RANK_VISITS_KEY);
+  savePrevRanks(_RANK_VISITS_KEY, data.map(function(v){ return v.itemId; }));
+
+  el.innerHTML = data.map(function(v, idx){
     var local   = (allItems||[]).find(function(x){ return String(x.id)===v.itemId; });
     var title   = (local&&local.title)||('MLA '+v.itemId);
     var price   = (local&&local.price)||0;
@@ -9772,16 +9794,18 @@ function renderMostVisited(data){
     var imgEl   = thumb
       ? '<img src="'+thumb+'" onerror="this.parentElement.textContent=\'👁\'">'
       : '👁';
+    var arrow   = trendArrow(prevRanks, v.itemId, idx);
     var metric  =
-      '<span style="'+DASH_C_METRIC+'">'+v.visits.toLocaleString('es-AR')+' visitas</span>'
+      '<span style="'+DASH_C_METRIC+'">'+v.visits.toLocaleString('es-AR')+' visitas (15d)</span>'
       +' · <span style="'+DASH_C_PRICE+'">$'+(price>0?price.toLocaleString('es-AR'):'—')+'</span>'
       +(sc!=null?' · <span style="'+DASH_C_QUAL+'">Calidad: '+sc+'%</span>':'');
 
-    return '<div style="display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid var(--border);cursor:pointer" '+onCl+'>'
+    return '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);cursor:pointer" '+onCl+'>'
+      +(arrow?'<span style="width:14px;flex-shrink:0">'+arrow+'</span>':'<span style="width:14px;flex-shrink:0"></span>')
       +'<div class="item-thumb" style="flex-shrink:0">'+imgEl+'</div>'
       +'<div style="flex:1;min-width:0">'
         +'<div style="font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+title+'</div>'
-        +'<div style="font-size:10px;margin-top:2px;display:flex;gap:6px;flex-wrap:wrap">'+metric+'</div>'
+        +'<div style="font-size:10px;margin-top:2px;display:flex;gap:5px;flex-wrap:wrap">'+metric+'</div>'
       +'</div>'
       +'<span class="badge '+(status==='active'?'bg-green':'bg-amber')+'" style="flex-shrink:0">'+(status==='active'?'●':'⏸')+'</span>'
       +'</div>';
