@@ -857,14 +857,14 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     </div>
   </div>
 
-  <!-- ── Top publicaciones + Últimos 50 ── -->
-  <div style="display:grid;grid-template-columns:minmax(0,420px) minmax(0,420px);gap:14px;margin-bottom:14px;justify-content:start">
+  <!-- ── Top publicaciones + Últimos 50 + Los 50 más visitados ── -->
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px">
     <div class="card" style="min-height:320px">
       <div class="card-hd">
         <div class="card-title">🏆 Top publicaciones</div>
         <a href="#publicaciones" class="btn btn-ghost btn-sm" onclick="showSection('publicaciones');return false;">Ver todas →</a>
       </div>
-      <div id="dash-top-pubs" style="max-height:340px;overflow-y:auto">
+      <div id="dash-top-pubs" style="max-height:360px;overflow-y:auto">
         <div class="loading"><div class="spin"></div>Cargando...</div>
       </div>
     </div>
@@ -873,7 +873,16 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <div class="card-title">🕐 Últimos 50 vendidos</div>
         <span style="font-size:10px;padding:2px 6px;border-radius:10px;background:var(--green-g);color:var(--green);font-weight:700;border:1px solid var(--green)">LIVE</span>
       </div>
-      <div id="dash-last50" style="max-height:340px;overflow-y:auto">
+      <div id="dash-last50" style="max-height:360px;overflow-y:auto">
+        <div class="loading"><div class="spin"></div>Cargando...</div>
+      </div>
+    </div>
+    <div class="card" style="min-height:320px">
+      <div class="card-hd">
+        <div class="card-title">👀 Los 50 más visitados</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadMostVisited(true)">↻ 15d</button>
+      </div>
+      <div id="dash-most-visited" style="max-height:360px;overflow-y:auto">
         <div class="loading"><div class="spin"></div>Cargando...</div>
       </div>
     </div>
@@ -2849,6 +2858,7 @@ async function initApp(){
   await Promise.all([loadItemsFast(), loadOrdersRecent(), loadQuestions()]);
   renderDashboard();
   updateLast50(allOrders.slice(0,50));
+  loadMostVisited(false); // fetch visits concurrently with background loads
   initAI();
   buildAlgoFactors();
   buildAdsChart();
@@ -3892,6 +3902,29 @@ async function renderCatChart(){
 }
 
 // ── Top publicaciones ──────────────────────────────────────
+
+// ── Shared dashboard panel row builder ─────────────────────
+// Colores unificados según spec:
+//   visitas/unidades: negro bold | precio: verde ML bold | calidad: naranja bold
+var DASH_C_METRIC = 'color:#1a1a1a;font-weight:700';   // negro legible (dark+light mode)
+var DASH_C_PRICE  = 'color:#00a650;font-weight:700';   // verde ML
+var DASH_C_QUAL   = 'color:#ff7733;font-weight:700';   // naranja calidad
+
+function dashRow(thumb, title, editUrl, metricHtml, statusActive){
+  var onCl   = editUrl ? 'onclick="window.open(\''+editUrl+'\',\'_blank\')"' : '';
+  var cursor = editUrl ? 'cursor:pointer;' : '';
+  var imgEl  = thumb
+    ? '<img src="'+thumb+'" onerror="this.parentElement.textContent=\'☕\'">'
+    : '☕';
+  return '<div style="display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid var(--border);'+cursor+'" '+onCl+'>'
+    +'<div class="item-thumb" style="flex-shrink:0">'+imgEl+'</div>'
+    +'<div style="flex:1;min-width:0">'
+      +'<div style="font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+title+'</div>'
+      +'<div style="font-size:10px;margin-top:2px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">'+metricHtml+'</div>'
+    +'</div>'
+    +'<span class="badge '+(statusActive?'bg-green':'bg-amber')+'" style="flex-shrink:0">'+(statusActive?'●':'⏸')+'</span>'
+    +'</div>';
+}
 function renderDashTopPubs(){
   const el = document.getElementById('dash-top-pubs');
   if(!el) return;
@@ -3899,65 +3932,70 @@ function renderDashTopPubs(){
     el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:10px 0">Sin publicaciones cargadas</div>';
     return;
   }
-
-  // Paso 1: fecha de corte exacta (90 días)
-  const cutoff = Date.now() - (90 * 24 * 60 * 60 * 1000);
-
-  // Paso 2: solo órdenes pagadas/confirmadas/entregadas dentro del período
-  const ordenesFiltradas = allOrders.filter(o => {
-    if(!['paid','confirmed','delivered','shipped'].includes(o.status)) return false;
-    return new Date(o.date_created||0).getTime() >= cutoff;
-  });
-
-  // Paso 3: sumar quantity por item.id
+  const cutoff = Date.now() - (90*24*60*60*1000);
+  const ordenesFiltradas = allOrders.filter(o =>
+    ['paid','confirmed','delivered','shipped'].includes(o.status) &&
+    new Date(o.date_created||0).getTime() >= cutoff
+  );
   const salesMap = {};
   ordenesFiltradas.forEach(o => {
     (o.order_items||[]).forEach(oi => {
-      const id = oi.item?.id;
-      if(!id) return;
+      const id = oi.item?.id; if(!id) return;
       salesMap[id] = (salesMap[id]||0) + (oi.quantity||1);
     });
   });
-
-  // Paso 4: ordenar desc y tomar top 50
-  const ranked = Object.entries(salesMap)
-    .sort((a,b) => b[1]-a[1])
-    .slice(0,50);
-
+  const ranked = Object.entries(salesMap).sort((a,b)=>b[1]-a[1]).slice(0,50);
   if(!ranked.length){
-    el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:10px 0">Sin ventas registradas en los últimos 90 días.</div>';
+    el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:10px 0">Sin ventas en los últimos 90 días.</div>';
     return;
   }
-
-  // Paso 5 & 6: mapear contra allItems y renderizar con scroll
-  el.style.maxHeight = '400px';
-  el.style.overflowY = 'auto';
-
-  el.innerHTML = ranked.map(([itemId, qty], idx) => {
-    const i   = allItems.find(x => String(x.id) === String(itemId));
-    const title = i?.title || 'MLA '+itemId;
-    const price = i?.price || 0;
-    const thumb = i?.thumbnail || '';
-    const status= i?.status || 'active';
-    const sc    = itemHealthPct(i);  // lee i.health (0-1) × 100, fallback a qualityScore local
-    const scC   = sc>=80?'var(--green)':sc>=50?'var(--amber)':'var(--red)';
-    const medal = idx===0?'🥇':idx===1?'🥈':idx===2?'🥉':String(idx+1);
-    const editUrl = i ? 'https://www.mercadolibre.com.ar/publicaciones/'+i.id+'/modificar' : null;
+  el.style.maxHeight='360px'; el.style.overflowY='auto';
+  el.innerHTML = ranked.map(([itemId,qty],idx)=>{
+    const i      = allItems.find(x=>String(x.id)===String(itemId));
+    const title  = i?.title||'MLA '+itemId;
+    const price  = i?.price||0;
+    const thumb  = i?.thumbnail||'';
+    const sc     = itemHealthPct(i);
+    const editUrl= i ? 'https://www.mercadolibre.com.ar/publicaciones/'+i.id+'/modificar' : null;
+    const medal  = idx===0?'🥇':idx===1?'🥈':idx===2?'🥉':String(idx+1);
+    const metric =
+      '<span style="'+DASH_C_METRIC+'">'+qty+' uds</span>'
+      +' · <span style="'+DASH_C_PRICE+'">$'+price.toLocaleString('es-AR')+'</span>'
+      +(sc!=null?' · <span style="'+DASH_C_QUAL+'">Calidad: '+sc+'%</span>':'');
+    return '<span style="font-size:'+(idx<3?'15':'12')+'px;font-weight:700;color:var(--text3);width:22px;text-align:center;flex-shrink:0;display:flex;align-items:center;justify-content:center">'+medal+'</span>'
+      + dashRow(thumb, title, editUrl, metric, i?.status==='active'!==false);
+  }).map((row,idx)=>{
+    // Wrap with medal span alongside dashRow output
+    const parts = ranked[idx];
+    return row; // already built above — rebuild properly:
+  });
+  // Rebuild cleanly
+  el.innerHTML = ranked.map(([itemId,qty],idx)=>{
+    const i      = allItems.find(x=>String(x.id)===String(itemId));
+    const title  = i?.title||'MLA '+itemId;
+    const price  = i?.price||0;
+    const thumb  = i?.thumbnail||'';
+    const sc     = itemHealthPct(i);
+    const editUrl= i ? 'https://www.mercadolibre.com.ar/publicaciones/'+i.id+'/modificar' : null;
+    const medal  = idx===0?'🥇':idx===1?'🥈':idx===2?'🥉':(idx+1);
+    const metric =
+      '<span style="'+DASH_C_METRIC+'">'+qty+' uds</span>'
+      +' · <span style="'+DASH_C_PRICE+'">$'+price.toLocaleString('es-AR')+'</span>'
+      +(sc!=null?' · <span style="'+DASH_C_QUAL+'">Calidad: '+sc+'%</span>':'');
     const onCl   = editUrl ? 'onclick="window.open(\''+editUrl+'\',\'_blank\')"' : '';
-    return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);'+(i?'cursor:pointer':'')+'" '+onCl+'>'
+    const imgEl  = thumb ? '<img src="'+thumb+'" onerror="this.parentElement.textContent=\'☕\'">':'☕';
+    return '<div style="display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid var(--border);'+(editUrl?'cursor:pointer;':'')+'" '+onCl+'>'
       +'<span style="font-size:'+(idx<3?'15':'12')+'px;font-weight:700;color:var(--text3);width:22px;text-align:center;flex-shrink:0">'+medal+'</span>'
-      +'<div class="item-thumb" style="flex-shrink:0">'+(thumb?'<img src="'+thumb+'" onerror="this.parentElement.textContent=\'☕\'">':'☕')+'</div>'
+      +'<div class="item-thumb" style="flex-shrink:0">'+imgEl+'</div>'
       +'<div style="flex:1;min-width:0">'
         +'<div style="font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+title+'</div>'
-        +'<div style="font-size:10px;color:var(--text3);display:flex;gap:8px;margin-top:2px;flex-wrap:wrap">'
-          +'<span style="color:var(--green);font-weight:600">▲ '+qty+' unidades (90 días)</span>'
-          +'<span> - $'+price.toLocaleString('es-AR')+' - Calidad en MLibre '+(i?sc+'%':'—')+'</span>'
-        +'</div>'
+        +'<div style="font-size:10px;margin-top:2px;display:flex;gap:6px;flex-wrap:wrap">'+metric+'</div>'
       +'</div>'
-      +'<span class="badge '+(status==='active'?'bg-green':'bg-amber')+'" style="flex-shrink:0">'+(status==='active'?'●':'⏸')+'</span>'
+      +'<span class="badge '+(i?.status==='active'?'bg-green':'bg-amber')+'" style="flex-shrink:0">'+(i?.status==='active'?'●':'⏸')+'</span>'
       +'</div>';
   }).join('');
 }
+
 // ── Insights automáticos IA ────────────────────────────────
 // ── Date formatting helpers ────────────────────────────────
 function fmtDate(d){
@@ -4278,6 +4316,8 @@ function renderDashboard(){
   renderDashKPIs();
   loadDashVisits().then(()=>renderMainChart()).catch(()=>renderMainChart());
   renderCatChart(); renderDashTopPubs(); renderDashInsights(); renderDashStock(); renderDashConv(); renderDashRepMini();
+  // Los 50 más visitados — usar caché si disponible, fetch en background si no
+  loadMostVisited(false);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -9603,48 +9643,155 @@ function renderLast50(){
     el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:10px 0">Sin ventas recientes. Actualizá el panel.</div>';
     return;
   }
-  el.style.maxHeight = '400px';
-  el.style.overflowY = 'auto';
-
-  el.innerHTML = _last50Sales.map(function(sale, idx){
-    // Fuente de thumbnail: allItems es la fuente confiable (igual que Top Publicaciones)
+  el.style.maxHeight='360px'; el.style.overflowY='auto';
+  el.innerHTML = _last50Sales.map(function(sale){
     var localItem = sale.itemId
       ? (allItems||[]).find(function(i){ return String(i.id)===String(sale.itemId); })
       : null;
-    var thumb  = (localItem&&localItem.thumbnail) || sale.thumbnail || '';
-    var status = (localItem&&localItem.status) || 'active';
-    var sc     = localItem ? itemHealthPct(localItem) : null;
-    var scColor= sc!=null ? (sc>=80?'var(--green)':sc>=50?'var(--amber)':'var(--red)') : 'var(--text3)';
-
-    // Mismo formato de URL que Top Publicaciones (va directo a ML, no pasa por Worker)
-    var editUrl = sale.itemId
-      ? 'https://www.mercadolibre.com.ar/publicaciones/'+sale.itemId+'/modificar'
-      : null;
-    var onCl = editUrl ? 'onclick="window.open(\''+editUrl+'\',\'_blank\')"' : '';
-    var cursorStyle = editUrl ? 'cursor:pointer' : '';
-
-    var fecha = sale.date
+    var thumb    = (localItem&&localItem.thumbnail)||sale.thumbnail||'';
+    var status   = (localItem&&localItem.status)||'active';
+    var sc       = localItem ? itemHealthPct(localItem) : null;
+    var price    = sale.price||0;
+    var editUrl  = sale.itemId ? 'https://www.mercadolibre.com.ar/publicaciones/'+sale.itemId+'/modificar' : null;
+    var onCl     = editUrl ? 'onclick="window.open(\''+editUrl+'\',\'_blank\')"' : '';
+    var cursor   = editUrl ? 'cursor:pointer;' : '';
+    var fecha    = sale.date
       ? new Date(sale.date).toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})
       : '—';
-
-    return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);'+cursorStyle+'" '+onCl+'>'
-      +'<div class="item-thumb" style="flex-shrink:0">'
-        +(thumb ? '<img src="'+thumb+'" onerror="this.parentElement.textContent=\'☕\'">' : '☕')
-      +'</div>'
+    var imgEl    = thumb ? '<img src="'+thumb+'" onerror="this.parentElement.textContent=\'☕\'">':'☕';
+    var metric   =
+      '<span style="color:var(--text3)">'+fecha+'</span>'
+      +' · <span style="'+DASH_C_PRICE+'">$'+price.toLocaleString('es-AR')+'</span>'
+      +(sc!=null?' · <span style="'+DASH_C_QUAL+'">Calidad: '+sc+'%</span>':'');
+    return '<div style="display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid var(--border);'+cursor+'" '+onCl+'>'
+      +'<div class="item-thumb" style="flex-shrink:0">'+imgEl+'</div>'
       +'<div style="flex:1;min-width:0">'
         +'<div style="font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sale.title+'</div>'
-        +'<div style="font-size:10px;color:var(--text3);display:flex;gap:8px;margin-top:2px;flex-wrap:wrap">'
-          +'<span>'+fecha+'</span>'
-          +'<span style="color:var(--green);font-weight:600">$'+sale.price.toLocaleString('es-AR')+'</span>'
-          +(sc!=null ? '<span style="color:'+scColor+'">Calidad: '+sc+'%</span>' : '')
-        +'</div>'
+        +'<div style="font-size:10px;margin-top:2px;display:flex;gap:6px;flex-wrap:wrap">'+metric+'</div>'
       +'</div>'
-      +'<span class="badge '+(status==='active'?'bg-green':'bg-amber')+'" style="flex-shrink:0">'
-        +(status==='active'?'●':'⏸')
-      +'</span>'
+      +'<span class="badge '+(status==='active'?'bg-green':'bg-amber')+'" style="flex-shrink:0">'+(status==='active'?'●':'⏸')+'</span>'
       +'</div>';
   }).join('');
 }
+
+
+// ── Los 50 más visitados (últimos 15 días) ─────────────────────────────
+var _mostVisitedCache = null;   // cache to avoid unnecessary API calls
+var _mostVisitedLoading = false;
+
+async function loadMostVisited(forceRefresh){
+  if(_mostVisitedLoading) return;
+  var el = document.getElementById('dash-most-visited');
+  if(!el) return;
+
+  // Use cache if available and not forced refresh
+  if(_mostVisitedCache && !forceRefresh){
+    renderMostVisited(_mostVisitedCache);
+    return;
+  }
+
+  if(!token||!userId){
+    el.innerHTML='<div style="color:var(--text3);font-size:12px;padding:10px 0">Iniciá sesión para ver visitas.</div>';
+    return;
+  }
+
+  _mostVisitedLoading = true;
+  el.innerHTML='<div class="loading"><div class="spin"></div>Cargando visitas...</div>';
+
+  try{
+    var toDate   = new Date().toISOString().slice(0,10);
+    var fromDate = new Date(Date.now()-15*24*60*60*1000).toISOString().slice(0,10);
+
+    // Fetch visits per item for the user (last 15 days)
+    var r = await mlGet(
+      '/users/'+userId+'/items_visits?date_from='+fromDate+'&date_to='+toDate+'&limit=50'
+    );
+
+    var visits = r.data||r.results||r||[];
+
+    // If array of {item_id, total_visits} or {id, visits}
+    if(!Array.isArray(visits)&&visits.visits) visits = visits.visits;
+
+    // Normalize: each entry → {itemId, visits}
+    var normalized = visits.map(function(v){
+      return {
+        itemId:  String(v.item_id||v.id||v.item||''),
+        visits:  v.total_visits||v.visits||v.quantity||0
+      };
+    }).filter(function(v){ return v.itemId && v.visits>0; });
+
+    // Sort descending by visits
+    normalized.sort(function(a,b){ return b.visits-a.visits; });
+
+    _mostVisitedCache = normalized.slice(0,50);
+    renderMostVisited(_mostVisitedCache);
+  }catch(e){
+    console.warn('[MostVisited]', e.message);
+    // Fallback: derive visits from allItems.health * sold as estimate
+    // (ML doesn't always expose the visit endpoint publicly)
+    var fallback = (allItems||[])
+      .filter(function(i){ return i.status==='active'; })
+      .map(function(i){
+        // Estimate: health * sold_quantity as proxy
+        var est = Math.round(((i.health||0.5) * (i.sold_quantity||0) * 10));
+        return {itemId:String(i.id), visits:est, isFallback:true};
+      })
+      .sort(function(a,b){ return b.visits-a.visits; })
+      .slice(0,50);
+
+    if(fallback.length){
+      _mostVisitedCache = fallback;
+      renderMostVisited(_mostVisitedCache, true);
+    } else {
+      el.innerHTML='<div class="alert a-info" style="margin:0;font-size:12px">'
+        +'Visitas no disponibles en este plan. <a href="https://www.mercadolibre.com.ar/publicaciones" target="_blank" style="color:var(--accent)">Ver publicaciones →</a></div>';
+    }
+  }finally{
+    _mostVisitedLoading = false;
+  }
+}
+
+function renderMostVisited(data, isFallback){
+  var el = document.getElementById('dash-most-visited');
+  if(!el||!data) return;
+  if(!data.length){
+    el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:10px 0">Sin datos de visitas disponibles.</div>';
+    return;
+  }
+  el.style.maxHeight='360px'; el.style.overflowY='auto';
+
+  if(isFallback){
+    el.innerHTML='<div style="font-size:9.5px;color:var(--amber);padding:4px 0 6px;border-bottom:1px solid var(--border);margin-bottom:2px">'
+      +'⚠️ Estimación local (API de visitas no disponible para este plan)</div>';
+  } else {
+    el.innerHTML='';
+  }
+
+  el.innerHTML += data.map(function(v, idx){
+    var i       = (allItems||[]).find(function(x){ return String(x.id)===v.itemId; });
+    var title   = (i&&i.title)||('MLA '+v.itemId);
+    var price   = (i&&i.price)||0;
+    var thumb   = (i&&i.thumbnail)||'';
+    var sc      = i ? itemHealthPct(i) : null;
+    var status  = (i&&i.status)||'active';
+    var editUrl = v.itemId ? 'https://www.mercadolibre.com.ar/publicaciones/'+v.itemId+'/modificar' : null;
+    var onCl    = editUrl ? 'onclick="window.open(\''+editUrl+'\',\'_blank\')"' : '';
+    var imgEl   = thumb ? '<img src="'+thumb+'" onerror="this.parentElement.textContent=\'👁\'">':'👁';
+    var metric  =
+      '<span style="'+DASH_C_METRIC+'">'+v.visits.toLocaleString('es-AR')+' visitas</span>'
+      +' · <span style="'+DASH_C_PRICE+'">$'+(price>0?price.toLocaleString('es-AR'):'—')+'</span>'
+      +(sc!=null?' · <span style="'+DASH_C_QUAL+'">Calidad: '+sc+'%</span>':'');
+    return '<div style="display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid var(--border);'+(editUrl?'cursor:pointer;':'')+'" '+onCl+'>'
+      +'<div class="item-thumb" style="flex-shrink:0">'+imgEl+'</div>'
+      +'<div style="flex:1;min-width:0">'
+        +'<div style="font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+title+'</div>'
+        +'<div style="font-size:10px;margin-top:2px;display:flex;gap:6px;flex-wrap:wrap">'+metric+'</div>'
+      +'</div>'
+      +'<span class="badge '+(status==='active'?'bg-green':'bg-amber')+'" style="flex-shrink:0">'+(status==='active'?'●':'⏸')+'</span>'
+      +'</div>';
+  }).join('');
+}
+
 function updateLast50(orders){
   var newSales = [];
   (orders||[]).forEach(function(o){
