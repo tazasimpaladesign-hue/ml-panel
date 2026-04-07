@@ -9186,11 +9186,11 @@ function aiOpportunities(){
     if(visits>50 && sold<5)
       alerts.push({icon:'🔴',thumb:thumb,title:item.title,
         msg:'Alto tráfico pero pocas ventas — revisá precio o fotos',
-        action:'Ver pub',url:'https://www.mercadolibre.com.ar/andes/listing/edit?item_id='+item.id,type:'danger'});
+        action:'Ver pub',url:'https://www.mercadolibre.com.ar/publicaciones/'+item.id+'/modificar',type:'danger'});
     else if(sold>20 && stock<rules.stock)
       alerts.push({icon:'⚠️',thumb:thumb,title:item.title,
         msg:'Vende bien pero stock crítico ('+stock+' u.)',
-        action:'Editar',url:'https://www.mercadolibre.com.ar/andes/listing/edit?item_id='+item.id,type:'warn'});
+        action:'Editar',url:'https://www.mercadolibre.com.ar/publicaciones/'+item.id+'/modificar',type:'warn'});
     else if(sold>10 && status==='active')
       alerts.push({icon:'💡',thumb:thumb,title:item.title,
         msg:'Producto escalable con '+sold+' ventas — considerá activar publicidad',
@@ -9262,7 +9262,7 @@ async function aiCompetition(){
         +(minComp?' · Competidor mín: $'+minComp.toLocaleString('es-AR'):' · Sin competidores encontrados')+'</div>'
       +'</div>'
       +statusBadge
-      +'<a href="https://www.mercadolibre.com.ar/andes/listing/edit?item_id='+r.item.id+'" target="_blank" class="btn btn-ghost btn-xs" style="font-size:10px;flex-shrink:0;margin-left:4px">✏️ Editar</a>'
+      +'<a href="https://www.mercadolibre.com.ar/publicaciones/'+r.item.id++'/modificar''" target="_blank" class="btn btn-ghost btn-xs" style="font-size:10px;flex-shrink:0;margin-left:4px">✏️ Editar</a>'
       +'</div>';
   }).join('');
   aiSet('ai-comp-list', html||'<div class="alert a-info">Sin datos de competencia disponibles.</div>');
@@ -9338,7 +9338,7 @@ function aiStock(){
           +'<span class="badge '+cls+'" style="font-size:11px;padding:3px 8px">'+days+'d</span>'
           +'<div style="font-size:9px;color:var(--text3);margin-top:2px">de autonomía</div>'
         +'</div>'
-        +'<a href="https://www.mercadolibre.com.ar/andes/listing/edit?item_id='+p.item.id+'" target="_blank" style="color:var(--accent);font-size:12px;text-decoration:none;flex-shrink:0;padding:4px">✏️</a>'
+        +'<a href="https://www.mercadolibre.com.ar/publicaciones/'+p.item.id++'/modificar''" target="_blank" style="color:var(--accent);font-size:12px;text-decoration:none;flex-shrink:0;padding:4px">✏️</a>'
         +'</div>';
     }).join('');
   }
@@ -9595,24 +9595,48 @@ var _last50Sales = [];
 function renderLast50(){
   var el = document.getElementById('dash-last50');
   if(!el) return;
-  if(!_last50Sales.length){ el.innerHTML='<div style="color:var(--text3);font-size:12px;padding:10px">Sin ventas recientes</div>'; return; }
-  el.innerHTML = _last50Sales.map(function(sale){
-    var raw   = sale.thumbnail||sale.picture||'';
-    var thumb = raw ? raw.replace('http://','https://') : '';
-    var fecha = sale.date ? new Date(sale.date).toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
-    var health= sale.health!=null ? '<span class="badge '+(sale.health>0.8?'bg-green':sale.health>0.5?'bg-amber':'bg-red')+'" style="font-size:9px">'+Math.round(sale.health*100)+'%</span>' : '';
-    var imgEl = thumb
-      ? '<img src="'+thumb+'" width="40" height="40" loading="lazy" referrerpolicy="no-referrer" style="object-fit:cover;border-radius:4px;flex-shrink:0;border:1px solid var(--border);min-width:40px" onerror="this.outerHTML=\'<div style=&quot;width:40px;height:40px;background:var(--bg3);border-radius:4px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:16px&quot;>📦</div>\'">'
-      : '<div style="width:40px;height:40px;background:var(--bg3);border-radius:4px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:16px">📦</div>';
-    return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">'
-      +imgEl
+  if(!_last50Sales.length){
+    el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:10px 0">Sin ventas recientes. Actualizá el panel.</div>';
+    return;
+  }
+  el.style.maxHeight = '400px';
+  el.style.overflowY = 'auto';
+
+  el.innerHTML = _last50Sales.map(function(sale, idx){
+    // Fuente de thumbnail: allItems es la fuente confiable (igual que Top Publicaciones)
+    var localItem = sale.itemId
+      ? (allItems||[]).find(function(i){ return String(i.id)===String(sale.itemId); })
+      : null;
+    var thumb  = (localItem&&localItem.thumbnail) || sale.thumbnail || '';
+    var status = (localItem&&localItem.status) || 'active';
+    var sc     = localItem ? itemHealthPct(localItem) : null;
+    var scColor= sc!=null ? (sc>=80?'var(--green)':sc>=50?'var(--amber)':'var(--red)') : 'var(--text3)';
+
+    // Mismo formato de URL que Top Publicaciones (va directo a ML, no pasa por Worker)
+    var editUrl = sale.itemId
+      ? 'https://www.mercadolibre.com.ar/publicaciones/'+sale.itemId+'/modificar'
+      : null;
+    var onCl = editUrl ? 'onclick="window.open(\''+editUrl+'\',\'_blank\')" style="cursor:pointer"' : '';
+
+    var fecha = sale.date
+      ? new Date(sale.date).toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})
+      : '—';
+
+    return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)" '+onCl+'>'
+      +'<div class="item-thumb" style="flex-shrink:0">'
+        +(thumb ? '<img src="'+thumb+'" onerror="this.parentElement.textContent=\'☕\'">' : '☕')
+      +'</div>'
       +'<div style="flex:1;min-width:0">'
-      +'<div style="font-size:11px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+sale.title.slice(0,44)+'</div>'
-      +'<div style="font-size:10px;color:var(--text3);display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:2px">'
-      +'<span>'+fecha+'</span>'
-      +'<span style="color:var(--green);font-weight:700">$'+sale.price.toLocaleString('es-AR')+'</span>'
-      +health+'</div></div>'
-      +(sale.itemId?'<a href="https://www.mercadolibre.com.ar/andes/listing/edit?item_id='+sale.itemId+'" target="_blank" title="Editar" style="color:var(--accent);text-decoration:none;font-size:13px;flex-shrink:0;padding:4px">✏️</a>':'')
+        +'<div style="font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sale.title+'</div>'
+        +'<div style="font-size:10px;color:var(--text3);display:flex;gap:8px;margin-top:2px;flex-wrap:wrap">'
+          +'<span>'+fecha+'</span>'
+          +'<span style="color:var(--green);font-weight:600">$'+sale.price.toLocaleString('es-AR')+'</span>'
+          +(sc!=null ? '<span style="color:'+scColor+'">Calidad: '+sc+'%</span>' : '')
+        +'</div>'
+      +'</div>'
+      +'<span class="badge '+(status==='active'?'bg-green':'bg-amber')+'" style="flex-shrink:0">'
+        +(status==='active'?'●':'⏸')
+      +'</span>'
       +'</div>';
   }).join('');
 }
@@ -9622,35 +9646,23 @@ function updateLast50(orders){
     (o.order_items||[]).forEach(function(oi){
       var itemMeta = oi.item||{};
       var itemId   = itemMeta.id ? String(itemMeta.id) : null;
-      // allItems lookup — this is the reliable source of thumbnails
-      var localItem = itemId ? (allItems||[]).find(function(i){return String(i.id)===itemId;}) : null;
-      // Priority: localItem.thumbnail > itemMeta.thumbnail > localItem pictures
-      var rawThumb = (localItem&&localItem.thumbnail)
-                  || itemMeta.thumbnail
-                  || (localItem&&localItem.pictures&&localItem.pictures[0]&&localItem.pictures[0].url)
-                  || '';
-      var thumb = rawThumb ? rawThumb.replace('http://','https://').replace('-I.jpg','-O.jpg') : '';
       newSales.push({
         date:      o.date_created,
-        title:     (localItem&&localItem.title) || itemMeta.title || 'Sin título',
+        title:     itemMeta.title || 'Sin título',
         price:     oi.unit_price||0,
-        thumbnail: thumb,
+        thumbnail: '', // renderLast50 busca en allItems en tiempo real
         itemId:    itemId,
-        health:    localItem ? (localItem.health||null) : null,
       });
     });
   });
-  // Merge, deduplicate by orderId+title, sort newest first, keep exactly 50
-  // NO date filter — fill the 50 slots regardless of how old they are
+  // Merge, dedup, sort newest first — sin filtro de fecha (cupo de 50 FIFO)
   var merged = newSales.concat(_last50Sales);
   var seen   = {};
-  var unique = merged.filter(function(s){
-    var key = (s.date||'')+'|'+(s.title||'');
+  _last50Sales = merged.filter(function(s){
+    var key = (s.date||'')+'|'+(s.itemId||s.title||'');
     if(seen[key]) return false;
-    seen[key] = true;
-    return true;
-  });
-  _last50Sales = unique.sort(function(a,b){
+    seen[key]=true; return true;
+  }).sort(function(a,b){
     return new Date(b.date)-new Date(a.date);
   }).slice(0,50);
   renderLast50();
