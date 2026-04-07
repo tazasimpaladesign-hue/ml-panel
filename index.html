@@ -9699,83 +9699,138 @@ async function loadMostVisited(forceRefresh){
   var el = document.getElementById('dash-most-visited');
   if(!el) return;
 
-  if(_mostVisitedCache && !forceRefresh){ renderMostVisited(_mostVisitedCache); return; }
+  // ── Serve persisted data immediately (no blank panel on reload) ─────────
+  if(!_mostVisitedCache){
+    try{
+      var saved = JSON.parse(localStorage.getItem('impala_most_visited_cache')||'null');
+      if(saved && Array.isArray(saved) && saved.length) _mostVisitedCache = saved;
+    }catch(e){}
+  }
+  if(_mostVisitedCache && !forceRefresh){
+    renderMostVisited(_mostVisitedCache);
+    // Still kick off a background refresh without blocking
+    if(!_mostVisitedLoading) _loadMostVisitedBg();
+    return;
+  }
+
+  // ── First load or forced refresh ────────────────────────────────────────
+  if(_mostVisitedLoading) return;
   if(!token || !userId) return;
+  _loadMostVisitedBg(true);
+}
+
+// Background loader — non-blocking, processes all allItems in batches
+async function _loadMostVisitedBg(showSpinner){
   if(_mostVisitedLoading) return;
   _mostVisitedLoading = true;
 
-  if(!el.querySelector('.item-thumb'))
-    el.innerHTML='<div class="loading"><div class="spin"></div>Cargando visitas (15d)...</div>';
+  var el = document.getElementById('dash-most-visited');
+  if(!el){ _mostVisitedLoading=false; return; }
 
-  try{
-    var items = (allItems||[]).filter(function(i){
-      return i.status==='active'||i.status==='paused';
-    }).slice(0,100);
+  var items = (allItems||[]).filter(function(i){
+    return i.id && (i.status==='active'||i.status==='paused');
+  });
 
-    if(!items.length){
+  if(!items.length){
+    if(!_mostVisitedCache){
       el.innerHTML='<div style="color:var(--text3);font-size:12px;padding:10px 0">Esperando publicaciones...</div>';
-      _mostVisitedLoading = false;
-      setTimeout(function(){ loadMostVisited(true); }, 3000);
-      return;
+      _mostVisitedLoading=false;
+      setTimeout(function(){ _loadMostVisitedBg(true); }, 4000);
     }
+    return;
+  }
 
-    var now     = new Date();
-    var toISO   = now.toISOString();
-    var fromISO = new Date(now.getTime()-15*24*60*60*1000).toISOString();
+  var now     = new Date();
+  var toISO   = now.toISOString();
+  var fromISO = new Date(now.getTime()-15*24*60*60*1000).toISOString();
+  var total   = items.length;
+  var done    = 0;
+  var visitMap= {};
+  var BATCH   = 8;  // 8 concurrent requests per tick
 
-    // Individual calls per item — ML items/visits endpoint is 1 ID per request
-    // Concurrency: batches of 10 to avoid rate-limit
-    var BATCH = 10;
-    var results = [];
+  // Show progress indicator
+  var updateProgress = function(){
+    var prog = document.getElementById('mv-progress');
+    if(prog) prog.textContent = 'Actualizando visitas ('+done+' de '+total+')...';
+  };
 
-    for(var b=0; b<items.length; b+=BATCH){
-      var batch = items.slice(b, b+BATCH);
-      var batch_results = await Promise.all(batch.map(async function(item){
+  // Render progress bar in panel header (non-destructive)
+  var headerEl = el.previousElementSibling; // card-hd
+  var existingProg = document.getElementById('mv-progress');
+  if(!existingProg && headerEl){
+    var span = document.createElement('span');
+    span.id = 'mv-progress';
+    span.style.cssText = 'font-size:9.5px;color:var(--text3);font-style:italic;margin-left:6px';
+    span.textContent = 'Cargando visitas (0 de '+total+')...';
+    headerEl.appendChild(span);
+  }
+
+  // Show cached data immediately while loading
+  if(_mostVisitedCache && _mostVisitedCache.length && !showSpinner){
+    renderMostVisited(_mostVisitedCache);
+  } else if(showSpinner){
+    el.innerHTML='<div class="loading"><div class="spin"></div>Cargando todas las visitas... ('+total+' productos)</div>';
+  }
+
+  // Process ALL items in batches
+  for(var b=0; b<items.length; b+=BATCH){
+    var batch = items.slice(b, b+BATCH);
+    try{
+      await Promise.all(batch.map(async function(item){
         try{
           var r = await mlGet(
             '/items/'+item.id+'/visits?date_from='+encodeURIComponent(fromISO)
             +'&date_to='+encodeURIComponent(toISO)
           );
-          // Response can be: number, {total_visits:N}, {visits:N}, or array
-          var total = 0;
+          var total_v = 0;
           if(typeof r === 'number'){
-            total = r;
-          } else if(typeof r === 'object' && r !== null){
-            total = Number(
+            total_v = r;
+          } else if(r && typeof r === 'object'){
+            total_v = Number(
               r.total_visits || r.visits || r.total ||
               (Array.isArray(r) ? r.reduce(function(s,d){return s+(d.total||d.visits||0);},0) : 0)
-            );
+            ) || 0;
           }
-          return { itemId:String(item.id), visits:total };
-        }catch(e){
-          return { itemId:String(item.id), visits:0, error:true };
-        }
+          visitMap[String(item.id)] = total_v;
+        }catch(e){ visitMap[String(item.id)] = 0; }
       }));
-      results = results.concat(batch_results);
-      // Brief pause between batches to respect rate-limit
-      if(b+BATCH < items.length) await new Promise(function(r){ setTimeout(r,150); });
+    }catch(e){}
+
+    done += batch.length;
+    updateProgress();
+
+    // Every 50 items: re-render with partial data so user sees updates
+    if(done % 50 === 0 || done >= items.length){
+      var partial = Object.keys(visitMap).map(function(id){
+        return {itemId:id, visits:visitMap[id]};
+      });
+      // STRICT SORT: descending visits, zeros always last
+      partial.sort(function(a,b){
+        if(a.visits===0 && b.visits===0) return 0;
+        if(a.visits===0) return 1;   // zeros sink to bottom
+        if(b.visits===0) return -1;
+        return b.visits - a.visits;
+      });
+      _mostVisitedCache = partial;
+      renderMostVisited(partial);
     }
 
-    console.log('[MostVisited] fetched', results.length, 'items');
-
-    // Sort desc — items with 0 visits go to bottom but are kept (shown as alerts)
-    results.sort(function(a,b){ return b.visits-a.visits; });
-    var top50 = results.slice(0,50);
-
-    _mostVisitedCache = top50;
-    renderMostVisited(top50);
-
-  }catch(e){
-    console.error('[MostVisited]', e.message);
-    el.innerHTML='<div class="alert a-warn" style="margin:0;font-size:12px">'
-      +'Error: No se pudieron cargar visitas reales.<br>'
-      +'<span style="font-size:10px;color:var(--text3)">'+e.message+'</span><br>'
-      +'<button class="btn btn-ghost btn-xs" onclick="loadMostVisited(true)" style="margin-top:6px">↻ Reintentar</button>'
-      +'</div>';
-    _mostVisitedCache = null;
-  }finally{
-    _mostVisitedLoading = false;
+    // 50ms pause between batches — yields to browser, avoids rate-limit
+    await new Promise(function(res){ setTimeout(res, 50); });
   }
+
+  // ── Final: persist to localStorage ─────────────────────────────────────
+  try{ localStorage.setItem('impala_most_visited_cache', JSON.stringify(_mostVisitedCache)); }catch(e){}
+
+  // Remove progress indicator
+  var prog = document.getElementById('mv-progress');
+  if(prog){
+    prog.textContent = '✓ '+done+' productos • '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+    setTimeout(function(){ if(prog.parentNode) prog.parentNode.removeChild(prog); }, 5000);
+  }
+
+  _mostVisitedLoading = false;
+  console.log('[MostVisited] Completado:', done, 'productos procesados');
 }
 
 function renderMostVisited(data){
@@ -9802,16 +9857,16 @@ function renderMostVisited(data){
       ? '<img src="'+thumb+'" onerror="this.parentElement.textContent=\'👁\'">'
       : '👁';
     var arrow   = trendArrow(prevRanks, v.itemId, idx);
+    var isZero  = v.visits === 0;
 
-    // Zero-visit alert: red border + pink background
-    var isZero   = v.visits === 0;
+    // Zero-visit: red left border + light pink bg; active: normal
     var rowStyle = isZero
-      ? 'display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);cursor:pointer;border-left:3px solid #ff0000;background:rgba(255,0,0,0.04);padding-left:6px'
+      ? 'display:flex;align-items:center;gap:8px;padding:6px 6px 6px 8px;border-bottom:1px solid var(--border);cursor:pointer;border-left:3px solid #e74c3c;background:rgba(231,76,60,0.05)'
       : 'display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);cursor:pointer';
 
     var visitLabel = isZero
-      ? '<span style="'+DASH_C_METRIC+';color:#ff0000">⚠ 0 visitas (inactivo)</span>'
-      : '<span style="'+DASH_C_METRIC+'">'+v.visits.toLocaleString('es-AR')+' visitas (15d)</span>';
+      ? '<span style="color:#e74c3c;font-weight:700">⚠ 0 visitas</span>'
+      : '<span style="'+DASH_C_METRIC+'">'+v.visits.toLocaleString('es-AR')+' visitas</span>';
 
     var metric = visitLabel
       +' · <span style="'+DASH_C_PRICE+'">$'+(price>0?price.toLocaleString('es-AR'):'—')+'</span>'
