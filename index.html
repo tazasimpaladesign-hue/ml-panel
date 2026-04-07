@@ -9699,93 +9699,76 @@ async function loadMostVisited(forceRefresh){
   var el = document.getElementById('dash-most-visited');
   if(!el) return;
 
-  // Serve cache instantly (no flicker on repeated calls)
-  if(_mostVisitedCache && !forceRefresh){
-    renderMostVisited(_mostVisitedCache);
-    return;
-  }
-
+  if(_mostVisitedCache && !forceRefresh){ renderMostVisited(_mostVisitedCache); return; }
   if(!token || !userId) return;
   if(_mostVisitedLoading) return;
   _mostVisitedLoading = true;
 
-  if(!el.querySelector('.item-thumb')){
-    el.innerHTML='<div class="loading"><div class="spin"></div>Cargando visitas reales (15d)...</div>';
-  }
+  if(!el.querySelector('.item-thumb'))
+    el.innerHTML='<div class="loading"><div class="spin"></div>Cargando visitas (15d)...</div>';
 
   try{
-    // ── Step 1: IDs desde allItems local — incluye catálogo y todos los tipos ──
-    var localItems = (allItems||[]).filter(function(i){
-      return i.status === 'active' || i.status === 'paused';
-    });
+    var items = (allItems||[]).filter(function(i){
+      return i.status==='active'||i.status==='paused';
+    }).slice(0,100);
 
-    if(!localItems.length){
-      // allItems still loading — wait for it and retry
-      el.innerHTML='<div style="color:var(--text3);font-size:12px;padding:10px 0">Esperando carga de publicaciones...</div>';
+    if(!items.length){
+      el.innerHTML='<div style="color:var(--text3);font-size:12px;padding:10px 0">Esperando publicaciones...</div>';
       _mostVisitedLoading = false;
       setTimeout(function(){ loadMostVisited(true); }, 3000);
       return;
     }
 
-    // Batch IDs in chunks of 50 (API limit per call)
-    var allIds    = localItems.map(function(i){ return i.id; });
-    var chunkSize = 50;
-    var chunks    = [];
-    for(var i=0; i<allIds.length; i+=chunkSize){
-      chunks.push(allIds.slice(i, i+chunkSize));
-    }
-
-    // ── Step 2: Visit counts via /items/visits?ids=... (ISO dates) ─────────
     var now     = new Date();
     var toISO   = now.toISOString();
-    var fromISO = new Date(now.getTime() - 15*24*60*60*1000).toISOString();
+    var fromISO = new Date(now.getTime()-15*24*60*60*1000).toISOString();
 
-    var visitMap = {};
+    // Individual calls per item — ML items/visits endpoint is 1 ID per request
+    // Concurrency: batches of 10 to avoid rate-limit
+    var BATCH = 10;
+    var results = [];
 
-    for(var ci=0; ci<chunks.length; ci++){
-      var ids = chunks[ci].join(',');
-      try{
-        var visitsR = await mlGet(
-          '/items/visits?ids='+encodeURIComponent(ids)
-          +'&date_from='+encodeURIComponent(fromISO)
-          +'&date_to='+encodeURIComponent(toISO)
-        );
-
-        // ── Step 3: Extract visit list from response ────────────────────
-        var list = visitsR.results || visitsR.visits_detail || visitsR;
-        if(!Array.isArray(list)){
-          throw new Error('Formato de API no reconocido — se esperaba array en results o visits_detail');
+    for(var b=0; b<items.length; b+=BATCH){
+      var batch = items.slice(b, b+BATCH);
+      var batch_results = await Promise.all(batch.map(async function(item){
+        try{
+          var r = await mlGet(
+            '/items/'+item.id+'/visits?date_from='+encodeURIComponent(fromISO)
+            +'&date_to='+encodeURIComponent(toISO)
+          );
+          // Response can be: number, {total_visits:N}, {visits:N}, or array
+          var total = 0;
+          if(typeof r === 'number'){
+            total = r;
+          } else if(typeof r === 'object' && r !== null){
+            total = Number(
+              r.total_visits || r.visits || r.total ||
+              (Array.isArray(r) ? r.reduce(function(s,d){return s+(d.total||d.visits||0);},0) : 0)
+            );
+          }
+          return { itemId:String(item.id), visits:total };
+        }catch(e){
+          return { itemId:String(item.id), visits:0, error:true };
         }
-
-        list.forEach(function(v){
-          var id  = String(v.item_id||v.id||'');
-          var cnt = Number(v.total_visits||v.visits||v.quantity||0);
-          if(id && cnt) visitMap[id] = (visitMap[id]||0) + cnt;
-        });
-
-      }catch(chunkErr){
-        console.warn('[MostVisited] chunk error:', chunkErr.message);
-      }
+      }));
+      results = results.concat(batch_results);
+      // Brief pause between batches to respect rate-limit
+      if(b+BATCH < items.length) await new Promise(function(r){ setTimeout(r,150); });
     }
 
-    console.log('[MostVisited] items with visit data:', Object.keys(visitMap).length);
+    console.log('[MostVisited] fetched', results.length, 'items');
 
-    if(!Object.keys(visitMap).length){
-      throw new Error('La API no devolvió visitas para los últimos 15 días');
-    }
+    // Sort desc — items with 0 visits go to bottom but are kept (shown as alerts)
+    results.sort(function(a,b){ return b.visits-a.visits; });
+    var top50 = results.slice(0,50);
 
-    // ── Step 4: Sort desc by visits ────────────────────────────────────
-    var normalized = Object.keys(visitMap).map(function(id){
-      return { itemId:id, visits:visitMap[id] };
-    }).sort(function(a,b){ return b.visits-a.visits; }).slice(0,50);
-
-    _mostVisitedCache = normalized;
-    renderMostVisited(_mostVisitedCache);
+    _mostVisitedCache = top50;
+    renderMostVisited(top50);
 
   }catch(e){
     console.error('[MostVisited]', e.message);
     el.innerHTML='<div class="alert a-warn" style="margin:0;font-size:12px">'
-      +'Error: No se pudieron obtener visitas reales de los últimos 15 días.<br>'
+      +'Error: No se pudieron cargar visitas reales.<br>'
       +'<span style="font-size:10px;color:var(--text3)">'+e.message+'</span><br>'
       +'<button class="btn btn-ghost btn-xs" onclick="loadMostVisited(true)" style="margin-top:6px">↻ Reintentar</button>'
       +'</div>';
@@ -9799,11 +9782,10 @@ function renderMostVisited(data){
   var el = document.getElementById('dash-most-visited');
   if(!el||!data) return;
   if(!data.length){
-    el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:10px 0">Sin visitas en los últimos 15 días.</div>';
+    el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:10px 0">Sin datos de visitas.</div>';
     return;
   }
 
-  // Trend arrows
   var prevRanks = loadPrevRanks(_RANK_VISITS_KEY);
   savePrevRanks(_RANK_VISITS_KEY, data.map(function(v){ return v.itemId; }));
 
@@ -9820,12 +9802,22 @@ function renderMostVisited(data){
       ? '<img src="'+thumb+'" onerror="this.parentElement.textContent=\'👁\'">'
       : '👁';
     var arrow   = trendArrow(prevRanks, v.itemId, idx);
-    var metric  =
-      '<span style="'+DASH_C_METRIC+'">'+v.visits.toLocaleString('es-AR')+' visitas (15d)</span>'
+
+    // Zero-visit alert: red border + pink background
+    var isZero   = v.visits === 0;
+    var rowStyle = isZero
+      ? 'display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);cursor:pointer;border-left:3px solid #ff0000;background:rgba(255,0,0,0.04);padding-left:6px'
+      : 'display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);cursor:pointer';
+
+    var visitLabel = isZero
+      ? '<span style="'+DASH_C_METRIC+';color:#ff0000">⚠ 0 visitas (inactivo)</span>'
+      : '<span style="'+DASH_C_METRIC+'">'+v.visits.toLocaleString('es-AR')+' visitas (15d)</span>';
+
+    var metric = visitLabel
       +' · <span style="'+DASH_C_PRICE+'">$'+(price>0?price.toLocaleString('es-AR'):'—')+'</span>'
       +(sc!=null?' · <span style="'+DASH_C_QUAL+'">Calidad: '+sc+'%</span>':'');
 
-    return '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);cursor:pointer" '+onCl+'>'
+    return '<div style="'+rowStyle+'" '+onCl+'>'
       +(arrow?'<span style="width:14px;flex-shrink:0">'+arrow+'</span>':'<span style="width:14px;flex-shrink:0"></span>')
       +'<div class="item-thumb" style="flex-shrink:0">'+imgEl+'</div>'
       +'<div style="flex:1;min-width:0">'
