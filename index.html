@@ -4332,8 +4332,7 @@ function renderDashboard(){
   renderDashKPIs();
   loadDashVisits().then(()=>renderMainChart()).catch(()=>renderMainChart());
   renderCatChart(); renderDashTopPubs(); renderDashInsights(); renderDashStock(); renderDashConv(); renderDashRepMini();
-  // Los 50 más visitados — usar caché si disponible, fetch en background si no
-  loadMostVisited(false);
+  // Los 50 más visitados se cargan solo en initApp (single-run, 24h cache)
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -9695,149 +9694,175 @@ function renderLast50(){
 var _mostVisitedCache = null;   // cache to avoid unnecessary API calls
 var _mostVisitedLoading = false;
 
+// ── Los 50 más visitados — control vars ────────────────────────────────
+var _mvLoading    = false;   // single-run flag
+var _mvAbort      = false;   // abort signal for current run
+var _mvCacheKey   = 'impala_mv_cache';
+var _mvCacheTTL   = 24 * 60 * 60 * 1000; // 24 horas en ms
+
+function _mvSaveCache(data){
+  try{ localStorage.setItem(_mvCacheKey, JSON.stringify({ts:Date.now(), data:data})); }catch(e){}
+}
+function _mvLoadCache(){
+  try{
+    var raw = JSON.parse(localStorage.getItem(_mvCacheKey)||'null');
+    if(raw && raw.data && (Date.now()-raw.ts) < _mvCacheTTL) return raw.data;
+  }catch(e){}
+  return null;
+}
+function _mvClearCache(){
+  try{ localStorage.removeItem(_mvCacheKey); }catch(e){}
+  _mostVisitedCache = null;
+}
+
 async function loadMostVisited(forceRefresh){
   var el = document.getElementById('dash-most-visited');
   if(!el) return;
 
-  // ── Serve persisted data immediately (no blank panel on reload) ─────────
-  if(!_mostVisitedCache){
-    try{
-      var saved = JSON.parse(localStorage.getItem('impala_most_visited_cache')||'null');
-      if(saved && Array.isArray(saved) && saved.length) _mostVisitedCache = saved;
-    }catch(e){}
+  // ── 1. Serve fresh cache immediately (< 24h) ──────────────────────────
+  if(!forceRefresh){
+    var cached = _mvLoadCache();
+    if(cached){
+      _mostVisitedCache = cached;
+      renderMostVisited(cached);
+      return;   // data is fresh — do NOT start background reload
+    }
   }
-  if(_mostVisitedCache && !forceRefresh){
-    renderMostVisited(_mostVisitedCache);
-    // Still kick off a background refresh without blocking
-    if(!_mostVisitedLoading) _loadMostVisitedBg();
+
+  // ── 2. Cache too old or forced refresh → full load, single run ────────
+  if(_mvLoading){
+    // Already loading — just show current state
+    if(_mostVisitedCache) renderMostVisited(_mostVisitedCache);
     return;
   }
 
-  // ── First load or forced refresh ────────────────────────────────────────
-  if(_mostVisitedLoading) return;
   if(!token || !userId) return;
-  _loadMostVisitedBg(true);
-}
-
-// Background loader — non-blocking, processes all allItems in batches
-async function _loadMostVisitedBg(showSpinner){
-  if(_mostVisitedLoading) return;
-  _mostVisitedLoading = true;
-
-  var el = document.getElementById('dash-most-visited');
-  if(!el){ _mostVisitedLoading=false; return; }
+  _mvAbort   = false;
+  _mvLoading = true;
+  _mostVisitedCache = null;
 
   var items = (allItems||[]).filter(function(i){
-    return i.id && (i.status==='active'||i.status==='paused');
+    return i.id && (i.status==='active' || i.status==='paused');
   });
 
   if(!items.length){
-    if(!_mostVisitedCache){
-      el.innerHTML='<div style="color:var(--text3);font-size:12px;padding:10px 0">Esperando publicaciones...</div>';
-      _mostVisitedLoading=false;
-      setTimeout(function(){ _loadMostVisitedBg(true); }, 4000);
-    }
+    el.innerHTML='<div style="color:var(--text3);font-size:12px;padding:10px 0">Esperando publicaciones...</div>';
+    _mvLoading = false;
+    setTimeout(function(){ loadMostVisited(forceRefresh); }, 4000);
     return;
   }
 
-  var now     = new Date();
-  var toISO   = now.toISOString();
-  var fromISO = new Date(now.getTime()-15*24*60*60*1000).toISOString();
-  var total   = items.length;
-  var done    = 0;
-  var visitMap= {};
-  var BATCH   = 8;  // 8 concurrent requests per tick
+  var total    = items.length;
+  var done     = 0;
+  var visitMap = {};
 
-  // Show progress indicator
-  var updateProgress = function(){
-    var prog = document.getElementById('mv-progress');
-    if(prog) prog.textContent = 'Actualizando visitas ('+done+' de '+total+')...';
+  // Progress indicator in card header
+  var setProgress = function(txt){
+    var p = document.getElementById('mv-progress');
+    if(p) p.textContent = txt;
   };
-
-  // Render progress bar in panel header (non-destructive)
-  var headerEl = el.previousElementSibling; // card-hd
-  var existingProg = document.getElementById('mv-progress');
-  if(!existingProg && headerEl){
-    var span = document.createElement('span');
-    span.id = 'mv-progress';
-    span.style.cssText = 'font-size:9.5px;color:var(--text3);font-style:italic;margin-left:6px';
-    span.textContent = 'Cargando visitas (0 de '+total+')...';
-    headerEl.appendChild(span);
+  var hd = el.previousElementSibling;
+  if(!document.getElementById('mv-progress') && hd){
+    var sp = document.createElement('span');
+    sp.id = 'mv-progress';
+    sp.style.cssText = 'font-size:9.5px;color:var(--text3);font-style:italic;margin-left:6px;white-space:nowrap';
+    sp.textContent = 'Iniciando...';
+    hd.appendChild(sp);
   }
 
-  // Show cached data immediately while loading
-  if(_mostVisitedCache && _mostVisitedCache.length && !showSpinner){
-    renderMostVisited(_mostVisitedCache);
-  } else if(showSpinner){
-    el.innerHTML='<div class="loading"><div class="spin"></div>Cargando todas las visitas... ('+total+' productos)</div>';
+  // Show spinner only if panel is empty
+  if(!el.querySelector('.item-thumb')){
+    el.innerHTML='<div class="loading"><div class="spin"></div>Cargando visitas de '+total+' productos...</div>';
   }
 
-  // Process ALL items in batches
-  for(var b=0; b<items.length; b+=BATCH){
-    var batch = items.slice(b, b+BATCH);
+  // ── 3. Sequential queue — same pattern as SEO Analizador ──────────────
+  // Uses /items/{id}/visits/time_window?last=7&unit=day (proven working)
+  // Fallback: /items/{id}/visits?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD
+  var now    = nowAR();
+  var from7  = new Date(now - 7*86400000);
+  var date_to   = now.toISOString().slice(0,10);
+  var date_from = from7.toISOString().slice(0,10);
+
+  for(var i=0; i<items.length; i++){
+    if(_mvAbort) break;
+
+    var item = items[i];
+    var id   = String(item.id);
+    var visits = 0;
+
+    // Primary: time_window endpoint (same as SEO Analizador — proven working)
     try{
-      await Promise.all(batch.map(async function(item){
-        try{
-          var r = await mlGet(
-            '/items/'+item.id+'/visits?date_from='+encodeURIComponent(fromISO)
-            +'&date_to='+encodeURIComponent(toISO)
-          );
-          var total_v = 0;
-          if(typeof r === 'number'){
-            total_v = r;
-          } else if(r && typeof r === 'object'){
-            total_v = Number(
-              r.total_visits || r.visits || r.total ||
-              (Array.isArray(r) ? r.reduce(function(s,d){return s+(d.total||d.visits||0);},0) : 0)
-            ) || 0;
-          }
-          visitMap[String(item.id)] = total_v;
-        }catch(e){ visitMap[String(item.id)] = 0; }
-      }));
-    }catch(e){}
+      var r = await mlGet('/items/'+id+'/visits/time_window?last=7&unit=day');
+      if(r && typeof r.total_visits === 'number'){
+        visits = r.total_visits;
+      } else if(r && Array.isArray(r.visits)){
+        visits = r.visits.reduce(function(s,d){ return s+(d.total||d.quantity||0); }, 0);
+      }
+    }catch(e1){
+      // Fallback: date range (YYYY-MM-DD format — NOT full ISO)
+      try{
+        var r2 = await mlGet('/items/'+id+'/visits?date_from='+date_from+'&date_to='+date_to);
+        visits = (r2 && r2.total_visits) || 0;
+      }catch(e2){
+        visits = 0;
+      }
+    }
 
-    done += batch.length;
-    updateProgress();
+    visitMap[id] = visits;
+    done++;
 
-    // Every 50 items: re-render with partial data so user sees updates
-    if(done % 50 === 0 || done >= items.length){
-      var partial = Object.keys(visitMap).map(function(id){
-        return {itemId:id, visits:visitMap[id]};
-      });
-      // STRICT SORT: descending visits, zeros always last
-      partial.sort(function(a,b){
-        if(a.visits===0 && b.visits===0) return 0;
-        if(a.visits===0) return 1;   // zeros sink to bottom
-        if(b.visits===0) return -1;
-        return b.visits - a.visits;
-      });
+    // Update progress every item
+    setProgress('Cargando visitas ('+done+' de '+total+')...');
+
+    // Re-render every 100 items with current partial data
+    if(done % 100 === 0 || done === total){
+      var partial = _buildSortedVisits(visitMap);
       _mostVisitedCache = partial;
       renderMostVisited(partial);
     }
 
-    // 50ms pause between batches — yields to browser, avoids rate-limit
-    await new Promise(function(res){ setTimeout(res, 50); });
+    // Small yield every 10 items to keep browser responsive
+    if(done % 10 === 0){
+      await new Promise(function(res){ setTimeout(res, 0); });
+    }
   }
 
-  // ── Final: persist to localStorage ─────────────────────────────────────
-  try{ localStorage.setItem('impala_most_visited_cache', JSON.stringify(_mostVisitedCache)); }catch(e){}
+  // ── 4. Final: save to cache, clean up ─────────────────────────────────
+  var final = _buildSortedVisits(visitMap);
+  _mostVisitedCache = final;
+  _mvSaveCache(final);
+  renderMostVisited(final);
 
-  // Remove progress indicator
-  var prog = document.getElementById('mv-progress');
-  if(prog){
-    prog.textContent = '✓ '+done+' productos • '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
-    setTimeout(function(){ if(prog.parentNode) prog.parentNode.removeChild(prog); }, 5000);
-  }
+  setProgress('✓ '+done+' productos · '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}));
+  setTimeout(function(){
+    var p = document.getElementById('mv-progress');
+    if(p && p.parentNode) p.parentNode.removeChild(p);
+  }, 6000);
 
-  _mostVisitedLoading = false;
-  console.log('[MostVisited] Completado:', done, 'productos procesados');
+  _mvLoading = false;
+  console.log('[MostVisited] Completado:', done, 'productos');
 }
+
+function _buildSortedVisits(visitMap){
+  var list = Object.keys(visitMap).map(function(id){
+    return {itemId:id, visits:visitMap[id]};
+  });
+  // Descending: most visited first, zeros always last
+  list.sort(function(a,b){
+    if(a.visits===0 && b.visits===0) return 0;
+    if(a.visits===0) return 1;
+    if(b.visits===0) return -1;
+    return b.visits - a.visits;
+  });
+  return list;
+}
+
 
 function renderMostVisited(data){
   var el = document.getElementById('dash-most-visited');
-  if(!el||!data) return;
+  if(!el || !data) return;
   if(!data.length){
-    el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:10px 0">Sin datos de visitas.</div>';
+    el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:10px 0">Sin datos de visitas disponibles.</div>';
     return;
   }
 
@@ -9859,18 +9884,17 @@ function renderMostVisited(data){
     var arrow   = trendArrow(prevRanks, v.itemId, idx);
     var isZero  = v.visits === 0;
 
-    // Zero-visit: red left border + light pink bg; active: normal
     var rowStyle = isZero
       ? 'display:flex;align-items:center;gap:8px;padding:6px 6px 6px 8px;border-bottom:1px solid var(--border);cursor:pointer;border-left:3px solid #e74c3c;background:rgba(231,76,60,0.05)'
       : 'display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);cursor:pointer';
 
     var visitLabel = isZero
       ? '<span style="color:#e74c3c;font-weight:700">⚠ 0 visitas</span>'
-      : '<span style="'+DASH_C_METRIC+'">'+v.visits.toLocaleString('es-AR')+' visitas</span>';
+      : '<span style="'+DASH_C_METRIC+'">'+v.visits.toLocaleString('es-AR')+' vis. (7d)</span>';
 
     var metric = visitLabel
       +' · <span style="'+DASH_C_PRICE+'">$'+(price>0?price.toLocaleString('es-AR'):'—')+'</span>'
-      +(sc!=null?' · <span style="'+DASH_C_QUAL+'">Calidad: '+sc+'%</span>':'');
+      +(sc!=null?' · <span style="'+DASH_C_QUAL+'">Cal: '+sc+'%</span>':'');
 
     return '<div style="'+rowStyle+'" '+onCl+'>'
       +(arrow?'<span style="width:14px;flex-shrink:0">'+arrow+'</span>':'<span style="width:14px;flex-shrink:0"></span>')
