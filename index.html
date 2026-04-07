@@ -305,11 +305,15 @@ body{background:#f0f2f7}
 .nav .ni{font-size:14px}
 /* Badges del nav ya tienen color propio, no les hace falta override */
 #switch-account-btn{
-  background:rgba(255,255,255,0.07)!important;
-  border:1px solid rgba(255,255,255,0.12)!important;
-  color:#ffffff!important;
-  opacity:.7;
+  background:rgba(220,38,38,0.15)!important;
+  border:1px solid rgba(220,38,38,0.3)!important;
+  color:#fca5a5!important;
+  opacity:.85;
   font-size:12px!important;
+}
+#switch-account-btn:hover{
+  background:rgba(220,38,38,0.28)!important;
+  opacity:1;
 }
 #switch-account-btn:hover{opacity:1!important}
 #sidebar::-webkit-scrollbar-track{background:#090c12}
@@ -704,8 +708,8 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
     <span style="color:var(--text3);font-size:11px">●●</span>
   </a>
-  <button id="switch-account-btn" onclick="switchAccount()" style="display:none;margin:4px 10px 0;padding:7px 12px;background:var(--bg4);border:1px solid var(--border2);border-radius:var(--rs);font-size:11px;color:var(--text2);cursor:pointer;width:calc(100% - 20px);text-align:left;font-family:var(--font)">
-    🔄 Cambiar cuenta
+  <button id="switch-account-btn" onclick="logout()" style="display:none;margin:4px 10px 0;padding:7px 12px;background:var(--bg4);border:1px solid var(--border2);border-radius:var(--rs);font-size:11px;color:var(--text2);cursor:pointer;width:calc(100% - 20px);text-align:left;font-family:var(--font)">
+    🔒 Cerrar sesión
   </button>
 
   <div class="sb-sec">Dashboard</div>
@@ -854,7 +858,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   </div>
 
   <!-- ── Top publicaciones + Últimos 50 ── -->
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+  <div style="display:grid;grid-template-columns:minmax(0,420px) minmax(0,420px);gap:14px;margin-bottom:14px;justify-content:start">
     <div class="card" style="min-height:320px">
       <div class="card-hd">
         <div class="card-title">🏆 Top publicaciones</div>
@@ -9616,13 +9620,14 @@ function renderLast50(){
     var editUrl = sale.itemId
       ? 'https://www.mercadolibre.com.ar/publicaciones/'+sale.itemId+'/modificar'
       : null;
-    var onCl = editUrl ? 'onclick="window.open(\''+editUrl+'\',\'_blank\')" style="cursor:pointer"' : '';
+    var onCl = editUrl ? 'onclick="window.open(\''+editUrl+'\',\'_blank\')"' : '';
+    var cursorStyle = editUrl ? 'cursor:pointer' : '';
 
     var fecha = sale.date
       ? new Date(sale.date).toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})
       : '—';
 
-    return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)" '+onCl+'>'
+    return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);'+cursorStyle+'" '+onCl+'>'
       +'<div class="item-thumb" style="flex-shrink:0">'
         +(thumb ? '<img src="'+thumb+'" onerror="this.parentElement.textContent=\'☕\'">' : '☕')
       +'</div>'
@@ -9769,6 +9774,27 @@ document.addEventListener('click',e=>{if(e.target.classList.contains('modal-over
 // ═══════════════════════════════════════════════════════════
 // SWITCH ACCOUNT
 // ═══════════════════════════════════════════════════════════
+function logout(){
+  // Cerrar sesión segura: borrar token y volver al login
+  if(!confirm('¿Cerrar sesión? Tendrás que volver a conectar con MercadoLibre.')) return;
+  var appId = localStorage.getItem('ml_active_app');
+  if(appId){
+    // Intentar revocar token en ML (best-effort, no bloquea si falla)
+    try{
+      if(token) fetch(WORKER+'/api/revoke', {
+        method:'POST',
+        headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
+        body:JSON.stringify({token:token})
+      }).catch(()=>{});
+    }catch(e){}
+    // Limpiar todos los tokens guardados
+    localStorage.removeItem('ml_token_'+appId);
+    localStorage.removeItem('ml_refresh_'+appId);
+    localStorage.removeItem('ml_ref_'+appId);
+  }
+  switchAccount();
+}
+
 function switchAccount(){
   // Limpiar sesión actual y volver al login
   token = null; userId = null; userData = null;
