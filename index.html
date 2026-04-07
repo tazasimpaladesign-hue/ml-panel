@@ -9699,60 +9699,85 @@ async function loadMostVisited(forceRefresh){
   var el = document.getElementById('dash-most-visited');
   if(!el) return;
 
-  // Serve cache instantly (no flicker)
+  // Serve cache instantly (no flicker on repeated calls)
   if(_mostVisitedCache && !forceRefresh){
     renderMostVisited(_mostVisitedCache);
     return;
   }
 
-  if(!token||!userId) return;
+  if(!token || !userId) return;
   if(_mostVisitedLoading) return;
   _mostVisitedLoading = true;
 
   if(!el.querySelector('.item-thumb')){
-    el.innerHTML='<div class="loading"><div class="spin"></div>Cargando visitas reales...</div>';
+    el.innerHTML='<div class="loading"><div class="spin"></div>Cargando visitas reales (15d)...</div>';
   }
 
   try{
-    // ── Step 1: Get top 50 popular items for this seller ───────────────
-    var searchR = await mlGet('/sites/MLA/search?seller_id='+userId+'&sort=popularity&limit=50');
-    var items   = searchR.results||[];
-    if(!items.length) throw new Error('El vendedor no tiene publicaciones activas');
+    // ── Step 1: IDs desde allItems local — incluye catálogo y todos los tipos ──
+    var localItems = (allItems||[]).filter(function(i){
+      return i.status === 'active' || i.status === 'paused';
+    });
 
-    var ids = items.map(function(i){ return i.id; }).join(',');
+    if(!localItems.length){
+      // allItems still loading — wait for it and retry
+      el.innerHTML='<div style="color:var(--text3);font-size:12px;padding:10px 0">Esperando carga de publicaciones...</div>';
+      _mostVisitedLoading = false;
+      setTimeout(function(){ loadMostVisited(true); }, 3000);
+      return;
+    }
 
-    // ── Step 2: Fetch real visit counts for those IDs (last 15 days) ───
+    // Batch IDs in chunks of 50 (API limit per call)
+    var allIds    = localItems.map(function(i){ return i.id; });
+    var chunkSize = 50;
+    var chunks    = [];
+    for(var i=0; i<allIds.length; i+=chunkSize){
+      chunks.push(allIds.slice(i, i+chunkSize));
+    }
+
+    // ── Step 2: Visit counts via /items/visits?ids=... (ISO dates) ─────────
     var now     = new Date();
     var toISO   = now.toISOString();
     var fromISO = new Date(now.getTime() - 15*24*60*60*1000).toISOString();
 
-    var visitsR = await mlGet(
-      '/items/visits?ids='+encodeURIComponent(ids)
-      +'&date_from='+encodeURIComponent(fromISO)
-      +'&date_to='+encodeURIComponent(toISO)
-    );
+    var visitMap = {};
 
-    // ── Step 3: Extract visit list ──────────────────────────────────────
-    var list = visitsR.results || visitsR.visits_detail || visitsR;
-    if(!Array.isArray(list)){
-      throw new Error('Formato de API no reconocido — la respuesta no contiene un array de visitas');
+    for(var ci=0; ci<chunks.length; ci++){
+      var ids = chunks[ci].join(',');
+      try{
+        var visitsR = await mlGet(
+          '/items/visits?ids='+encodeURIComponent(ids)
+          +'&date_from='+encodeURIComponent(fromISO)
+          +'&date_to='+encodeURIComponent(toISO)
+        );
+
+        // ── Step 3: Extract visit list from response ────────────────────
+        var list = visitsR.results || visitsR.visits_detail || visitsR;
+        if(!Array.isArray(list)){
+          throw new Error('Formato de API no reconocido — se esperaba array en results o visits_detail');
+        }
+
+        list.forEach(function(v){
+          var id  = String(v.item_id||v.id||'');
+          var cnt = Number(v.total_visits||v.visits||v.quantity||0);
+          if(id && cnt) visitMap[id] = (visitMap[id]||0) + cnt;
+        });
+
+      }catch(chunkErr){
+        console.warn('[MostVisited] chunk error:', chunkErr.message);
+      }
     }
 
-    console.log('[MostVisited] real visits from API:', list.length, 'items');
+    console.log('[MostVisited] items with visit data:', Object.keys(visitMap).length);
 
-    // ── Step 4: Build {itemId, visits} and sort desc ───────────────────
-    var visitMap = {};
-    list.forEach(function(v){
-      var id  = String(v.item_id||v.id||'');
-      var cnt = Number(v.total_visits||v.visits||v.quantity||0);
-      if(id) visitMap[id] = (visitMap[id]||0) + cnt;
-    });
+    if(!Object.keys(visitMap).length){
+      throw new Error('La API no devolvió visitas para los últimos 15 días');
+    }
 
+    // ── Step 4: Sort desc by visits ────────────────────────────────────
     var normalized = Object.keys(visitMap).map(function(id){
       return { itemId:id, visits:visitMap[id] };
     }).sort(function(a,b){ return b.visits-a.visits; }).slice(0,50);
-
-    if(!normalized.length) throw new Error('La API devolvió 0 visitas para el período solicitado');
 
     _mostVisitedCache = normalized;
     renderMostVisited(_mostVisitedCache);
