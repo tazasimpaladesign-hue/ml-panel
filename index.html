@@ -80,7 +80,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 .btn-xs{padding:3px 8px;font-size:11px}
 
 /* ── CONTENT ── */
-.content{padding:22px;flex:1}
+.content{padding:22px;flex:1;min-width:0;overflow-x:hidden}
 .section{display:none}
 .section.active{display:block}
 @keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
@@ -858,31 +858,31 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   </div>
 
   <!-- ── Top publicaciones + Últimos 50 + Los 50 más visitados ── -->
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px">
-    <div class="card" style="min-height:320px">
-      <div class="card-hd">
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px;min-width:0;overflow:hidden">
+    <div class="card" style="min-width:0;overflow:hidden;display:flex;flex-direction:column">
+      <div class="card-hd" style="flex-shrink:0">
         <div class="card-title">🏆 Top publicaciones</div>
         <a href="#publicaciones" class="btn btn-ghost btn-sm" onclick="showSection('publicaciones');return false;">Ver todas →</a>
       </div>
-      <div id="dash-top-pubs" style="max-height:360px;overflow-y:auto">
+      <div id="dash-top-pubs" style="flex:1;max-height:480px;overflow-y:auto;min-height:0">
         <div class="loading"><div class="spin"></div>Cargando...</div>
       </div>
     </div>
-    <div class="card" style="min-height:320px">
-      <div class="card-hd">
+    <div class="card" style="min-width:0;overflow:hidden;display:flex;flex-direction:column">
+      <div class="card-hd" style="flex-shrink:0">
         <div class="card-title">🕐 Últimos 50 vendidos</div>
         <span style="font-size:10px;padding:2px 6px;border-radius:10px;background:var(--green-g);color:var(--green);font-weight:700;border:1px solid var(--green)">LIVE</span>
       </div>
-      <div id="dash-last50" style="max-height:360px;overflow-y:auto">
+      <div id="dash-last50" style="flex:1;max-height:480px;overflow-y:auto;min-height:0">
         <div class="loading"><div class="spin"></div>Cargando...</div>
       </div>
     </div>
-    <div class="card" style="min-height:320px">
-      <div class="card-hd">
+    <div class="card" style="min-width:0;overflow:hidden;display:flex;flex-direction:column">
+      <div class="card-hd" style="flex-shrink:0">
         <div class="card-title">👀 Los 50 más visitados</div>
         <button class="btn btn-ghost btn-sm" onclick="loadMostVisited(true)">↻ 15d</button>
       </div>
-      <div id="dash-most-visited" style="max-height:360px;overflow-y:auto">
+      <div id="dash-most-visited" style="flex:1;max-height:480px;overflow-y:auto;min-height:0">
         <div class="loading"><div class="spin"></div>Cargando...</div>
       </div>
     </div>
@@ -3035,9 +3035,6 @@ async function loadItemsFull(){
     // Actualizar health scores con datos recién bajados de ML
     refreshHealthScores();
     console.log('[loadItemsFull]',allItems.length);
-    // Refresh most visited panel now that full item data + metrics are available
-    _mostVisitedCache = null; // invalidate cache so fresh data loads
-    loadMostVisited(false);
   }catch(e){console.error('[loadItemsFull]',e);}
 }
 
@@ -3952,7 +3949,7 @@ function renderDashTopPubs(){
     el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:10px 0">Sin ventas en los últimos 90 días.</div>';
     return;
   }
-  el.style.maxHeight='360px'; el.style.overflowY='auto';
+  el.style.maxHeight='480px'; el.style.overflowY='auto';
   el.innerHTML = ranked.map(([itemId,qty],idx)=>{
     const i      = allItems.find(x=>String(x.id)===String(itemId));
     const title  = i?.title||'MLA '+itemId;
@@ -9646,7 +9643,7 @@ function renderLast50(){
     el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:10px 0">Sin ventas recientes. Actualizá el panel.</div>';
     return;
   }
-  el.style.maxHeight='360px'; el.style.overflowY='auto';
+  el.style.maxHeight='480px'; el.style.overflowY='auto';
   el.innerHTML = _last50Sales.map(function(sale){
     var localItem = sale.itemId
       ? (allItems||[]).find(function(i){ return String(i.id)===String(sale.itemId); })
@@ -9686,114 +9683,101 @@ async function loadMostVisited(forceRefresh){
   var el = document.getElementById('dash-most-visited');
   if(!el) return;
 
-  // If cache exists and not forcing: render immediately, no loading flash
+  // Cache hit — render immediately without flicker
   if(_mostVisitedCache && !forceRefresh){
     renderMostVisited(_mostVisitedCache);
     return;
   }
 
-  if(!token||!userId){ return; }
+  if(!token || !userId){
+    el.innerHTML='<div style="color:var(--text3);font-size:12px;padding:10px 0">Iniciá sesión para ver visitas.</div>';
+    return;
+  }
   if(_mostVisitedLoading) return;
   _mostVisitedLoading = true;
-  // Only show loading spinner if panel is currently empty
-  if(!el.innerHTML||el.innerHTML.indexOf('item-thumb')<0){
-    el.innerHTML='<div class="loading"><div class="spin"></div>Cargando visitas...</div>';
+
+  // Only show spinner if panel is empty
+  if(!el.querySelector('.item-thumb')){
+    el.innerHTML='<div class="loading"><div class="spin"></div>Cargando visitas reales (15 días)...</div>';
   }
 
   try{
-    // Strategy A: ML search sorted by visits — most reliable endpoint
-    // Returns items with full data including thumbnail and visit count
-    var r = await mlGet('/sites/MLA/search?seller_id='+userId+'&sort=visits_desc&limit=50');
-    var results = r.results||[];
-    console.log('[MostVisited] search results:', results.length);
+    var toDate   = new Date().toISOString().slice(0,10);
+    var fromDate = new Date(Date.now()-15*24*60*60*1000).toISOString().slice(0,10);
 
-    if(results.length){
-      var normalized = results.map(function(item){
-        return {
-          itemId:  String(item.id||''),
-          visits:  item.sold_quantity||0,           // visits not in search; use sold as proxy
-          // Enrich from allItems for thumb + health
-          _search: item
-        };
-      });
+    console.log('[MostVisited] Fetching real visits', fromDate, 'to', toDate);
 
-      // Cross-reference with itemMetrics for real visit data if available
-      normalized = normalized.map(function(v){
-        var m = itemMetrics[v.itemId];
-        if(m && m.visits>0) v.visits = m.visits;
-        return v;
-      });
+    var r = await mlGet(
+      '/users/'+userId+'/items_visits?date_from='+fromDate+'&date_to='+toDate+'&limit=50'
+    );
 
-      // Sort by visits desc
-      normalized.sort(function(a,b){ return b.visits-a.visits; });
-      _mostVisitedCache = normalized;
-      renderMostVisited(_mostVisitedCache, false);
+    // Defensive: locate the array in the response regardless of wrapper key
+    var list = r.items_visits || r.results || r.data || r;
+
+    if(!Array.isArray(list)){
+      throw new Error('Formato de API no reconocido — la respuesta no contiene un array de visitas');
+    }
+
+    if(!list.length){
+      el.innerHTML='<div class="alert a-info" style="margin:0;font-size:12px">'
+        +'Sin visitas registradas en los últimos 15 días ('+fromDate+' a '+toDate+').</div>';
       _mostVisitedLoading = false;
       return;
     }
+
+    // Normalize entries: {itemId, visits}
+    var normalized = list.map(function(v){
+      return {
+        itemId: String(v.item_id||v.id||v.item||''),
+        visits: Number(v.total_visits||v.visits||v.quantity||0)
+      };
+    }).filter(function(v){ return v.itemId && v.visits > 0; });
+
+    // Sort desc by visits
+    normalized.sort(function(a,b){ return b.visits - a.visits; });
+
+    _mostVisitedCache = normalized.slice(0,50);
+    renderMostVisited(_mostVisitedCache);
+
   }catch(e){
-    console.warn('[MostVisited] search failed:', e.message);
-  }
-
-  // Strategy B: Use itemMetrics (populated by background loads) with real visit data
-  var metricsData = Object.keys(itemMetrics).map(function(id){
-    var m = itemMetrics[id];
-    return { itemId:id, visits: m.visits||m.sales||0 };
-  }).filter(function(v){ return v.visits>0; })
-    .sort(function(a,b){ return b.visits-a.visits; })
-    .slice(0,50);
-
-  if(metricsData.length){
-    console.log('[MostVisited] using itemMetrics, items:', metricsData.length);
-    _mostVisitedCache = metricsData;
-    renderMostVisited(_mostVisitedCache, false);
+    console.error('[MostVisited]', e.message);
+    el.innerHTML='<div class="alert a-warn" style="margin:0;font-size:12px">'
+      +'Error: No se pudieron obtener visitas reales de los últimos 15 días.<br>'
+      +'<span style="font-size:10px;color:var(--text3)">'+e.message+'</span><br>'
+      +'<button class="btn btn-ghost btn-xs" onclick="loadMostVisited(true)" style="margin-top:6px">↻ Reintentar</button>'
+      +'</div>';
+    _mostVisitedCache = null;
+  }finally{
     _mostVisitedLoading = false;
-    return;
   }
-
-  // Strategy C: Fallback — sort allItems by sold_quantity (always available)
-  var fallback = (allItems||[])
-    .filter(function(i){ return i.status==='active'; })
-    .map(function(i){ return {itemId:String(i.id), visits:i.sold_quantity||0, isFallback:true}; })
-    .sort(function(a,b){ return b.visits-a.visits; })
-    .slice(0,50);
-
-  console.log('[MostVisited] fallback by sold_quantity, items:', fallback.length);
-  _mostVisitedCache = fallback;
-  renderMostVisited(_mostVisitedCache, true);
-  _mostVisitedLoading = false;
 }
 
-function renderMostVisited(data, isFallback){
+function renderMostVisited(data){
   var el = document.getElementById('dash-most-visited');
-  if(!el||!data) return;
+  if(!el || !data) return;
   if(!data.length){
-    el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:10px 0">Sin datos de visitas.</div>';
+    el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:10px 0">Sin visitas en los últimos 15 días.</div>';
     return;
   }
-  el.style.maxHeight='360px'; el.style.overflowY='auto';
 
-  var header = isFallback
-    ? '<div style="font-size:9.5px;color:var(--amber);padding:4px 0 6px;border-bottom:1px solid var(--border);margin-bottom:2px">⚠️ Ordenado por ventas (datos de visitas no disponibles)</div>'
-    : '';
-
-  var rows = data.map(function(v){
-    // Priority: local allItems > _search result from API
+  el.innerHTML = data.map(function(v){
     var local   = (allItems||[]).find(function(x){ return String(x.id)===v.itemId; });
-    var search  = v._search||{};
-    var title   = (local&&local.title)||search.title||('MLA '+v.itemId);
-    var price   = (local&&local.price)||search.price||0;
-    var thumb   = (local&&local.thumbnail)||search.thumbnail||'';
+    var title   = (local&&local.title)||('MLA '+v.itemId);
+    var price   = (local&&local.price)||0;
+    var thumb   = (local&&local.thumbnail)||'';
     var sc      = itemHealthPct(local||null);
     var status  = (local&&local.status)||'active';
-    var editUrl = v.itemId ? 'https://www.mercadolibre.com.ar/publicaciones/'+v.itemId+'/modificar' : null;
-    var onCl    = editUrl ? 'onclick="window.open(\''+editUrl+'\',\'_blank\')"' : '';
-    var imgEl   = thumb ? '<img src="'+thumb+'" onerror="this.parentElement.textContent=\'👁\'">':'👁';
+    var editUrl = 'https://www.mercadolibre.com.ar/publicaciones/'+v.itemId+'/modificar';
+    var onCl    = 'onclick="window.open(\''+editUrl+'\',\'_blank\')"';
+    var imgEl   = thumb
+      ? '<img src="'+thumb+'" onerror="this.parentElement.textContent=\'👁\'">'
+      : '👁';
     var metric  =
-      '<span style="'+DASH_C_METRIC+'">'+v.visits.toLocaleString('es-AR')+' '+(isFallback?'vendidas':'visitas')+'</span>'
+      '<span style="'+DASH_C_METRIC+'">'+v.visits.toLocaleString('es-AR')+' visitas</span>'
       +' · <span style="'+DASH_C_PRICE+'">$'+(price>0?price.toLocaleString('es-AR'):'—')+'</span>'
       +(sc!=null?' · <span style="'+DASH_C_QUAL+'">Calidad: '+sc+'%</span>':'');
-    return '<div style="display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid var(--border);'+(editUrl?'cursor:pointer;':'')+'" '+onCl+'>'
+
+    return '<div style="display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid var(--border);cursor:pointer" '+onCl+'>'
       +'<div class="item-thumb" style="flex-shrink:0">'+imgEl+'</div>'
       +'<div style="flex:1;min-width:0">'
         +'<div style="font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+title+'</div>'
@@ -9802,8 +9786,6 @@ function renderMostVisited(data, isFallback){
       +'<span class="badge '+(status==='active'?'bg-green':'bg-amber')+'" style="flex-shrink:0">'+(status==='active'?'●':'⏸')+'</span>'
       +'</div>';
   }).join('');
-
-  el.innerHTML = header + rows;
 }
 
 function updateLast50(orders){
