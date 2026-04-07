@@ -3035,6 +3035,9 @@ async function loadItemsFull(){
     // Actualizar health scores con datos recién bajados de ML
     refreshHealthScores();
     console.log('[loadItemsFull]',allItems.length);
+    // Refresh most visited panel now that full item data + metrics are available
+    _mostVisitedCache = null; // invalidate cache so fresh data loads
+    loadMostVisited(false);
   }catch(e){console.error('[loadItemsFull]',e);}
 }
 
@@ -9680,105 +9683,114 @@ var _mostVisitedCache = null;   // cache to avoid unnecessary API calls
 var _mostVisitedLoading = false;
 
 async function loadMostVisited(forceRefresh){
-  if(_mostVisitedLoading) return;
   var el = document.getElementById('dash-most-visited');
   if(!el) return;
 
-  // Use cache if available and not forced refresh
+  // If cache exists and not forcing: render immediately, no loading flash
   if(_mostVisitedCache && !forceRefresh){
     renderMostVisited(_mostVisitedCache);
     return;
   }
 
-  if(!token||!userId){
-    el.innerHTML='<div style="color:var(--text3);font-size:12px;padding:10px 0">Iniciá sesión para ver visitas.</div>';
+  if(!token||!userId){ return; }
+  if(_mostVisitedLoading) return;
+  _mostVisitedLoading = true;
+  // Only show loading spinner if panel is currently empty
+  if(!el.innerHTML||el.innerHTML.indexOf('item-thumb')<0){
+    el.innerHTML='<div class="loading"><div class="spin"></div>Cargando visitas...</div>';
+  }
+
+  try{
+    // Strategy A: ML search sorted by visits — most reliable endpoint
+    // Returns items with full data including thumbnail and visit count
+    var r = await mlGet('/sites/MLA/search?seller_id='+userId+'&sort=visits_desc&limit=50');
+    var results = r.results||[];
+    console.log('[MostVisited] search results:', results.length);
+
+    if(results.length){
+      var normalized = results.map(function(item){
+        return {
+          itemId:  String(item.id||''),
+          visits:  item.sold_quantity||0,           // visits not in search; use sold as proxy
+          // Enrich from allItems for thumb + health
+          _search: item
+        };
+      });
+
+      // Cross-reference with itemMetrics for real visit data if available
+      normalized = normalized.map(function(v){
+        var m = itemMetrics[v.itemId];
+        if(m && m.visits>0) v.visits = m.visits;
+        return v;
+      });
+
+      // Sort by visits desc
+      normalized.sort(function(a,b){ return b.visits-a.visits; });
+      _mostVisitedCache = normalized;
+      renderMostVisited(_mostVisitedCache, false);
+      _mostVisitedLoading = false;
+      return;
+    }
+  }catch(e){
+    console.warn('[MostVisited] search failed:', e.message);
+  }
+
+  // Strategy B: Use itemMetrics (populated by background loads) with real visit data
+  var metricsData = Object.keys(itemMetrics).map(function(id){
+    var m = itemMetrics[id];
+    return { itemId:id, visits: m.visits||m.sales||0 };
+  }).filter(function(v){ return v.visits>0; })
+    .sort(function(a,b){ return b.visits-a.visits; })
+    .slice(0,50);
+
+  if(metricsData.length){
+    console.log('[MostVisited] using itemMetrics, items:', metricsData.length);
+    _mostVisitedCache = metricsData;
+    renderMostVisited(_mostVisitedCache, false);
+    _mostVisitedLoading = false;
     return;
   }
 
-  _mostVisitedLoading = true;
-  el.innerHTML='<div class="loading"><div class="spin"></div>Cargando visitas...</div>';
+  // Strategy C: Fallback — sort allItems by sold_quantity (always available)
+  var fallback = (allItems||[])
+    .filter(function(i){ return i.status==='active'; })
+    .map(function(i){ return {itemId:String(i.id), visits:i.sold_quantity||0, isFallback:true}; })
+    .sort(function(a,b){ return b.visits-a.visits; })
+    .slice(0,50);
 
-  try{
-    var toDate   = new Date().toISOString().slice(0,10);
-    var fromDate = new Date(Date.now()-15*24*60*60*1000).toISOString().slice(0,10);
-
-    // Fetch visits per item for the user (last 15 days)
-    var r = await mlGet(
-      '/users/'+userId+'/items_visits?date_from='+fromDate+'&date_to='+toDate+'&limit=50'
-    );
-
-    var visits = r.data||r.results||r||[];
-
-    // If array of {item_id, total_visits} or {id, visits}
-    if(!Array.isArray(visits)&&visits.visits) visits = visits.visits;
-
-    // Normalize: each entry → {itemId, visits}
-    var normalized = visits.map(function(v){
-      return {
-        itemId:  String(v.item_id||v.id||v.item||''),
-        visits:  v.total_visits||v.visits||v.quantity||0
-      };
-    }).filter(function(v){ return v.itemId && v.visits>0; });
-
-    // Sort descending by visits
-    normalized.sort(function(a,b){ return b.visits-a.visits; });
-
-    _mostVisitedCache = normalized.slice(0,50);
-    renderMostVisited(_mostVisitedCache);
-  }catch(e){
-    console.warn('[MostVisited]', e.message);
-    // Fallback: derive visits from allItems.health * sold as estimate
-    // (ML doesn't always expose the visit endpoint publicly)
-    var fallback = (allItems||[])
-      .filter(function(i){ return i.status==='active'; })
-      .map(function(i){
-        // Estimate: health * sold_quantity as proxy
-        var est = Math.round(((i.health||0.5) * (i.sold_quantity||0) * 10));
-        return {itemId:String(i.id), visits:est, isFallback:true};
-      })
-      .sort(function(a,b){ return b.visits-a.visits; })
-      .slice(0,50);
-
-    if(fallback.length){
-      _mostVisitedCache = fallback;
-      renderMostVisited(_mostVisitedCache, true);
-    } else {
-      el.innerHTML='<div class="alert a-info" style="margin:0;font-size:12px">'
-        +'Visitas no disponibles en este plan. <a href="https://www.mercadolibre.com.ar/publicaciones" target="_blank" style="color:var(--accent)">Ver publicaciones →</a></div>';
-    }
-  }finally{
-    _mostVisitedLoading = false;
-  }
+  console.log('[MostVisited] fallback by sold_quantity, items:', fallback.length);
+  _mostVisitedCache = fallback;
+  renderMostVisited(_mostVisitedCache, true);
+  _mostVisitedLoading = false;
 }
 
 function renderMostVisited(data, isFallback){
   var el = document.getElementById('dash-most-visited');
   if(!el||!data) return;
   if(!data.length){
-    el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:10px 0">Sin datos de visitas disponibles.</div>';
+    el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:10px 0">Sin datos de visitas.</div>';
     return;
   }
   el.style.maxHeight='360px'; el.style.overflowY='auto';
 
-  if(isFallback){
-    el.innerHTML='<div style="font-size:9.5px;color:var(--amber);padding:4px 0 6px;border-bottom:1px solid var(--border);margin-bottom:2px">'
-      +'⚠️ Estimación local (API de visitas no disponible para este plan)</div>';
-  } else {
-    el.innerHTML='';
-  }
+  var header = isFallback
+    ? '<div style="font-size:9.5px;color:var(--amber);padding:4px 0 6px;border-bottom:1px solid var(--border);margin-bottom:2px">⚠️ Ordenado por ventas (datos de visitas no disponibles)</div>'
+    : '';
 
-  el.innerHTML += data.map(function(v, idx){
-    var i       = (allItems||[]).find(function(x){ return String(x.id)===v.itemId; });
-    var title   = (i&&i.title)||('MLA '+v.itemId);
-    var price   = (i&&i.price)||0;
-    var thumb   = (i&&i.thumbnail)||'';
-    var sc      = i ? itemHealthPct(i) : null;
-    var status  = (i&&i.status)||'active';
+  var rows = data.map(function(v){
+    // Priority: local allItems > _search result from API
+    var local   = (allItems||[]).find(function(x){ return String(x.id)===v.itemId; });
+    var search  = v._search||{};
+    var title   = (local&&local.title)||search.title||('MLA '+v.itemId);
+    var price   = (local&&local.price)||search.price||0;
+    var thumb   = (local&&local.thumbnail)||search.thumbnail||'';
+    var sc      = itemHealthPct(local||null);
+    var status  = (local&&local.status)||'active';
     var editUrl = v.itemId ? 'https://www.mercadolibre.com.ar/publicaciones/'+v.itemId+'/modificar' : null;
     var onCl    = editUrl ? 'onclick="window.open(\''+editUrl+'\',\'_blank\')"' : '';
     var imgEl   = thumb ? '<img src="'+thumb+'" onerror="this.parentElement.textContent=\'👁\'">':'👁';
     var metric  =
-      '<span style="'+DASH_C_METRIC+'">'+v.visits.toLocaleString('es-AR')+' visitas</span>'
+      '<span style="'+DASH_C_METRIC+'">'+v.visits.toLocaleString('es-AR')+' '+(isFallback?'vendidas':'visitas')+'</span>'
       +' · <span style="'+DASH_C_PRICE+'">$'+(price>0?price.toLocaleString('es-AR'):'—')+'</span>'
       +(sc!=null?' · <span style="'+DASH_C_QUAL+'">Calidad: '+sc+'%</span>':'');
     return '<div style="display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid var(--border);'+(editUrl?'cursor:pointer;':'')+'" '+onCl+'>'
@@ -9790,6 +9802,8 @@ function renderMostVisited(data, isFallback){
       +'<span class="badge '+(status==='active'?'bg-green':'bg-amber')+'" style="flex-shrink:0">'+(status==='active'?'●':'⏸')+'</span>'
       +'</div>';
   }).join('');
+
+  el.innerHTML = header + rows;
 }
 
 function updateLast50(orders){
