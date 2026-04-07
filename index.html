@@ -1909,9 +1909,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <div class="card">
       <div class="card-hd"><div class="card-title">Reglas activas</div></div>
       <div id="rules-list">
-        <div class="rule-card" id="rule-def-1"><div class="rule-icon" style="background:var(--amber-g)">📈</div><div style="flex:1"><div style="font-size:12.5px;font-weight:500">Subir precio si stock bajo</div><div style="font-size:11px;color:var(--text3)">Stock ≤ 3 → Subir 10%</div></div><span class="badge bg-green">Activa</span><button class="btn btn-ghost btn-xs" style="margin-left:6px" onclick="toggleRule('rule-def-1',this)">⏸ Pausar</button><button class="btn btn-danger btn-xs" style="margin-left:4px" onclick="deleteRule('rule-def-1')">✕</button></div>
-        <div class="rule-card" id="rule-def-2"><div class="rule-icon" style="background:var(--red-g)">📉</div><div style="flex:1"><div style="font-size:12.5px;font-weight:500">Bajar precio sin ventas</div><div style="font-size:11px;color:var(--text3)">Sin ventas 7 días → Bajar 5%</div></div><span class="badge bg-green">Activa</span><button class="btn btn-ghost btn-xs" style="margin-left:6px" onclick="toggleRule('rule-def-2',this)">⏸ Pausar</button><button class="btn btn-danger btn-xs" style="margin-left:4px" onclick="deleteRule('rule-def-2')">✕</button></div>
-        <div class="rule-card" id="rule-def-3"><div class="rule-icon" style="background:var(--accent-g)">🤖</div><div style="flex:1"><div style="font-size:12.5px;font-weight:500">Auto-responder preguntas</div><div style="font-size:11px;color:var(--text3)">Pregunta nueva → IA responde</div></div><span class="badge bg-amber">Pendiente</span><button class="btn btn-ghost btn-xs" style="margin-left:6px" onclick="toggleRule('rule-def-3',this)">⏸ Pausar</button><button class="btn btn-danger btn-xs" style="margin-left:4px" onclick="deleteRule('rule-def-3')">✕</button></div>
+        <!-- Reglas generadas dinámicamente por renderRules() -->
       </div>
     </div>
   </div>
@@ -2560,7 +2558,10 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <div class="card">
       <div class="card-hd">
         <div class="card-title">📢 Publicidad — Métricas Pads</div>
-        <button class="btn btn-ghost btn-sm" onclick="loadPadsMetrics()">↻ Actualizar</button>
+        <div style="display:flex;gap:6px;align-items:center">
+          <a href="https://www.mercadolibre.com.ar/publicidad/resumen-anunciante?from=seller_central&validate_user=true#from=menu_mkt" target="_blank" class="btn btn-ghost btn-sm" style="font-size:11px">🔗 Abrir en ML</a>
+          <button class="btn btn-ghost btn-sm" onclick="loadPadsMetrics()">↻ Actualizar</button>
+        </div>
       </div>
       <div id="ai-pads-content">
         <div style="font-size:11px;color:var(--text3);margin-bottom:8px">
@@ -3069,6 +3070,7 @@ async function loadOrdersHistory(){
     allOrders=[...hist].filter(o=>{if(seen.has(o.id))return false;seen.add(o.id);return true;});
     allOrders.sort((a,b)=>new Date(b.date_created)-new Date(a.date_created));
     console.log('[loadOrdersHistory]',allOrders.length);
+    updateLast50(allOrders.slice(0,100)); // Fill Últimos 50 from full history
     // Cargar envios del ultimo mes
     const recent=allOrders.filter(o=>o.shipping?.id&&!o.shipping._statusLoaded&&new Date(o.date_created)>new Date(Date.now()-30*24*3600*1000));
     await loadShippingStatuses(recent);
@@ -3653,7 +3655,7 @@ function renderDashKPIs(){
 
   // Actualizar también los valores del módulo facturación
   const ssT=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
-  ssT('fac-mes','$'+billing.toLocaleString('es-AR'));
+  setEl('fac-mes','$'+billing.toLocaleString('es-AR'));
 
   // Verificar inconsistencia: si ticket > billing/sales hay bug
   const warn = document.getElementById('dash-inconsistency-warn');
@@ -7269,80 +7271,86 @@ function buildAdsChart(){}
 // FACTURACIÓN
 // ═══════════════════════════════════════════════════════════
 async function renderFacturacion(){
-  // ── Calculos desde ordenes propias ──────────────────────────────
-  const arNow = nowAR();
+  // Si solo tenemos el mes actual, disparar carga histórica en segundo plano
+  if(allOrders.length < 51){
+    loadOrdersHistory().then(()=>renderFacturacion());
+  }
+
+  const arNow   = nowAR();
   const thisMon = arNow.getUTCMonth(), thisYr = arNow.getUTCFullYear();
-  const prevDate = new Date(Date.UTC(thisYr, thisMon-1, 1));
-  const prevMon  = prevDate.getUTCMonth(), prevYr = prevDate.getUTCFullYear();
+  const prevDate= new Date(Date.UTC(thisYr, thisMon-1, 1));
+  const prevMon = prevDate.getUTCMonth(), prevYr = prevDate.getUTCFullYear();
 
   const mesOrders  = allOrders.filter(o=>{ const d=dateAR(o.date_created); return d.getUTCFullYear()===thisYr && d.getUTCMonth()===thisMon; });
   const prevOrders = allOrders.filter(o=>{ const d=dateAR(o.date_created); return d.getUTCFullYear()===prevYr && d.getUTCMonth()===prevMon; });
-  const totalMes   = mesOrders.reduce((s,o)=>s+(o.total_amount||0),0);
-  const totalPrev  = prevOrders.reduce((s,o)=>s+(o.total_amount||0),0);
-  const totalHist  = allOrders.reduce((s,o)=>s+(o.total_amount||0),0);
 
-  ssT('fac-mes',  '$'+totalMes.toLocaleString('es-AR'));
-  ssT('fac-prev', '$'+totalPrev.toLocaleString('es-AR'));
-  ssT('fac-hist', '$'+totalHist.toLocaleString('es-AR'));
+  const totalMes  = mesOrders.reduce((s,o)=>s+(o.total_amount||0),0);
+  const totalPrev = prevOrders.reduce((s,o)=>s+(o.total_amount||0),0);
+  const totalHist = allOrders.reduce((s,o)=>s+(o.total_amount||0),0);
 
-  // ── Detalle de facturas ML (API billing) ─────────────────────────
+  const fmtARS = v => '$'+Math.round(v).toLocaleString('es-AR');
+
+  // Update KPI cards
+  const setEl = (id,txt) => { const e=document.getElementById(id); if(e) e.textContent=txt; };
+  setEl('fac-mes',  fmtARS(totalMes));
+  setEl('fac-prev', totalPrev>0 ? fmtARS(totalPrev) : (allOrders.length>50?'$0':'Cargando...'));
+  setEl('fac-hist', totalHist>0 ? fmtARS(totalHist) : (allOrders.length>50?'$0':'Cargando...'));
+
+  // Billing API (optional enrichment — non-blocking)
   const facDetailEl = document.getElementById('fac-invoice-detail');
-  if(facDetailEl){
+  if(facDetailEl && !facDetailEl.dataset.loaded){
     facDetailEl.innerHTML='<div class="loading"><div class="spin"></div>Cargando facturación ML...</div>';
     try{
       const inv = await mlGet('/billing/invoices/periods?limit=3');
       const periods = inv.results||inv.periods||[];
+      facDetailEl.dataset.loaded = '1';
       if(periods.length){
-        facDetailEl.innerHTML = '<div style="font-size:12.5px;font-weight:600;margin-bottom:10px">\uD83D\uDCC4 Períodos de facturación ML</div>' +
-          periods.map(p=>`
-            <div style="display:flex;justify-content:space-between;align-items:center;
-              padding:10px 0;border-bottom:1px solid var(--border)">
+        facDetailEl.innerHTML = '<div style="font-size:12.5px;font-weight:600;margin-bottom:10px">📄 Períodos de facturación ML</div>'
+          +periods.map(p=>`
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)">
               <div>
                 <div style="font-size:13px;font-weight:500">${p.name||p.period||'Período'}</div>
-                <div style="font-size:11px;color:var(--text3);margin-top:3px">
+                <div style="font-size:11px;color:var(--text3);margin-top:2px">
                   Vence: ${p.due_date?new Date(p.due_date).toLocaleDateString('es-AR'):'—'}
                   &nbsp;·&nbsp; Estado:&nbsp;<span class="badge ${p.status==='paid'?'bg-green':'bg-amber'}">${p.status||'—'}</span>
                   ${p.detail?'&nbsp;·&nbsp;<span style="font-size:10px">'+p.detail+'</span>':''}
                 </div>
               </div>
-              <div style="font-weight:700;color:var(--green);font-size:15px">
-                $${((p.total_amount||p.amount||0)).toLocaleString('es-AR')}
-              </div>
+              <div style="font-weight:700;color:var(--green);font-size:15px">$${((p.total_amount||p.amount||0)).toLocaleString('es-AR')}</div>
             </div>`).join('');
-      } else {
+      }else{
         facDetailEl.innerHTML='<div class="alert a-info" style="margin:0">Sin facturas pendientes para este perfil.</div>';
       }
     }catch(e){
-      console.warn('[Facturación] API billing no disponible:',e.message);
-      facDetailEl.innerHTML='<div style="color:var(--text3);font-size:12px;padding:8px 0">ℹ️ Datos de facturación ML no disponibles en este plan. Los montos reflejan tus órdenes de ML.</div>';
+      if(facDetailEl) facDetailEl.innerHTML='<div style="color:var(--text3);font-size:12px">ℹ️ Facturación ML no disponible para este plan.</div>';
     }
   }
 
-  // ── Tabla de ordenes del mes ──────────────────────────────────────
-  const tbody=document.getElementById('fac-tbody');
-  tbody.innerHTML=mesOrders.map(o=>{
-    const facTitle = o.order_items&&o.order_items[0]&&o.order_items[0].item ? (o.order_items[0].item.title||'—').slice(0,40) : '—';
-    const facThumb = o.order_items&&o.order_items[0]&&o.order_items[0].item ? (o.order_items[0].item.thumbnail||'') : '';
-    const shipState = o.shipping&&o.shipping.status ? o.shipping.status : '';
-    return `<tr>
-      <td style="font-family:var(--mono);font-size:11px">#${o.id}</td>
-      <td style="max-width:190px">
-        <div style="display:flex;align-items:center;gap:8px">
-          ${facThumb?`<img src="${facThumb}" width="36" height="36" loading="lazy"
-            style="object-fit:cover;border-radius:5px;flex-shrink:0;border:1px solid var(--border)"
-            onerror="this.style.display='none'">`:''}\
-          <span style="overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-size:12px;line-height:1.35">${facTitle}</span>
-        </div>
-      </td>
-      <td>${o.buyer&&o.buyer.nickname?o.buyer.nickname:'—'}</td>
-      <td style="font-weight:600;color:var(--green)">$${(o.total_amount||0).toLocaleString('es-AR')}</td>
-      <td><span class="badge ${o.status==='paid'?'bg-green':'bg-amber'}">${o.status||'—'}</span></td>
-      <td style="font-size:11px">${shipState?`<span class="badge bg-blue">${shipState}</span>`:'—'}</td>
-      <td style="color:var(--text3)">${o.date_created?dateAR(o.date_created).toLocaleDateString('es-AR',{timeZone:'UTC'}):''}</td>
-    </tr>`;
-  }).join('');
+  // Tabla órdenes del mes
+  const tbody = document.getElementById('fac-tbody');
+  if(tbody){
+    tbody.innerHTML = mesOrders.map(o=>{
+      const facTitle = o.order_items?.[0]?.item?.title?.slice(0,40)||'—';
+      const facThumb = (o.order_items?.[0]?.item?.thumbnail||'').replace('http://','https://');
+      const shipState= o.shipping?.status||'';
+      return `<tr>
+        <td style="font-family:var(--mono);font-size:11px">#${o.id}</td>
+        <td style="max-width:190px">
+          <div style="display:flex;align-items:center;gap:7px">
+            ${facThumb?`<img src="${facThumb}" width="36" height="36" referrerpolicy="no-referrer" loading="lazy" style="object-fit:cover;border-radius:4px;flex-shrink:0;border:1px solid var(--border)" onerror="this.style.display='none'">` : ''}
+            <span style="overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-size:12px;line-height:1.35">${facTitle}</span>
+          </div>
+        </td>
+        <td>${o.buyer?.nickname||'—'}</td>
+        <td style="font-weight:600;color:var(--green)">$${(o.total_amount||0).toLocaleString('es-AR')}</td>
+        <td><span class="badge ${o.status==='paid'?'bg-green':'bg-amber'}">${o.status||'—'}</span></td>
+        <td style="font-size:11px">${shipState?`<span class="badge bg-blue">${shipState}</span>`:'—'}</td>
+        <td style="color:var(--text3)">${o.date_created?dateAR(o.date_created).toLocaleDateString('es-AR',{timeZone:'UTC'}):''}</td>
+      </tr>`;
+    }).join('');
+  }
 
-  // ── Grafico mensual ──────────────────────────────────────────────
+  // Chart (últimos 6 meses)
   const months={};
   for(let i=5;i>=0;i--){const d=new Date();d.setMonth(d.getMonth()-i);const k=d.getMonth()+'-'+d.getFullYear();months[k]={label:d.toLocaleDateString('es-AR',{month:'short'}),val:0};}
   allOrders.forEach(o=>{const d=new Date(o.date_created||'');const k=d.getMonth()+'-'+d.getFullYear();if(months[k])months[k].val+=o.total_amount||0;});
@@ -7350,45 +7358,90 @@ async function renderFacturacion(){
   makeChart('chart-fac',{type:'bar',data:{labels:entries.map(e=>e.label),datasets:[{data:entries.map(e=>e.val),backgroundColor:'#4f8ef7',borderRadius:6}]},options:{...chartDefaults(),scales:{y:{...tOpts(),ticks:{...tOpts().ticks,callback:v=>'$'+(v/1000).toFixed(0)+'k'}},x:{...tXOpts()}}}});
 }
 
+
 // ═══════════════════════════════════════════════════════════
 // REGLAS
 // ═══════════════════════════════════════════════════════════
-function addRule(){
-  const name=document.getElementById('rule-name').value.trim();
-  const cond=document.getElementById('rule-cond').value;
-  const action=document.getElementById('rule-action').value;
-  if(!name)return;
-  const id='rule-'+Date.now();
-  activeRules.push({id,name,cond,action,active:true});
-  const el=document.getElementById('rules-list');
-  const div=document.createElement('div');
-  div.className='rule-card';div.id=id;
-  div.innerHTML=`<div class="rule-icon" style="background:var(--accent-g)">⚙️</div><div style="flex:1"><div style="font-size:12.5px;font-weight:500">${name}</div><div style="font-size:11px;color:var(--text3)">${cond} -> ${action}</div></div><span class="badge bg-green" id="badge-${id}">Activa</span><button class="btn btn-ghost btn-xs" style="margin-left:6px" onclick="toggleRule('${id}',this)">⏸ Pausar</button><button class="btn btn-danger btn-xs" style="margin-left:4px" onclick="deleteRule('${id}')">✕</button>`;
-  el.appendChild(div);
-  document.getElementById('rule-name').value='';
+
+var RULES_LS_KEY = 'impala_active_rules';
+
+function _saveRulesToLS(){
+  try{ localStorage.setItem(RULES_LS_KEY, JSON.stringify(activeRules)); }catch(e){}
+}
+function _loadRulesFromLS(){
+  try{
+    var saved = JSON.parse(localStorage.getItem(RULES_LS_KEY)||'null');
+    if(Array.isArray(saved) && saved.length){ activeRules = saved; return true; }
+  }catch(e){}
+  return false;
 }
 
-function toggleRule(id,btn){
-  const badge=document.getElementById('badge-'+id);
-  const rule=activeRules.find(r=>r.id===id);
-  const isActive=badge?badge.classList.contains('bg-green'):true;
-  if(isActive){
-    if(badge){badge.textContent='Pausada';badge.className='badge bg-amber';}
-    btn.textContent='▶ Activar';
-    if(rule)rule.active=false;
-  }else{
-    if(badge){badge.textContent='Activa';badge.className='badge bg-green';}
-    btn.textContent='⏸ Pausar';
-    if(rule)rule.active=true;
+function renderRules(){
+  const el = document.getElementById('rules-list');
+  if(!el) return;
+  if(!activeRules.length){
+    el.innerHTML='<div style="color:var(--text3);font-size:12px;padding:12px 0;text-align:center">Sin reglas activas. Creá la primera arriba.</div>';
+    return;
   }
+  const condLabels = {stock_low:'Stock ≤ 3 u.',no_sales:'Sin ventas 7d',rank_drop:'Caída ranking',paused:'Publicación pausada',question_24h:'Pregunta +24h'};
+  const actLabels  = {price_up:'Subir precio 10%',price_down:'Bajar precio 5%',notify:'Enviar alerta',pause:'Pausar pub',ai_answer:'Responder con IA'};
+  const icons      = {price_up:'📈',price_down:'📉',notify:'🔔',pause:'⏸',ai_answer:'🤖'};
+  el.innerHTML = activeRules.map(r=>`
+    <div class="rule-card" id="rule-${r.id}">
+      <div class="rule-icon" style="background:var(--accent-g)">${icons[r.action]||'⚙️'}</div>
+      <div style="flex:1">
+        <div style="font-size:12.5px;font-weight:500">${r.name}</div>
+        <div style="font-size:11px;color:var(--text3)">${condLabels[r.cond]||r.cond} → ${actLabels[r.action]||r.action}</div>
+      </div>
+      <span class="badge ${r.active!==false?'bg-green':'bg-amber'}" id="badge-rule-${r.id}">${r.active!==false?'Activa':'Pausada'}</span>
+      <button class="btn btn-ghost btn-xs" style="margin-left:6px" onclick="toggleRule('${r.id}',this)">${r.active!==false?'⏸ Pausar':'▶ Activar'}</button>
+      <button class="btn btn-danger btn-xs" style="margin-left:4px" onclick="deleteRule('${r.id}')">✕</button>
+    </div>`).join('');
+}
+
+function addRule(){
+  const name   = document.getElementById('rule-name').value.trim();
+  const cond   = document.getElementById('rule-cond').value;
+  const action = document.getElementById('rule-action').value;
+  if(!name){ showToast('Escribí un nombre para la regla','warn'); return; }
+  const id = 'r'+Date.now();
+  activeRules.push({id,name,cond,action,active:true});
+  _saveRulesToLS();
+  renderRules();
+  document.getElementById('rule-name').value='';
+  showToast('✅ Regla guardada: '+name,'success');
+}
+
+function toggleRule(id, btn){
+  const rule = activeRules.find(r=>r.id===id);
+  if(!rule) return;
+  rule.active = !rule.active;
+  const badge = document.getElementById('badge-rule-'+id);
+  if(badge){ badge.textContent = rule.active?'Activa':'Pausada'; badge.className='badge '+(rule.active?'bg-green':'bg-amber'); }
+  if(btn) btn.textContent = rule.active?'⏸ Pausar':'▶ Activar';
+  _saveRulesToLS();
 }
 
 function deleteRule(id){
-  if(!confirm('¿Eliminar esta regla?'))return;
-  const el=document.getElementById(id);
-  if(el)el.remove();
-  activeRules=activeRules.filter(r=>r.id!==id);
+  if(!confirm('¿Eliminar esta regla?')) return;
+  activeRules = activeRules.filter(r=>r.id!==id);
+  _saveRulesToLS();
+  renderRules();
 }
+
+// Inicializar reglas al abrir la sección
+function initRules(){
+  if(!activeRules.length && !_loadRulesFromLS()){
+    // Solo la primera vez: cargar defaults
+    activeRules = [
+      {id:'r-def1', name:'Subir precio si stock bajo', cond:'stock_low',  action:'price_up',   active:true},
+      {id:'r-def2', name:'Bajar precio sin ventas',    cond:'no_sales',   action:'price_down',  active:true},
+      {id:'r-def3', name:'Auto-responder preguntas',   cond:'question_24h',action:'ai_answer',  active:false},
+    ];
+  }
+  renderRules();
+}
+
 
 // ═══════════════════════════════════════════════════════════
 // ALERTAS
@@ -7468,6 +7521,24 @@ function refreshAlerts(){
       });
     }
 
+    // Mala calidad ML (health oficial < 0.5) -> IMPORTANTE
+    // item.health es el indicador de calidad de ML (0 a 1), no el SEO interno
+    if (i.status === 'active' && typeof i.health === 'number' && i.health < 0.5) {
+      const pct = Math.round(i.health * 100);
+      alerts.push({
+        uid: 'quality_' + id,
+        priority: 2,
+        category: 'quality',
+        icon: '🔴',
+        title: 'Baja calidad ML',
+        subtitle: title.slice(0, 60),
+        detail: `Calidad ML: ${pct}% — Completá atributos, mejorá imágenes y descripción`,
+        actionLabel: 'Mejorar publicación',
+        item_id: id,
+        item_title: title,
+        item_score: pct,
+      });
+    }
 
   });
 
@@ -9136,7 +9207,7 @@ function aiOpportunities(){
         +'<div style="font-size:11.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+a.title.slice(0,48)+'</div>'
         +'<div style="font-size:11px;color:var(--text3);margin-top:2px">'+a.icon+' '+a.msg+'</div>'
       +'</div>'
-      +'<a href="'+a.url+'" target="_blank" style="font-size:10px;white-space:nowrap;color:var(--accent);text-decoration:none;flex-shrink:0">'+a.action+'</a>'
+      +(a.url&&a.url.startsWith('http') ? '<a href="'+a.url+'" target="_blank" class="btn btn-ghost btn-xs" style="white-space:nowrap;flex-shrink:0;font-size:10px">'+a.action+' ↗</a>' : '<button class="btn btn-ghost btn-xs" onclick="showSection(\'publicidad\')" style="white-space:nowrap;flex-shrink:0;font-size:10px">'+a.action+'</button>')
       +'</div>';
   }).join('');
   aiSet('ai-opps-list', html);
@@ -9189,6 +9260,7 @@ async function aiCompetition(){
         +(minComp?' · Competidor mín: $'+minComp.toLocaleString('es-AR'):' · Sin competidores encontrados')+'</div>'
       +'</div>'
       +statusBadge
+      +'<a href="https://www.mercadolibre.com.ar/andes/listing/edit?item_id='+r.item.id+'" target="_blank" class="btn btn-ghost btn-xs" style="font-size:10px;flex-shrink:0;margin-left:4px">✏️ Editar</a>'
       +'</div>';
   }).join('');
   aiSet('ai-comp-list', html||'<div class="alert a-info">Sin datos de competencia disponibles.</div>');
@@ -9547,25 +9619,38 @@ function updateLast50(orders){
   (orders||[]).forEach(function(o){
     (o.order_items||[]).forEach(function(oi){
       var itemMeta = oi.item||{};
-      var itemId   = itemMeta.id||null;
-      // Try to get thumbnail from multiple sources
-      var localItem  = itemId ? (allItems||[]).find(function(i){return String(i.id)===String(itemId);}) : null;
-      var rawThumb   = itemMeta.thumbnail || (localItem&&localItem.thumbnail) || (localItem&&localItem.pictures&&localItem.pictures[0]&&localItem.pictures[0].url) || '';
-      var thumb      = rawThumb ? rawThumb.replace('http://','https://') : '';
+      var itemId   = itemMeta.id ? String(itemMeta.id) : null;
+      // allItems lookup — this is the reliable source of thumbnails
+      var localItem = itemId ? (allItems||[]).find(function(i){return String(i.id)===itemId;}) : null;
+      // Priority: localItem.thumbnail > itemMeta.thumbnail > localItem pictures
+      var rawThumb = (localItem&&localItem.thumbnail)
+                  || itemMeta.thumbnail
+                  || (localItem&&localItem.pictures&&localItem.pictures[0]&&localItem.pictures[0].url)
+                  || '';
+      var thumb = rawThumb ? rawThumb.replace('http://','https://').replace('-I.jpg','-O.jpg') : '';
       newSales.push({
         date:      o.date_created,
-        title:     itemMeta.title || (localItem&&localItem.title) || 'Sin título',
+        title:     (localItem&&localItem.title) || itemMeta.title || 'Sin título',
         price:     oi.unit_price||0,
         thumbnail: thumb,
         itemId:    itemId,
-        health:    localItem ? localItem.health : null,
+        health:    localItem ? (localItem.health||null) : null,
       });
     });
   });
-  _last50Sales = newSales.concat(_last50Sales)
-    .sort(function(a,b){return new Date(b.date)-new Date(a.date);})
-    .filter(function(s,i,arr){return arr.findIndex(function(x){return x.date===s.date&&x.title===s.title;})=== i;}) // dedup
-    .slice(0,50);
+  // Merge, deduplicate by orderId+title, sort newest first, keep exactly 50
+  // NO date filter — fill the 50 slots regardless of how old they are
+  var merged = newSales.concat(_last50Sales);
+  var seen   = {};
+  var unique = merged.filter(function(s){
+    var key = (s.date||'')+'|'+(s.title||'');
+    if(seen[key]) return false;
+    seen[key] = true;
+    return true;
+  });
+  _last50Sales = unique.sort(function(a,b){
+    return new Date(b.date)-new Date(a.date);
+  }).slice(0,50);
   renderLast50();
 }
 
@@ -9655,6 +9740,7 @@ function showSection(id){
   if(id==='tendencias'){ if(allItems&&allItems.length) loadTrends(); else loadItemsFast().then(()=>loadTrends()); }
   if(id==='profit-calculator') pcInit();
   if(id==='asistente-ia'){ aiLoadRules(); aiRunAll(); }
+  if(id==='reglas') initRules();
   if(id==='publicidad'){loadAdsData();}
   if(id==='bulk') renderPubs();
 }
@@ -11642,6 +11728,16 @@ function toggleTask(id) {
 }
 
 // ── deleteTask ────────────────────────────────────────────────────────────────
+function saveTaskEdit(id, el){
+  var t = _tasks.find(function(x){ return x.id===id; });
+  if(!t) return;
+  var newText = (el.textContent||el.innerText||'').trim();
+  if(!newText){ el.textContent = t.text; return; } // revert if empty
+  if(newText === t.text) return; // no change
+  t.text = newText;
+  pushFullBackup();
+}
+
 function deleteTask(id) {
   _tasks = _tasks.filter(function(t) { return t.id !== id; });
   _renderBoard();
@@ -11696,7 +11792,11 @@ function _renderBoard() {
          + ' ondragstart="noteDragStart(event,\'' + t.id + '\')"'
          + ' ondragend="noteDragEnd(event)">'
          + '<div class="note-color-bar">' + dots + '</div>'
-         + '<div class="note-text">' + t.text + '</div>'
+         + '<div class="note-text" contenteditable="true" spellcheck="false"'
+         + ' onblur="saveTaskEdit(\'' + t.id + '\',this)"'
+         + ' onclick="this.focus()"'
+         + ' title="Clic para editar"'
+         + ' style="cursor:text;outline:none;min-height:1em">' + t.text + '</div>'
          + '<div class="note-footer">'
          + '<span>' + dateStr + '</span>'
          + '<div style="display:flex;gap:6px;align-items:center">'
