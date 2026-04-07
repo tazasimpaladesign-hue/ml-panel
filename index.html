@@ -740,6 +740,8 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   <a class="nav" href="#reclamos" id="nav-reclamos" onclick="showSection('reclamos');return false;"><span class="ni">🚨</span>Reclamos</a>
   <a class="nav" href="#horarios" id="nav-horarios" onclick="showSection('horarios');return false;"><span class="ni">🕐</span>Horarios y festivos</a>
 
+  <div class="sb-sec">Herramientas</div>
+  <a class="nav" href="#calendario" id="nav-calendario" onclick="showSection('calendario');return false;"><span class="ni">📅</span>Calendario Estratégico<span class="nb nb-new">NEW</span></a>
   <div class="sb-sec">Monetización</div>
   <a class="nav" href="#publicidad" id="nav-publicidad" onclick="showSection('publicidad');loadAdsData();return false;"><span class="ni">📢</span>Publicidad</a>
   <a class="nav" href="#facturacion" id="nav-facturacion" onclick="showSection('facturacion');return false;"><span class="ni">💰</span>Facturación</a>
@@ -857,7 +859,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     </div>
   </div>
 
-  <!-- ── Top publicaciones + Últimos 50 + Los 50 más visitados ── -->
+  <!-- ── Top publicaciones + Últimos 50 + Los más visitados ── -->
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px;min-width:0;overflow:hidden">
     <div class="card" style="min-width:0;overflow:hidden;display:flex;flex-direction:column">
       <div class="card-hd" style="flex-shrink:0">
@@ -879,8 +881,8 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     </div>
     <div class="card" style="min-width:0;overflow:hidden;display:flex;flex-direction:column">
       <div class="card-hd" style="flex-shrink:0">
-        <div class="card-title">👀 Los 50 más visitados</div>
-        <button class="btn btn-ghost btn-sm" onclick="loadMostVisited(true)">↻ 15d</button>
+        <div class="card-title">👀 Los más visitados</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadMostVisited(true)">↻ 7 días</button>
       </div>
       <div id="dash-most-visited" style="flex:1;max-height:480px;overflow-y:auto;min-height:0">
         <div class="loading"><div class="spin"></div>Cargando...</div>
@@ -896,6 +898,14 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <div id="dash-insights"></div>
   </div>
 
+  <!-- ── Próximos eventos ── -->
+  <div class="card mb" style="padding:12px 16px">
+    <div class="card-hd" style="margin-bottom:8px">
+      <div class="card-title" style="font-size:12.5px">📅 Próximos eventos</div>
+      <a href="#calendario" class="btn btn-ghost btn-xs" onclick="showSection('calendario');return false;">Ver calendario →</a>
+    </div>
+    <div id="dash-cal-widget"></div>
+  </div>
   <!-- ── Stock + Conversión + Reputación ── -->
   <div class="g3">
     <div class="card" style="cursor:pointer">
@@ -2594,6 +2604,81 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 </div><!-- /section-asistente-ia -->
 
 
+
+<!-- ═══════════════════════ CALENDARIO ESTRATÉGICO ═══════════════════════ -->
+<div id="section-calendario" class="section fade-in">
+
+  <!-- Header con toggle de vista -->
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+    <div style="flex:1">
+      <div class="card-title" style="font-size:16px">📅 Calendario Estratégico</div>
+      <div style="font-size:12px;color:var(--text3);margin-top:2px">Impala Design 2026 — Fiscal · Comercial · Operativo · Cultura Pop</div>
+    </div>
+    <div class="tabs">
+      <button class="tab active" id="cal-tab-mes" onclick="calSetView('mes',this)">📆 Mes</button>
+      <button class="tab" id="cal-tab-lista" onclick="calSetView('lista',this)">📋 Próximos</button>
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="calAddEvent()">+ Agregar</button>
+  </div>
+
+  <!-- Leyenda de colores -->
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;font-size:11px">
+    <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:#ef4444;flex-shrink:0"></span>Fiscal/Legal</span>
+    <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:#3b82f6;flex-shrink:0"></span>Operativo</span>
+    <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:#22c55e;flex-shrink:0"></span>Ventas fuertes</span>
+    <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:#a855f7;flex-shrink:0"></span>Tendencias/Pop</span>
+    <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:#f59e0b;flex-shrink:0"></span>Personal</span>
+  </div>
+
+  <!-- Controles de navegación del mes -->
+  <div id="cal-view-mes">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+      <button class="btn btn-ghost btn-sm" onclick="calPrevMonth()">&#8592;</button>
+      <div id="cal-month-label" style="font-size:15px;font-weight:700;flex:1;text-align:center"></div>
+      <button class="btn btn-ghost btn-sm" onclick="calNextMonth()">&#8594;</button>
+    </div>
+    <!-- Days header -->
+    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:4px">
+      <div style="text-align:center;font-size:10px;font-weight:700;color:var(--text3);padding:4px">Lun</div>
+      <div style="text-align:center;font-size:10px;font-weight:700;color:var(--text3);padding:4px">Mar</div>
+      <div style="text-align:center;font-size:10px;font-weight:700;color:var(--text3);padding:4px">Mié</div>
+      <div style="text-align:center;font-size:10px;font-weight:700;color:var(--text3);padding:4px">Jue</div>
+      <div style="text-align:center;font-size:10px;font-weight:700;color:var(--text3);padding:4px">Vie</div>
+      <div style="text-align:center;font-size:10px;font-weight:700;color:var(--text3);padding:4px">Sáb</div>
+      <div style="text-align:center;font-size:10px;font-weight:700;color:var(--text3);padding:4px">Dom</div>
+    </div>
+    <div id="cal-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px"></div>
+  </div>
+
+  <!-- Vista lista próximos eventos -->
+  <div id="cal-view-lista" style="display:none">
+    <div id="cal-lista"></div>
+  </div>
+
+  <!-- Modal agregar evento -->
+  <div id="cal-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center">
+    <div style="background:var(--bg2);border-radius:12px;padding:24px;width:360px;max-width:90vw;border:1px solid var(--border)">
+      <div style="font-size:14px;font-weight:700;margin-bottom:16px">Agregar recordatorio</div>
+      <div class="ff"><label>Fecha</label><input type="date" id="cal-new-date"></div>
+      <div class="ff"><label>Descripción</label><input type="text" id="cal-new-text" placeholder="Ej: Llegada de cajas"></div>
+      <div class="ff"><label>Categoría</label>
+        <select id="cal-new-cat">
+          <option value="personal">⭐ Personal</option>
+          <option value="fiscal">🔴 Fiscal/Legal</option>
+          <option value="operativo">🔵 Operativo</option>
+          <option value="ventas">🟢 Ventas</option>
+          <option value="pop">🟣 Tendencias/Pop</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn btn-primary btn-sm" style="flex:1" onclick="calSaveNewEvent()">Guardar</button>
+        <button class="btn btn-ghost btn-sm" onclick="calCloseModal()">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /section-calendario -->
+
 <div id="section-tareas" class="section fade-in">
 
   <!-- Barra de control compacta -->
@@ -3924,15 +4009,16 @@ function loadPrevRanks(key){
   try{ return JSON.parse(localStorage.getItem(key)||'{}'); }catch(e){ return {}; }
 }
 
-// Returns: '⬆' (green), '⬇' (red), or '' (same/new)
+// Returns trend indicator: ⬆ green, ⬇ red, = gray, or '' for new
 function trendArrow(prevRanks, itemId, currentIdx){
   var id  = String(itemId);
-  if(prevRanks[id] === undefined) return '';            // new entry — no arrow
+  if(prevRanks[id] === undefined) return '';
   var prev = prevRanks[id];
-  if(prev === currentIdx) return '';                    // same position
+  if(prev === currentIdx)
+    return '<span style="color:#9ca3af;font-weight:700;font-size:11px;line-height:1" title="Misma posición">=</span>';
   return prev > currentIdx
-    ? '<span style="color:#00a650;font-weight:700;font-size:11px" title="Subió '+(prev-currentIdx)+' posiciones">⬆</span>'
-    : '<span style="color:#e74c3c;font-weight:700;font-size:11px" title="Bajó '+(currentIdx-prev)+' posiciones">⬇</span>';
+    ? '<span style="color:#00a650;font-weight:700;font-size:12px;line-height:1" title="Subió '+(prev-currentIdx)+' posiciones">⬆</span>'
+    : '<span style="color:#e74c3c;font-weight:700;font-size:12px;line-height:1" title="Bajó '+(currentIdx-prev)+' posiciones">⬇</span>';
 }
 var DASH_C_METRIC = 'color:#1a1a1a;font-weight:700';   // negro legible (dark+light mode)
 var DASH_C_PRICE  = 'color:#00a650;font-weight:700';   // verde ML
@@ -4332,7 +4418,8 @@ function renderDashboard(){
   renderDashKPIs();
   loadDashVisits().then(()=>renderMainChart()).catch(()=>renderMainChart());
   renderCatChart(); renderDashTopPubs(); renderDashInsights(); renderDashStock(); renderDashConv(); renderDashRepMini();
-  // Los 50 más visitados se cargan solo en initApp (single-run, 24h cache)
+  renderCalWidget();
+  // Los más visitados se cargan solo en initApp (single-run, 24h cache)
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -9690,11 +9777,11 @@ function renderLast50(){
 }
 
 
-// ── Los 50 más visitados (últimos 15 días) ─────────────────────────────
+// ── Los más visitados (últimos 15 días) ─────────────────────────────
 var _mostVisitedCache = null;   // cache to avoid unnecessary API calls
 var _mostVisitedLoading = false;
 
-// ── Los 50 más visitados — control vars ────────────────────────────────
+// ── Los más visitados — control vars ────────────────────────────────
 var _mvLoading    = false;   // single-run flag
 var _mvAbort      = false;   // abort signal for current run
 var _mvCacheKey   = 'impala_mv_cache';
@@ -9896,8 +9983,10 @@ function renderMostVisited(data){
       +' · <span style="'+DASH_C_PRICE+'">$'+(price>0?price.toLocaleString('es-AR'):'—')+'</span>'
       +(sc!=null?' · <span style="'+DASH_C_QUAL+'">Cal: '+sc+'%</span>':'');
 
+    var medal = idx===0?'🥇':idx===1?'🥈':idx===2?'🥉':(idx+1);
     return '<div style="'+rowStyle+'" '+onCl+'>'
-      +(arrow?'<span style="width:14px;flex-shrink:0">'+arrow+'</span>':'<span style="width:14px;flex-shrink:0"></span>')
+      +'<span style="font-size:'+(idx<3?'15':'12')+'px;font-weight:700;color:var(--text3);width:22px;text-align:center;flex-shrink:0">'+medal+'</span>'
+      +'<span style="width:16px;flex-shrink:0;text-align:center">'+(arrow||'')+'</span>'
       +'<div class="item-thumb" style="flex-shrink:0">'+imgEl+'</div>'
       +'<div style="flex:1;min-width:0">'
         +'<div style="font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+title+'</div>'
@@ -9934,6 +10023,352 @@ function updateLast50(orders){
     return new Date(b.date)-new Date(a.date);
   }).slice(0,50);
   renderLast50();
+}
+
+
+
+
+// ══════════════════════════════════════════════════════════════════════
+// CALENDARIO ESTRATÉGICO — Motor de datos y UI
+// ══════════════════════════════════════════════════════════════════════
+
+// ── Colores por categoría ──────────────────────────────────────────────
+var CAL_COLORS = {
+  fiscal:   { bg:'#ef4444', text:'#fff', light:'rgba(239,68,68,.12)'   },
+  operativo:{ bg:'#3b82f6', text:'#fff', light:'rgba(59,130,246,.12)'  },
+  ventas:   { bg:'#22c55e', text:'#fff', light:'rgba(34,197,94,.12)'   },
+  pop:      { bg:'#a855f7', text:'#fff', light:'rgba(168,85,247,.12)'  },
+  personal: { bg:'#f59e0b', text:'#fff', light:'rgba(245,158,11,.12)'  },
+};
+
+// ── Base de datos de eventos 2026 ──────────────────────────────────────
+var CAL_BASE_EVENTS = [
+  // FISCAL — Monotributo día 20 cada mes
+  {id:'mono-01', date:'2026-01-20', cat:'fiscal', title:'Pago Monotributo', icon:'💸', recurrent:'monthly-20'},
+  {id:'mono-02', date:'2026-02-20', cat:'fiscal', title:'Pago Monotributo', icon:'💸'},
+  {id:'mono-03', date:'2026-03-20', cat:'fiscal', title:'Pago Monotributo', icon:'💸'},
+  {id:'mono-04', date:'2026-04-20', cat:'fiscal', title:'Pago Monotributo', icon:'💸'},
+  {id:'mono-05', date:'2026-05-20', cat:'fiscal', title:'Pago Monotributo', icon:'💸'},
+  {id:'mono-06', date:'2026-06-20', cat:'fiscal', title:'Pago Monotributo', icon:'💸'},
+  {id:'mono-07', date:'2026-07-20', cat:'fiscal', title:'Pago Monotributo', icon:'💸'},
+  {id:'mono-08', date:'2026-08-20', cat:'fiscal', title:'Pago Monotributo', icon:'💸'},
+  {id:'mono-09', date:'2026-09-20', cat:'fiscal', title:'Pago Monotributo', icon:'💸'},
+  {id:'mono-10', date:'2026-10-20', cat:'fiscal', title:'Pago Monotributo', icon:'💸'},
+  {id:'mono-11', date:'2026-11-20', cat:'fiscal', title:'Pago Monotributo', icon:'💸'},
+  {id:'mono-12', date:'2026-12-20', cat:'fiscal', title:'Pago Monotributo', icon:'💸'},
+  // FISCAL — IIBB (aproximado, ajustar según ARBA/AGIP)
+  {id:'iibb-01',date:'2026-01-18',cat:'fiscal',title:'Vencimiento IIBB',icon:'📋'},
+  {id:'iibb-02',date:'2026-02-18',cat:'fiscal',title:'Vencimiento IIBB',icon:'📋'},
+  {id:'iibb-03',date:'2026-03-18',cat:'fiscal',title:'Vencimiento IIBB',icon:'📋'},
+  {id:'iibb-04',date:'2026-04-20',cat:'fiscal',title:'Vencimiento IIBB',icon:'📋'},
+  {id:'iibb-05',date:'2026-05-18',cat:'fiscal',title:'Vencimiento IIBB',icon:'📋'},
+  {id:'iibb-06',date:'2026-06-18',cat:'fiscal',title:'Vencimiento IIBB',icon:'📋'},
+  {id:'iibb-07',date:'2026-07-20',cat:'fiscal',title:'Vencimiento IIBB',icon:'📋'},
+  {id:'iibb-08',date:'2026-08-18',cat:'fiscal',title:'Vencimiento IIBB',icon:'📋'},
+  {id:'iibb-09',date:'2026-09-18',cat:'fiscal',title:'Vencimiento IIBB',icon:'📋'},
+  {id:'iibb-10',date:'2026-10-20',cat:'fiscal',title:'Vencimiento IIBB',icon:'📋'},
+  {id:'iibb-11',date:'2026-11-18',cat:'fiscal',title:'Vencimiento IIBB',icon:'📋'},
+  {id:'iibb-12',date:'2026-12-18',cat:'fiscal',title:'Vencimiento IIBB',icon:'📋'},
+  // FISCAL — Recategorización
+  {id:'recat-01',date:'2026-01-15',cat:'fiscal',title:'Recategorización Monotributo',icon:'🔄'},
+  {id:'recat-07',date:'2026-07-15',cat:'fiscal',title:'Recategorización Monotributo',icon:'🔄'},
+  // VENTAS — Fechas comerciales fuertes
+  {id:'san-valentin',    date:'2026-02-14',cat:'ventas',title:'San Valentín ❤️',icon:'❤️'},
+  {id:'dia-mujer',       date:'2026-03-08',cat:'ventas',title:'Día de la Mujer',icon:'💜'},
+  {id:'dia-madre',       date:'2026-10-11',cat:'ventas',title:'Día de la Madre 🌸',icon:'🌸'},
+  {id:'dia-padre',       date:'2026-06-21',cat:'ventas',title:'Día del Padre 👨',icon:'👨'},
+  {id:'dia-amigo',       date:'2026-07-20',cat:'ventas',title:'Día del Amigo 🤝',icon:'🤝'},
+  {id:'dia-nino',        date:'2026-08-16',cat:'ventas',title:'Día del Niño 🧸',icon:'🧸'},
+  {id:'navidad',         date:'2026-12-24',cat:'ventas',title:'Navidad / Nochebuena 🎄',icon:'🎄'},
+  {id:'reyes',           date:'2026-01-06',cat:'ventas',title:'Día de Reyes 👑',icon:'👑'},
+  {id:'cyber',           date:'2026-11-30',cat:'ventas',title:'Cyber Monday 💻',icon:'💻'},
+  {id:'hot-sale',        date:'2026-05-11',cat:'ventas',title:'Hot Sale inicio',icon:'🔥'},
+  // POP / CULTURA
+  {id:'star-wars',       date:'2026-05-04',cat:'pop',title:'Star Wars Day ⚔️',icon:'⚔️'},
+  {id:'anime-day',       date:'2026-04-15',cat:'pop',title:'Día del Anime 🎌',icon:'🎌'},
+  {id:'pride',           date:'2026-06-01',cat:'pop',title:'Pride Month 🏳️‍🌈 — inicio',icon:'🏳️‍🌈'},
+  {id:'halloween',       date:'2026-10-31',cat:'pop',title:'Halloween 🎃',icon:'🎃'},
+  // OPERATIVO — Compra insumos día 5 cada mes
+  {id:'insumos-01',date:'2026-01-05',cat:'operativo',title:'Compra mayorista insumos',icon:'📦'},
+  {id:'insumos-02',date:'2026-02-05',cat:'operativo',title:'Compra mayorista insumos',icon:'📦'},
+  {id:'insumos-03',date:'2026-03-05',cat:'operativo',title:'Compra mayorista insumos',icon:'📦'},
+  {id:'insumos-04',date:'2026-04-05',cat:'operativo',title:'Compra mayorista insumos',icon:'📦'},
+  {id:'insumos-05',date:'2026-05-05',cat:'operativo',title:'Compra mayorista insumos',icon:'📦'},
+  {id:'insumos-06',date:'2026-06-05',cat:'operativo',title:'Compra mayorista insumos',icon:'📦'},
+  {id:'insumos-07',date:'2026-07-05',cat:'operativo',title:'Compra mayorista insumos',icon:'📦'},
+  {id:'insumos-08',date:'2026-08-05',cat:'operativo',title:'Compra mayorista insumos',icon:'📦'},
+  {id:'insumos-09',date:'2026-09-05',cat:'operativo',title:'Compra mayorista insumos',icon:'📦'},
+  {id:'insumos-10',date:'2026-10-05',cat:'operativo',title:'Compra mayorista insumos',icon:'📦'},
+  {id:'insumos-11',date:'2026-11-05',cat:'operativo',title:'Compra mayorista insumos',icon:'📦'},
+  {id:'insumos-12',date:'2026-12-05',cat:'operativo',title:'Compra mayorista insumos',icon:'📦'},
+  // OPERATIVO — Cálculo de ganancias quincena
+  {id:'gan-q1-01',date:'2026-01-15',cat:'operativo',title:'Cálculo ganancia real (quincena)',icon:'💰'},
+  {id:'gan-q2-01',date:'2026-02-15',cat:'operativo',title:'Cálculo ganancia real (quincena)',icon:'💰'},
+  {id:'gan-q1-02',date:'2026-03-15',cat:'operativo',title:'Cálculo ganancia real (quincena)',icon:'💰'},
+  {id:'gan-q2-02',date:'2026-04-15',cat:'operativo',title:'Cálculo ganancia real (quincena)',icon:'💰'},
+  {id:'gan-q1-05',date:'2026-05-15',cat:'operativo',title:'Cálculo ganancia real (quincena)',icon:'💰'},
+  {id:'gan-q2-05',date:'2026-06-15',cat:'operativo',title:'Cálculo ganancia real (quincena)',icon:'💰'},
+  {id:'gan-q1-07',date:'2026-07-15',cat:'operativo',title:'Cálculo ganancia real (quincena)',icon:'💰'},
+  {id:'gan-q2-08',date:'2026-08-15',cat:'operativo',title:'Cálculo ganancia real (quincena)',icon:'💰'},
+  {id:'gan-q1-09',date:'2026-09-15',cat:'operativo',title:'Cálculo ganancia real (quincena)',icon:'💰'},
+  {id:'gan-q2-10',date:'2026-10-15',cat:'operativo',title:'Cálculo ganancia real (quincena)',icon:'💰'},
+  {id:'gan-q1-11',date:'2026-11-15',cat:'operativo',title:'Cálculo ganancia real (quincena)',icon:'💰'},
+  {id:'gan-q2-12',date:'2026-12-15',cat:'operativo',title:'Cálculo ganancia real (quincena)',icon:'💰'},
+  // OPERATIVO — Hosting web (ajustar fecha real)
+  {id:'hosting-06',date:'2026-06-01',cat:'operativo',title:'Pago Hosting Web 🌐',icon:'🌐'},
+  {id:'hosting-12',date:'2026-12-01',cat:'operativo',title:'Pago Hosting Web 🌐',icon:'🌐'},
+];
+
+var CAL_LS_KEY = 'impala_cal_custom';
+var _calYear   = new Date().getFullYear();
+var _calMonth  = new Date().getMonth(); // 0-based
+var _calView   = 'mes';
+
+function calGetCustom(){ try{ return JSON.parse(localStorage.getItem(CAL_LS_KEY)||'[]'); }catch(e){ return []; } }
+function calSaveCustom(arr){ localStorage.setItem(CAL_LS_KEY, JSON.stringify(arr)); }
+
+function calAllEvents(){
+  return CAL_BASE_EVENTS.concat(calGetCustom());
+}
+
+function calEventsForDate(dateStr){
+  return calAllEvents().filter(function(e){ return e.date===dateStr; });
+}
+
+function calEventsForMonth(year, month){
+  var prefix = year+'-'+(month+1<10?'0':'')+(month+1);
+  return calAllEvents().filter(function(e){ return e.date && e.date.startsWith(prefix); });
+}
+
+// ── Render calendar grid ───────────────────────────────────────────────
+function calRender(){
+  if(_calView==='mes') calRenderMonth();
+  else calRenderList();
+}
+
+function calSetView(view, btn){
+  _calView = view;
+  document.querySelectorAll('#cal-tab-mes,#cal-tab-lista').forEach(function(b){ b.classList.remove('active'); });
+  if(btn) btn.classList.add('active');
+  document.getElementById('cal-view-mes').style.display   = view==='mes'   ? '' : 'none';
+  document.getElementById('cal-view-lista').style.display = view==='lista' ? '' : 'none';
+  calRender();
+}
+
+function calPrevMonth(){ _calMonth--; if(_calMonth<0){ _calMonth=11; _calYear--; } calRenderMonth(); }
+function calNextMonth(){ _calMonth++; if(_calMonth>11){ _calMonth=0; _calYear++; } calRenderMonth(); }
+
+function calRenderMonth(){
+  var label = document.getElementById('cal-month-label');
+  var grid  = document.getElementById('cal-grid');
+  if(!label||!grid) return;
+
+  var MONTHS = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  label.textContent = MONTHS[_calMonth]+' '+_calYear;
+
+  var firstDay = new Date(_calYear, _calMonth, 1).getDay(); // 0=Sun
+  // Convert to Mon-based (0=Mon ... 6=Sun)
+  firstDay = (firstDay+6)%7;
+  var daysInMonth = new Date(_calYear, _calMonth+1, 0).getDate();
+  var today = new Date().toISOString().slice(0,10);
+
+  var cells = '';
+  // Empty cells before first day
+  for(var i=0; i<firstDay; i++) cells += '<div></div>';
+
+  for(var d=1; d<=daysInMonth; d++){
+    var dateStr = _calYear+'-'+(_calMonth+1<10?'0':'')+(_calMonth+1)+'-'+(d<10?'0':'')+d;
+    var evs = calEventsForDate(dateStr);
+    var isToday = dateStr===today;
+    var dots = evs.slice(0,3).map(function(e){
+      var col = (CAL_COLORS[e.cat]||CAL_COLORS.personal).bg;
+      return '<span style="width:6px;height:6px;border-radius:50%;background:'+col+';display:inline-block;margin:0 1px"></span>';
+    }).join('');
+
+    cells += '<div onclick="calClickDay(\''+dateStr+'\')" style="'
+      +'min-height:52px;border-radius:7px;padding:5px 4px;cursor:pointer;'
+      +'background:'+(isToday?'var(--accent-g)':'var(--bg3)')+';'
+      +'border:1.5px solid '+(isToday?'var(--accent)':'var(--border)')+';'
+      +'transition:background .15s"'
+      +' onmouseover="this.style.background=\'var(--bg4)\'" onmouseout="this.style.background=\''+(isToday?'var(--accent-g)':'var(--bg3)')+'\'">'+
+      '<div style="font-size:11px;font-weight:'+(isToday?'800':'600')+';color:'+(isToday?'var(--accent)':'var(--text)')+';margin-bottom:3px">'+d+'</div>'+
+      '<div style="display:flex;flex-wrap:wrap;gap:1px">'+dots+'</div>'+
+      (evs.length>3?'<div style="font-size:8px;color:var(--text3)">+'+( evs.length-3)+' más</div>':'')+
+      '</div>';
+  }
+
+  grid.innerHTML = cells;
+}
+
+function calClickDay(dateStr){
+  var evs = calEventsForDate(dateStr);
+  var parts = dateStr.split('-');
+  var label = parts[2]+'/'+parts[1]+'/'+parts[0];
+  var content = evs.length
+    ? evs.map(function(e){
+        var col = (CAL_COLORS[e.cat]||CAL_COLORS.personal);
+        return '<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;margin-bottom:6px;background:'+col.light+';border-left:3px solid '+col.bg+'">'
+          +'<span style="font-size:16px">'+e.icon+'</span>'
+          +'<div style="flex:1"><div style="font-size:12.5px;font-weight:600">'+e.title+'</div>'
+          +(e.custom?'<button class="btn btn-danger btn-xs" onclick="calDeleteCustom(\''+e.id+'\')" style="margin-top:4px">Eliminar</button>':'')+'</div></div>';
+      }).join('')
+    : '<div style="color:var(--text3);font-size:12px">Sin eventos. <button class="btn btn-ghost btn-xs" onclick="calOpenModalDate(\''+dateStr+'\')">+ Agregar</button></div>';
+
+  if(typeof openModal === 'function'){
+    openModal('<b>'+label+'</b>', content);
+  } else {
+    var el = document.getElementById('cal-modal');
+    if(el){ document.getElementById('cal-new-date').value=dateStr; calOpenModal(); }
+    else alert(label+'\n\n'+evs.map(function(e){return e.icon+' '+e.title;}).join('\n'));
+  }
+}
+
+// ── Vista Lista — próximos 60 días ─────────────────────────────────────
+function calRenderList(){
+  var el = document.getElementById('cal-lista');
+  if(!el) return;
+  var now     = new Date();
+  var cutoff  = new Date(now.getTime() + 60*24*60*60*1000);
+  var todayStr= now.toISOString().slice(0,10);
+  var upcom   = calAllEvents()
+    .filter(function(e){ return e.date >= todayStr && e.date <= cutoff.toISOString().slice(0,10); })
+    .sort(function(a,b){ return a.date.localeCompare(b.date); });
+
+  if(!upcom.length){ el.innerHTML='<div style="color:var(--text3);padding:20px 0;text-align:center">Sin eventos en los próximos 60 días.</div>'; return; }
+
+  var html = '';
+  var lastMonth = '';
+  upcom.forEach(function(e){
+    var month = e.date.slice(0,7);
+    if(month!==lastMonth){
+      var MONTHS=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+      var m = parseInt(e.date.slice(5,7))-1;
+      html += '<div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text3);margin:14px 0 7px">'+MONTHS[m]+'</div>';
+      lastMonth = month;
+    }
+    var col    = (CAL_COLORS[e.cat]||CAL_COLORS.personal);
+    var parts  = e.date.split('-');
+    var label  = parts[2]+'/'+parts[1];
+    var diffD  = Math.round((new Date(e.date)-now)/(1000*60*60*24));
+    var diffLabel = diffD===0?'HOY':diffD===1?'Mañana':'en '+diffD+'d';
+    html += '<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;margin-bottom:5px;background:'+col.light+';border-left:3px solid '+col.bg+'">'
+      +'<span style="font-size:17px">'+e.icon+'</span>'
+      +'<div style="flex:1;min-width:0">'
+        +'<div style="font-size:12.5px;font-weight:600">'+e.title+'</div>'
+        +'<div style="font-size:10.5px;color:var(--text3)">'+label+'</div>'
+      +'</div>'
+      +'<span style="font-size:10px;font-weight:700;color:'+col.bg+';white-space:nowrap">'+diffLabel+'</span>'
+      +(e.custom?'<button class="btn btn-danger btn-xs" onclick="calDeleteCustom(\''+e.id+'\')">✕</button>':'')
+      +'</div>';
+  });
+  el.innerHTML = html;
+}
+
+// ── Modal agregar ──────────────────────────────────────────────────────
+function calAddEvent(){
+  var today = new Date().toISOString().slice(0,10);
+  document.getElementById('cal-new-date').value = today;
+  document.getElementById('cal-new-text').value = '';
+  document.getElementById('cal-new-cat').value  = 'personal';
+  var m = document.getElementById('cal-modal');
+  if(m){ m.style.display='flex'; }
+}
+function calOpenModalDate(dateStr){
+  document.getElementById('cal-new-date').value = dateStr;
+  document.getElementById('cal-new-text').value = '';
+  var m = document.getElementById('cal-modal');
+  if(m){ m.style.display='flex'; }
+}
+function calCloseModal(){
+  var m = document.getElementById('cal-modal');
+  if(m) m.style.display='none';
+}
+function calSaveNewEvent(){
+  var date = document.getElementById('cal-new-date')?.value||'';
+  var text = document.getElementById('cal-new-text')?.value?.trim()||'';
+  var cat  = document.getElementById('cal-new-cat')?.value||'personal';
+  if(!date||!text){ showToast('Completá la fecha y descripción','warn'); return; }
+  var customs = calGetCustom();
+  var icons = {personal:'⭐',fiscal:'📋',operativo:'📦',ventas:'🎯',pop:'🎬'};
+  customs.push({ id:'custom-'+Date.now(), date:date, cat:cat, title:text, icon:icons[cat]||'⭐', custom:true });
+  calSaveCustom(customs);
+  calCloseModal();
+  calRender();
+  showToast('✅ Evento guardado: '+text,'success');
+}
+function calDeleteCustom(id){
+  if(!confirm('¿Eliminar este evento?')) return;
+  calSaveCustom(calGetCustom().filter(function(e){ return e.id!==id; }));
+  calRender();
+}
+
+// ── IA: checkUpcomingEvents — insights predictivos ─────────────────────
+function checkUpcomingEvents(){
+  var now    = new Date();
+  var cutoff = new Date(now.getTime()+30*24*60*60*1000);
+  var today  = now.toISOString().slice(0,10);
+  var alerts = [];
+
+  calAllEvents()
+    .filter(function(e){ return e.date >= today && e.date <= cutoff.toISOString().slice(0,10); })
+    .sort(function(a,b){ return a.date.localeCompare(b.date); })
+    .forEach(function(e){
+      var diffD = Math.round((new Date(e.date)-now)/(1000*60*60*24));
+      var sold = 0;
+      allOrders.forEach(function(o){
+        if(new Date(o.date_created||0).getFullYear() === now.getFullYear()-1)
+          sold += (o.order_items||[]).reduce(function(s,i){return s+(i.quantity||1);},0);
+      });
+
+      var msg = '';
+      if(e.cat==='ventas' && diffD<=20){
+        var stock = (allItems||[]).reduce(function(s,i){return s+(i.available_quantity||0);},0);
+        msg = '⚠️ Faltan '+diffD+' días para <strong>'+e.title+'</strong>. Stock total: <strong>'+stock.toLocaleString('es-AR')+' u.</strong> Preparate con anticipación.';
+      } else if(e.cat==='fiscal' && diffD<=5){
+        msg = '🔴 <strong>'+e.title+'</strong> vence en <strong>'+diffD+' días</strong>. ¡No olvidés pagar!';
+      } else if(e.cat==='pop' && diffD<=14){
+        msg = '🎬 Tendencia <strong>'+e.title+'</strong> se acerca en '+diffD+' días. ¿Tus publicaciones están optimizadas?';
+      } else if(e.cat==='operativo' && diffD<=2){
+        msg = '🔵 Recordatorio: <strong>'+e.title+'</strong> en '+diffD+' días.';
+      }
+      if(msg) alerts.push(msg);
+    });
+  return alerts.slice(0,5);
+}
+
+// ── Widget en Dashboard — próximos 3 eventos ───────────────────────────
+function renderCalWidget(){
+  var el = document.getElementById('dash-cal-widget');
+  if(!el) return;
+  var now   = new Date();
+  var today = now.toISOString().slice(0,10);
+  var cut3  = new Date(now.getTime()+30*24*60*60*1000).toISOString().slice(0,10);
+  var evs   = calAllEvents()
+    .filter(function(e){ return e.date>=today && e.date<=cut3; })
+    .sort(function(a,b){ return a.date.localeCompare(b.date); })
+    .slice(0,3);
+
+  el.innerHTML = evs.map(function(e){
+    var col  = (CAL_COLORS[e.cat]||CAL_COLORS.personal);
+    var diff = Math.round((new Date(e.date)-now)/(1000*60*60*24));
+    return '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)">'
+      +'<span style="font-size:15px">'+e.icon+'</span>'
+      +'<div style="flex:1;min-width:0">'
+        +'<div style="font-size:11.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+e.title+'</div>'
+        +'<div style="font-size:10px;color:var(--text3)">'+e.date.split('-').reverse().join('/')+'</div>'
+      +'</div>'
+      +'<span style="font-size:10px;font-weight:700;color:'+col.bg+';white-space:nowrap">'+(diff===0?'HOY':diff+'d')+'</span>'
+      +'</div>';
+  }).join('')||'<div style="color:var(--text3);font-size:12px">Sin eventos próximos</div>';
+}
+
+// Init on showSection
+function calInit(){
+  _calYear  = new Date().getFullYear();
+  _calMonth = new Date().getMonth();
+  _calView  = 'mes';
+  calSetView('mes', document.getElementById('cal-tab-mes'));
+  renderCalWidget();
 }
 
 
@@ -9990,6 +10425,7 @@ const titles={
   alertas:['🔔 Alertas','Centro de notificaciones'],
   'woo-import':['&#x1F6D2; Importar a WooCommerce','Trae tus publicaciones de ML a tu tienda propia'],
   'tareas':['&#x2705; Gestor de Tareas','Pendientes y completadas - sincronizadas en la nube'],
+  calendario:['📅 Calendario Estratégico','Fechas fiscales · Ventas · Operativo · Cultura Pop'],
   'profit-calculator':['🧮 Calculadora de Rentabilidad','Precios sugeridos por canal con márgenes reales']
 };
 
@@ -10021,6 +10457,7 @@ function showSection(id){
   if(id==='alertas') refreshAlerts();
   if(id==='tendencias'){ if(allItems&&allItems.length) loadTrends(); else loadItemsFast().then(()=>loadTrends()); }
   if(id==='profit-calculator') pcInit();
+  if(id==='calendario') calInit();
   if(id==='asistente-ia'){ aiLoadRules(); aiRunAll(); }
   if(id==='reglas') initRules();
   if(id==='publicidad'){loadAdsData();}
