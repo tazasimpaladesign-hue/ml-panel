@@ -1914,6 +1914,8 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <option value="stock_low">Stock ≤ 3 unidades</option>
           <option value="no_sales">Sin ventas en 7 días</option>
           <option value="rank_drop">Caída de ranking</option>
+          <option value="no_visits">Sin visitas en 7 días</option>
+          <option value="health_low">Calidad (Health) &lt; 70%</option>
           <option value="paused">Publicación pausada</option>
           <option value="question_24h">Pregunta sin responder +24h</option>
         </select>
@@ -2229,11 +2231,13 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <div id="section-alertas" class="section fade-in">
   <!-- Filtros por categoria -->
   <div id="alerts-filter-bar" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
-    <button class="btn btn-primary btn-sm" id="af-all"       onclick="setAlertFilter('all',this)">★ Todas</button>
-    <button class="btn btn-ghost btn-sm"   id="af-stock"     onclick="setAlertFilter('stock',this)">📦 Stock Bajo</button>
-    <button class="btn btn-ghost btn-sm"   id="af-paused"    onclick="setAlertFilter('paused',this)">⏸ Pausadas</button>
-    <button class="btn btn-ghost btn-sm"   id="af-quality"   onclick="setAlertFilter('quality',this)">🔴 Mala Calidad</button>
-    <button class="btn btn-ghost btn-sm"   id="af-preguntas" onclick="setAlertFilter('preguntas',this)">💬 Preguntas</button>
+    <button class="btn btn-primary btn-sm" id="af-all"          onclick="setAlertFilter('all',this)">★ Todas</button>
+    <button class="btn btn-ghost btn-sm"   id="af-stock"        onclick="setAlertFilter('stock',this)">📦 Stock Bajo</button>
+    <button class="btn btn-ghost btn-sm"   id="af-paused"       onclick="setAlertFilter('paused',this)">⏸ Pausadas</button>
+    <button class="btn btn-ghost btn-sm"   id="af-quality"      onclick="setAlertFilter('quality',this)">🔴 Mala Calidad (&lt;70%)</button>
+    <button class="btn btn-ghost btn-sm"   id="af-sin-visitas"  onclick="setAlertFilter('sin_visitas',this)">👁 Sin Visitas</button>
+    <button class="btn btn-ghost btn-sm"   id="af-sin-ventas"   onclick="setAlertFilter('sin_ventas',this)">📉 Sin Ventas</button>
+    <button class="btn btn-ghost btn-sm"   id="af-preguntas"    onclick="setAlertFilter('preguntas',this)">💬 Preguntas</button>
     <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
       <span id="alm-total-pill" style="font-size:11px;color:var(--text3)"></span>
       <button class="btn btn-ghost btn-sm" onclick="refreshAlerts()">&#8635; Actualizar</button>
@@ -2992,6 +2996,8 @@ async function initApp(){
   loadTrends();
   // POLLING: auto-actualizar cada 60s
   startPolling();
+  // POLLING MENSAJES: verificar mensajes post-venta sin leer cada 90s
+  startMessagePolling();
   // Settings auto-save cada 60 min
   _startSettingsAutoSave();
 }
@@ -4037,28 +4043,70 @@ async function renderCatChart(){
 var _RANK_TOP_KEY    = 'impala_rank_toppubs';
 var _RANK_VISITS_KEY = 'impala_rank_visits';
 
+// ── Ranking snapshot diario ────────────────────────────────────────────
+// El snapshot solo se actualiza una vez por día (fecha del sistema).
+// Esto garantiza que las flechas muestren el cambio vs. ayer,
+// y no se resetean a "=" en cada recarga del panel.
+
+function _rankTodayKey(){ return new Date().toISOString().slice(0,10); } // 'YYYY-MM-DD'
+
 function savePrevRanks(key, orderedIds){
+  // Solo sobreescribir si la FECHA cambió respecto al snapshot actual.
+  // Si es el mismo día, conservar el snapshot "de ayer" intacto para
+  // que las flechas no se reseteen en cada recarga.
   try{
-    var map = {};
+    var stored = JSON.parse(localStorage.getItem(key) || '{}');
+    var today  = _rankTodayKey();
+    // Si ya hay un snapshot de hoy, no lo pisamos (la comparación sigue siendo vs. ayer)
+    if(stored._date === today) return;
+    // Nuevo día: guardar posiciones actuales como el nuevo punto de comparación
+    var map = { _date: today };
     orderedIds.forEach(function(id,i){ map[String(id)] = i; });
     localStorage.setItem(key, JSON.stringify(map));
   }catch(e){}
 }
 
 function loadPrevRanks(key){
-  try{ return JSON.parse(localStorage.getItem(key)||'{}'); }catch(e){ return {}; }
+  // Devuelve el mapa posición anterior (día previo).
+  // Si el snapshot guardado ES de hoy, buscamos el de ayer (_prev).
+  try{
+    var stored = JSON.parse(localStorage.getItem(key) || '{}');
+    var today  = _rankTodayKey();
+    if(stored._date === today){
+      // Usamos el snapshot previo (_prev) para la comparación real
+      var prev = JSON.parse(localStorage.getItem(key+'_prev') || '{}');
+      return prev;
+    }
+    // El snapshot guardado es de un día anterior: guardar copia como _prev antes de comparar
+    localStorage.setItem(key+'_prev', JSON.stringify(stored));
+    return stored;
+  }catch(e){ return {}; }
+}
+
+// Guarda el snapshot actual como referencia para el PRÓXIMO día
+// (se llama desde renderDashTopPubs y renderMasVisitados DESPUÉS de loadPrevRanks)
+function commitRankSnapshot(key, orderedIds){
+  try{
+    var today = _rankTodayKey();
+    var stored = JSON.parse(localStorage.getItem(key) || '{}');
+    if(stored._date === today) return; // ya hay snapshot de hoy, nada que hacer
+    var map = { _date: today };
+    orderedIds.forEach(function(id,i){ map[String(id)] = i; });
+    localStorage.setItem(key, JSON.stringify(map));
+  }catch(e){}
 }
 
 // Returns trend indicator: ⬆ green, ⬇ red, = gray, or '' for new
 function trendArrow(prevRanks, itemId, currentIdx){
   var id  = String(itemId);
-  if(prevRanks[id] === undefined) return '';
+  if(!prevRanks || prevRanks[id] === undefined) return ''; // ítem nuevo, sin historial
   var prev = prevRanks[id];
-  if(prev === currentIdx)
-    return '<span style="color:#9ca3af;font-weight:700;font-size:11px;line-height:1" title="Misma posición">=</span>';
-  return prev > currentIdx
-    ? '<span style="color:#00a650;font-weight:700;font-size:12px;line-height:1" title="Subió '+(prev-currentIdx)+' posiciones">⬆</span>'
-    : '<span style="color:#e74c3c;font-weight:700;font-size:12px;line-height:1" title="Bajó '+(currentIdx-prev)+' posiciones">⬇</span>';
+  var diff = prev - currentIdx; // positivo = subió, negativo = bajó
+  if(diff === 0)
+    return '<span style="color:#9ca3af;font-weight:700;font-size:11px;line-height:1" title="Misma posición que ayer">=</span>';
+  if(diff > 0)
+    return '<span style="color:#00a650;font-weight:700;font-size:12px;line-height:1" title="Subió '+diff+' posición'+(diff>1?'es':'')+' desde ayer">⬆</span>';
+  return '<span style="color:#e74c3c;font-weight:700;font-size:12px;line-height:1" title="Bajó '+Math.abs(diff)+' posición'+(Math.abs(diff)>1?'es':'')+' desde ayer">⬇</span>';
 }
 var DASH_C_METRIC = 'color:#1a1a1a;font-weight:700';   // negro legible (dark+light mode)
 var DASH_C_PRICE  = 'color:#00a650;font-weight:700';   // verde ML
@@ -4104,10 +4152,10 @@ function renderDashTopPubs(){
     return;
   }
 
-  // Load previous ranks for trend arrows
+  // Cargar snapshot del día ANTERIOR para calcular flechas de tendencia
   const prevRanks = loadPrevRanks(_RANK_TOP_KEY);
-  // Save current ranks for next load
-  savePrevRanks(_RANK_TOP_KEY, ranked.map(([id])=>id));
+  // Confirmar snapshot de HOY (solo escribe si la fecha cambió)
+  commitRankSnapshot(_RANK_TOP_KEY, ranked.map(([id])=>id));
 
   el.style.maxHeight='480px'; el.style.overflowY='auto';
   el.innerHTML = ranked.map(([itemId,qty],idx)=>{
@@ -7571,7 +7619,15 @@ function renderRules(){
     el.innerHTML='<div style="color:var(--text3);font-size:12px;padding:12px 0;text-align:center">Sin reglas activas. Creá la primera arriba.</div>';
     return;
   }
-  const condLabels = {stock_low:'Stock ≤ 3 u.',no_sales:'Sin ventas 7d',rank_drop:'Caída ranking',paused:'Publicación pausada',question_24h:'Pregunta +24h'};
+  const condLabels = {
+    stock_low:   'Stock ≤ 3 u.',
+    no_sales:    'Sin ventas 7d',
+    rank_drop:   'Caída ranking',
+    paused:      'Publicación pausada',
+    question_24h:'Pregunta +24h',
+    no_visits:   'Sin visitas 7d',
+    health_low:  'Calidad (Health) < 70%'
+  };
   const actLabels  = {price_up:'Subir precio 10%',price_down:'Bajar precio 5%',notify:'Enviar alerta',pause:'Pausar pub',ai_answer:'Responder con IA'};
   const icons      = {price_up:'📈',price_down:'📉',notify:'🔔',pause:'⏸',ai_answer:'🤖'};
   el.innerHTML = activeRules.map(r=>`
@@ -7622,9 +7678,11 @@ function initRules(){
   if(!activeRules.length && !_loadRulesFromLS()){
     // Solo la primera vez: cargar defaults
     activeRules = [
-      {id:'r-def1', name:'Subir precio si stock bajo', cond:'stock_low',  action:'price_up',   active:true},
-      {id:'r-def2', name:'Bajar precio sin ventas',    cond:'no_sales',   action:'price_down',  active:true},
-      {id:'r-def3', name:'Auto-responder preguntas',   cond:'question_24h',action:'ai_answer',  active:false},
+      {id:'r-def1', name:'Subir precio si stock bajo',    cond:'stock_low',   action:'price_up',   active:true},
+      {id:'r-def2', name:'Bajar precio sin ventas',       cond:'no_sales',    action:'price_down', active:true},
+      {id:'r-def3', name:'Auto-responder preguntas',      cond:'question_24h',action:'ai_answer',  active:false},
+      {id:'r-def4', name:'Alerta sin visitas 7 días',     cond:'no_visits',   action:'notify',     active:true},
+      {id:'r-def5', name:'Alerta calidad ML < 70%',       cond:'health_low',  action:'notify',     active:true},
     ];
   }
   renderRules();
@@ -7648,6 +7706,20 @@ function setAlertFilter(filter, btn) {
   refreshAlerts();
 }
 
+// ── Helper: ventas de un ítem en los últimos N días ─────────────────
+function _itemSalesLast(itemId, days){
+  var cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  var count = 0;
+  (allOrders || []).forEach(function(o){
+    if(!['paid','confirmed','delivered','shipped'].includes(o.status)) return;
+    if(new Date(o.date_created || 0).getTime() < cutoff) return;
+    (o.order_items || []).forEach(function(oi){
+      if(String(oi.item && oi.item.id) === String(itemId)) count += (oi.quantity || 1);
+    });
+  });
+  return count;
+}
+
 function refreshAlerts(){
   const alerts = [];
 
@@ -7658,9 +7730,8 @@ function refreshAlerts(){
     const qty    = i.available_quantity ?? 0;
     const sold   = i.sold_quantity || 0;
     const price  = i.price || 0;
-    const score  = (typeof seoScore === 'function') ? seoScore(title) : 50;
 
-    // Sin stock -> CRÍTICO
+    // ── Sin stock → CRÍTICO ─────────────────────────────
     if (qty === 0 && i.status === 'active') {
       alerts.push({
         uid: 'sinstock_' + id,
@@ -7669,14 +7740,12 @@ function refreshAlerts(){
         icon: '⛔',
         title: 'Sin stock',
         subtitle: title.slice(0, 60),
-        detail: `Stock: 0 unidades · Vendidas totales: ${sold}`,
+        detail: 'Stock: 0 unidades · Vendidas totales: ' + sold,
         actionLabel: 'Corregir stock',
-        item_id: id,
-        item_title: title,
-        item_stock: qty,
+        item_id: id, item_title: title, item_stock: qty,
       });
     }
-    // Stock bajo (≤2) -> IMPORTANTE
+    // ── Stock bajo (≤2) → IMPORTANTE ───────────────────
     else if (qty > 0 && qty <= 2 && i.status === 'active') {
       alerts.push({
         uid: 'bajstock_' + id,
@@ -7685,15 +7754,13 @@ function refreshAlerts(){
         icon: '⚠️',
         title: 'Stock bajo',
         subtitle: title.slice(0, 60),
-        detail: `Solo ${qty} unidad${qty !== 1 ? 'es' : ''} disponible${qty !== 1 ? 's' : ''} · Vendidas: ${sold}`,
+        detail: 'Solo ' + qty + ' unidad' + (qty !== 1 ? 'es' : '') + ' disponible' + (qty !== 1 ? 's' : '') + ' · Vendidas: ' + sold,
         actionLabel: 'Actualizar stock',
-        item_id: id,
-        item_title: title,
-        item_stock: qty,
+        item_id: id, item_title: title, item_stock: qty,
       });
     }
 
-    // Publicación pausada -> IMPORTANTE
+    // ── Publicación pausada → IMPORTANTE ────────────────
     if (i.status === 'paused') {
       alerts.push({
         uid: 'paused_' + id,
@@ -7704,28 +7771,74 @@ function refreshAlerts(){
         subtitle: title.slice(0, 60),
         detail: 'No está visible en ML · Perdés ventas mientras está pausada',
         actionLabel: 'Reactivar',
-        item_id: id,
-        item_title: title,
+        item_id: id, item_title: title,
       });
     }
 
-    // Mala calidad ML (health oficial < 0.5) -> IMPORTANTE
-    // item.health es el indicador de calidad de ML (0 a 1), no el SEO interno
-    if (i.status === 'active' && typeof i.health === 'number' && i.health < 0.5) {
-      const pct = Math.round(i.health * 100);
-      alerts.push({
-        uid: 'quality_' + id,
-        priority: 2,
-        category: 'quality',
-        icon: '🔴',
-        title: 'Baja calidad ML',
-        subtitle: title.slice(0, 60),
-        detail: `Calidad ML: ${pct}% — Completá atributos, mejorá imágenes y descripción`,
-        actionLabel: 'Mejorar publicación',
-        item_id: id,
-        item_title: title,
-        item_score: pct,
-      });
+    // ── Mala calidad ML (health < 70%) → IMPORTANTE ─────
+    // Umbral correcto: 0.70 (70%). Si health es null, forzar refresh individual.
+    if (i.status === 'active') {
+      var hVal = (typeof i.health === 'number') ? i.health : null;
+      if (hVal === null && typeof i.qualityScore === 'number') {
+        hVal = i.qualityScore / 100; // fallback al score local normalizado
+      }
+      if (hVal !== null && hVal < 0.70) {
+        const pct = Math.round(hVal * 100);
+        alerts.push({
+          uid: 'quality_' + id,
+          priority: pct < 50 ? 1 : 2,         // <50% = CRÍTICO, 50-69% = IMPORTANTE
+          category: 'quality',
+          icon: pct < 50 ? '🔴' : '🟠',
+          title: 'Baja calidad ML: ' + pct + '%',
+          subtitle: title.slice(0, 60),
+          detail: 'Calidad ML: ' + pct + '% (umbral: 70%) — Completá atributos, mejorá imágenes y descripción',
+          actionLabel: 'Mejorar publicación',
+          item_id: id, item_title: title, item_score: pct,
+        });
+      }
+    }
+
+    // ── Sin ventas en 7 días (publicación activa con stock) → IMPORTANTE ─
+    if (i.status === 'active' && qty > 0) {
+      var salesLast7 = _itemSalesLast(id, 7);
+      if (salesLast7 === 0 && sold > 0) {
+        // Solo alertar si el ítem tiene historial de ventas (no es nuevo)
+        alerts.push({
+          uid: 'noventas7_' + id,
+          priority: 2,
+          category: 'sin_ventas',
+          icon: '📉',
+          title: 'Sin ventas en 7 días',
+          subtitle: title.slice(0, 60),
+          detail: 'Con stock disponible (' + qty + ' u.) pero sin ventas la última semana · Total histórico: ' + sold,
+          actionLabel: 'Revisar precio',
+          item_id: id, item_title: title,
+        });
+      }
+    }
+
+    // ── Sin visitas en 7 días (publicación activa) → INFO ───────────────
+    // Usamos el campo visits del análisis de visitas si está disponible
+    if (i.status === 'active') {
+      var visits7 = (typeof i.visits_7d === 'number') ? i.visits_7d : null;
+      // Fallback: buscar en _mostVisitedCache si existe
+      if (visits7 === null && typeof _mostVisitedCache !== 'undefined' && _mostVisitedCache) {
+        var cached = _mostVisitedCache.find(function(v){ return String(v.itemId) === String(id); });
+        if (cached) visits7 = cached.visits;
+      }
+      if (visits7 !== null && visits7 === 0) {
+        alerts.push({
+          uid: 'novisitas7_' + id,
+          priority: 3,
+          category: 'sin_visitas',
+          icon: '👁',
+          title: 'Sin visitas en 7 días',
+          subtitle: title.slice(0, 60),
+          detail: '0 visitas registradas en los últimos 7 días · Publicación activa con stock: ' + qty + ' u.',
+          actionLabel: 'Ver publicación',
+          item_id: id, item_title: title,
+        });
+      }
     }
 
   });
@@ -7738,12 +7851,11 @@ function refreshAlerts(){
       priority: 1,
       category: 'preguntas',
       icon: '💬',
-      title: `${pend.length} preguntas sin responder`,
+      title: pend.length + ' preguntas sin responder',
       subtitle: 'Respuesta tardía perjudica tu reputación en ML',
-      detail: `${pend.length} comprador${pend.length > 1 ? 'es esperan' : ' espera'} respuesta · Afecta ranking`,
+      detail: pend.length + ' comprador' + (pend.length > 1 ? 'es esperan' : ' espera') + ' respuesta · Afecta ranking',
       actionLabel: 'Responder ahora',
-      item_id: null,
-      item_title: null,
+      item_id: null, item_title: null,
     });
   } else if (pend.length > 0) {
     alerts.push({
@@ -7751,31 +7863,155 @@ function refreshAlerts(){
       priority: 2,
       category: 'preguntas',
       icon: '💬',
-      title: `${pend.length} pregunta${pend.length > 1 ? 's' : ''} sin responder`,
+      title: pend.length + ' pregunta' + (pend.length > 1 ? 's' : '') + ' sin responder',
       subtitle: 'Respondé para mantener tu reputación',
-      detail: `${pend.length} pregunta${pend.length > 1 ? 's esperan' : ' espera'} respuesta`,
+      detail: pend.length + ' pregunta' + (pend.length > 1 ? 's esperan' : ' espera') + ' respuesta',
       actionLabel: 'Ver preguntas',
-      item_id: null,
-      item_title: null,
+      item_id: null, item_title: null,
     });
   }
 
-  // ── Ordenar: primero críticas, luego importantes ───────
+  // ── Evaluar Reglas Activas → inyectar alertas ──────────
+  // Condiciones: no_sales, rank_drop, no_visits, health_low
+  // Solo las reglas con action='notify' disparan alertas aquí.
+  if (typeof activeRules !== 'undefined' && Array.isArray(activeRules)) {
+    activeRules.filter(r => r.active !== false).forEach(r => {
+      // Regla: Sin ventas 7 días → alerta global si hay ítems afectados
+      if (r.cond === 'no_sales') {
+        var affected = allItems.filter(function(i){
+          return i.status === 'active'
+            && (i.available_quantity || 0) > 0
+            && _itemSalesLast(i.id, 7) === 0
+            && (i.sold_quantity || 0) > 0; // tiene historial
+        });
+        if (affected.length > 0 && r.action === 'notify') {
+          // Las alertas individuales ya se generan arriba; aquí solo si no hay
+          // ninguna alerta de este tipo ya creada.
+          var already = alerts.some(a => a.category === 'sin_ventas');
+          if (!already) {
+            alerts.push({
+              uid: 'rule_noventas_' + r.id,
+              priority: 2,
+              category: 'sin_ventas',
+              icon: '📉',
+              title: '[Regla: ' + r.name + '] ' + affected.length + ' pub' + (affected.length > 1 ? 's' : '') + ' sin ventas 7d',
+              subtitle: 'Publicaciones activas sin ventas la última semana',
+              detail: 'Regla "' + r.name + '" detectó ' + affected.length + ' publicación' + (affected.length > 1 ? 'es' : '') + ' · Revisá precios y visibilidad',
+              actionLabel: 'Ver publicaciones',
+              item_id: null, item_title: null,
+            });
+          }
+        }
+      }
+
+      // Regla: Sin visitas 7 días → alerta global si hay ítems afectados
+      if (r.cond === 'no_visits' && r.action === 'notify') {
+        var affectedV = alerts.filter(a => a.category === 'sin_visitas').length;
+        if (affectedV > 0) {
+          var alreadyV = alerts.some(a => a.uid === 'rule_novisitas_' + r.id);
+          if (!alreadyV) {
+            alerts.push({
+              uid: 'rule_novisitas_' + r.id,
+              priority: 3,
+              category: 'sin_visitas',
+              icon: '👁',
+              title: '[Regla: ' + r.name + '] ' + affectedV + ' pub' + (affectedV > 1 ? 's' : '') + ' sin visitas 7d',
+              subtitle: 'Sin visitas registradas la última semana',
+              detail: 'Regla "' + r.name + '" detectó ' + affectedV + ' publicación' + (affectedV > 1 ? 'es' : '') + ' sin tráfico · Revisá SEO y palabras clave',
+              actionLabel: 'Analizar SEO',
+              item_id: null, item_title: null,
+            });
+          }
+        }
+      }
+
+      // Regla: Health < 70% → alerta global
+      if (r.cond === 'health_low' && r.action === 'notify') {
+        var affectedH = alerts.filter(a => a.category === 'quality').length;
+        if (affectedH > 0) {
+          alerts.push({
+            uid: 'rule_health_' + r.id,
+            priority: 2,
+            category: 'quality',
+            icon: '🟠',
+            title: '[Regla: ' + r.name + '] ' + affectedH + ' pub' + (affectedH > 1 ? 's' : '') + ' con calidad < 70%',
+            subtitle: 'Calidad ML por debajo del umbral recomendado',
+            detail: 'Regla "' + r.name + '" detectó ' + affectedH + ' publicación' + (affectedH > 1 ? 'es' : '') + ' · Completá atributos faltantes en cada ítem',
+            actionLabel: 'Ver calidad',
+            item_id: null, item_title: null,
+          });
+        }
+      }
+
+      // Regla: Caída de ranking → revisar snapshot KV local
+      if (r.cond === 'rank_drop' && r.action === 'notify') {
+        var prevTop  = loadPrevRanks(_RANK_TOP_KEY);
+        var prevVis  = loadPrevRanks(_RANK_VISITS_KEY);
+        var drops = [];
+        allItems.filter(i => i.status === 'active').forEach(function(i){
+          var idStr = String(i.id);
+          // Verificar caída en top ventas
+          if(prevTop[idStr] !== undefined){
+            var currentIdx = (allOrders || []).reduce(function(acc, o){
+              // índice aproximado: no recalculamos el ranking completo aquí
+              return acc;
+            }, prevTop[idStr]);
+            // Verificar si bajó (simplified: si el ítem ya no aparece en los primeros 20)
+          }
+          // Verificar caída en visitas
+          if(prevVis[idStr] !== undefined){
+            var inCache = typeof _mostVisitedCache !== 'undefined' && _mostVisitedCache;
+            if(inCache){
+              var pos = _mostVisitedCache.findIndex(function(v){ return String(v.itemId) === idStr; });
+              if(pos >= 0 && pos > prevVis[idStr] + 3) drops.push(i.title);
+            }
+          }
+        });
+        if(drops.length > 0){
+          alerts.push({
+            uid: 'rule_rankdrop_' + r.id,
+            priority: 2,
+            category: 'rank_drop',
+            icon: '📊',
+            title: '[Regla: ' + r.name + '] Caída de ranking detectada',
+            subtitle: drops.slice(0,2).join(' / ') + (drops.length > 2 ? ' y ' + (drops.length-2) + ' más' : ''),
+            detail: drops.length + ' publicación' + (drops.length > 1 ? 'es bajaron' : ' bajó') + ' de posición en visitas vs. ayer',
+            actionLabel: 'Ver más visitados',
+            item_id: null, item_title: null,
+          });
+        }
+      }
+    });
+  }
+
+  // ── Ordenar: críticas primero, luego importantes, luego info ──────
   alerts.sort((a, b) => a.priority - b.priority);
 
-  // ── Filtro activo (botones de categoria) ────────────────
+  // ── Filtro activo (botones de categoria) ─────────────────────────
   let filteredAlerts = alerts;
-  if(_alertFilter === 'stock')     filteredAlerts = alerts.filter(a => a.category === 'stock');
-  if(_alertFilter === 'paused')    filteredAlerts = alerts.filter(a => a.category === 'paused');
-  if(_alertFilter === 'quality')   filteredAlerts = alerts.filter(a => a.category === 'quality');
-  if(_alertFilter === 'preguntas') filteredAlerts = alerts.filter(a => a.category === 'preguntas');
+  if (_alertFilter === 'stock')       filteredAlerts = alerts.filter(a => a.category === 'stock');
+  if (_alertFilter === 'paused')      filteredAlerts = alerts.filter(a => a.category === 'paused');
+  if (_alertFilter === 'quality')     filteredAlerts = alerts.filter(a => a.category === 'quality');
+  if (_alertFilter === 'preguntas')   filteredAlerts = alerts.filter(a => a.category === 'preguntas');
+  if (_alertFilter === 'sin_visitas') filteredAlerts = alerts.filter(a => a.category === 'sin_visitas');
+  if (_alertFilter === 'sin_ventas')  filteredAlerts = alerts.filter(a => a.category === 'sin_ventas');
+  if (_alertFilter === 'rank_drop')   filteredAlerts = alerts.filter(a => a.category === 'rank_drop');
 
   // Actualizar pill de total
   const pillEl = document.getElementById('alm-total-pill');
   if(pillEl) pillEl.textContent = filteredAlerts.length + ' alerta' + (filteredAlerts.length !== 1 ? 's' : '') + ' · ' + alerts.length + ' total';
 
   // Actualizar label descriptivo
-  const filterLabels = {all:'Todas las alertas activas', stock:'Publicaciones con stock bajo o sin stock', paused:'Publicaciones pausadas', quality:'Publicaciones con mala calidad SEO', preguntas:'Preguntas sin responder'};
+  const filterLabels = {
+    all:         'Todas las alertas activas',
+    stock:       'Publicaciones con stock bajo o sin stock',
+    paused:      'Publicaciones pausadas',
+    quality:     'Publicaciones con calidad ML < 70%',
+    preguntas:   'Preguntas sin responder',
+    sin_visitas: 'Publicaciones sin visitas en los últimos 7 días',
+    sin_ventas:  'Publicaciones sin ventas en los últimos 7 días',
+    rank_drop:   'Publicaciones que cayeron de posición',
+  };
   const labelEl = document.getElementById('alerts-filter-label');
   if(labelEl) labelEl.textContent = filterLabels[_alertFilter] || 'Filtrá por categoría';
 
@@ -7831,8 +8067,6 @@ function refreshAlerts(){
     2: { label:'IMPORTANTE', badgeCls:'bg-amber', borderColor:'#f5a623', btnBg:'#fffbeb', btnColor:'#78350f', btnBorder:'#fde68a' },
     3: { label:'INFO',       badgeCls:'bg-blue',  borderColor:'#4f8ef7', btnBg:'#eff6ff', btnColor:'#1e40af', btnBorder:'#bfdbfe' },
   };
-
-  // ── Render cards ───────────────────────────────────────
   const cards = filteredAlerts.map(a => {
     const p = PRI[a.priority] || PRI[3];
     const safeId    = (a.item_id    || '').replace(/'/g, "\\'");
@@ -7877,11 +8111,15 @@ function alertGoTo(category, itemId, itemTitle, btnEl, uid){
   }
 
   switch(category){
-    case 'stock':     alertGoToStock(itemId, itemTitle); break;
-    case 'seo':       alertGoToSEO(itemId, itemTitle); break;
-    case 'paused':    alertGoToPaused(itemId, itemTitle, btnEl, uid); break;
-    case 'preguntas': showSection('preguntas'); break;
-    default:          showSection('publicaciones');
+    case 'stock':       alertGoToStock(itemId, itemTitle); break;
+    case 'seo':         alertGoToSEO(itemId, itemTitle); break;
+    case 'paused':      alertGoToPaused(itemId, itemTitle, btnEl, uid); break;
+    case 'preguntas':   showSection('preguntas'); break;
+    case 'quality':     itemId ? goToOptimizerWith(itemId, itemTitle) : showSection('seo'); break;
+    case 'sin_visitas': showSection('dashboard'); break;
+    case 'sin_ventas':  itemId ? alertGoToStock(itemId, itemTitle) : showSection('publicaciones'); break;
+    case 'rank_drop':   showSection('dashboard'); break;
+    default:            showSection('publicaciones');
   }
 }
 
@@ -9994,7 +10232,7 @@ function renderMostVisited(data){
   }
 
   var prevRanks = loadPrevRanks(_RANK_VISITS_KEY);
-  savePrevRanks(_RANK_VISITS_KEY, data.map(function(v){ return v.itemId; }));
+  commitRankSnapshot(_RANK_VISITS_KEY, data.map(function(v){ return v.itemId; }));
 
   el.innerHTML = data.map(function(v, idx){
     var local   = (allItems||[]).find(function(x){ return String(x.id)===v.itemId; });
@@ -10166,32 +10404,36 @@ var CAL_BASE_EVENTS = [
   {id:'k-pop',        date:'2026-04-13',cat:'pop',icon:'🇰🇷',title:'K-Pop Day (cumple BTS debut)'},
   {id:'harry-potter', date:'2026-09-01',cat:'pop',icon:'⚡',title:'Vuelta a Hogwarts'},
   // ── OPERATIVO ────────────────────────────────────────────────────────
-  {id:'ins-01',date:'2026-01-05',cat:'operativo',icon:'📦',title:'Compra mayorista insumos'},
-  {id:'ins-02',date:'2026-02-05',cat:'operativo',icon:'📦',title:'Compra mayorista insumos'},
-  {id:'ins-03',date:'2026-03-05',cat:'operativo',icon:'📦',title:'Compra mayorista insumos'},
-  {id:'ins-04',date:'2026-04-05',cat:'operativo',icon:'📦',title:'Compra mayorista insumos'},
-  {id:'ins-05',date:'2026-05-05',cat:'operativo',icon:'📦',title:'Compra mayorista insumos'},
-  {id:'ins-06',date:'2026-06-05',cat:'operativo',icon:'📦',title:'Compra mayorista insumos'},
-  {id:'ins-07',date:'2026-07-05',cat:'operativo',icon:'📦',title:'Compra mayorista insumos'},
-  {id:'ins-08',date:'2026-08-05',cat:'operativo',icon:'📦',title:'Compra mayorista insumos'},
-  {id:'ins-09',date:'2026-09-05',cat:'operativo',icon:'📦',title:'Compra mayorista insumos'},
-  {id:'ins-10',date:'2026-10-05',cat:'operativo',icon:'📦',title:'Compra mayorista insumos'},
-  {id:'ins-11',date:'2026-11-05',cat:'operativo',icon:'📦',title:'Compra mayorista insumos'},
-  {id:'ins-12',date:'2026-12-05',cat:'operativo',icon:'📦',title:'Compra mayorista insumos'},
-  {id:'gan-01',date:'2026-01-15',cat:'operativo',icon:'💰',title:'Cálculo ganancia (quincena)'},
-  {id:'gan-02',date:'2026-02-15',cat:'operativo',icon:'💰',title:'Cálculo ganancia (quincena)'},
-  {id:'gan-03',date:'2026-03-15',cat:'operativo',icon:'💰',title:'Cálculo ganancia (quincena)'},
-  {id:'gan-04',date:'2026-04-15',cat:'operativo',icon:'💰',title:'Cálculo ganancia (quincena)'},
-  {id:'gan-05',date:'2026-05-15',cat:'operativo',icon:'💰',title:'Cálculo ganancia (quincena)'},
-  {id:'gan-06',date:'2026-06-15',cat:'operativo',icon:'💰',title:'Cálculo ganancia (quincena)'},
-  {id:'gan-07',date:'2026-07-15',cat:'operativo',icon:'💰',title:'Cálculo ganancia (quincena)'},
-  {id:'gan-08',date:'2026-08-15',cat:'operativo',icon:'💰',title:'Cálculo ganancia (quincena)'},
-  {id:'gan-09',date:'2026-09-15',cat:'operativo',icon:'💰',title:'Cálculo ganancia (quincena)'},
-  {id:'gan-10',date:'2026-10-15',cat:'operativo',icon:'💰',title:'Cálculo ganancia (quincena)'},
-  {id:'gan-11',date:'2026-11-15',cat:'operativo',icon:'💰',title:'Cálculo ganancia (quincena)'},
-  {id:'gan-12',date:'2026-12-15',cat:'operativo',icon:'💰',title:'Cálculo ganancia (quincena)'},
   {id:'host-06',date:'2026-06-01',cat:'operativo',icon:'🌐',title:'Pago Hosting Web'},
   {id:'host-12',date:'2026-12-01',cat:'operativo',icon:'🌐',title:'Pago Hosting Web'},
+  // ── DÍAS INTERNACIONALES Y MUNDIALES (relevantes para drinkware y nichos) ──
+  {id:'cafe-world',   date:'2026-10-01',cat:'ventas',  icon:'☕',title:'Día Mundial del Café'},
+  {id:'te-world',     date:'2026-12-15',cat:'ventas',  icon:'🍵',title:'Día Internacional del Té'},
+  {id:'chocolate',    date:'2026-07-07',cat:'ventas',  icon:'🍫',title:'Día Mundial del Chocolate'},
+  {id:'mate-dia',     date:'2026-11-30',cat:'ventas',  icon:'🧉',title:'Día Nacional del Mate (Arg)'},
+  {id:'cerveza-int',  date:'2026-08-07',cat:'ventas',  icon:'🍺',title:'Día Internacional de la Cerveza'},
+  {id:'cocteleria',   date:'2026-07-24',cat:'ventas',  icon:'🍹',title:'Día Internacional del Cóctel'},
+  {id:'agua',         date:'2026-03-22',cat:'ventas',  icon:'💧',title:'Día Mundial del Agua'},
+  {id:'medio-amb',    date:'2026-06-05',cat:'ventas',  icon:'🌎',title:'Día Mundial del Medioambiente'},
+  {id:'tierra',       date:'2026-04-22',cat:'ventas',  icon:'🌱',title:'Día de la Tierra'},
+  {id:'mascota',      date:'2026-04-11',cat:'ventas',  icon:'🐾',title:'Día Mundial del Animal de Compañía'},
+  {id:'perro-int',    date:'2026-07-31',cat:'ventas',  icon:'🐶',title:'Día Mundial del Perro'},
+  {id:'gato-int',     date:'2026-08-08',cat:'ventas',  icon:'🐱',title:'Día Internacional del Gato'},
+  {id:'libro',        date:'2026-04-23',cat:'ventas',  icon:'📚',title:'Día Mundial del Libro'},
+  {id:'disenio',      date:'2026-04-27',cat:'ventas',  icon:'🎨',title:'Día Mundial del Diseño Gráfico'},
+  {id:'arte',         date:'2026-04-15',cat:'pop',     icon:'🖼️',title:'Día Mundial del Arte'},
+  {id:'fotog-int',    date:'2026-08-19',cat:'pop',     icon:'📷',title:'Día Mundial de la Fotografía'},
+  {id:'musica-int',   date:'2026-06-21',cat:'pop',     icon:'🎵',title:'Día Mundial de la Música'},
+  {id:'cine',         date:'2026-10-17',cat:'pop',     icon:'🎬',title:'Día Mundial del Cine'},
+  {id:'pizza-int',    date:'2026-01-09',cat:'pop',     icon:'🍕',title:'Día Mundial de la Pizza'},
+  {id:'ramen',        date:'2026-04-04',cat:'pop',     icon:'🍜',title:'Día Nacional del Ramen'},
+  {id:'emoji-int',    date:'2026-07-17',cat:'pop',     icon:'😂',title:'Día Mundial del Emoji'},
+  {id:'nerd-pride',   date:'2026-05-25',cat:'pop',     icon:'🤓',title:'Nerd Pride Day (Día del Orgullo Friki)'},
+  {id:'internet',     date:'2026-10-29',cat:'pop',     icon:'🌐',title:'Día Mundial de Internet'},
+  {id:'reciclaje',    date:'2026-05-17',cat:'ventas',  icon:'♻️',title:'Día Mundial del Reciclaje'},
+  {id:'regalo',       date:'2026-12-09',cat:'ventas',  icon:'🎁',title:'Día Internacional del Regalo'},
+  {id:'abuela',       date:'2026-10-26',cat:'ventas',  icon:'👵',title:'Día Internacional de los Abuelos'},
+  {id:'cumple-ml',    date:'2026-08-02',cat:'ventas',  icon:'🛒',title:'Cumpleaños MercadoLibre (Ofertas)'},
 ];
 
 var CAL_LS_KEY  = 'impala_cal_custom';
@@ -10824,6 +11066,57 @@ function renderMsgPacks(packs,el){
       +'</div></div>';
   }).join('')||'<div class="alert a-success">✅ Sin mensajes</div>';
 }
+// ══════════════════════════════════════════════════════════════════════
+// POLLING DE MENSAJES POST-VENTA — verifica cada 90 s si hay mensajes
+// nuevos sin leer y dispara toast + badge aunque el usuario no esté
+// en la sección de mensajes.
+// ══════════════════════════════════════════════════════════════════════
+var _msgPollTimer    = null;
+var _msgLastUnread   = -1; // -1 = primera vez (no notificar)
+var _MSG_POLL_MS     = 90 * 1000; // 90 segundos
+
+async function _pollMessages(){
+  if(!userId || !token) return;
+  try{
+    var r = await mlGet('/messages/packs?role=seller&limit=50&tag=post_sale');
+    var packs = (r && (r.data || r.results)) || [];
+    var unread = packs.filter(function(p){
+      return p.status === 'unread' || p.status === 'UNREAD';
+    }).length;
+
+    // Actualizar badge del sidebar siempre
+    var nbEl = document.getElementById('nb-msg');
+    if(nbEl){ nbEl.textContent = unread; nbEl.style.display = unread > 0 ? '' : 'none'; }
+
+    // Toastar solo si aumentaron los mensajes sin leer desde la última vez
+    if(_msgLastUnread >= 0 && unread > _msgLastUnread){
+      var diff = unread - _msgLastUnread;
+      showToast(
+        '💬 ' + diff + ' mensaje' + (diff > 1 ? 's' : '') + ' nuevo' + (diff > 1 ? 's' : '') + ' sin leer',
+        'info',
+        6000
+      );
+      // Reproducir sonido de alerta si está disponible
+      if(typeof playNotifSound === 'function') playNotifSound('message');
+    }
+    _msgLastUnread = unread;
+  }catch(e){
+    console.warn('[MsgPoll] Error verificando mensajes:', e.message);
+  }
+}
+
+function startMessagePolling(){
+  if(_msgPollTimer) clearInterval(_msgPollTimer);
+  _msgLastUnread = -1; // reset para no notificar en el primer ciclo
+  _pollMessages(); // ejecutar inmediatamente para cargar el badge
+  _msgPollTimer = setInterval(_pollMessages, _MSG_POLL_MS);
+  console.log('[MsgPoll] Polling iniciado cada', _MSG_POLL_MS/1000, 's');
+}
+
+function stopMessagePolling(){
+  if(_msgPollTimer){ clearInterval(_msgPollTimer); _msgPollTimer = null; }
+}
+
 // ══════════════════════════════════════════════════════════════════════
 // MÓDULO: PRECIOS AUTOMÁTICOS (REPRICING DINÁMICO)
 // Basado en competencia real via API de Mercado Libre
