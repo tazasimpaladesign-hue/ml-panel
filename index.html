@@ -2249,7 +2249,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <button class="btn btn-ghost btn-sm"   id="af-preguntas"    onclick="setAlertFilter('preguntas',this)">💬 Preguntas <span id="afc-preguntas"    class="afc-badge"></span></button>
     <button class="btn btn-ghost btn-sm"   id="af-sinvis"       onclick="setAlertFilter('sinvis',this)">🤓 Poca Visibilidad <span id="afc-sinvis"      class="afc-badge"></span></button>
     <button class="btn btn-ghost btn-sm"   id="af-fuga-conv"    onclick="setAlertFilter('fuga_conv',this)">⚠️ Fuga Conv. <span id="afc-fuga-conv"    class="afc-badge"></span></button>
-    <button class="btn btn-ghost btn-sm"   id="af-mas-vendidos" onclick="setAlertFilter('mas_vendidos',this)">🏆 Más Vendidos <span id="afc-mas-vendidos" class="afc-badge"></span></button>
+    <button class="btn btn-ghost btn-sm"   id="af-mas-vendidos" onclick="setAlertFilter('mas_vendidos',this)">🏆 Top 50 (30d) <span id="afc-mas-vendidos" class="afc-badge"></span></button>
     <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
       <span id="alm-total-pill" style="font-size:11px;color:var(--text3)"></span>
       <button class="btn btn-ghost btn-sm" onclick="refreshAlerts()">&#8635; Actualizar</button>
@@ -3854,8 +3854,36 @@ function renderSmartAlerts(){
       title:`${pocaVisItems.length} publicación${pocaVisItems.length>1?'es':''} con Poca Visibilidad`,
       desc:'Estás perdiendo impresiones. Optimizá el título para atraer más clics.',
       action:'Ver alertas ->',fn:"showSection('alertas');setTimeout(()=>setAlertFilter('sinvis',document.getElementById('af-sinvis')),350)",sev:2});
+
+  // ── Fuga de Conversión (visitas > 30, ventas 7d = 0) ────
+  const fugaConvItems = allItems.filter(i => {
+    if(i.status !== 'active' || (i.available_quantity||0) === 0) return false;
+    const m = itemMetrics[i.id];
+    const v7 = (m && typeof m.visits === 'number') ? m.visits
+             : (typeof i.visits_7d === 'number') ? i.visits_7d : null;
+    const s7 = (m && typeof m.sales === 'number') ? m.sales : null;
+    return v7 !== null && v7 > 30 && s7 !== null && s7 === 0;
+  });
+  if(fugaConvItems.length > 0)
+    alerts.push({icon:'⚠️',color:'#92400e',bg:'#fffbeb',bdr:'#fde68a',
+      title:`${fugaConvItems.length} publicación${fugaConvItems.length>1?'es':''} con Fuga de Conversión`,
+      desc:'Reciben tráfico pero no venden. Revisá precio, fotos y descripción vs. competidores.',
+      action:'Ver alertas ->',fn:"showSection('alertas');setTimeout(()=>setAlertFilter('fuga_conv',document.getElementById('af-fuga-conv')),350)",sev:2});
+
+  // ── Mala Calidad ML (health < 70%) ───────────────────────
+  const malaCalidadItems = allItems.filter(i => {
+    if(i.status !== 'active') return false;
+    const hVal = (typeof i.health === 'number') ? i.health
+               : (typeof i.qualityScore === 'number') ? i.qualityScore / 100 : null;
+    return hVal !== null && hVal < 0.70;
+  });
+  if(malaCalidadItems.length > 0)
+    alerts.push({icon:'🔴',color:'#991b1b',bg:'#fef2f2',bdr:'#fecaca',
+      title:`${malaCalidadItems.length} publicación${malaCalidadItems.length>1?'es':''} con Mala Calidad`,
+      desc:'La calidad ML < 70% penaliza el posicionamiento. Completá atributos e imágenes.',
+      action:'Ver alertas ->',fn:"showSection('alertas');setTimeout(()=>setAlertFilter('quality',document.getElementById('af-quality')),350)",sev:2});
   if(!alerts.length){el.innerHTML='';return;}
-  const sorted=[...alerts.filter(a=>a.sev===1),...alerts.filter(a=>a.sev===2)].slice(0,6);
+  const sorted=[...alerts.filter(a=>a.sev===1),...alerts.filter(a=>a.sev===2)].slice(0,8);
   el.innerHTML=`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-bottom:14px">
     ${sorted.map(a=>`
       <div style="background:${a.bg};border:1px solid ${a.bdr};border-left:3px solid ${a.color};border-radius:var(--rs);padding:11px 13px;display:flex;flex-direction:column;gap:5px">
@@ -8180,12 +8208,27 @@ function refreshAlerts(){
   alerts.forEach(a => { catCount[a.category] = (catCount[a.category]||0) + 1; });
   catCount['all'] = alerts.length;
 
-  // "Más Vendidos": top 20 publicaciones activas por ventas (no se generan alertas,
-  // se construyen en el momento del filtro)
-  const masVendidosItems = [...allItems]
-    .filter(i => i.status === 'active')
-    .sort((a,b) => (b.sold_quantity||0) - (a.sold_quantity||0))
-    .slice(0, 20);
+  // "Más Vendidos 30d": top 50 publicaciones por ventas en últimos 30 días
+  // Misma lógica que el módulo "Top Publicaciones" del dashboard
+  const _mv30cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const _mv30salesMap = {};
+  allOrders.filter(o =>
+    ['paid','confirmed','delivered','shipped'].includes(o.status) &&
+    new Date(o.date_created||0).getTime() >= _mv30cutoff
+  ).forEach(o => {
+    (o.order_items||[]).forEach(oi => {
+      const id = oi.item?.id; if(!id) return;
+      _mv30salesMap[id] = (_mv30salesMap[id]||0) + (oi.quantity||1);
+    });
+  });
+  const masVendidosItems = Object.entries(_mv30salesMap)
+    .sort((a,b) => b[1]-a[1])
+    .slice(0, 50)
+    .map(([id, qty]) => {
+      const item = allItems.find(x => String(x.id) === String(id));
+      return item ? { ...item, _sales30d: qty } : null;
+    })
+    .filter(Boolean);
   catCount['mas_vendidos'] = masVendidosItems.length;
 
   // Actualizar texto de cada badge en los botones
@@ -8225,15 +8268,15 @@ function refreshAlerts(){
   if (_alertFilter === 'sinvis')       filteredAlerts = alerts.filter(a => a.category === 'sinvis');
   if (_alertFilter === 'fuga_conv')    filteredAlerts = alerts.filter(a => a.category === 'fuga_conv');
   if (_alertFilter === 'mas_vendidos') {
-    // Generar "alertas" sintéticas para cada uno de los top 20
+    // Generar "alertas" sintéticas para cada uno de los top 50 (últimos 30 días)
     filteredAlerts = masVendidosItems.map(i => ({
       uid:         'masv_' + i.id,
       priority:    3,
       category:    'mas_vendidos',
       icon:        '🏆',
-      title:       i.sold_quantity + ' ventas totales',
+      title:       (i._sales30d||0) + ' ventas en 30 días',
       subtitle:    (i.title||'').slice(0, 60),
-      detail:      'Publicación estrella. Activá publicidad para multiplicar su alcance.',
+      detail:      'Top publicación del último mes. Activá publicidad para multiplicar su alcance y mantener la posición.',
       actionLabel: 'Ir a Publicidad',
       item_id:     i.id,
       item_title:  i.title,
@@ -8278,7 +8321,7 @@ function refreshAlerts(){
     rank_drop:    'Publicaciones que cayeron de posición',
     sinvis:       'Publicaciones con 1 a 5 visitas en 7 días (Poca Visibilidad)',
     fuga_conv:    'Publicaciones con tráfico > 30 visitas pero 0 ventas en 7 días',
-    mas_vendidos: 'Top 20 publicaciones con más ventas históricas',
+    mas_vendidos: 'Top 50 publicaciones con más ventas en los últimos 30 días',
   };
   const labelEl = document.getElementById('alerts-filter-label');
   if(labelEl) labelEl.textContent = filterLabels[_alertFilter] || 'Filtrá por categoría';
@@ -8390,14 +8433,14 @@ function alertGoTo(category, itemId, itemTitle, btnEl, uid){
     case 'mas_vendidos':
       window.open('https://www.mercadolibre.com.ar/publicidad/resumen-anunciante?from=seller_central&validate_user=true#from=menu_mkt','_blank','noopener');
       break;
-    // Acción directa: abrir editor ML en nueva pestaña
+    // Acción directa: abrir editor ML en nueva pestaña (mismo link que SEO/Publicaciones)
     case 'quality':
     case 'sin_visitas':
     case 'sin_ventas':
     case 'sinvis':
     case 'fuga_conv':
       if(itemId){
-        window.open('https://postventa.mercadolibre.com.ar/editItem?item_id=' + itemId, '_blank', 'noopener');
+        window.open('https://www.mercadolibre.com.ar/publicaciones/' + itemId + '/modificar', '_blank', 'noopener');
       } else {
         showSection('publicaciones');
       }
@@ -11197,6 +11240,18 @@ async function renderMensajes(){
       notifs.push({
         _source: 'message',
         _orderId: orderId,
+        _thumb:  (function(){
+          // Buscar thumbnail via orderId en allOrders
+          if(!orderId) return '';
+          const relOrder = allOrders.find(function(o){ return String(o.id) === String(orderId); });
+          if(relOrder){
+            const fi = relOrder.order_items && relOrder.order_items[0] && relOrder.order_items[0].item;
+            const fid = fi && fi.id ? String(fi.id) : null;
+            const loc = fid ? allItems.find(function(x){ return String(x.id) === fid; }) : null;
+            return (loc && loc.thumbnail) || (fid && _thumbCache[fid]) || (fi && fi.thumbnail) || '';
+          }
+          return '';
+        })(),
         is_read:  !isUnread,
         subject:  p.subject || 'Mensaje post-venta',
         date:     (p.last_message && p.last_message.date) || p.date_created || '',
@@ -11216,14 +11271,20 @@ async function renderMensajes(){
     const orders = ro.results||[];
     orders.forEach(function(o){
       // Solo agregar si no viene ya de mensajes
+      const firstItem = o.order_items && o.order_items[0] && o.order_items[0].item;
+      const itemId    = firstItem && firstItem.id ? String(firstItem.id) : null;
+      const localItem = itemId ? allItems.find(x => String(x.id) === itemId) : null;
+      const thumb     = (localItem && localItem.thumbnail) || (itemId && _thumbCache[itemId]) || (firstItem && firstItem.thumbnail) || '';
       notifs.push({
-        _source: 'order',
+        _source:  'order',
         _orderId: o.id,
-        is_read: true,
-        subject: 'Nueva venta: ' + ((o.order_items&&o.order_items[0]&&o.order_items[0].item&&o.order_items[0].item.title)||'—'),
-        date:    o.date_created||'',
-        preview: '$' + (o.total_amount||0).toLocaleString('es-AR') + ' — ' + (o.status||''),
-        from:    o.buyer&&o.buyer.nickname ? o.buyer.nickname : '',
+        _itemId:  itemId,
+        _thumb:   thumb,
+        is_read:  true,
+        subject:  'Nueva venta: ' + ((firstItem && firstItem.title)||'—'),
+        date:     o.date_created||'',
+        preview:  '$' + (o.total_amount||0).toLocaleString('es-AR') + ' — ' + (o.status||''),
+        from:     o.buyer&&o.buyer.nickname ? o.buyer.nickname : '',
       });
     });
     console.log('[Notif] Ordenes recientes:', orders.length);
@@ -11300,6 +11361,8 @@ function renderNotifList(notifs, el){
 
     return '<div style="padding:12px 0;border-bottom:1px solid var(--border)">'
       +'<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">'
+      // thumbnail miniatura si existe
+      +(n._thumb ? '<img src="'+n._thumb+'" loading="lazy" style="width:42px;height:42px;object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border);margin-top:2px" onerror="this.style.display=\'none\'">' : '')
       +'<div style="flex:1;min-width:0">'
       +'<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap">'
       +badge
@@ -11307,6 +11370,7 @@ function renderNotifList(notifs, el){
       +'</div>'
       +'<div style="font-size:11px;color:var(--text3);margin-bottom:4px">'
       +(n.participants||n.buyer?.nickname?n.participants||n.buyer?.nickname+' · ':'')
+      +(n.from ? '<span style="font-weight:500">'+n.from+'</span> · ' : '')
       +dateStr
       +(resourceId?' <span style="opacity:.4">· #'+resourceId+'</span>':'')
       +'</div>'
