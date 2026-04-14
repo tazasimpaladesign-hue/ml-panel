@@ -3456,8 +3456,30 @@ const _ORDERS_LS_KEY  = 'mlp_orders_v1';
 function _saveDataCache(){
   try{
     const ts = Date.now();
-    localStorage.setItem(_ITEMS_LS_KEY,  JSON.stringify({ ts, data: allItems  }));
-    localStorage.setItem(_ORDERS_LS_KEY, JSON.stringify({ ts, data: allOrders }));
+    // Items: solo campos esenciales para renderizado rápido (evitar exceder 5MB de localStorage)
+    const itemsSlim = allItems.map(i => ({
+      id: i.id, title: i.title, price: i.price, status: i.status,
+      available_quantity: i.available_quantity, sold_quantity: i.sold_quantity,
+      thumbnail: i.thumbnail, category_id: i.category_id,
+      listing_type_id: i.listing_type_id, health: i.health,
+      seller_custom_field: i.seller_custom_field, tags: i.tags,
+    }));
+    // Órdenes: solo últimos 90 días (el dashboard usa 30 días máximo)
+    const cutoff90 = Date.now() - 90 * 24 * 60 * 60 * 1000;
+    const ordersSlim = allOrders
+      .filter(o => !o.date_created || new Date(o.date_created).getTime() >= cutoff90)
+      .slice(0, 500) // máximo 500 órdenes para no saturar
+      .map(o => ({
+        id: o.id, status: o.status, date_created: o.date_created,
+        total_amount: o.total_amount,
+        buyer: o.buyer ? { nickname: o.buyer.nickname } : undefined,
+        order_items: (o.order_items||[]).map(oi => ({
+          quantity: oi.quantity,
+          item: oi.item ? { id: oi.item.id, title: oi.item.title, thumbnail: oi.item.thumbnail } : undefined,
+        })),
+      }));
+    localStorage.setItem(_ITEMS_LS_KEY,  JSON.stringify({ ts, data: itemsSlim  }));
+    localStorage.setItem(_ORDERS_LS_KEY, JSON.stringify({ ts, data: ordersSlim }));
   }catch(e){ console.warn('[DataCache] localStorage lleno:', e.message); }
 }
 
@@ -8613,12 +8635,17 @@ function refreshAlerts(){
     return;
   }
 
-  // ── Barra de resumen ───────────────────────────────────
+  // ── Barra de resumen — conteo del filtro activo ────────
+  const FILTER_LABELS_SHORT = {
+    all:'todas', stock:'stock bajo', paused:'pausadas', quality:'mala calidad',
+    sin_visitas:'sin visitas', sin_ventas:'sin ventas', preguntas:'preguntas',
+    sinvis:'poca visibilidad', fuga_conv:'fuga conversión',
+    mas_vendidos:'más vendidos (30d)', rank_drop:'caída ranking',
+  };
   const summaryBar = `
     <div class="alert-summary-bar">
-      ${critCount ? `<div class="alert-count-pill alert-count-critical">⛔ ${critCount} crítica${critCount > 1 ? 's' : ''}</div>` : ''}
-      ${warnCount ? `<div class="alert-count-pill alert-count-warn">⚠️ ${warnCount} importante${warnCount > 1 ? 's' : ''}</div>` : ''}
-      <div style="margin-left:auto;font-size:11px;color:var(--text3)">${alerts.length} alerta${alerts.length > 1 ? 's' : ''} en total · ordenadas por prioridad</div>
+      <div style="font-size:13px;font-weight:600;color:var(--text2)">${filteredAlerts.length} publicación${filteredAlerts.length !== 1 ? 'es' : ''} &middot; <span style="color:var(--text3);font-weight:400">${FILTER_LABELS_SHORT[_alertFilter]||_alertFilter}</span></div>
+      <div style="margin-left:auto;font-size:11px;color:var(--text3)">${alerts.length} alertas en total</div>
     </div>`;
 
   // ── Configuración visual por prioridad ────────────────
@@ -8631,10 +8658,13 @@ function refreshAlerts(){
     const p = PRI[a.priority] || PRI[3];
     const safeId    = (a.item_id    || '').replace(/'/g, "\\'");
     const safeTitle = (a.item_title || '').replace(/'/g, "\\'");
-    // Botón: si tiene _adUrl (Más Vendidos) abre link de publicidad directamente
+    // Botón(es): si tiene _adUrl (Más Vendidos) → dos botones apilados
     const btnOnclick = a._adUrl
       ? `window.open('${a._adUrl}','_blank','noopener')`
       : `alertGoTo('${a.category}','${safeId}','${safeTitle}',this,'${a.uid}')`;
+    const extraBtn = a._adUrl && safeId
+      ? `<button class="btn btn-sm" onclick="window.open('https://www.mercadolibre.com.ar/publicaciones/${safeId}/modificar','_blank','noopener')" style="flex-shrink:0;background:#fffbeb;color:#78350f;border:1px solid #fde68a;font-weight:600;white-space:nowrap;margin-top:4px">✏️ Editar en ML -></button>`
+      : '';
     return `
       <div class="alert-action-card priority-${a.priority === 1 ? 'critical' : a.priority === 2 ? 'warn' : 'info'}"
            id="alertcard-${a.uid}"
@@ -8651,11 +8681,14 @@ function refreshAlerts(){
           <div class="alert-detail">${a.detail}</div>
           </div>
         </div>
-        <button class="btn btn-sm"
-                onclick="${btnOnclick}"
-                style="flex-shrink:0;background:${p.btnBg};color:${p.btnColor};border:1px solid ${p.btnBorder};font-weight:600;white-space:nowrap">
-          ${a.actionLabel} ->
-        </button>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:0;flex-shrink:0">
+          <button class="btn btn-sm"
+                  onclick="${btnOnclick}"
+                  style="background:${p.btnBg};color:${p.btnColor};border:1px solid ${p.btnBorder};font-weight:600;white-space:nowrap">
+            ${a.actionLabel} ->
+          </button>
+          ${extraBtn}
+        </div>
       </div>`;
   }).join('');
 
@@ -10854,6 +10887,26 @@ function renderMostVisited(data){
       +'<span class="badge '+(status==='active'?'bg-green':'bg-amber')+'" style="flex-shrink:0">'+(status==='active'?'●':'⏸')+'</span>'
       +'</div>';
   }).join('');
+
+  // ── Timestamp de antigüedad (análogo a SEO Analizador) ──────────────────
+  try{
+    var mvRaw = localStorage.getItem(_mvCacheKey);
+    if(mvRaw){
+      var mvEntry = JSON.parse(mvRaw);
+      if(mvEntry && mvEntry.ts){
+        var mvMins = Math.round((Date.now() - mvEntry.ts) / 60000);
+        var mvLbl  = mvMins < 2 ? 'recién' : mvMins < 60 ? 'hace ' + mvMins + ' min' : 'hace ' + Math.round(mvMins/60) + 'h';
+        var mvTs   = document.getElementById('mv-ts-label');
+        if(!mvTs){
+          mvTs = document.createElement('span');
+          mvTs.id = 'mv-ts-label';
+          mvTs.style.cssText = 'font-size:9px;color:var(--text4);display:block;margin-top:4px;text-align:right;padding-right:4px;';
+          if(el.parentNode) el.parentNode.appendChild(mvTs);
+        }
+        mvTs.textContent = '⏱ ' + mvLbl;
+      }
+    }
+  }catch(e){}
 }
 
 function updateLast50(orders){
