@@ -644,6 +644,258 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 </head>
 <body>
 
+<!-- ═══════════════════════ WHATSAPP BUSINESS ═══════════════════════ -->
+<div id="section-whatsapp" class="section fade-in">
+  <!-- Estado de conexión -->
+  <div class="mgt mgt-3 mb">
+    <div class="mc c-green">
+      <div class="mc-label">Estado</div>
+      <div class="mc-val" id="wa-status-val" style="font-size:14px">No conectado</div>
+      <div class="mc-sub" id="wa-status-sub">Configurá el token en el Worker</div>
+    </div>
+    <div class="mc c-blue">
+      <div class="mc-label">Mensajes enviados (30d)</div>
+      <div class="mc-val" id="wa-sent-val">—</div>
+      <div class="mc-sub">Desde el log de KV</div>
+    </div>
+    <div class="mc c-amber">
+      <div class="mc-label">Último envío</div>
+      <div class="mc-val" id="wa-last-val" style="font-size:13px">—</div>
+      <div class="mc-sub" id="wa-last-sub"></div>
+    </div>
+  </div>
+
+  <!-- Config -->
+  <div class="card mb">
+    <div class="card-hd">
+      <div><div class="card-title">🔧 Configuración</div><div class="card-sub">Credenciales y número de destino. Se guardan en variables de entorno del Worker.</div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px">
+      <div>
+        <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Número de destino (tu móvil)</label>
+        <input type="text" id="wa-phone" placeholder="Ej: 5492617699215" style="font-size:13px" oninput="waSaveDraft()">
+        <div style="font-size:10px;color:var(--text3);margin-top:3px">Formato internacional sin + ni espacios</div>
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Phone Number ID (Meta)</label>
+        <input type="text" id="wa-phone-id" placeholder="Desde Meta Business Suite" style="font-size:13px" oninput="waSaveDraft()">
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Access Token permanente</label>
+        <input type="password" id="wa-token" placeholder="EAAxx..." style="font-size:13px" oninput="waSaveDraft()">
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Webhook Verify Token</label>
+        <input type="text" id="wa-verify-token" placeholder="Tu token secreto de verificación" style="font-size:13px" oninput="waSaveDraft()">
+      </div>
+    </div>
+    <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <button class="btn btn-primary btn-sm" onclick="waSaveConfig()">💾 Guardar en KV</button>
+      <button class="btn btn-ghost btn-sm" onclick="waTestSend()">📤 Enviar mensaje de prueba</button>
+      <span id="wa-config-status" style="font-size:12px;color:var(--text3)"></span>
+    </div>
+    <div class="alert a-info" style="margin-top:14px;font-size:12px">
+      <strong>Cómo configurar:</strong> Creá una app en <a href="https://developers.facebook.com" target="_blank" style="color:var(--accent)">Meta for Developers</a> → WhatsApp → API Setup. Copiá el Phone Number ID y generá un Access Token permanente. El Webhook URL a registrar es: <code style="background:var(--bg4);padding:2px 6px;border-radius:4px;font-size:11px">${typeof WORKER !== 'undefined' ? WORKER : '[WORKER_URL]'}/webhook/whatsapp</code>
+    </div>
+  </div>
+
+  <!-- Notificaciones automáticas -->
+  <div class="card mb">
+    <div class="card-hd"><div class="card-title">🤖 Notificaciones automáticas</div><div class="card-sub">Eventos de ML que disparan un mensaje de WhatsApp a tu móvil</div></div>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-top:14px">
+      <!-- Nueva venta -->
+      <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:12px 14px;display:flex;align-items:flex-start;gap:12px">
+        <div style="font-size:20px;line-height:1">🛍️</div>
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:600;color:var(--text)">Nueva venta</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px">Notificación instantánea cuando una orden queda pagada</div>
+          <div style="margin-top:8px">
+            <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:3px">Mensaje (usá {producto}, {precio}, {comprador})</label>
+            <textarea id="wa-tmpl-venta" rows="2" style="font-size:12px;width:100%;resize:vertical">🛍️ Nueva venta en ML!\n{producto}\n💰 ${precio}\n👤 {comprador}</textarea>
+          </div>
+        </div>
+        <label class="toggle-switch" style="flex-shrink:0;margin-top:2px">
+          <input type="checkbox" id="wa-ev-venta" checked onchange="waSaveDraft()">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <!-- Nueva pregunta -->
+      <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:12px 14px;display:flex;align-items:flex-start;gap:12px">
+        <div style="font-size:20px;line-height:1">💬</div>
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:600;color:var(--text)">Nueva pregunta</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px">Alerta al móvil cuando llega una pregunta sin responder</div>
+          <div style="margin-top:8px">
+            <textarea id="wa-tmpl-pregunta" rows="2" style="font-size:12px;width:100%;resize:vertical">❓ Nueva pregunta en ML!\n{pregunta}\nPublicación: {producto}</textarea>
+          </div>
+        </div>
+        <label class="toggle-switch" style="flex-shrink:0;margin-top:2px">
+          <input type="checkbox" id="wa-ev-pregunta" checked onchange="waSaveDraft()">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <!-- Estado de envío -->
+      <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:12px 14px;display:flex;align-items:flex-start;gap:12px">
+        <div style="font-size:20px;line-height:1">📦</div>
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:600;color:var(--text)">Envío despachado</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px">Envía link de seguimiento de Correo Argentino / Paq.ar automáticamente al despacharse</div>
+          <div style="margin-top:8px">
+            <textarea id="wa-tmpl-envio" rows="2" style="font-size:12px;width:100%;resize:vertical">📦 Tu pedido fue despachado!\nProducto: {producto}\n🔍 Seguilo en: {tracking_url}</textarea>
+          </div>
+        </div>
+        <label class="toggle-switch" style="flex-shrink:0;margin-top:2px">
+          <input type="checkbox" id="wa-ev-envio" checked onchange="waSaveDraft()">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+    <div style="margin-top:12px">
+      <button class="btn btn-primary btn-sm" onclick="waSaveConfig()">💾 Guardar plantillas</button>
+    </div>
+  </div>
+
+  <!-- Log de envíos -->
+  <div class="card">
+    <div class="card-hd">
+      <div><div class="card-title">📋 Log de envíos</div><div class="card-sub">Últimos mensajes enviados via WhatsApp API (guardados en KV)</div></div>
+      <button class="btn btn-ghost btn-sm" onclick="waLoadLog()">↻ Actualizar</button>
+    </div>
+    <div id="wa-log-list" style="margin-top:12px">
+      <div style="color:var(--text3);font-size:12.5px;padding:16px 0;text-align:center">Cargá el log para ver el historial de envíos.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════ GOOGLE TOOLS ═══════════════════════ -->
+<div id="section-google-tools" class="section fade-in">
+  <!-- Estado de conexión -->
+  <div class="mgt mgt-3 mb">
+    <div class="mc c-blue">
+      <div class="mc-label">Google Analytics 4</div>
+      <div class="mc-val" id="ga4-status-val" style="font-size:13px">No conectado</div>
+      <div class="mc-sub">OAuth 2.0 requerido</div>
+    </div>
+    <div class="mc c-green">
+      <div class="mc-label">Search Console</div>
+      <div class="mc-val" id="gsc-status-val" style="font-size:13px">No conectado</div>
+      <div class="mc-sub">Mismas credenciales OAuth</div>
+    </div>
+    <div class="mc c-purple">
+      <div class="mc-label">Keywords trackeadas</div>
+      <div class="mc-val" id="gsc-kw-count">—</div>
+      <div class="mc-sub">Desde último fetch</div>
+    </div>
+  </div>
+
+  <!-- Config OAuth -->
+  <div class="card mb">
+    <div class="card-hd"><div class="card-title">🔐 Autenticación Google (OAuth 2.0)</div><div class="card-sub">Configurá una vez — el token se renueva automáticamente via Refresh Token</div></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px">
+      <div>
+        <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Client ID</label>
+        <input type="text" id="goog-client-id" placeholder="xxx.apps.googleusercontent.com" style="font-size:12px" oninput="googSaveDraft()">
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Client Secret</label>
+        <input type="password" id="goog-client-secret" placeholder="GOCSPX-..." style="font-size:12px" oninput="googSaveDraft()">
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Refresh Token</label>
+        <input type="password" id="goog-refresh-token" placeholder="1//04..." style="font-size:12px" oninput="googSaveDraft()">
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">GA4 Property ID</label>
+        <input type="text" id="goog-ga4-id" placeholder="Ej: 123456789" style="font-size:12px" oninput="googSaveDraft()">
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Search Console Site URL</label>
+        <input type="text" id="goog-gsc-url" placeholder="https://tiendaimpala.com.ar/" style="font-size:12px" oninput="googSaveDraft()">
+      </div>
+    </div>
+    <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <button class="btn btn-primary btn-sm" onclick="googSaveConfig()">💾 Guardar credenciales</button>
+      <button class="btn btn-ghost btn-sm" onclick="googTestConnection()">🔌 Probar conexión</button>
+      <span id="goog-config-status" style="font-size:12px;color:var(--text3)"></span>
+    </div>
+    <div class="alert a-info" style="margin-top:14px;font-size:12px">
+      <strong>Cómo obtener credenciales:</strong> <a href="https://console.cloud.google.com" target="_blank" style="color:var(--accent)">Google Cloud Console</a> → Credenciales → OAuth 2.0 → Crear ID de cliente → Tipo: App web. Redirect URI: <code style="background:var(--bg4);padding:2px 5px;border-radius:4px;font-size:10px">https://developers.google.com/oauthplayground</code>. Habilitá las APIs: Google Analytics Data API y Search Console API.
+    </div>
+  </div>
+
+  <!-- GA4: Tráfico comparativo -->
+  <div class="card mb">
+    <div class="card-hd">
+      <div><div class="card-title">📈 Google Analytics 4 · Tráfico externo</div><div class="card-sub" id="ga4-sub">Compará visitas WooCommerce vs. Mercado Libre</div></div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="ga4-period" style="font-size:11px;padding:4px 8px;border-radius:var(--rs);border:1px solid var(--border2);background:var(--bg3);color:var(--text)">
+          <option value="7">7 días</option>
+          <option value="30" selected>30 días</option>
+          <option value="90">90 días</option>
+        </select>
+        <button class="btn btn-ghost btn-sm" onclick="ga4Fetch()" id="ga4-fetch-btn">📊 Cargar datos</button>
+      </div>
+    </div>
+    <div id="ga4-content" style="margin-top:14px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px" id="ga4-kpi-row">
+        <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:14px;text-align:center">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Visitas Woo (7d)</div>
+          <div style="font-size:22px;font-weight:700;color:var(--accent)" id="ga4-woo-visits">—</div>
+          <div style="font-size:10px;color:var(--text3);margin-top:4px" id="ga4-woo-delta"></div>
+        </div>
+        <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:14px;text-align:center">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Sesiones orgánicas</div>
+          <div style="font-size:22px;font-weight:700;color:var(--green)" id="ga4-organic">—</div>
+          <div style="font-size:10px;color:var(--text3);margin-top:4px" id="ga4-organic-delta"></div>
+        </div>
+      </div>
+      <div style="margin-top:14px">
+        <div style="font-size:12px;font-weight:500;color:var(--text2);margin-bottom:8px">Páginas más visitadas</div>
+        <div id="ga4-pages-list" style="font-size:12px;color:var(--text3)">Cargá los datos para ver el detalle.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Search Console: Keywords de oportunidad -->
+  <div class="card">
+    <div class="card-hd">
+      <div><div class="card-title">🔍 Search Console · Keywords de Oportunidad</div><div class="card-sub">Palabras clave reales por las que te encuentran en Google → Optimizá tus títulos de ML</div></div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="gsc-period" style="font-size:11px;padding:4px 8px;border-radius:var(--rs);border:1px solid var(--border2);background:var(--bg3);color:var(--text)">
+          <option value="7">7 días</option>
+          <option value="28" selected>28 días</option>
+          <option value="90">90 días</option>
+        </select>
+        <button class="btn btn-ghost btn-sm" onclick="gscFetch()" id="gsc-fetch-btn">🔍 Cargar keywords</button>
+      </div>
+    </div>
+    <div id="gsc-content" style="margin-top:14px">
+      <div class="alert a-info" style="font-size:12px;margin-bottom:12px" id="gsc-opp-banner" style="display:none">
+        💡 <strong>Keywords de oportunidad:</strong> Términos con CTR bajo pero buenas impresiones — optimizá los títulos de ML con estas palabras para capturar ese tráfico.
+      </div>
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:12px" id="gsc-table">
+          <thead>
+            <tr style="background:var(--bg3)">
+              <th style="padding:8px;text-align:left;border-bottom:1px solid var(--border)">Keyword</th>
+              <th style="padding:8px;text-align:right;border-bottom:1px solid var(--border)">Clics</th>
+              <th style="padding:8px;text-align:right;border-bottom:1px solid var(--border)">Impresiones</th>
+              <th style="padding:8px;text-align:right;border-bottom:1px solid var(--border)">CTR</th>
+              <th style="padding:8px;text-align:right;border-bottom:1px solid var(--border)">Posición</th>
+              <th style="padding:8px;text-align:center;border-bottom:1px solid var(--border)">Oportunidad</th>
+              <th style="padding:8px;text-align:center;border-bottom:1px solid var(--border)">Acción</th>
+            </tr>
+          </thead>
+          <tbody id="gsc-tbody">
+            <tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text3)">Cargá las keywords para ver oportunidades.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div id="gsc-ts" style="font-size:10px;color:var(--text3);text-align:right;margin-top:6px"></div>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ LOGIN ═══ -->
 <div id="login-screen">
   <div class="login-box fade-in">
@@ -758,6 +1010,8 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
   <div class="sb-sec">Integraciones</div>
   <a class="nav" href="#woo-import" id="nav-woo-import" onclick="showSection('woo-import');return false;"><span class="ni">🛒</span>Importar a Woo<span class="nb nb-new">NEW</span></a>
+  <a class="nav" href="#whatsapp" id="nav-whatsapp" onclick="showSection('whatsapp');return false;"><span class="ni">💬</span>WhatsApp Biz<span class="nb nb-green">NEW</span></a>
+  <a class="nav" href="#google-tools" id="nav-google-tools" onclick="showSection('google-tools');return false;"><span class="ni">📊</span>Google Tools<span class="nb nb-new">NEW</span></a>
 
   <a class="nav" href="#tareas" id="nav-tareas" onclick="showSection('tareas');return false;"><span class="ni">&#x2705;</span>Gestor de Tareas<span class="nb nb-green" id="nb-tareas" style="display:none">0</span></a>
 
@@ -11426,6 +11680,8 @@ const titles={
   reglas:['⚙️ Reglas automáticas','Automatizaciones de precios y respuestas'],
   alertas:['🔔 Alertas','Centro de notificaciones'],
   'woo-import':['&#x1F6D2; Importar a WooCommerce','Trae tus publicaciones de ML a tu tienda propia'],
+  'whatsapp':['💬 WhatsApp Business','Notificaciones automáticas y alertas al móvil'],
+  'google-tools':['📊 Google Tools','Analytics 4 + Search Console · Tráfico e inteligencia SEO'],
   'tareas':['&#x2705; Gestor de Tareas','Pendientes y completadas - sincronizadas en la nube'],
   calendario:['📅 Calendario Estratégico','Fechas fiscales · Ventas · Operativo · Cultura Pop'],
   'profit-calculator':['🧮 Calculadora de Rentabilidad','Precios sugeridos por canal con márgenes reales']
@@ -11454,6 +11710,8 @@ function showSection(id){
   if(id==='stock') renderStock();
   if(id==='reclamos') renderReclamos();
   if(id==='repricing'){ rpUpdateKPIs(); rpRenderList(); }
+  if(id==='whatsapp')    { waInit(); }
+  if(id==='google-tools'){ googInit(); }
   if(id==='horarios') { loadHorarios(); loadFestivos(); }
   if(id==='facturacion') renderFacturacion();
   if(id==='alertas') refreshAlerts();
@@ -13671,6 +13929,414 @@ function _startAutoSave() {
 // ── Autoguardado de SETTINGS en la nube cada 60 minutos ───────────────────────
 var _SETTINGS_AUTOSAVE_KEY = 'mlp_settings_last_autosave';
 var _settingsAutoSaveTid   = null;
+// ═══════════════════════════════════════════════════════════
+// WHATSAPP BUSINESS — Configuración, plantillas y log
+// ═══════════════════════════════════════════════════════════
+
+var _waConfig = {}; // { phone, phoneId, token, verifyToken, templates, events }
+var _WA_KV_KEY = 'wa_config_v1';
+
+async function waInit(){
+  // Cargar config desde KV
+  try{
+    const r = await fetch(WORKER + '/api/settings', { headers:{ Authorization:'Bearer '+token } });
+    if(r.ok){
+      const d = await r.json();
+      if(d && d.waConfig){
+        _waConfig = d.waConfig;
+        _waApplyConfig();
+      }
+    }
+  }catch(e){ console.warn('[WA] No se pudo cargar config:', e.message); }
+  waLoadLog();
+  // Actualizar estado
+  const statusEl = document.getElementById('wa-status-val');
+  const statusSub = document.getElementById('wa-status-sub');
+  if(_waConfig.token && _waConfig.phone){
+    if(statusEl) statusEl.textContent = '✅ Conectado';
+    if(statusSub) statusSub.textContent = 'Número: +' + _waConfig.phone;
+  } else {
+    if(statusEl) statusEl.textContent = '⚠️ Sin configurar';
+    if(statusSub) statusSub.textContent = 'Completá los campos de configuración';
+  }
+}
+
+function _waApplyConfig(){
+  const set = (id, val) => { const e = document.getElementById(id); if(e && val !== undefined) e.value = val; };
+  set('wa-phone',        _waConfig.phone        || '');
+  set('wa-phone-id',     _waConfig.phoneId      || '');
+  set('wa-token',        _waConfig.token        || '');
+  set('wa-verify-token', _waConfig.verifyToken  || '');
+  set('wa-tmpl-venta',   _waConfig.tmplVenta    || '🛍️ Nueva venta en ML!\n{producto}\n💰 ${precio}\n👤 {comprador}');
+  set('wa-tmpl-pregunta',_waConfig.tmplPregunta || '❓ Nueva pregunta en ML!\n{pregunta}\nPublicación: {producto}');
+  set('wa-tmpl-envio',   _waConfig.tmplEnvio    || '📦 Tu pedido fue despachado!\nProducto: {producto}\n🔍 Seguilo en: {tracking_url}');
+  const setChk = (id, val) => { const e = document.getElementById(id); if(e) e.checked = val !== false; };
+  setChk('wa-ev-venta',    _waConfig.evVenta);
+  setChk('wa-ev-pregunta', _waConfig.evPregunta);
+  setChk('wa-ev-envio',    _waConfig.evEnvio);
+}
+
+function _waReadForm(){
+  const get = id => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
+  const getChk = id => { const e = document.getElementById(id); return e ? e.checked : false; };
+  return {
+    phone:        get('wa-phone'),
+    phoneId:      get('wa-phone-id'),
+    token:        get('wa-token'),
+    verifyToken:  get('wa-verify-token'),
+    tmplVenta:    get('wa-tmpl-venta'),
+    tmplPregunta: get('wa-tmpl-pregunta'),
+    tmplEnvio:    get('wa-tmpl-envio'),
+    evVenta:      getChk('wa-ev-venta'),
+    evPregunta:   getChk('wa-ev-pregunta'),
+    evEnvio:      getChk('wa-ev-envio'),
+  };
+}
+
+function waSaveDraft(){
+  // Guardar borrador en localStorage silenciosamente
+  try{ localStorage.setItem('wa_draft', JSON.stringify(_waReadForm())); }catch(e){}
+}
+
+async function waSaveConfig(){
+  const cfg = _waReadForm();
+  _waConfig = cfg;
+  const statusEl = document.getElementById('wa-config-status');
+  if(statusEl){ statusEl.textContent = '⏳ Guardando...'; statusEl.style.color = 'var(--text3)'; }
+  try{
+    // Leer settings actuales y mergear wa config
+    const r0 = await fetch(WORKER + '/api/settings', { headers:{ Authorization:'Bearer '+token } });
+    const current = r0.ok ? await r0.json() : {};
+    const body = { ...current, waConfig: cfg };
+    const r = await fetch(WORKER + '/api/settings', {
+      method: 'POST',
+      headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' },
+      body: JSON.stringify(body)
+    });
+    if(r.ok){
+      if(statusEl){ statusEl.textContent = '✅ Guardado'; statusEl.style.color = 'var(--green)'; }
+      setTimeout(()=>{ if(statusEl) statusEl.textContent = ''; }, 2500);
+      waInit();
+    } else {
+      if(statusEl){ statusEl.textContent = '❌ Error al guardar'; statusEl.style.color = 'var(--red)'; }
+    }
+  }catch(e){
+    if(statusEl){ statusEl.textContent = '❌ ' + e.message; statusEl.style.color = 'var(--red)'; }
+  }
+}
+
+async function waTestSend(){
+  if(!_waConfig.token || !_waConfig.phoneId || !_waConfig.phone){
+    alert('Completá y guardá la configuración primero.');
+    return;
+  }
+  const statusEl = document.getElementById('wa-config-status');
+  if(statusEl){ statusEl.textContent = '📤 Enviando...'; statusEl.style.color = 'var(--text3)'; }
+  try{
+    const r = await fetch(WORKER + '/webhook/whatsapp/test', {
+      method: 'POST',
+      headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' },
+      body: JSON.stringify({ to: _waConfig.phone, message: '✅ Mensaje de prueba desde ML Panel Pro. Conexión exitosa!' })
+    });
+    const d = await r.json();
+    if(d.ok || d.messages){
+      if(statusEl){ statusEl.textContent = '✅ Mensaje enviado'; statusEl.style.color = 'var(--green)'; }
+    } else {
+      if(statusEl){ statusEl.textContent = '❌ ' + (d.error || JSON.stringify(d)); statusEl.style.color = 'var(--red)'; }
+    }
+  }catch(e){
+    if(statusEl){ statusEl.textContent = '❌ ' + e.message; statusEl.style.color = 'var(--red)'; }
+  }
+  setTimeout(()=>{ if(statusEl) statusEl.textContent = ''; }, 4000);
+}
+
+async function waLoadLog(){
+  const el = document.getElementById('wa-log-list');
+  if(!el) return;
+  try{
+    const r = await fetch(WORKER + '/api/wa-log', { headers:{ Authorization:'Bearer '+token } });
+    if(!r.ok){ el.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:10px 0">Sin log disponible.</div>'; return; }
+    const d = await r.json();
+    const logs = d.logs || [];
+    // Actualizar métricas
+    const now = Date.now();
+    const cnt30 = logs.filter(l => (now - new Date(l.ts||0).getTime()) < 30*24*60*60*1000).length;
+    const s = id => document.getElementById(id);
+    if(s('wa-sent-val')) s('wa-sent-val').textContent = cnt30;
+    if(logs.length && s('wa-last-val')){
+      const last = logs[0];
+      s('wa-last-val').textContent = last.event || '—';
+      if(s('wa-last-sub')) s('wa-last-sub').textContent = last.ts ? new Date(last.ts).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
+    }
+    if(!logs.length){
+      el.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:10px 0;text-align:center">No hay envíos registrados aún.</div>';
+      return;
+    }
+    el.innerHTML = logs.slice(0,20).map(l=>`
+      <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+        <span style="font-size:14px">${l.event==='venta'?'🛍️':l.event==='pregunta'?'💬':l.event==='envio'?'📦':'📤'}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12.5px;font-weight:500">${l.description||l.event||'Mensaje'}</div>
+          <div style="font-size:10px;color:var(--text3)">${l.ts ? new Date(l.ts).toLocaleString('es-AR') : '—'} · To: +${l.to||'—'}</div>
+        </div>
+        <span class="badge ${l.ok?'bg-green':'bg-red'}" style="font-size:9px">${l.ok?'Enviado':'Error'}</span>
+      </div>`).join('');
+  }catch(e){
+    el.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:10px 0">No se pudo cargar el log.</div>';
+  }
+}
+
+// ── Disparador de notificaciones WA desde eventos ML ────────────────────────
+// Se llama desde pollNewData y loadQuestions cuando detecta eventos nuevos
+async function waTrigger(event, data){
+  if(!_waConfig.token || !_waConfig.phone || !_waConfig.phoneId) return;
+  if(event === 'venta'    && !_waConfig.evVenta)    return;
+  if(event === 'pregunta' && !_waConfig.evPregunta) return;
+  if(event === 'envio'    && !_waConfig.evEnvio)    return;
+
+  let tmpl = '';
+  if(event === 'venta')    tmpl = _waConfig.tmplVenta    || '🛍️ Nueva venta: {producto} — ${precio}';
+  if(event === 'pregunta') tmpl = _waConfig.tmplPregunta || '❓ Nueva pregunta: {pregunta}';
+  if(event === 'envio')    tmpl = _waConfig.tmplEnvio    || '📦 Envío despachado: {producto}';
+
+  // Reemplazar variables
+  const msg = tmpl
+    .replace(/{producto}/g,     data.producto     || '—')
+    .replace(/{precio}/g,       data.precio       ? Number(data.precio).toLocaleString('es-AR') : '—')
+    .replace(/{comprador}/g,    data.comprador    || '—')
+    .replace(/{pregunta}/g,     data.pregunta     || '—')
+    .replace(/{tracking_url}/g, data.trackingUrl  || 'https://andreani.com');
+
+  try{
+    await fetch(WORKER + '/webhook/whatsapp/send', {
+      method: 'POST',
+      headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' },
+      body: JSON.stringify({ to: _waConfig.phone, message: msg, event })
+    });
+    console.log('[WA] Notificación enviada:', event);
+  }catch(e){ console.warn('[WA] Error al enviar:', e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════
+// GOOGLE TOOLS — GA4 + Search Console
+// ═══════════════════════════════════════════════════════════
+
+var _googConfig = {};
+var _ga4Cache = null, _gscCache = null;
+var _GA4_LS_KEY = 'mlp_ga4_v1', _GSC_LS_KEY = 'mlp_gsc_v1';
+var _GOOG_CACHE_TTL = 6 * 60 * 60 * 1000; // 6 horas
+
+async function googInit(){
+  try{
+    const r = await fetch(WORKER + '/api/settings', { headers:{ Authorization:'Bearer '+token } });
+    if(r.ok){
+      const d = await r.json();
+      if(d && d.googConfig){
+        _googConfig = d.googConfig;
+        _googApplyConfig();
+      }
+    }
+  }catch(e){}
+  // Restaurar caché local
+  _ga4RestoreCache();
+  _gscRestoreCache();
+}
+
+function _googApplyConfig(){
+  const set = (id, val) => { const e = document.getElementById(id); if(e && val) e.value = val; };
+  set('goog-client-id',      _googConfig.clientId);
+  set('goog-client-secret',  _googConfig.clientSecret);
+  set('goog-refresh-token',  _googConfig.refreshToken);
+  set('goog-ga4-id',         _googConfig.ga4Id);
+  set('goog-gsc-url',        _googConfig.gscUrl);
+  const ga4El = document.getElementById('ga4-status-val');
+  const gscEl = document.getElementById('gsc-status-val');
+  if(_googConfig.refreshToken){
+    if(ga4El) ga4El.textContent = _googConfig.ga4Id ? '🟡 Token OK' : '⚠️ Falta GA4 ID';
+    if(gscEl) gscEl.textContent = _googConfig.gscUrl ? '🟡 Token OK' : '⚠️ Falta Site URL';
+  }
+}
+
+function googSaveDraft(){
+  try{ localStorage.setItem('goog_draft', JSON.stringify(_googReadForm())); }catch(e){}
+}
+
+function _googReadForm(){
+  const get = id => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
+  return {
+    clientId:     get('goog-client-id'),
+    clientSecret: get('goog-client-secret'),
+    refreshToken: get('goog-refresh-token'),
+    ga4Id:        get('goog-ga4-id'),
+    gscUrl:       get('goog-gsc-url'),
+  };
+}
+
+async function googSaveConfig(){
+  const cfg = _googReadForm();
+  _googConfig = cfg;
+  const statusEl = document.getElementById('goog-config-status');
+  if(statusEl){ statusEl.textContent = '⏳ Guardando...'; statusEl.style.color = 'var(--text3)'; }
+  try{
+    const r0 = await fetch(WORKER + '/api/settings', { headers:{ Authorization:'Bearer '+token } });
+    const current = r0.ok ? await r0.json() : {};
+    const body = { ...current, googConfig: cfg };
+    const r = await fetch(WORKER + '/api/settings', {
+      method: 'POST',
+      headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' },
+      body: JSON.stringify(body)
+    });
+    if(r.ok){
+      if(statusEl){ statusEl.textContent = '✅ Guardado'; statusEl.style.color = 'var(--green)'; }
+      setTimeout(()=>{ if(statusEl) statusEl.textContent = ''; }, 2500);
+      _googApplyConfig();
+    } else {
+      if(statusEl){ statusEl.textContent = '❌ Error'; statusEl.style.color = 'var(--red)'; }
+    }
+  }catch(e){
+    if(statusEl){ statusEl.textContent = '❌ ' + e.message; statusEl.style.color = 'var(--red)'; }
+  }
+}
+
+async function googTestConnection(){
+  const statusEl = document.getElementById('goog-config-status');
+  if(statusEl){ statusEl.textContent = '🔌 Probando...'; statusEl.style.color = 'var(--text3)'; }
+  try{
+    const r = await fetch(WORKER + '/api/google/test', { headers:{ Authorization:'Bearer '+token } });
+    const d = await r.json();
+    if(d.ok){
+      if(statusEl){ statusEl.textContent = '✅ ' + (d.email||'Conexión OK'); statusEl.style.color = 'var(--green)'; }
+      const ga4El = document.getElementById('ga4-status-val');
+      const gscEl = document.getElementById('gsc-status-val');
+      if(ga4El) ga4El.textContent = '✅ Conectado';
+      if(gscEl) gscEl.textContent = '✅ Conectado';
+    } else {
+      if(statusEl){ statusEl.textContent = '❌ ' + (d.error||'Error de auth'); statusEl.style.color = 'var(--red)'; }
+    }
+  }catch(e){
+    if(statusEl){ statusEl.textContent = '❌ ' + e.message; statusEl.style.color = 'var(--red)'; }
+  }
+  setTimeout(()=>{ if(statusEl) statusEl.textContent = ''; }, 5000);
+}
+
+// ── GA4 ──────────────────────────────────────────────────────────────────────
+function _ga4RestoreCache(){
+  try{
+    const raw = localStorage.getItem(_GA4_LS_KEY);
+    if(!raw) return;
+    const entry = JSON.parse(raw);
+    if(Date.now() - entry.ts < _GOOG_CACHE_TTL){ _ga4Cache = entry.data; _ga4Render(entry.data, entry.ts); }
+  }catch(e){}
+}
+
+async function ga4Fetch(){
+  const btn = document.getElementById('ga4-fetch-btn');
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Cargando...'; }
+  const days = document.getElementById('ga4-period')?.value || '30';
+  try{
+    const r = await fetch(WORKER + '/api/google/ga4?days=' + days, { headers:{ Authorization:'Bearer '+token } });
+    const d = await r.json();
+    if(d.error){ alert('GA4: ' + d.error); return; }
+    _ga4Cache = d;
+    localStorage.setItem(_GA4_LS_KEY, JSON.stringify({ ts: Date.now(), data: d }));
+    _ga4Render(d, Date.now());
+  }catch(e){ alert('Error: ' + e.message); }
+  if(btn){ btn.disabled=false; btn.textContent='📊 Cargar datos'; }
+}
+
+function _ga4Render(d, ts){
+  const s = (id, v) => { const e = document.getElementById(id); if(e) e.textContent = v; };
+  s('ga4-woo-visits', (d.sessions||0).toLocaleString('es-AR'));
+  s('ga4-organic',    (d.organicSessions||0).toLocaleString('es-AR'));
+  s('ga4-woo-delta',  d.sessionsDelta ? (d.sessionsDelta > 0 ? '▲ +' : '▼ ') + d.sessionsDelta + '% vs ant.' : '');
+  s('ga4-organic-delta', d.organicDelta ? (d.organicDelta > 0 ? '▲ +' : '▼ ') + d.organicDelta + '% vs ant.' : '');
+  // Top páginas
+  const pagesEl = document.getElementById('ga4-pages-list');
+  if(pagesEl && d.topPages && d.topPages.length){
+    pagesEl.innerHTML = d.topPages.slice(0,10).map((p,i)=>
+      `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:11.5px">
+        <span style="color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;margin-right:8px">${i+1}. ${p.path||p.page||'/'}</span>
+        <span style="color:var(--text3);flex-shrink:0">${(p.sessions||p.views||0).toLocaleString('es-AR')} vis.</span>
+      </div>`).join('');
+  } else if(pagesEl){
+    pagesEl.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:8px 0">Sin datos de páginas disponibles.</div>';
+  }
+  const subEl = document.getElementById('ga4-sub');
+  if(subEl && ts) subEl.textContent = '⏱ Actualizado: ' + new Date(ts).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+}
+
+// ── GSC ──────────────────────────────────────────────────────────────────────
+function _gscRestoreCache(){
+  try{
+    const raw = localStorage.getItem(_GSC_LS_KEY);
+    if(!raw) return;
+    const entry = JSON.parse(raw);
+    if(Date.now() - entry.ts < _GOOG_CACHE_TTL){ _gscCache = entry.data; _gscRender(entry.data, entry.ts); }
+  }catch(e){}
+}
+
+async function gscFetch(){
+  const btn = document.getElementById('gsc-fetch-btn');
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Cargando...'; }
+  const days = document.getElementById('gsc-period')?.value || '28';
+  try{
+    const r = await fetch(WORKER + '/api/google/gsc?days=' + days, { headers:{ Authorization:'Bearer '+token } });
+    const d = await r.json();
+    if(d.error){ alert('Search Console: ' + d.error); return; }
+    _gscCache = d;
+    localStorage.setItem(_GSC_LS_KEY, JSON.stringify({ ts: Date.now(), data: d }));
+    _gscRender(d, Date.now());
+  }catch(e){ alert('Error: ' + e.message); }
+  if(btn){ btn.disabled=false; btn.textContent='🔍 Cargar keywords'; }
+}
+
+function _gscRender(d, ts){
+  const rows = d.rows || [];
+  const kwCount = document.getElementById('gsc-kw-count');
+  if(kwCount) kwCount.textContent = rows.length;
+  const bannEl = document.getElementById('gsc-opp-banner');
+  if(bannEl) bannEl.style.display = '';
+  const tbody = document.getElementById('gsc-tbody');
+  if(!tbody) return;
+  if(!rows.length){
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text3)">Sin keywords disponibles para el período.</td></tr>';
+    return;
+  }
+  // Calcular oportunidades: CTR < 3% pero impresiones > 100
+  tbody.innerHTML = rows.slice(0,50).map(row => {
+    const ctr     = (row.ctr * 100).toFixed(1);
+    const pos     = row.position.toFixed(1);
+    const isOpp   = row.ctr < 0.03 && row.impressions > 100;
+    const oppBadge = isOpp
+      ? '<span style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;font-size:9px;padding:1px 5px;border-radius:3px;font-weight:700">🎯 OPORTUNIDAD</span>'
+      : '<span style="color:var(--text3);font-size:10px">—</span>';
+    const actionBtn = isOpp
+      ? `<button class="btn btn-ghost btn-xs" style="font-size:10px" onclick="gscCopyToSEO('${(row.keys||[row.query||'']).join(' ').replace(/'/g,'').slice(0,40)}')">✨ Usar en SEO</button>`
+      : '';
+    return `<tr style="${isOpp?'background:#fffbeb':''};hover-bg:var(--bg3)">
+      <td style="padding:7px 8px;color:var(--text2);font-size:12px">${(row.keys||[row.query||'?'])[0]}</td>
+      <td style="padding:7px 8px;text-align:right;font-weight:600">${(row.clicks||0).toLocaleString('es-AR')}</td>
+      <td style="padding:7px 8px;text-align:right">${(row.impressions||0).toLocaleString('es-AR')}</td>
+      <td style="padding:7px 8px;text-align:right;color:${row.ctr<0.03?'var(--amber)':'var(--green)'}">${ctr}%</td>
+      <td style="padding:7px 8px;text-align:right">${pos}</td>
+      <td style="padding:7px 8px;text-align:center">${oppBadge}</td>
+      <td style="padding:7px 8px;text-align:center">${actionBtn}</td>
+    </tr>`;
+  }).join('');
+  const tsEl = document.getElementById('gsc-ts');
+  if(tsEl && ts) tsEl.textContent = '⏱ ' + new Date(ts).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+}
+
+function gscCopyToSEO(keyword){
+  // Navegar al optimizador con la keyword cargada
+  showSection('optimizar');
+  setTimeout(()=>{
+    const kws = document.getElementById('opt-kws');
+    if(kws){ kws.value = (kws.value ? kws.value + ', ' : '') + keyword; }
+    showToast('🔍 Keyword "' + keyword + '" agregada al optimizador', 'success');
+  }, 400);
+}
+
 function _startSettingsAutoSave(){
   if(_settingsAutoSaveTid) clearInterval(_settingsAutoSaveTid);
   _settingsAutoSaveTid = setInterval(function(){
