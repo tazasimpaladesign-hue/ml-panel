@@ -2998,6 +2998,11 @@ async function initApp(){
   const switchBtn = document.getElementById('switch-account-btn');
   if(switchBtn) switchBtn.style.display = 'flex';
   stamp();
+  // ── RESTAURAR métricas desde localStorage ANTES de cargar ─────────────
+  // Fix: itemMetrics empieza vacío en memoria pero el caché existe en localStorage.
+  // Restaurarlo aquí hace que SEO/Dashboard muestren datos inmediatamente sin
+  // tener que hacer click en "Cargar métricas" de nuevo.
+  restoreMetricsFromCache();
   // CARGA RAPIDA: dashboard listo en ~2s
   await Promise.all([loadItemsFast(), loadOrdersRecent(), loadQuestions()]);
   renderDashboard();
@@ -3014,6 +3019,10 @@ async function initApp(){
   startPolling();
   // POLLING MENSAJES: verificar mensajes post-venta sin leer cada 90s
   startMessagePolling();
+  // SYNC MULTI-DEVICE: polling silencioso de config cada 60s
+  startConfigSync();
+  // SYNC CROSS-TAB: BroadcastChannel para métricas entre pestañas
+  initCrossTabSync();
   // Settings auto-save cada 60 min
   _startSettingsAutoSave();
 }
@@ -3416,6 +3425,116 @@ function metricsFromCache(id){
 function metricsToCache(id, data){
   try{ localStorage.setItem(METRICS_CACHE_KEY + id, JSON.stringify({ ts: Date.now(), data })); }
   catch(e){ /* localStorage lleno — ignorar silenciosamente */ }
+}
+
+// ── Restaurar itemMetrics desde localStorage al arrancar ────────────────────
+// Evita el problema de "los datos desaparecen al recargar". Lee todas las claves
+// de caché válidas (no expiradas) y las carga en memoria antes de renderizar.
+function restoreMetricsFromCache(){
+  try{
+    let restored = 0;
+    for(let i = 0; i < localStorage.length; i++){
+      const key = localStorage.key(i);
+      if(!key || !key.startsWith(METRICS_CACHE_KEY)) continue;
+      const id = key.slice(METRICS_CACHE_KEY.length);
+      if(!id) continue;
+      const entry = JSON.parse(localStorage.getItem(key)||'null');
+      if(!entry || !entry.data) continue;
+      if(Date.now() - entry.ts > METRICS_CACHE_TTL) continue; // expirado — ignorar
+      itemMetrics[id] = entry.data;
+      restored++;
+    }
+    if(restored > 0) console.log('[Métricas] Restauradas desde localStorage:', restored, 'ítems');
+  }catch(e){ console.warn('[Métricas] restoreFromCache error:', e.message); }
+}
+
+// ── Timestamp en botón de métricas ──────────────────────────────────────────
+// Muestra "Métricas: hace X min" debajo del botón para saber la antigüedad del caché.
+function updateMetricsTimestamp(){
+  const btn = document.getElementById('seo-metrics-btn');
+  if(!btn) return;
+  // Buscar el timestamp más reciente entre todas las métricas en caché
+  let newestTs = 0;
+  for(let i = 0; i < localStorage.length; i++){
+    const key = localStorage.key(i);
+    if(!key || !key.startsWith(METRICS_CACHE_KEY)) continue;
+    try{
+      const entry = JSON.parse(localStorage.getItem(key)||'null');
+      if(entry && entry.ts > newestTs) newestTs = entry.ts;
+    }catch{}
+  }
+  if(!newestTs) return;
+  const mins = Math.round((Date.now() - newestTs) / 60000);
+  const label = mins < 2 ? 'recién' : mins < 60 ? 'hace ' + mins + ' min' : 'hace ' + Math.round(mins/60) + 'h';
+  let sub = btn.nextElementSibling;
+  if(!sub || !sub.classList.contains('metrics-ts-label')){
+    sub = document.createElement('span');
+    sub.className = 'metrics-ts-label';
+    sub.style.cssText = 'font-size:9px;color:var(--text3);display:block;margin-top:2px;text-align:center;';
+    btn.parentNode && btn.parentNode.insertBefore(sub, btn.nextSibling);
+  }
+  sub.textContent = '⏱ ' + label;
+}
+
+// ── Config sync multi-device (polling 60s silencioso) ───────────────────────
+// Compara el timestamp de KV con el local. Si hay cambios, recarga la config
+// (settings: quick replies, reglas, plantillas). Las métricas ML NO se tocan
+// (son datos de ML, cada device tiene su propio caché local de 24h).
+let _localConfigTs = Date.now(); // timestamp de la config cargada en esta sesión
+let _configSyncInterval = null;
+
+function startConfigSync(){
+  if(_configSyncInterval) clearInterval(_configSyncInterval);
+  _configSyncInterval = setInterval(async () => {
+    if(!token || !userId) return;
+    try{
+      const r = await fetch(WORKER + '/check-sync', {
+        headers: { 'Authorization': 'Bearer ' + token }
+      });
+      if(!r.ok) return;
+      const { lastUpdate } = await r.json();
+      if(lastUpdate && lastUpdate > _localConfigTs){
+        console.log('[ConfigSync] Cambio detectado en otro dispositivo — recargando config...');
+        _localConfigTs = lastUpdate;
+        // Recargar silenciosamente la configuración del usuario desde KV
+        await loadRemoteSettings();
+        // Notificar otras pestañas que también actualicen
+        try{ _syncChannel && _syncChannel.postMessage({ type:'config-updated', ts: lastUpdate }); }catch{}
+      }
+    }catch(e){ /* polling silencioso — nunca mostrar error al usuario */ }
+  }, 60000);
+}
+
+// ── Cross-tab sync via BroadcastChannel ─────────────────────────────────────
+// Sync instantáneo entre pestañas de la MISMA PC sin API calls.
+// Cuando una pestaña carga métricas → las otras las ven sin re-fetch.
+// Cuando una pestaña actualiza config → las otras la recargan desde localStorage.
+let _syncChannel = null;
+
+function initCrossTabSync(){
+  try{
+    _syncChannel = new BroadcastChannel('mlpanel_sync_v1');
+    _syncChannel.onmessage = function(event){
+      const { type, ts } = event.data || {};
+      if(type === 'metrics-updated'){
+        // Otra pestaña cargó métricas — restaurar desde localStorage (gratis, sin API)
+        console.log('[CrossTab] Métricas actualizadas en otra pestaña — restaurando...');
+        restoreMetricsFromCache();
+        // Re-renderizar si la sección SEO está activa
+        if(document.getElementById('section-seo')?.classList.contains('active')){
+          renderSEOTable();
+        }
+        updateMetricsTimestamp();
+      } else if(type === 'config-updated'){
+        // Otra pestaña detectó cambio en config via sync multi-device
+        console.log('[CrossTab] Config actualizada — recargando settings locales...');
+        if(ts && ts > _localConfigTs){ _localConfigTs = ts; loadRemoteSettings(); }
+      }
+    };
+    console.log('[CrossTab] BroadcastChannel iniciado');
+  }catch(e){
+    console.warn('[CrossTab] BroadcastChannel no disponible:', e.message);
+  }
 }
 
 async function loadPubMetricsBatch(ids){
@@ -5688,6 +5807,10 @@ async function loadSEOMetrics(){
     }
     if(btn){ btn.disabled=false; btn.textContent='📊 Métricas ✓'; }
     console.log('[SEO] Métricas completas para', ids.length, 'ítems');
+
+    // Actualizar timestamp y notificar otras pestañas (cross-tab sync)
+    updateMetricsTimestamp();
+    try{ _syncChannel && _syncChannel.postMessage({ type:'metrics-updated' }); }catch{}
   }catch(e){
     console.error('[SEO] Error cargando métricas:', e.message);
     if(btn){ btn.disabled=false; btn.textContent='📊 Cargar métricas'; }
@@ -8868,6 +8991,8 @@ async function loadRemoteSettings(){
     if(d && Array.isArray(d.competitors)){ _savedCompetitors = d.competitors; }
     if(d && (d.quickReplies||d.template||d.rpRules||d.activeRules)){
       localStorage.setItem(SYNC_TS_KEY, Date.now().toString());
+      // Actualizar timestamp local para que el polling no vea esto como "cambio nuevo"
+      _localConfigTs = Date.now();
       console.log('[Settings] Configuracion cargada desde la nube OK');
       return d;
     }
@@ -11142,7 +11267,7 @@ function showSection(id){
 
   if(id==='dashboard' && token) renderDashboard();
   if(id==='publicaciones') renderPubs();
-  if(id==='seo') renderSEOSection();
+  if(id==='seo'){ renderSEOSection(); updateMetricsTimestamp(); }
   if(id==='ventas') renderVentas();
   if(id==='preguntas') renderQuestions();
   if(id==='mensajes') renderMensajes();
