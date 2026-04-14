@@ -2999,15 +2999,47 @@ async function initApp(){
   if(switchBtn) switchBtn.style.display = 'flex';
   stamp();
   // ── RESTAURAR métricas desde localStorage ANTES de cargar ─────────────
-  // Fix: itemMetrics empieza vacío en memoria pero el caché existe en localStorage.
-  // Restaurarlo aquí hace que SEO/Dashboard muestren datos inmediatamente sin
-  // tener que hacer click en "Cargar métricas" de nuevo.
   restoreMetricsFromCache();
-  // CARGA RAPIDA: dashboard listo en ~2s
-  await Promise.all([loadItemsFast(), loadOrdersRecent(), loadQuestions()]);
-  renderDashboard();
-  updateLast50(allOrders.slice(0,50));
-  loadMostVisited(false); // fetch visits concurrently with background loads
+
+  // ── CARGA RÁPIDA: usar caché si hay datos frescos (nueva pestaña / recarga) ─
+  // Si hay datos en localStorage (< 10 min), mostrar inmediatamente y hacer
+  // refresh en background. Si no hay caché, carga normal desde la API.
+  const _cached = _loadDataCache();
+  if(_cached && _cached.items.length > 0){
+    // Datos frescos disponibles — renderizar instantáneamente
+    allItems  = _cached.items;
+    allOrders = _cached.orders;
+    _updateItemsUI();
+    _updateOrdersUI(allOrders);
+    console.log('[DataCache] Datos desde caché (' + _cached.ageMin + ' min) — actualizando en background...');
+    // Mostrar badge discreto de antigüedad en el dashboard
+    _showDataCacheAge(_cached.ageMin);
+    // Cargar preguntas (pequeñas, siempre frescas)
+    await loadQuestions();
+    // Restaurar visitas más visitadas desde su caché
+    const mvCached = _mvLoadCache();
+    if(mvCached){ _mostVisitedCache = mvCached; renderMostVisited(mvCached); }
+    // Renderizar dashboard con datos del caché
+    renderDashboard();
+    updateLast50(allOrders.slice(0,50));
+    // Refresh silencioso en background (sin loader)
+    Promise.all([loadItemsFast(), loadOrdersRecent()]).then(() => {
+      _saveDataCache(); // actualizar caché con datos frescos
+      renderDashboard();
+      updateLast50(allOrders.slice(0,50));
+      _hideCacheAgeBadge();
+      // Notificar otras pestañas para que actualicen desde caché renovado
+      try{ _syncChannel && _syncChannel.postMessage({ type: 'data-updated' }); }catch{}
+    });
+  } else {
+    // Sin caché — carga normal
+    await Promise.all([loadItemsFast(), loadOrdersRecent(), loadQuestions()]);
+    _saveDataCache(); // guardar para la próxima pestaña
+    renderDashboard();
+    updateLast50(allOrders.slice(0,50));
+  }
+
+  loadMostVisited(false);
   initAI();
   buildAlgoFactors();
   buildAdsChart();
@@ -3249,6 +3281,8 @@ async function loadOrdersHistory(){
     _updateOrdersUI(allOrders.filter(o=>dateAR(o.date_created)>=new Date(Date.UTC(arNow2.getUTCFullYear(),arNow2.getUTCMonth(),1))));
     _updateVentasBadge();
     if(document.getElementById('section-ventas')?.classList.contains('active'))renderVentasTable();
+    // Guardar caché completo (historial 18 meses) para nueva pestaña
+    _saveDataCache();
   }catch(e){console.error('[loadOrdersHistory]',e);}
 }
 
@@ -3412,6 +3446,81 @@ function itemHealthPct(item){
 const METRICS_CACHE_KEY = 'mlp_metrics_v1_';
 const METRICS_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 horas
 
+// ── Caché de datos principales entre pestañas/recargas ─────────────────────
+// Objetivo: abrir nueva pestaña o recargar no fuerza esperar la API nuevamente.
+// TTL de 10 min — datos frescos sin sacrificar UX. Se actualiza en background igual.
+const _DATA_CACHE_TTL = 10 * 60 * 1000; // 10 minutos
+const _ITEMS_LS_KEY   = 'mlp_items_v1';
+const _ORDERS_LS_KEY  = 'mlp_orders_v1';
+
+function _saveDataCache(){
+  try{
+    const ts = Date.now();
+    localStorage.setItem(_ITEMS_LS_KEY,  JSON.stringify({ ts, data: allItems  }));
+    localStorage.setItem(_ORDERS_LS_KEY, JSON.stringify({ ts, data: allOrders }));
+  }catch(e){ console.warn('[DataCache] localStorage lleno:', e.message); }
+}
+
+function _loadDataCache(){
+  try{
+    const rawI = localStorage.getItem(_ITEMS_LS_KEY);
+    const rawO = localStorage.getItem(_ORDERS_LS_KEY);
+    if(!rawI || !rawO) return null;
+    const ei = JSON.parse(rawI), eo = JSON.parse(rawO);
+    const now = Date.now();
+    if(now - ei.ts > _DATA_CACHE_TTL) return null; // expirado
+    if(now - eo.ts > _DATA_CACHE_TTL) return null;
+    return { items: ei.data, orders: eo.data, ageMin: Math.round((now - Math.min(ei.ts, eo.ts)) / 60000) };
+  }catch(e){ return null; }
+}
+
+function _clearDataCache(){
+  try{ localStorage.removeItem(_ITEMS_LS_KEY); localStorage.removeItem(_ORDERS_LS_KEY); }catch(e){}
+}
+
+// ── Badge de antigüedad del caché (discreto, top-right del dashboard) ───────
+function _showDataCacheAge(ageMin){
+  let el = document.getElementById('dash-cache-age-badge');
+  if(!el){
+    el = document.createElement('span');
+    el.id = 'dash-cache-age-badge';
+    el.style.cssText = 'font-size:10px;color:var(--text4);background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:2px 8px;margin-left:10px;vertical-align:middle';
+    const lbl = document.getElementById('dash-period-label');
+    if(lbl) lbl.parentNode.insertBefore(el, lbl.nextSibling);
+  }
+  el.textContent = '⏱ Datos de hace ' + (ageMin < 2 ? '1 min' : ageMin + ' min') + ' · actualizando...';
+  el.style.display = '';
+}
+
+function _hideCacheAgeBadge(){
+  const el = document.getElementById('dash-cache-age-badge');
+  if(el) el.style.display = 'none';
+}
+
+// ── Timestamp de antigüedad de datos en el dashboard (análogo al de SEO) ────
+function _updateDashDataTimestamp(){
+  try{
+    const rawO = localStorage.getItem(_ORDERS_LS_KEY);
+    const rawI = localStorage.getItem(_ITEMS_LS_KEY);
+    if(!rawO && !rawI) return;
+    const eoTs = rawO ? JSON.parse(rawO).ts : 0;
+    const eiTs = rawI ? JSON.parse(rawI).ts : 0;
+    const ts = Math.max(eoTs, eiTs);
+    if(!ts) return;
+    const mins = Math.round((Date.now() - ts) / 60000);
+    const label = mins < 2 ? 'recién' : mins < 60 ? 'hace ' + mins + ' min' : 'hace ' + Math.round(mins/60) + 'h';
+    let el = document.getElementById('dash-data-ts-label');
+    if(!el){
+      el = document.createElement('span');
+      el.id = 'dash-data-ts-label';
+      el.style.cssText = 'font-size:10px;color:var(--text4);margin-left:8px;vertical-align:middle';
+      const periodLabel = document.getElementById('dash-period-label');
+      if(periodLabel) periodLabel.parentNode.insertBefore(el, periodLabel.nextSibling);
+    }
+    el.textContent = '⏱ ' + label;
+  }catch(e){}
+}
+
 function metricsFromCache(id){
   try{
     const raw = localStorage.getItem(METRICS_CACHE_KEY + id);
@@ -3525,6 +3634,20 @@ function initCrossTabSync(){
           renderSEOTable();
         }
         updateMetricsTimestamp();
+      } else if(type === 'data-updated'){
+        // Otra pestaña terminó de cargar datos frescos de la API
+        console.log('[CrossTab] Datos actualizados en otra pestaña — recargando desde caché...');
+        const fresh = _loadDataCache();
+        if(fresh && fresh.items.length > 0){
+          allItems  = fresh.items;
+          allOrders = fresh.orders;
+          _updateItemsUI();
+          _updateOrdersUI(allOrders);
+          if(document.getElementById('section-dashboard')?.classList.contains('active')){
+            renderDashboard(); updateLast50(allOrders.slice(0,50));
+          }
+          _hideCacheAgeBadge();
+        }
       } else if(type === 'config-updated'){
         // Otra pestaña detectó cambio en config via sync multi-device
         console.log('[CrossTab] Config actualizada — recargando settings locales...');
@@ -4045,6 +4168,9 @@ function renderDashKPIs(){
   // Verificar inconsistencia: si ticket > billing/sales hay bug
   const warn = document.getElementById('dash-inconsistency-warn');
   if(warn) warn.style.display = (paid.length>0 && ticket > billing) ? '' : 'none';
+
+  // Mostrar antigüedad de los datos de órdenes (misma lógica que SEO)
+  _updateDashDataTimestamp();
 }
 
 // ── Gráfico principal con comparación período anterior ──────
