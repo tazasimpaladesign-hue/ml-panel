@@ -14076,7 +14076,6 @@ async function waSaveConfig(){
 
 async function waTestSend(){
   const statusEl = document.getElementById('wa-config-status');
-  // Leer campos del formulario en tiempo real (por si no guardó aún)
   const formCfg = _waReadForm();
   const activeCfg = (formCfg.token && formCfg.phoneId && formCfg.phone) ? formCfg : _waConfig;
   if(!activeCfg.token || !activeCfg.phoneId || !activeCfg.phone){
@@ -14085,36 +14084,56 @@ async function waTestSend(){
     return;
   }
 
-  // Enviar a todos los números configurados (igual que waTrigger)
   const phones = [activeCfg.phone, activeCfg.phone2].filter(Boolean);
-  if(statusEl){ statusEl.textContent = '📤 Enviando a ' + phones.length + ' número' + (phones.length > 1 ? 's' : '') + '...'; statusEl.style.color = 'var(--text3)'; }
+  if(statusEl){ statusEl.textContent = '📤 Enviando...'; statusEl.style.color = 'var(--text3)'; }
+
+  // Mostrar diagnóstico detallado en un div expandido
+  let diagEl = document.getElementById('wa-diag-log');
+  if(!diagEl){
+    diagEl = document.createElement('div');
+    diagEl.id = 'wa-diag-log';
+    diagEl.style.cssText = 'margin-top:10px;font-size:11px;font-family:monospace;background:var(--bg4);border:1px solid var(--border);border-radius:6px;padding:10px;max-height:200px;overflow-y:auto;display:none;color:var(--text2)';
+    statusEl && statusEl.parentNode && statusEl.parentNode.insertBefore(diagEl, statusEl.nextSibling);
+  }
+  diagEl.style.display = 'block';
+  diagEl.innerHTML = '<div style="color:var(--text3)">🔍 Diagnóstico de envío...</div>';
+
+  let logLines = [];
+  const log = (msg, color) => {
+    logLines.push(`<div style="color:${color||'var(--text2)'};margin:2px 0">${msg}</div>`);
+    diagEl.innerHTML = logLines.join('');
+    diagEl.scrollTop = diagEl.scrollHeight;
+  };
 
   let allOk = true;
-  const errors = [];
   for(const phone of phones){
+    log(`📤 Enviando a: ${phone}`, 'var(--text3)');
     try{
       const r = await fetch(WORKER + '/webhook/whatsapp/test', {
         method: 'POST',
         headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' },
-        body: JSON.stringify({ to: phone, message: '✅ Mensaje de prueba desde ML Panel Pro. ¡Conexión exitosa!' })
+        body: JSON.stringify({ to: phone })
       });
       const d = await r.json();
-      if(!d.ok && !d.messages){
-        allOk = false;
-        errors.push((d.error || 'Error').slice(0, 60) + ' → ' + phone);
-      }
+      log(`HTTP ${r.status} | ok=${d.ok} | método=${d.method||'—'}`, r.ok ? 'var(--green)' : 'var(--red)');
+      if(d.messages) log(`✅ Message ID: ${d.messages[0]?.id||'—'}`, 'var(--green)');
+      if(d.error)    { log(`❌ Error: ${d.error}`, 'var(--red)'); allOk = false; }
+      if(d.code)     log(`Código Meta: ${d.code}`, 'var(--amber)');
+      if(d.detail?.error) log(`Detalle: ${JSON.stringify(d.detail.error).slice(0,120)}`, 'var(--amber)');
     }catch(e){
+      log(`❌ fetch failed: ${e.message}`, 'var(--red)');
       allOk = false;
-      errors.push(e.message + ' → ' + phone);
     }
   }
 
   if(allOk){
-    if(statusEl){ statusEl.textContent = '✅ Enviado a ' + phones.length + ' número' + (phones.length > 1 ? 's' : ''); statusEl.style.color = 'var(--green)'; }
+    if(statusEl){ statusEl.textContent = '✅ Enviado — revisá el diagnóstico abajo'; statusEl.style.color = 'var(--green)'; }
+    log('⚠️ "Enviado" = Meta aceptó la solicitud, pero si la plantilla está en revisión puede no llegar al teléfono.', 'var(--amber)');
   } else {
-    if(statusEl){ statusEl.textContent = '❌ ' + errors[0]; statusEl.style.color = 'var(--red)'; }
+    if(statusEl){ statusEl.textContent = '❌ Error — ver diagnóstico'; statusEl.style.color = 'var(--red)'; }
   }
-  setTimeout(()=>{ if(statusEl) statusEl.textContent = ''; }, 6000);
+  // No ocultar el diagnóstico automáticamente
+  setTimeout(()=>{ if(statusEl) statusEl.textContent = ''; }, 8000);
 }
 
 async function waLoadLog(){
