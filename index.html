@@ -14004,21 +14004,19 @@ async function waSaveConfig(){
   const statusEl = document.getElementById('wa-config-status');
   if(statusEl){ statusEl.textContent = '⏳ Guardando...'; statusEl.style.color = 'var(--text3)'; }
   try{
-    // Leer settings actuales y mergear wa config
-    const r0 = await fetch(WORKER + '/api/settings', { headers:{ Authorization:'Bearer '+token } });
-    const current = r0.ok ? await r0.json() : {};
-    const body = { ...current, waConfig: cfg };
+    // Mandar solo waConfig — el Worker preserva los demás campos automáticamente
     const r = await fetch(WORKER + '/api/settings', {
       method: 'POST',
       headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' },
-      body: JSON.stringify(body)
+      body: JSON.stringify({ waConfig: cfg })
     });
     if(r.ok){
-      if(statusEl){ statusEl.textContent = '✅ Guardado'; statusEl.style.color = 'var(--green)'; }
-      setTimeout(()=>{ if(statusEl) statusEl.textContent = ''; }, 2500);
+      if(statusEl){ statusEl.textContent = '✅ Guardado en KV'; statusEl.style.color = 'var(--green)'; }
+      setTimeout(()=>{ if(statusEl) statusEl.textContent = ''; }, 3000);
       waInit();
     } else {
-      if(statusEl){ statusEl.textContent = '❌ Error al guardar'; statusEl.style.color = 'var(--red)'; }
+      const err = await r.json().catch(()=>({}));
+      if(statusEl){ statusEl.textContent = '❌ ' + (err.error||'Error al guardar'); statusEl.style.color = 'var(--red)'; }
     }
   }catch(e){
     if(statusEl){ statusEl.textContent = '❌ ' + e.message; statusEl.style.color = 'var(--red)'; }
@@ -14026,28 +14024,32 @@ async function waSaveConfig(){
 }
 
 async function waTestSend(){
-  if(!_waConfig.token || !_waConfig.phoneId || !_waConfig.phone){
-    alert('Completá y guardá la configuración primero.');
+  const statusEl = document.getElementById('wa-config-status');
+  // Leer campos del formulario en tiempo real (por si no guardó aún)
+  const formCfg = _waReadForm();
+  const activeCfg = (formCfg.token && formCfg.phoneId && formCfg.phone) ? formCfg : _waConfig;
+  if(!activeCfg.token || !activeCfg.phoneId || !activeCfg.phone){
+    if(statusEl){ statusEl.textContent = '⚠️ Completá token, phone ID y número primero'; statusEl.style.color = 'var(--amber)'; }
+    setTimeout(()=>{ if(statusEl) statusEl.textContent = ''; }, 4000);
     return;
   }
-  const statusEl = document.getElementById('wa-config-status');
   if(statusEl){ statusEl.textContent = '📤 Enviando...'; statusEl.style.color = 'var(--text3)'; }
   try{
     const r = await fetch(WORKER + '/webhook/whatsapp/test', {
       method: 'POST',
       headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' },
-      body: JSON.stringify({ to: _waConfig.phone, message: '✅ Mensaje de prueba desde ML Panel Pro. Conexión exitosa!' })
+      body: JSON.stringify({ to: activeCfg.phone, message: '✅ Mensaje de prueba desde ML Panel Pro. ¡Conexión exitosa!' })
     });
     const d = await r.json();
     if(d.ok || d.messages){
-      if(statusEl){ statusEl.textContent = '✅ Mensaje enviado'; statusEl.style.color = 'var(--green)'; }
+      if(statusEl){ statusEl.textContent = '✅ ¡Mensaje enviado!'; statusEl.style.color = 'var(--green)'; }
     } else {
-      if(statusEl){ statusEl.textContent = '❌ ' + (d.error || JSON.stringify(d)); statusEl.style.color = 'var(--red)'; }
+      if(statusEl){ statusEl.textContent = '❌ ' + (d.error || JSON.stringify(d).slice(0,80)); statusEl.style.color = 'var(--red)'; }
     }
   }catch(e){
     if(statusEl){ statusEl.textContent = '❌ ' + e.message; statusEl.style.color = 'var(--red)'; }
   }
-  setTimeout(()=>{ if(statusEl) statusEl.textContent = ''; }, 4000);
+  setTimeout(()=>{ if(statusEl) statusEl.textContent = ''; }, 6000);
 }
 
 async function waLoadLog(){
