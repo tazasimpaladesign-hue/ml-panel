@@ -3009,7 +3009,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <div style="font-size:10px;color:var(--text3);margin-top:4px" id="ga4-woo-delta"></div>
         </div>
         <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:14px;text-align:center">
-          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Sesiones orgánicas</div>
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px" id="ga4-organic-label">Clics orgánicos Google</div>
           <div style="font-size:22px;font-weight:700;color:var(--green)" id="ga4-organic">—</div>
           <div style="font-size:10px;color:var(--text3);margin-top:4px" id="ga4-organic-delta"></div>
         </div>
@@ -3032,6 +3032,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <option value="90">90 días</option>
         </select>
         <button class="btn btn-ghost btn-sm" onclick="gscFetch()" id="gsc-fetch-btn">🔍 Cargar keywords</button>
+        <button class="btn btn-ghost btn-sm" onclick="gscListSites()" title="Ver propiedades verificadas en tu cuenta">🔎 Ver mis propiedades</button>
       </div>
     </div>
     <div id="gsc-content" style="margin-top:14px">
@@ -14395,9 +14396,9 @@ function _ga4Render(d, ts){
   const s = (id, v) => { const e = document.getElementById(id); if(e) e.textContent = v; };
   s('ga4-woo-visits', (d.sessions||0).toLocaleString('es-AR'));
   s('ga4-organic',    (d.organicSessions||0).toLocaleString('es-AR'));
+  s('ga4-organic-label', d.organicLabel || 'Clics orgánicos Google');
   s('ga4-woo-delta',  d.sessionsDelta ? (d.sessionsDelta > 0 ? '▲ +' : '▼ ') + d.sessionsDelta + '% vs ant.' : '');
   s('ga4-organic-delta', d.organicDelta ? (d.organicDelta > 0 ? '▲ +' : '▼ ') + d.organicDelta + '% vs ant.' : '');
-  // Top páginas
   const pagesEl = document.getElementById('ga4-pages-list');
   if(pagesEl && d.topPages && d.topPages.length){
     pagesEl.innerHTML = d.topPages.slice(0,10).map((p,i)=>
@@ -14410,6 +14411,36 @@ function _ga4Render(d, ts){
   }
   const subEl = document.getElementById('ga4-sub');
   if(subEl && ts) subEl.textContent = '⏱ Actualizado: ' + new Date(ts).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+}
+
+// ── GSC Diagnóstico: listar propiedades verificadas ───────────────────────────
+async function gscListSites(){
+  const statusEl = document.getElementById('goog-config-status');
+  if(statusEl){ statusEl.textContent = '🔎 Buscando propiedades...'; statusEl.style.color='var(--text3)'; }
+  try{
+    const r = await fetch(WORKER + '/api/google/gsc/sites', { headers:{ Authorization:'Bearer '+token } });
+    const d = await r.json();
+    if(d.error){
+      if(statusEl){ statusEl.textContent = '❌ ' + d.error; statusEl.style.color='var(--red)'; }
+      setTimeout(()=>{ if(statusEl) statusEl.textContent=''; }, 6000);
+      return;
+    }
+    const sites = d.sites || [];
+    if(!sites.length){
+      alert('No se encontraron propiedades verificadas en tu cuenta de Google Search Console.\n\nAsegurate de:\n1. Haber verificado el sitio en search.google.com/search-console\n2. Que la cuenta OAuth tenga acceso a esa propiedad.');
+      if(statusEl) statusEl.textContent='';
+      return;
+    }
+    const msg = '✅ Propiedades encontradas en tu cuenta:\n\n' +
+      sites.map(s => (s.level==='siteOwner'?'👑':'👤') + ' ' + s.url + ' (' + s.level + ')').join('\n') +
+      '\n\nCopiá exactamente la URL que querés usar y pegála en el campo "Search Console Site URL" del panel.';
+    alert(msg);
+    if(statusEl){ statusEl.textContent = '✅ ' + sites.length + ' propiedad' + (sites.length!==1?'es':'') + ' encontradas'; statusEl.style.color='var(--green)'; }
+    setTimeout(()=>{ if(statusEl) statusEl.textContent=''; }, 4000);
+  }catch(e){
+    if(statusEl){ statusEl.textContent='❌ '+e.message; statusEl.style.color='var(--red)'; }
+    setTimeout(()=>{ if(statusEl) statusEl.textContent=''; }, 5000);
+  }
 }
 
 // ── GSC ──────────────────────────────────────────────────────────────────────
