@@ -2809,6 +2809,11 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <div style="font-size:10px;color:var(--text3);margin-top:3px">Formato internacional sin + ni espacios</div>
       </div>
       <div>
+        <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">2° número (opcional)</label>
+        <input type="text" id="wa-phone2" placeholder="Ej: 5491154321234" style="font-size:13px" oninput="waSaveDraft()">
+        <div style="font-size:10px;color:var(--text3);margin-top:3px">Segundo celular que recibirá las mismas alertas</div>
+      </div>
+      <div>
         <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Phone Number ID (Meta)</label>
         <input type="text" id="wa-phone-id" placeholder="Desde Meta Business Suite" style="font-size:13px" oninput="waSaveDraft()">
       </div>
@@ -3328,19 +3333,52 @@ async function pollNewData(){
     const r=await mlGet('/orders/search?seller='+userId+'&order.date_created.from='+encodeURIComponent(from2h)+'&sort=date_desc&limit=10');
     const fresh=r.results||[];
     let hasNew=false;
+    const newOrders=[];
     fresh.forEach(o=>{
       const idx=allOrders.findIndex(e=>e.id===o.id);
-      if(idx<0){allOrders.unshift(o);hasNew=true;}
+      if(idx<0){allOrders.unshift(o);hasNew=true;newOrders.push(o);}
       else allOrders[idx]={...allOrders[idx],...o};
     });
     if(hasNew){
       const n=fresh[0];
       showToast('🛍️ Nueva venta: '+(n.order_items?.[0]?.item?.title||'').slice(0,40)+' $'+(n.total_amount||0).toLocaleString('es-AR'),'success','sale');
+      // ── WhatsApp: nueva venta ─────────────────────────────────
+      newOrders.forEach(o => {
+        if(!['paid','confirmed','delivered','shipped'].includes(o.status)) return;
+        waTrigger('venta', {
+          producto:  (o.order_items?.[0]?.item?.title||'Producto').slice(0,60),
+          precio:    o.total_amount || 0,
+          comprador: o.buyer?.nickname || '—',
+        });
+      });
     }
-    // Actualizar shipping de las frescas
+    // Actualizar shipping de las frescas y detectar envíos despachados
+    const prevShipStatuses = {};
+    allOrders.forEach(o => { if(o.shipping?.id) prevShipStatuses[o.shipping.id] = o.shipping.status; });
     await loadShippingStatuses(fresh.filter(o=>o.shipping?.id));
+    // ── WhatsApp: envío despachado ────────────────────────────
+    allOrders.forEach(o => {
+      if(!o.shipping?.id) return;
+      const prevSt = prevShipStatuses[o.shipping.id];
+      const currSt = o.shipping?.status;
+      if(prevSt && prevSt !== 'shipped' && currSt === 'shipped'){
+        // Construir URL de seguimiento
+        const trackingNum = o.shipping?.tracking_number || o.shipping?.id || '';
+        const carrier = (o.shipping?.service_id||'').toLowerCase().includes('correo') ? 'correoargentino' : 'paqar';
+        const trackUrl = trackingNum
+          ? (carrier === 'correoargentino'
+              ? `https://www.correoargentino.com.ar/formularios/oidn?id=${trackingNum}`
+              : `https://www.paqar.com.ar/#${trackingNum}`)
+          : 'https://www.correoargentino.com.ar';
+        waTrigger('envio', {
+          producto:    (o.order_items?.[0]?.item?.title||'Producto').slice(0,60),
+          comprador:   o.buyer?.nickname || '—',
+          trackingUrl: trackUrl,
+        });
+      }
+    });
+
     _updateVentasBadge();
-    const now=new Date();
     const arNow=nowAR();const mesOrders=allOrders.filter(o=>dateAR(o.date_created)>=new Date(Date.UTC(arNow.getUTCFullYear(),arNow.getUTCMonth(),1)));
     _updateOrdersUI(mesOrders);
     if(document.getElementById('section-ventas')?.classList.contains('active'))renderVentasTable();
@@ -3350,7 +3388,17 @@ async function pollNewData(){
     const uq=await mlGet('/questions/search?seller_id='+userId+'&status=UNANSWERED&limit=50');
     const pend=(uq.questions||[]).length;
     const prev=parseInt(document.getElementById('nb-q')?.textContent)||0;
-    if(pend>prev)showToast('💬 Nueva pregunta ('+pend+' pendientes)','warn','question');
+    if(pend>prev){
+      showToast('💬 Nueva pregunta ('+pend+' pendientes)','warn','question');
+      // ── WhatsApp: nueva pregunta ──────────────────────────────
+      const newQs = (uq.questions||[]).slice(0, pend - prev);
+      newQs.forEach(q => {
+        waTrigger('pregunta', {
+          pregunta: (q.text||'').slice(0,120),
+          producto: q.item_id ? ((allItems.find(i=>String(i.id)===String(q.item_id))?.title)||('MLA '+q.item_id)) : '—',
+        });
+      });
+    }
     document.getElementById('nb-q').textContent=pend;
     if(pend!==prev&&document.getElementById('section-preguntas')?.classList.contains('active'))renderQuestions();
     // Mensajes post-venta no leidos
@@ -13964,6 +14012,7 @@ async function waInit(){
 function _waApplyConfig(){
   const set = (id, val) => { const e = document.getElementById(id); if(e && val !== undefined) e.value = val; };
   set('wa-phone',        _waConfig.phone        || '');
+  set('wa-phone2',       _waConfig.phone2       || '');
   set('wa-phone-id',     _waConfig.phoneId      || '');
   set('wa-token',        _waConfig.token        || '');
   set('wa-verify-token', _waConfig.verifyToken  || '');
@@ -13981,6 +14030,7 @@ function _waReadForm(){
   const getChk = id => { const e = document.getElementById(id); return e ? e.checked : false; };
   return {
     phone:        get('wa-phone'),
+    phone2:       get('wa-phone2'),
     phoneId:      get('wa-phone-id'),
     token:        get('wa-token'),
     verifyToken:  get('wa-verify-token'),
@@ -14109,14 +14159,18 @@ async function waTrigger(event, data){
     .replace(/{pregunta}/g,     data.pregunta     || '—')
     .replace(/{tracking_url}/g, data.trackingUrl  || 'https://andreani.com');
 
-  try{
-    await fetch(WORKER + '/webhook/whatsapp/send', {
-      method: 'POST',
-      headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' },
-      body: JSON.stringify({ to: _waConfig.phone, message: msg, event })
-    });
-    console.log('[WA] Notificación enviada:', event);
-  }catch(e){ console.warn('[WA] Error al enviar:', e.message); }
+  // Enviar a todos los números configurados (principal + opcional)
+  const phones = [_waConfig.phone, _waConfig.phone2].filter(Boolean);
+  for(const phone of phones){
+    try{
+      await fetch(WORKER + '/webhook/whatsapp/send', {
+        method: 'POST',
+        headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' },
+        body: JSON.stringify({ to: phone, message: msg, event })
+      });
+      console.log('[WA] Notificación enviada:', event, '→', phone);
+    }catch(e){ console.warn('[WA] Error al enviar a', phone, ':', e.message); }
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
