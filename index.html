@@ -14083,21 +14083,35 @@ async function waTestSend(){
     setTimeout(()=>{ if(statusEl) statusEl.textContent = ''; }, 4000);
     return;
   }
-  if(statusEl){ statusEl.textContent = '📤 Enviando...'; statusEl.style.color = 'var(--text3)'; }
-  try{
-    const r = await fetch(WORKER + '/webhook/whatsapp/test', {
-      method: 'POST',
-      headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' },
-      body: JSON.stringify({ to: activeCfg.phone, message: '✅ Mensaje de prueba desde ML Panel Pro. ¡Conexión exitosa!' })
-    });
-    const d = await r.json();
-    if(d.ok || d.messages){
-      if(statusEl){ statusEl.textContent = '✅ ¡Mensaje enviado!'; statusEl.style.color = 'var(--green)'; }
-    } else {
-      if(statusEl){ statusEl.textContent = '❌ ' + (d.error || JSON.stringify(d).slice(0,80)); statusEl.style.color = 'var(--red)'; }
+
+  // Enviar a todos los números configurados (igual que waTrigger)
+  const phones = [activeCfg.phone, activeCfg.phone2].filter(Boolean);
+  if(statusEl){ statusEl.textContent = '📤 Enviando a ' + phones.length + ' número' + (phones.length > 1 ? 's' : '') + '...'; statusEl.style.color = 'var(--text3)'; }
+
+  let allOk = true;
+  const errors = [];
+  for(const phone of phones){
+    try{
+      const r = await fetch(WORKER + '/webhook/whatsapp/test', {
+        method: 'POST',
+        headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' },
+        body: JSON.stringify({ to: phone, message: '✅ Mensaje de prueba desde ML Panel Pro. ¡Conexión exitosa!' })
+      });
+      const d = await r.json();
+      if(!d.ok && !d.messages){
+        allOk = false;
+        errors.push((d.error || 'Error').slice(0, 60) + ' → ' + phone);
+      }
+    }catch(e){
+      allOk = false;
+      errors.push(e.message + ' → ' + phone);
     }
-  }catch(e){
-    if(statusEl){ statusEl.textContent = '❌ ' + e.message; statusEl.style.color = 'var(--red)'; }
+  }
+
+  if(allOk){
+    if(statusEl){ statusEl.textContent = '✅ Enviado a ' + phones.length + ' número' + (phones.length > 1 ? 's' : ''); statusEl.style.color = 'var(--green)'; }
+  } else {
+    if(statusEl){ statusEl.textContent = '❌ ' + errors[0]; statusEl.style.color = 'var(--red)'; }
   }
   setTimeout(()=>{ if(statusEl) statusEl.textContent = ''; }, 6000);
 }
