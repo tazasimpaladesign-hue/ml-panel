@@ -3374,6 +3374,7 @@ async function pollNewData(){
           producto:    (o.order_items?.[0]?.item?.title||'Producto').slice(0,60),
           comprador:   o.buyer?.nickname || '—',
           trackingUrl: trackUrl,
+          fallbackMsg: `📦 Envío despachado!\nProducto: ${(o.order_items?.[0]?.item?.title||'Producto').slice(0,50)}\nSeguilo en: ${trackUrl}`,
         });
       }
     });
@@ -14160,29 +14161,28 @@ async function waTrigger(event, data){
   if(event === 'pregunta' && !_waConfig.evPregunta) return;
   if(event === 'envio'    && !_waConfig.evEnvio)    return;
 
-  let tmpl = '';
-  if(event === 'venta')    tmpl = _waConfig.tmplVenta    || '🛍️ Nueva venta: {producto} — ${precio}';
-  if(event === 'pregunta') tmpl = _waConfig.tmplPregunta || '❓ Nueva pregunta: {pregunta}';
-  if(event === 'envio')    tmpl = _waConfig.tmplEnvio    || '📦 Envío despachado: {producto}';
-
-  // Reemplazar variables
-  const msg = tmpl
-    .replace(/{producto}/g,     data.producto     || '—')
-    .replace(/{precio}/g,       data.precio       ? Number(data.precio).toLocaleString('es-AR') : '—')
-    .replace(/{comprador}/g,    data.comprador    || '—')
-    .replace(/{pregunta}/g,     data.pregunta     || '—')
-    .replace(/{tracking_url}/g, data.trackingUrl  || 'https://andreani.com');
-
   // Enviar a todos los números configurados (principal + opcional)
   const phones = [_waConfig.phone, _waConfig.phone2].filter(Boolean);
   for(const phone of phones){
     try{
+      // El Worker maneja el mapeo a plantilla + fallback automáticamente
       await fetch(WORKER + '/webhook/whatsapp/send', {
         method: 'POST',
         headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' },
-        body: JSON.stringify({ to: phone, message: msg, event })
+        body: JSON.stringify({
+          to:          phone,
+          event:       event,
+          // Campos estructurados para las plantillas
+          producto:    data.producto    || '—',
+          precio:      data.precio      ? String(Number(data.precio).toLocaleString('es-AR')) : '—',
+          comprador:   data.comprador   || '—',
+          pregunta:    data.pregunta    || '—',
+          trackingUrl: data.trackingUrl || '',
+          // Fallback de texto para eventos sin plantilla (ej: envío)
+          message:     data.fallbackMsg || '',
+        })
       });
-      console.log('[WA] Notificación enviada:', event, '→', phone);
+      console.log('[WA] Notificación disparada:', event, '→', phone);
     }catch(e){ console.warn('[WA] Error al enviar a', phone, ':', e.message); }
   }
 }
