@@ -2280,19 +2280,24 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   <div class="card mb">
     <div class="card-hd" style="flex-wrap:wrap;gap:8px">
       <div style="flex:1;min-width:0">
-        <div class="card-title">&#x1F6D2; Importador a WooCommerce</div>
-        <div class="card-sub" style="margin-top:4px;line-height:1.6">
-          Ingres&#225; el ID v&#225;lido de ML (MLA-XXXXXXX o MLAXXXXXXX)
-          &middot; Revis&#225; los datos &middot; Ajust&#225; el precio
-          &middot; Se guarda como borrador &#x270D;&#xFE0F;
+        <div class="card-title">🛒 Importador a WooCommerce</div>
+        <div class="card-sub" style="margin-top:4px;line-height:1.7">
+          Usá el <strong>número de publicación</strong> que aparece en tu panel de Mercado Libre.
+          Andá a <strong>Mis publicaciones → cualquier producto → botón copiar (#XXXXXXXXXX)</strong> y pegalo acá.
+          También podés pegar el link completo de la publicación.
         </div>
       </div>
     </div>
+    <div style="margin-top:10px;padding:10px 12px;background:var(--bg3);border-radius:8px;border:1px solid var(--border);font-size:12px;color:var(--text2);line-height:1.7">
+      <strong>¿Cómo obtener el ID?</strong><br>
+      En tu panel de MercadoLibre → Publicaciones → buscá el producto → fijate el número con # adelante (ej: <code style="background:var(--bg4);padding:1px 5px;border-radius:3px">#1234567890</code>).
+      Ese número pegado acá (con o sin el #) trae el producto correctamente porque usa tu cuenta autenticada, igual que el módulo de Publicaciones y el Analizador SEO.
+    </div>
     <div style="display:flex;gap:10px;align-items:flex-end;margin-top:14px">
       <div style="flex:1">
-        <label>ID o link de MercadoLibre</label>
+        <label>Número de publicación o link de ML</label>
         <input type="text" id="woo-url-input"
-          placeholder="MLA1234567890 &#243; https://articulo.mercadolibre.com.ar/MLA-..."
+          placeholder="Ej: #1234567890  ó  MLA1234567890  ó  https://articulo.mercadolibre.com.ar/MLA-..."
           style="font-size:13px">
       </div>
       <button class="btn btn-primary" onclick="fetchPreviewML()" id="btn-fetch-woo"
@@ -13271,30 +13276,33 @@ function _parseMLId(input) {
   if (!input) return null;
   var clean = input.trim();
 
-  // Formato catálogo: /up/MLAU3899091033 → necesitamos el MLA del producto padre
-  // Estas URLs no tienen el MLA directamente, pero el parámetro de la URL puede tenerlo
-  // Intentar extraer del path /MLA-XXXXXXX/ o del query string item_id=
+  // Formato copiado desde panel ML: #1234567890 (con o sin #)
+  var hashMatch = clean.match(/^#(\d{8,12})$/);
+  if (hashMatch) return 'MLA' + hashMatch[1];
+
+  // Parámetro item_id en query string
   var itemIdParam = clean.match(/[?&]item_id=(MLA\d+)/i);
   if (itemIdParam) return itemIdParam[1];
 
-  // URL estándar: mercadolibre.com.ar/titulo-del-producto/p/MLA12345 o /MLA-12345
+  // URL estándar con MLA en el path
   var mlaMatch = clean.match(/\/(MLA-?(\d+))/i);
   if (mlaMatch) return 'MLA' + mlaMatch[2];
 
-  // ID solo en path /up/MLAU... → no es MLA directo, ignorar el U
-  // El path puede ser /up/MLAU3899091033 — intentar quitar la U
+  // Catálogo /up/MLAU3899091033 — quitar la letra entre MLA y los números
   var uMatch = clean.match(/\/up\/MLA[A-Z](\d+)/i);
   if (uMatch) return 'MLA' + uMatch[1];
 
-  // Número puro en el query o path
+  // Número en path
   var numMatch = clean.match(/\/(\d{8,12})(?:[/?#]|$)/);
   if (numMatch) return 'MLA' + numMatch[1];
 
-  // ID directo (sin URL)
-  var stripped = clean.split('?')[0].split('#')[0];
-  var direct = stripped.match(/MLA-?(\d+)/i);
+  // ID directo: MLA1234567890 o MLA-1234567890
+  var stripped = clean.split('?')[0].split('#')[0].trim();
+  var direct = stripped.match(/^MLA-?(\d+)$/i);
   if (direct) return 'MLA' + direct[1];
-  if (/^\d{8,12}$/.test(stripped.trim())) return 'MLA' + stripped.trim();
+
+  // Número puro
+  if (/^\d{8,12}$/.test(stripped)) return 'MLA' + stripped;
 
   return null;
 }
