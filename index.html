@@ -3381,9 +3381,9 @@ function stopPolling(){if(_pollingInterval){clearInterval(_pollingInterval);_pol
 async function pollNewData(){
   if(!token||!userId)return;
   try{
-    // Ordenes de las ultimas 2 horas
-    const from2h=new Date(Date.now()-2*60*60*1000).toISOString();
-    const r=await mlGet('/orders/search?seller='+userId+'&order.date_created.from='+encodeURIComponent(from2h)+'&sort=date_desc&limit=10');
+    // Órdenes últimas 6 horas (antes 2h — por si el panel estaba cerrado durante la venta)
+    const from6h=new Date(Date.now()-6*60*60*1000).toISOString();
+    const r=await mlGet('/orders/search?seller='+userId+'&order.date_created.from='+encodeURIComponent(from6h)+'&sort=date_desc&limit=20');
     const fresh=r.results||[];
     let hasNew=false;
     const newOrders=[];
@@ -3395,16 +3395,19 @@ async function pollNewData(){
     if(hasNew){
       const n=fresh[0];
       showToast('🛍️ Nueva venta: '+(n.order_items?.[0]?.item?.title||'').slice(0,40)+' $'+(n.total_amount||0).toLocaleString('es-AR'),'success','sale');
-      // ── WhatsApp: nueva venta ─────────────────────────────────
-      newOrders.forEach(o => {
-        if(!['paid','confirmed','delivered','shipped'].includes(o.status)) return;
-        waTrigger('venta', {
-          producto:  (o.order_items?.[0]?.item?.title||'Producto').slice(0,60),
-          precio:    o.total_amount || 0,
-          comprador: o.buyer?.nickname || '—',
-        });
-      });
     }
+    // ── WhatsApp: nueva venta — usar dedup persistente para no perder ventas
+    // aunque el panel esté abierto/cerrado en el momento de la venta
+    fresh.forEach(o => {
+      if(!['paid','confirmed','delivered','shipped'].includes(o.status)) return;
+      if(_waAlreadyNotified(o.id)) return; // ya notificada, saltar
+      _waNoteOrder(o.id); // marcar como notificada ANTES de enviar
+      waTrigger('venta', {
+        producto:  (o.order_items?.[0]?.item?.title||'Producto').slice(0,60),
+        precio:    o.total_amount || 0,
+        comprador: o.buyer?.nickname || '—',
+      });
+    });
     // Actualizar shipping de las frescas y detectar envíos despachados
     const prevShipStatuses = {};
     allOrders.forEach(o => { if(o.shipping?.id) prevShipStatuses[o.shipping.id] = o.shipping.status; });
@@ -6184,11 +6187,15 @@ function renderSEOTable(){
           </div>
         </div>
       </td>
-      <td style="text-align:right;white-space:nowrap">
-        <span style="font-size:12px;font-weight:600;color:var(--text)">$${(item.price||0).toLocaleString('es-AR')}</span>
+      <td style="text-align:right;white-space:nowrap" id="seo-price-cell-${item.id}">
+        <span style="font-size:12px;font-weight:600;color:var(--text);cursor:pointer" 
+          onclick="seoStartPriceEdit('${item.id}',${item.price||0})" 
+          title="Clic para editar precio">$${(item.price||0).toLocaleString('es-AR')} ✎</span>
       </td>
-      <td style="text-align:center">
-        <span style="font-size:12px;font-weight:600;color:${(item.available_quantity??0)===0?'var(--red)':(item.available_quantity??0)<=3?'var(--amber)':'var(--text)'}">${item.available_quantity??0}</span>
+      <td style="text-align:center" id="seo-stock-cell-${item.id}">
+        <span style="font-size:12px;font-weight:600;color:${(item.available_quantity??0)===0?'var(--red)':(item.available_quantity??0)<=3?'var(--amber)':'var(--text)'};cursor:pointer"
+          onclick="seoStartStockEdit('${item.id}',${item.available_quantity??0})"
+          title="Clic para editar stock">${item.available_quantity??0} ✎</span>
       </td>
       <td style="text-align:center">
         <span style="font-size:14px;font-weight:700;color:var(--text)">${item.sold_quantity||0}</span>
@@ -6253,6 +6260,92 @@ function renderSEOTable(){
     pgEl.innerHTML=b;
   }
 }
+// ── Edición inline de precio y stock en SEO ──────────────────────────────────
+const SEO_MIN_PRICE = 100; // precio mínimo en pesos — validación anti-typo
+
+function seoStartPriceEdit(itemId, currentPrice){
+  const cell = document.getElementById('seo-price-cell-'+itemId);
+  if(!cell) return;
+  cell.innerHTML = `<div style="display:flex;align-items:center;gap:3px">
+    <span style="font-size:10px;color:var(--text3)">$</span>
+    <input id="seo-prc-${itemId}" type="number" value="${currentPrice}" min="${SEO_MIN_PRICE}" step="1"
+      style="width:80px;font-size:12px;padding:2px 5px;border-radius:4px;border:1px solid var(--accent);background:var(--bg3);color:var(--text)"
+      onkeydown="if(event.key==='Enter'){event.preventDefault();seoSavePrice('${itemId}');}if(event.key==='Escape')renderSEOTable();">
+    <button class="btn btn-primary btn-xs" style="padding:1px 6px" onclick="seoSavePrice('${itemId}')">✓</button>
+    <button class="btn btn-ghost btn-xs" style="padding:1px 5px" onclick="renderSEOTable()">✕</button>
+    <span id="seo-prc-msg-${itemId}" style="font-size:9px"></span>
+  </div>`;
+  const inp = document.getElementById('seo-prc-'+itemId);
+  if(inp){ inp.focus(); inp.select(); }
+}
+
+async function seoSavePrice(itemId){
+  const inp   = document.getElementById('seo-prc-'+itemId);
+  const msgEl = document.getElementById('seo-prc-msg-'+itemId);
+  if(!inp) return;
+  const val = parseFloat(inp.value);
+  if(isNaN(val) || val < SEO_MIN_PRICE){
+    inp.style.borderColor='var(--red)';
+    if(msgEl){ msgEl.textContent='Mín $'+SEO_MIN_PRICE; msgEl.style.color='var(--red)'; }
+    return;
+  }
+  inp.disabled=true;
+  if(msgEl){ msgEl.textContent='...'; msgEl.style.color='var(--text3)'; }
+  const item = allItems.find(i=>i.id===itemId);
+  const body = item?.variations?.length ? { variations: item.variations.map(v=>({id:v.id,price:val})) } : { price: val };
+  try{
+    const res = await fetch(WORKER+'/api/items/'+itemId,{
+      method:'PUT', headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
+      body:JSON.stringify(body)
+    });
+    const d = await res.json();
+    if(d.error){ inp.disabled=false; inp.style.borderColor='var(--red)'; if(msgEl){ msgEl.textContent='❌'+(d.message||d.error).slice(0,30); msgEl.style.color='var(--red)'; } return; }
+    if(item){ item.price=val; if(item.variations?.length) item.variations.forEach(v=>v.price=val); }
+    showToast('💰 Precio actualizado: $'+val.toLocaleString('es-AR'),'success');
+    renderSEOTable();
+  }catch(e){ inp.disabled=false; if(msgEl){ msgEl.textContent='❌'+e.message.slice(0,25); msgEl.style.color='var(--red)'; } }
+}
+
+function seoStartStockEdit(itemId, currentStock){
+  const cell = document.getElementById('seo-stock-cell-'+itemId);
+  if(!cell) return;
+  cell.innerHTML = `<div style="display:flex;align-items:center;gap:3px">
+    <input id="seo-stk-${itemId}" type="number" value="${currentStock}" min="0" step="1"
+      style="width:60px;font-size:12px;padding:2px 5px;border-radius:4px;border:1px solid var(--accent);background:var(--bg3);color:var(--text)"
+      onkeydown="if(event.key==='Enter'){event.preventDefault();seoSaveStock('${itemId}');}if(event.key==='Escape')renderSEOTable();">
+    <button class="btn btn-primary btn-xs" style="padding:1px 6px" onclick="seoSaveStock('${itemId}')">✓</button>
+    <button class="btn btn-ghost btn-xs" style="padding:1px 5px" onclick="renderSEOTable()">✕</button>
+    <span id="seo-stk-msg-${itemId}" style="font-size:9px"></span>
+  </div>`;
+  const inp = document.getElementById('seo-stk-'+itemId);
+  if(inp){ inp.focus(); inp.select(); }
+}
+
+async function seoSaveStock(itemId){
+  const inp   = document.getElementById('seo-stk-'+itemId);
+  const msgEl = document.getElementById('seo-stk-msg-'+itemId);
+  if(!inp) return;
+  const val = parseInt(inp.value);
+  if(isNaN(val) || val < 0){ inp.style.borderColor='var(--red)'; if(msgEl){ msgEl.textContent='Inválido'; msgEl.style.color='var(--red)'; } return; }
+  inp.disabled=true;
+  if(msgEl){ msgEl.textContent='...'; msgEl.style.color='var(--text3)'; }
+  const item = allItems.find(i=>i.id===itemId);
+  const body = item?.variations?.length
+    ? { variations: item.variations.map(v=>({id:v.id,available_quantity:val})) }
+    : { available_quantity: val };
+  try{
+    const res = await fetch(WORKER+'/api/items/'+itemId,{
+      method:'PUT', headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
+      body:JSON.stringify(body)
+    });
+    const d = await res.json();
+    if(d.error){ inp.disabled=false; inp.style.borderColor='var(--red)'; if(msgEl){ msgEl.textContent='❌'+(d.message||d.error).slice(0,30); msgEl.style.color='var(--red)'; } return; }
+    if(item){ item.available_quantity=val; if(item.variations?.length) item.variations.forEach(v=>v.available_quantity=val); }
+    showToast('📦 Stock actualizado: '+val+' unidades','success');
+    renderSEOTable();
+  }catch(e){ inp.disabled=false; if(msgEl){ msgEl.textContent='❌'+e.message.slice(0,25); msgEl.style.color='var(--red)'; } }
+}
+
 function renderKWDensity(){
   const words={};
   allItems.forEach(i=>{
@@ -13176,10 +13269,33 @@ var _wooImportHistory = [];
 
 function _parseMLId(input) {
   if (!input) return null;
-  var clean = input.trim().split('?')[0].split('#')[0];
-  var m = clean.match(/MLA-?(\d+)/i);
-  if (m) return 'MLA' + m[1];
-  if (/^\d{8,12}$/.test(clean.trim())) return 'MLA' + clean.trim();
+  var clean = input.trim();
+
+  // Formato catálogo: /up/MLAU3899091033 → necesitamos el MLA del producto padre
+  // Estas URLs no tienen el MLA directamente, pero el parámetro de la URL puede tenerlo
+  // Intentar extraer del path /MLA-XXXXXXX/ o del query string item_id=
+  var itemIdParam = clean.match(/[?&]item_id=(MLA\d+)/i);
+  if (itemIdParam) return itemIdParam[1];
+
+  // URL estándar: mercadolibre.com.ar/titulo-del-producto/p/MLA12345 o /MLA-12345
+  var mlaMatch = clean.match(/\/(MLA-?(\d+))/i);
+  if (mlaMatch) return 'MLA' + mlaMatch[2];
+
+  // ID solo en path /up/MLAU... → no es MLA directo, ignorar el U
+  // El path puede ser /up/MLAU3899091033 — intentar quitar la U
+  var uMatch = clean.match(/\/up\/MLA[A-Z](\d+)/i);
+  if (uMatch) return 'MLA' + uMatch[1];
+
+  // Número puro en el query o path
+  var numMatch = clean.match(/\/(\d{8,12})(?:[/?#]|$)/);
+  if (numMatch) return 'MLA' + numMatch[1];
+
+  // ID directo (sin URL)
+  var stripped = clean.split('?')[0].split('#')[0];
+  var direct = stripped.match(/MLA-?(\d+)/i);
+  if (direct) return 'MLA' + direct[1];
+  if (/^\d{8,12}$/.test(stripped.trim())) return 'MLA' + stripped.trim();
+
   return null;
 }
 
@@ -13413,7 +13529,7 @@ async function fetchPreviewML() {
   var btn       = document.getElementById('btn-fetch-woo');
 
   if (!itemId) {
-    container.innerHTML = '<div class="alert a-warn" style="margin-top:10px">Ingres&#225; un link v&#225;lido de ML o un ID tipo MLA-XXXXXXX</div>';
+    container.innerHTML = '<div class="alert a-warn" style="margin-top:10px">Ingresá un link válido de ML o un ID tipo MLA-XXXXXXX</div>';
     return;
   }
 
@@ -13421,9 +13537,9 @@ async function fetchPreviewML() {
   container.innerHTML = '<div class="alert a-info" style="margin-top:14px">Buscando producto...</div>';
 
   var rawTitle = '', price = 0, pictures = [], permalink = '', description = '', attributes = [], stock = 1;
-  var sku = '', ean = '';
+  var sku = '', ean = '', variations = [];
 
-  // PASO 1: allItems en memoria (productos propios)
+  // PASO 1: allItems en memoria (productos propios — misma lógica que PUBLICACIONES y SEO)
   var local = allItems.find(function(i) {
     var sid = String(i.id);
     return sid === itemId || sid === itemId.replace(/^MLA/i, '');
@@ -13435,6 +13551,7 @@ async function fetchPreviewML() {
     permalink  = local.permalink || '';
     stock      = local.available_quantity || 1;
     attributes = local.attributes || [];
+    variations = local.variations || [];
     if (local.pictures && local.pictures.length) {
       local.pictures.forEach(function(p) { var u = p.secure_url || p.url || ''; if (u) pictures.push(u); });
     }
@@ -13447,29 +13564,37 @@ async function fetchPreviewML() {
     } catch(e) {}
 
   } else {
-    // PASO 2: API publica via allorigins.win
-    container.innerHTML = '<div class="alert a-info" style="margin-top:14px">Consultando API de MercadoLibre...</div>';
+    // PASO 2: API autenticada del Worker (igual que PUBLICACIONES y SEO — nunca proxy público)
+    container.innerHTML = '<div class="alert a-info" style="margin-top:14px">Consultando API de MercadoLibre (cuenta autenticada)...</div>';
     try {
-      var mlUrl    = 'https://api.mercadolibre.com/items/' + itemId;
-      var proxyUrl = 'https://api.allorigins.win/get?url=' + encodeURIComponent(mlUrl);
-      var proxyRes = await fetch(proxyUrl);
-      if (!proxyRes.ok) throw new Error('Proxy HTTP ' + proxyRes.status);
-      var pd      = await proxyRes.json();
-      var mlData  = JSON.parse(pd.contents);
+      var mlRes = await fetch(WORKER + '/api/items/' + itemId, {
+        headers: { 'Authorization': 'Bearer ' + token }
+      });
+      if (!mlRes.ok) throw new Error('Error HTTP ' + mlRes.status);
+      var mlData = await mlRes.json();
       if (mlData.error) throw new Error(mlData.message || mlData.error);
+
       rawTitle   = mlData.title || '';
       price      = mlData.price || 0;
       permalink  = mlData.permalink || '';
       stock      = mlData.available_quantity || 1;
       attributes = mlData.attributes || [];
+      variations = mlData.variations || [];
       if (mlData.pictures && mlData.pictures.length) {
         mlData.pictures.forEach(function(p) { var u = p.secure_url || p.url || ''; if (u) pictures.push(u); });
       }
       if (!pictures.length && mlData.thumbnail) pictures.push(mlData.thumbnail);
       sku = wooExtractAttr(attributes, 'SELLER_SKU');
       ean = wooExtractAttr(attributes, 'GTIN') || wooExtractAttr(attributes, 'EAN');
+
+      // Descripción
+      try {
+        var dRes2 = await fetch(WORKER + '/api/items/' + itemId + '/description', { headers: { 'Authorization': 'Bearer ' + token } });
+        if (dRes2.ok) { var dData2 = await dRes2.json(); description = dData2.plain_text || ''; }
+      } catch(e) {}
+
     } catch(e) {
-      container.innerHTML = '<div class="alert a-red" style="margin-top:14px">No se pudo obtener el producto. (' + e.message + ')</div>';
+      container.innerHTML = '<div class="alert a-red" style="margin-top:14px">❌ No se pudo obtener el producto: ' + e.message + '<br><small>Verificá que el ID sea correcto y que el producto sea tuyo.</small></div>';
       btn.disabled = false; btn.textContent = 'Obtener datos'; return;
     }
   }
@@ -14065,7 +14190,10 @@ var _settingsAutoSaveTid   = null;
 // WHATSAPP BUSINESS — Configuración, plantillas y log
 // ═══════════════════════════════════════════════════════════
 
-var _waConfig = {}; // { phone, phoneId, token, verifyToken, templates, events }
+var _waConfig = {};
+var _WA_NOTIFIED_KEY = 'mlp_wa_notified_v1'; // IDs de órdenes ya notificadas
+function _waNoteOrder(id){ try{ const s=new Set(JSON.parse(localStorage.getItem(_WA_NOTIFIED_KEY)||'[]')); s.add(String(id)); const a=[...s].slice(-200); localStorage.setItem(_WA_NOTIFIED_KEY,JSON.stringify(a)); }catch(e){} }
+function _waAlreadyNotified(id){ try{ return JSON.parse(localStorage.getItem(_WA_NOTIFIED_KEY)||'[]').includes(String(id)); }catch(e){ return false; } } // { phone, phoneId, token, verifyToken, templates, events }
 var _WA_KV_KEY = 'wa_config_v1';
 
 async function waInit(){
