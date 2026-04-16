@@ -14414,15 +14414,22 @@ async function waLoadLog(){
       el.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:10px 0;text-align:center">No hay envíos registrados aún.</div>';
       return;
     }
-    el.innerHTML = logs.slice(0,20).map(l=>`
-      <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
-        <span style="font-size:14px">${l.event==='venta'?'🛍️':l.event==='pregunta'?'💬':l.event==='envio'?'📦':'📤'}</span>
-        <div style="flex:1;min-width:0">
-          <div style="font-size:12.5px;font-weight:500">${l.description||l.event||'Mensaje'}</div>
-          <div style="font-size:10px;color:var(--text3)">${l.ts ? new Date(l.ts).toLocaleString('es-AR') : '—'} · To: +${l.to||'—'}</div>
+    el.innerHTML = logs.slice(0,20).map(l=>{
+      const methodLabel = l.method==='template_v1'?'✅ plantilla aprobada':l.method==='template_v2'?'✅ plantilla v2':l.method==='text_fallback'?'⚠️ texto plano (plantilla falló)':'—';
+      const errInfo = l.attemptErrors?.length ? l.attemptErrors.map(e=>`código ${e.code}: ${e.msg||'?'}`).join(' / ') : '';
+      return `<div style="padding:8px 0;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:14px">${l.event==='venta'?'🛍️':l.event==='pregunta'?'💬':l.event==='envio'?'📦':'📤'}</span>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12px;font-weight:500">${l.event||'Mensaje'} → +${l.to||'—'}</div>
+            <div style="font-size:10px;color:var(--text3)">${l.ts ? new Date(l.ts).toLocaleString('es-AR') : '—'}</div>
+          </div>
+          <span class="badge ${l.ok?'bg-green':'bg-red'}" style="font-size:9px">${l.ok?'OK':'Error'}</span>
         </div>
-        <span class="badge ${l.ok?'bg-green':'bg-red'}" style="font-size:9px">${l.ok?'Enviado':'Error'}</span>
-      </div>`).join('');
+        ${l.method ? `<div style="font-size:10px;color:var(--text3);margin-top:3px;padding-left:22px">${methodLabel}</div>` : ''}
+        ${errInfo ? `<div style="font-size:10px;color:var(--amber);margin-top:2px;padding-left:22px">⚠️ ${errInfo}</div>` : ''}
+      </div>`;
+    }).join('');
   }catch(e){
     el.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:10px 0">No se pudo cargar el log.</div>';
   }
