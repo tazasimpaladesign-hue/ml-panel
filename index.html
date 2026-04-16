@@ -758,6 +758,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
   <div class="sb-sec">Integraciones</div>
   <a class="nav" href="#woo-import" id="nav-woo-import" onclick="showSection('woo-import');return false;"><span class="ni">🛒</span>Importar a Woo<span class="nb nb-new">NEW</span></a>
+  <a class="nav" href="#woo-seo" id="nav-woo-seo" onclick="showSection('woo-seo');wooSeoInit();return false;"><span class="ni">🟣</span>SEO Tienda Woo<span class="nb nb-new">NEW</span></a>
   <a class="nav" href="#whatsapp" id="nav-whatsapp" onclick="showSection('whatsapp');return false;"><span class="ni">💬</span>WhatsApp Biz<span class="nb nb-green">NEW</span></a>
   <a class="nav" href="#google-tools" id="nav-google-tools" onclick="showSection('google-tools');return false;"><span class="ni">📊</span>Google Tools<span class="nb nb-new">NEW</span></a>
 
@@ -2936,6 +2937,97 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <div style="color:var(--text3);font-size:12.5px;padding:16px 0;text-align:center">Cargá el log para ver el historial de envíos.</div>
     </div>
   </div>
+</div>
+
+<!-- ═══════════════════════ SEO TIENDA WOOCOMMERCE ═══════════════════════ -->
+<div id="section-woo-seo" class="section fade-in">
+
+  <!-- Header con métricas resumen -->
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+    <div class="mc c-purple" style="flex:1;min-width:120px;padding:10px 14px">
+      <div class="mc-label">Productos</div>
+      <div style="font-size:20px;font-weight:700" id="wseo-total">—</div>
+    </div>
+    <div class="mc c-green" style="flex:1;min-width:120px;padding:10px 14px">
+      <div class="mc-label">Score SEO promedio</div>
+      <div style="font-size:20px;font-weight:700" id="wseo-avg-score">—</div>
+    </div>
+    <div class="mc c-amber" style="flex:1;min-width:120px;padding:10px 14px">
+      <div class="mc-label">Con problemas SEO</div>
+      <div style="font-size:20px;font-weight:700" id="wseo-issues-count">—</div>
+    </div>
+    <div class="mc c-red" style="flex:1;min-width:120px;padding:10px 14px">
+      <div class="mc-label">Sin stock</div>
+      <div style="font-size:20px;font-weight:700" id="wseo-no-stock">—</div>
+    </div>
+  </div>
+
+  <!-- Filtros y búsqueda -->
+  <div class="card mb" style="padding:12px 16px">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <input type="text" id="wseo-search" placeholder="🔍 Buscar producto..." style="font-size:12px;max-width:220px" oninput="wseoApplyFilters()">
+      <select id="wseo-filter-status" onchange="wseoApplyFilters()" style="font-size:12px;padding:5px 8px;border-radius:var(--rs);border:1px solid var(--border2);background:var(--bg3);color:var(--text)">
+        <option value="">Todos los estados</option>
+        <option value="publish">Publicados</option>
+        <option value="draft">Borradores</option>
+        <option value="pending">Pendientes</option>
+      </select>
+      <select id="wseo-filter-score" onchange="wseoApplyFilters()" style="font-size:12px;padding:5px 8px;border-radius:var(--rs);border:1px solid var(--border2);background:var(--bg3);color:var(--text)">
+        <option value="">Todos los scores</option>
+        <option value="critical">🔴 Crítico (&lt;40)</option>
+        <option value="warn">🟡 Mejorable (40-69)</option>
+        <option value="ok">🟢 Bueno (70+)</option>
+      </select>
+      <select id="wseo-sort" onchange="wseoApplyFilters()" style="font-size:12px;padding:5px 8px;border-radius:var(--rs);border:1px solid var(--border2);background:var(--bg3);color:var(--text)">
+        <option value="score_asc">Score ↑ (peores primero)</option>
+        <option value="score_desc">Score ↓ (mejores primero)</option>
+        <option value="sales_desc">Más vendidos</option>
+        <option value="name_asc">Nombre A-Z</option>
+        <option value="price_desc">Mayor precio</option>
+      </select>
+      <button class="btn btn-primary btn-sm" onclick="wseoLoad()" id="wseo-load-btn">📊 Cargar productos</button>
+      <button class="btn btn-ghost btn-sm" onclick="wseoLoad(true)" id="wseo-refresh-btn" style="display:none">↻ Actualizar</button>
+      <span id="wseo-status" style="font-size:11px;color:var(--text3)"></span>
+    </div>
+  </div>
+
+  <!-- Tabla -->
+  <div class="card" style="padding:0;overflow:hidden">
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:12px" id="wseo-table">
+        <thead>
+          <tr style="background:var(--bg3);border-bottom:2px solid var(--border)">
+            <th style="padding:10px 12px;text-align:left;min-width:280px">Producto</th>
+            <th style="padding:10px 8px;text-align:center">Estado</th>
+            <th style="padding:10px 8px;text-align:right">Precio</th>
+            <th style="padding:10px 8px;text-align:center">Stock</th>
+            <th style="padding:10px 8px;text-align:center">Vendidas</th>
+            <th style="padding:10px 8px;text-align:left;min-width:80px">SKU</th>
+            <th style="padding:10px 8px;text-align:center;min-width:120px">Score SEO</th>
+            <th style="padding:10px 8px;text-align:left;min-width:160px">Problemas</th>
+            <th style="padding:10px 8px;text-align:center;min-width:100px">Acciones</th>
+          </tr>
+        </thead>
+        <tbody id="wseo-tbody">
+          <tr><td colspan="9" style="text-align:center;padding:32px;color:var(--text3)">Hacé clic en "Cargar productos" para analizar tu tienda WooCommerce.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <!-- Paginación -->
+    <div id="wseo-pagination" style="display:flex;justify-content:space-between;align-items:center;padding:10px 16px;border-top:1px solid var(--border);font-size:12px"></div>
+  </div>
+
+  <!-- Panel detalle SEO (expandido al hacer clic en score) -->
+  <div id="wseo-detail-panel" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center">
+    <div style="background:var(--bg2);border-radius:14px;padding:24px;width:520px;max-width:94vw;max-height:85vh;overflow-y:auto;border:1px solid var(--border);box-shadow:0 20px 60px rgba(0,0,0,.4)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+        <div style="font-size:14px;font-weight:700" id="wseo-detail-title">Detalle SEO</div>
+        <button onclick="document.getElementById('wseo-detail-panel').style.display='none'" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text3);line-height:1">×</button>
+      </div>
+      <div id="wseo-detail-content"></div>
+    </div>
+  </div>
+
 </div>
 
 <!-- ═══════════════════════ GOOGLE TOOLS ═══════════════════════ -->
@@ -11911,6 +12003,7 @@ const titles={
   alertas:['🔔 Alertas','Centro de notificaciones'],
   'woo-import':['&#x1F6D2; Importar a WooCommerce','Trae tus publicaciones de ML a tu tienda propia'],
   'whatsapp':['💬 WhatsApp Business','Notificaciones automáticas y alertas al móvil'],
+  'woo-seo':['🟣 SEO Tienda Woo','Analizador SEO de tus productos en tiendaimpala.com.ar'],
   'google-tools':['📊 Google Tools','Analytics 4 + Search Console · Tráfico e inteligencia SEO'],
   'tareas':['&#x2705; Gestor de Tareas','Pendientes y completadas - sincronizadas en la nube'],
   calendario:['📅 Calendario Estratégico','Fechas fiscales · Ventas · Operativo · Cultura Pop'],
@@ -14864,6 +14957,195 @@ function bdayRenderList(){
       +'<button onclick="bdayDelete(\''+b.id+'\')" style="background:var(--red-g);color:var(--red);border:1px solid rgba(244,100,95,.2);border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px">✕</button>'
       +'</div>';
   }).join('');
+}
+
+// ═══════════════════════════════════════════════════════════
+// SEO TIENDA WOOCOMMERCE
+// ═══════════════════════════════════════════════════════════
+var _wseoProducts = [];  // datos completos
+var _wseoFiltered = [];  // tras aplicar filtros
+var _wseoCurPage  = 1;
+var _wseoTotalPages = 1;
+var _wseoLoaded   = false;
+const WSEO_PER_PAGE = 50;
+
+function wooSeoInit(){
+  if(!_wseoLoaded) return; // esperar a que el usuario pulse cargar
+}
+
+async function wseoLoad(refresh){
+  const btn    = document.getElementById('wseo-load-btn');
+  const refBtn = document.getElementById('wseo-refresh-btn');
+  const status = document.getElementById('wseo-status');
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Cargando...'; }
+  if(status) status.textContent='Consultando WooCommerce...';
+
+  try{
+    const search = document.getElementById('wseo-search')?.value||'';
+    let url = WORKER+'/woo/products?per_page='+WSEO_PER_PAGE+'&page='+_wseoCurPage;
+    if(search) url += '&search='+encodeURIComponent(search);
+
+    const r = await fetch(url, { headers:{ Authorization:'Bearer '+token } });
+    const d = await r.json();
+    if(d.error){ if(status){ status.textContent='❌ '+d.error; status.style.color='var(--red)'; } return; }
+
+    _wseoProducts = d.products || [];
+    _wseoTotalPages = d.totalPages || 1;
+    _wseoLoaded = true;
+
+    if(btn){ btn.style.display='none'; }
+    if(refBtn){ refBtn.style.display='inline-flex'; refBtn.disabled=false; }
+    if(status) status.textContent = d.total+' productos';
+
+    wseoUpdateStats();
+    wseoApplyFilters();
+  }catch(e){
+    if(status){ status.textContent='❌ '+e.message; status.style.color='var(--red)'; }
+  }
+  if(btn){ btn.disabled=false; btn.textContent='📊 Cargar productos'; }
+}
+
+function wseoUpdateStats(){
+  const prods = _wseoProducts;
+  const s = id => document.getElementById(id);
+  if(s('wseo-total'))        s('wseo-total').textContent = prods.length;
+  const scores = prods.map(p=>p.seo_score);
+  const avg = scores.length ? Math.round(scores.reduce((a,b)=>a+b,0)/scores.length) : 0;
+  if(s('wseo-avg-score'))    s('wseo-avg-score').textContent = avg+'%';
+  if(s('wseo-issues-count')) s('wseo-issues-count').textContent = prods.filter(p=>p.seo_score<70).length;
+  if(s('wseo-no-stock'))     s('wseo-no-stock').textContent = prods.filter(p=>p.stock_status==='outofstock'||p.stock_quantity===0).length;
+}
+
+function wseoApplyFilters(){
+  const q      = (document.getElementById('wseo-search')?.value||'').toLowerCase();
+  const status = document.getElementById('wseo-filter-status')?.value||'';
+  const score  = document.getElementById('wseo-filter-score')?.value||'';
+  const sort   = document.getElementById('wseo-sort')?.value||'score_asc';
+
+  let rows = [..._wseoProducts];
+  if(q)      rows = rows.filter(p=>(p.name||'').toLowerCase().includes(q)||(p.sku||'').toLowerCase().includes(q));
+  if(status) rows = rows.filter(p=>p.status===status);
+  if(score==='critical') rows = rows.filter(p=>p.seo_score<40);
+  if(score==='warn')     rows = rows.filter(p=>p.seo_score>=40&&p.seo_score<70);
+  if(score==='ok')       rows = rows.filter(p=>p.seo_score>=70);
+
+  rows.sort((a,b)=>{
+    if(sort==='score_asc')   return a.seo_score-b.seo_score;
+    if(sort==='score_desc')  return b.seo_score-a.seo_score;
+    if(sort==='sales_desc')  return (b.total_sales||0)-(a.total_sales||0);
+    if(sort==='name_asc')    return (a.name||'').localeCompare(b.name||'');
+    if(sort==='price_desc')  return (b.price||0)-(a.price||0);
+    return 0;
+  });
+
+  _wseoFiltered = rows;
+  wseoRenderTable(rows);
+}
+
+function wseoRenderTable(rows){
+  const tbody = document.getElementById('wseo-tbody');
+  if(!tbody) return;
+  if(!rows.length){
+    tbody.innerHTML='<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text3)">Sin productos para este filtro.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = rows.map(p => {
+    // Score color
+    const sc = p.seo_score;
+    const scC = sc>=70?'#16a34a':sc>=40?'#92400e':'#dc2626';
+    const scBg= sc>=70?'#f0fdf4':sc>=40?'#fffbeb':'#fef2f2';
+    const scIcon = sc>=70?'🟢':sc>=40?'🟡':'🔴';
+
+    // Stock color
+    const stk = p.stock_quantity;
+    const stkC = p.stock_status==='outofstock'?'var(--red)':stk===0?'var(--red)':stk<=3?'var(--amber)':'var(--text)';
+    const stkLabel = p.stock_status==='outofstock'?'Sin stock':stk!=null?stk+'u':p.stock_status||'—';
+
+    // Estado badge
+    const stMap = { publish:'🟢 Publicado', draft:'⚫ Borrador', pending:'🟡 Pendiente', private:'🔒 Privado' };
+    const stLabel = stMap[p.status]||p.status;
+
+    // Issues top 3
+    const issueList = (p.seo_issues||[]).slice(0,3).map(i=>`<span style="font-size:9px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:3px;padding:1px 4px;white-space:nowrap">${i}</span>`).join(' ');
+    const moreIssues = (p.seo_issues||[]).length>3 ? `<span style="font-size:9px;color:var(--text3)">+${p.seo_issues.length-3} más</span>` : '';
+
+    return `<tr onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''">
+      <td style="padding:10px 12px">
+        <div style="display:flex;align-items:center;gap:8px">
+          ${p.thumbnail
+            ? `<img src="${p.thumbnail}" alt="" style="width:40px;height:40px;object-fit:cover;border-radius:5px;flex-shrink:0;border:1px solid var(--border)" onerror="this.style.display='none'">`
+            : `<div style="width:40px;height:40px;background:var(--bg4);border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">🟣</div>`}
+          <div style="min-width:0">
+            <div style="font-size:12px;font-weight:500;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:220px" title="${(p.name||'').replace(/"/g,'&quot;')}">${p.name||'—'}</div>
+            <div style="font-size:10px;color:var(--text3);margin-top:2px">ID: ${p.id} · ${(p.categories||[]).join(', ')||'Sin categoría'}</div>
+          </div>
+        </div>
+      </td>
+      <td style="padding:10px 8px;text-align:center;white-space:nowrap;font-size:11px">${stLabel}</td>
+      <td style="padding:10px 8px;text-align:right;font-weight:600;white-space:nowrap">$${(p.price||0).toLocaleString('es-AR')}</td>
+      <td style="padding:10px 8px;text-align:center;font-weight:600;color:${stkC}">${stkLabel}</td>
+      <td style="padding:10px 8px;text-align:center;font-weight:600">${(p.total_sales||0).toLocaleString('es-AR')}</td>
+      <td style="padding:10px 8px;font-size:11px;color:var(--text3);max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${p.sku||''}">${p.sku||'—'}</td>
+      <td style="padding:10px 8px;text-align:center">
+        <div onclick="wseoShowDetail(${p.id})" style="cursor:pointer;display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border-radius:20px;background:${scBg};border:1px solid ${scC}30">
+          <span>${scIcon}</span>
+          <span style="font-size:12px;font-weight:700;color:${scC}">${sc}%</span>
+        </div>
+      </td>
+      <td style="padding:10px 8px">
+        <div style="display:flex;flex-wrap:wrap;gap:2px">
+          ${issueList}${moreIssues}
+          ${!(p.seo_issues||[]).length?'<span style="font-size:9px;color:#16a34a;font-weight:600">✓ Sin problemas</span>':''}
+        </div>
+      </td>
+      <td style="padding:10px 8px;text-align:center">
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <a href="${p.edit_url}" target="_blank" rel="noopener" class="btn btn-ghost btn-xs" style="font-size:10px;text-decoration:none;white-space:nowrap">✏️ WP Admin</a>
+          ${p.permalink?`<a href="${p.permalink}" target="_blank" rel="noopener" class="btn btn-ghost btn-xs" style="font-size:10px;text-decoration:none">🌐 Ver</a>`:''}
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function wseoShowDetail(productId){
+  const p = _wseoProducts.find(x=>x.id===productId);
+  if(!p) return;
+  const panel = document.getElementById('wseo-detail-panel');
+  const title = document.getElementById('wseo-detail-title');
+  const content = document.getElementById('wseo-detail-content');
+  if(!panel||!content) return;
+
+  if(title) title.textContent = 'Score SEO: '+p.name.slice(0,40);
+
+  const checks = p.seo_checks || [];
+  const sc = p.seo_score;
+  const scC = sc>=70?'#16a34a':sc>=40?'#92400e':'#dc2626';
+
+  content.innerHTML = `
+    <div style="text-align:center;margin-bottom:20px">
+      <div style="font-size:48px;font-weight:900;color:${scC}">${sc}<span style="font-size:24px">%</span></div>
+      <div style="font-size:12px;color:var(--text3)">${checks.filter(c=>c.ok).length}/${checks.length} criterios cumplidos</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      ${checks.map(c=>`
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg3);border-radius:8px;border-left:3px solid ${c.ok?'#22c55e':'#ef4444'}">
+          <span style="font-size:14px;flex-shrink:0">${c.ok?'✅':'❌'}</span>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12px;font-weight:500">${c.label}</div>
+            <div style="font-size:10px;color:var(--text3);margin-top:1px">${c.detail||''}</div>
+          </div>
+        </div>`).join('')}
+    </div>
+    <div style="margin-top:16px;padding:12px;background:var(--bg3);border-radius:8px;font-size:11px;color:var(--text3);line-height:1.6">
+      💡 Los 10 criterios evalúan: longitud del título, extensión de la descripción, descripción corta, alt text de la imagen principal, galería de imágenes, SKU definido, URL amigable, categoría asignada, precio y etiquetas SEO.
+    </div>
+    <div style="margin-top:12px;text-align:center">
+      <a href="${p.edit_url}" target="_blank" rel="noopener" class="btn btn-primary btn-sm" style="text-decoration:none">✏️ Editar en WP Admin</a>
+    </div>`;
+
+  panel.style.display='flex';
 }
 
 function _startSettingsAutoSave(){
