@@ -14169,34 +14169,21 @@ async function waCheckTemplates(){
       return;
     }
     const templates = d.templates || [];
-    const lines = templates.map(t =>
-      `${t.status==='APPROVED'?'✅':t.status==='PENDING'||t.status==='IN_APPEAL'?'⏳':'❌'} "${t.name}" | lang: ${t.language} | ${t.status}`
-    );
-    // Comparar con lo que usa el Worker
     const workerNames = ['nueva_venta_impala','venta_impala_v2','nueva_pregunta_impala','pregunta_impala_v2'];
-    const found = workerNames.filter(n => templates.some(t=>t.name===n));
+    const found   = workerNames.filter(n => templates.some(t=>t.name===n));
     const missing = workerNames.filter(n => !templates.some(t=>t.name===n));
-    let msg = '📋 Plantillas en tu cuenta Meta:
-
-' + lines.join('
-');
-    if(missing.length) msg += '
-
-⚠️ NO encontradas (nombre incorrecto):
-' + missing.map(n=>'  ✗ '+n).join('
-');
-    if(found.length)   msg += '
-
-✅ Encontradas:
-' + found.map(n=>'  ✓ '+n).join('
-');
-    msg += '
-
-WABA ID: ' + (d.wabaId||'—');
-    alert(msg);
-    if(statusEl){ statusEl.textContent=''; }
+    let lines = ['Plantillas en tu cuenta Meta:', ''];
+    templates.forEach(t => {
+      const icon = t.status==='APPROVED'?'OK':t.status==='PENDING'||t.status==='IN_REVIEW'?'...':'X';
+      lines.push('['+icon+'] '+t.name+' | lang: '+t.language+' | '+t.status);
+    });
+    if(missing.length){ lines.push(''); lines.push('NO encontradas en Meta:'); missing.forEach(n=>lines.push('  x '+n)); }
+    if(found.length){   lines.push(''); lines.push('Encontradas correctamente:'); found.forEach(n=>lines.push('  OK '+n)); }
+    lines.push(''); lines.push('WABA ID: '+(d.wabaId||'?'));
+    alert(lines.join('\n'));
+    if(statusEl) statusEl.textContent='';
   }catch(e){
-    if(statusEl){ statusEl.textContent='❌ '+e.message; statusEl.style.color='var(--red)'; }
+    if(statusEl){ statusEl.textContent='? '+e.message; statusEl.style.color='var(--red)'; }
     setTimeout(()=>{ if(statusEl) statusEl.textContent=''; }, 5000);
   }
 }
