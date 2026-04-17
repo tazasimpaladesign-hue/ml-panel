@@ -741,6 +741,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   <a class="nav" href="#mensajes" id="nav-mensajes" onclick="showSection('mensajes');return false;"><span class="ni">🔔</span>Notificaciones<span class="nb nb-red" id="nb-msg" style="display:none">0</span></a>
   <a class="nav" href="#reputacion" id="nav-reputacion" onclick="showSection('reputacion');return false;"><span class="ni">⭐</span>Reputación</a>
   <a class="nav" href="#stock" id="nav-stock" onclick="showSection('stock');return false;"><span class="ni">📋</span>Stock</a>
+  <a class="nav" href="#quiebre-stock" id="nav-quiebre-stock" onclick="showSection('quiebre-stock');return false;"><span class="ni">🔴</span>Quiebre de Stock<span class="nb nb-new">NEW</span></a>
   <a class="nav" href="#reclamos" id="nav-reclamos" onclick="showSection('reclamos');return false;"><span class="ni">🚨</span>Reclamos</a>
   <a class="nav" href="#horarios" id="nav-horarios" onclick="showSection('horarios');return false;"><span class="ni">🕐</span>Horarios y festivos</a>
 
@@ -3077,8 +3078,123 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
 </div>
 
-<!-- ═══════════════════════ GOOGLE TOOLS ═══════════════════════ -->
-<div id="section-google-tools" class="section fade-in">
+<!-- ═══════════════════════ QUIEBRE DE STOCK ═══════════════════════ -->
+<div id="section-quiebre-stock" class="section fade-in">
+
+  <!-- Fila 1: Métricas resumen (clickeables → filtrar) -->
+  <div class="mgt mgt-5" style="margin-bottom:8px">
+    <div class="mc c-blue" style="cursor:pointer" onclick="qsSetFilter(null)" title="Ver todos">
+      <div class="mc-label">Total analizados</div><div class="mc-val" id="qs-total">—</div>
+      <div class="mc-sub" style="font-size:9px;margin-top:3px">Activos con stock o ventas</div>
+    </div>
+    <div class="mc c-red" style="cursor:pointer" onclick="qsSetFilter('agotados')" title="Productos sin stock">
+      <div class="mc-label">🔴 Agotados</div><div class="mc-val" id="qs-agotados">—</div>
+      <div class="mc-sub" style="font-size:9px;margin-top:3px">Clic para filtrar</div>
+    </div>
+    <div class="mc c-amber" style="cursor:pointer" onclick="qsSetFilter('critico')" title="Stock crítico (≤7 días)">
+      <div class="mc-label">⚠️ Crítico ≤7d</div><div class="mc-val" id="qs-critico">—</div>
+      <div class="mc-sub" style="font-size:9px;margin-top:3px">Clic para filtrar</div>
+    </div>
+    <div class="mc c-amber" style="cursor:pointer;opacity:.85" onclick="qsSetFilter('aviso')" title="Stock bajo (8-15 días)">
+      <div class="mc-label">🟡 Aviso ≤15d</div><div class="mc-val" id="qs-aviso">—</div>
+      <div class="mc-sub" style="font-size:9px;margin-top:3px">Clic para filtrar</div>
+    </div>
+    <div class="mc c-green" style="cursor:pointer" onclick="qsSetFilter('sano')" title="Stock saludable (>15 días)">
+      <div class="mc-label">🟢 Stock sano</div><div class="mc-val" id="qs-sano">—</div>
+      <div class="mc-sub" style="font-size:9px;margin-top:3px">Clic para filtrar</div>
+    </div>
+  </div>
+
+  <!-- Fila 2: Indicadores secundarios -->
+  <div class="mgt mgt-5" style="margin-bottom:14px">
+    <div class="mc c-purple" style="cursor:pointer" onclick="qsSetFilter('sin_ventas')" title="Sin ventas en los últimos 60 días">
+      <div class="mc-label">Sin ventas 60d</div><div class="mc-val" id="qs-sin-ventas">—</div>
+      <div class="mc-sub" style="font-size:9px;margin-top:3px">Candidatos a pausar</div>
+    </div>
+    <div class="mc c-teal" style="cursor:pointer" onclick="qsSetFilter('alta_rotacion')" title="Alta rotación (>0.5 ventas/día)">
+      <div class="mc-label">🚀 Alta rotación</div><div class="mc-val" id="qs-alta-rot">—</div>
+      <div class="mc-sub" style="font-size:9px;margin-top:3px">>0.5 ventas/día</div>
+    </div>
+    <div class="mc c-pink" style="cursor:pointer" onclick="qsSetFilter(null)" title="Unidades totales en stock">
+      <div class="mc-label">Unidades en stock</div><div class="mc-val" id="qs-unidades">—</div>
+      <div class="mc-sub" style="font-size:9px;margin-top:3px">Sumatoria total</div>
+    </div>
+    <div class="mc c-blue" style="cursor:pointer" onclick="qsSetFilter(null)" title="Valor total del inventario">
+      <div class="mc-label">Valor inventario</div><div class="mc-val" id="qs-valor">—</div>
+      <div class="mc-sub" style="font-size:9px;margin-top:3px">Stock × precio</div>
+    </div>
+    <div class="mc c-red" style="cursor:pointer" onclick="qsSetFilter('reponer')" title="Sugeridos para reponer">
+      <div class="mc-label">📦 Reponer ya</div><div class="mc-val" id="qs-reponer">—</div>
+      <div class="mc-sub" style="font-size:9px;margin-top:3px">Agotados con ventas</div>
+    </div>
+  </div>
+
+  <!-- Chips de filtro -->
+  <div class="card mb" id="qs-filter-bar">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      <span style="font-size:11px;color:var(--text3);font-weight:600;white-space:nowrap">Estado:</span>
+      <div class="chips" style="margin:0;gap:5px">
+        <div class="chip" id="qschip-all"         onclick="qsSetFilter(null)"          style="font-size:11px;background:var(--accent);color:#fff;border-color:var(--accent)">Todos</div>
+        <div class="chip" id="qschip-agotados"    onclick="qsSetFilter('agotados')"    style="font-size:11px">🔴 Agotados</div>
+        <div class="chip" id="qschip-critico"     onclick="qsSetFilter('critico')"     style="font-size:11px">⚠️ Crítico (≤7d)</div>
+        <div class="chip" id="qschip-aviso"       onclick="qsSetFilter('aviso')"       style="font-size:11px">🟡 Aviso (≤15d)</div>
+        <div class="chip" id="qschip-sano"        onclick="qsSetFilter('sano')"        style="font-size:11px">🟢 Sano (>15d)</div>
+        <div class="chip" id="qschip-sin_ventas"  onclick="qsSetFilter('sin_ventas')"  style="font-size:11px">😴 Sin ventas 60d</div>
+        <div class="chip" id="qschip-alta_rotacion" onclick="qsSetFilter('alta_rotacion')" style="font-size:11px">🚀 Alta rotación</div>
+        <div class="chip" id="qschip-reponer"     onclick="qsSetFilter('reponer')"     style="font-size:11px;background:#fef2f2;border-color:#fca5a5">📦 Reponer ya</div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span style="font-size:11px;color:var(--text3);font-weight:600;white-space:nowrap">Publicación:</span>
+      <div class="chips" style="margin:0;gap:5px">
+        <div class="chip" id="qschip-st-all"      onclick="qsSetStatus(null)"     style="font-size:11px;background:var(--accent);color:#fff;border-color:var(--accent)">Todas</div>
+        <div class="chip" id="qschip-st-active"   onclick="qsSetStatus('active')"  style="font-size:11px">✅ Activas</div>
+        <div class="chip" id="qschip-st-paused"   onclick="qsSetStatus('paused')"  style="font-size:11px">⏸ Pausadas</div>
+        <div class="chip" id="qschip-st-closed"   onclick="qsSetStatus('closed')"  style="font-size:11px">⛔ Cerradas</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tabla principal -->
+  <div class="card">
+    <div class="card-hd" style="flex-wrap:wrap;gap:8px">
+      <div>
+        <div class="card-title">Análisis de stock por publicación</div>
+        <div class="card-sub" id="qs-result-count">—</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-left:auto;flex-wrap:wrap">
+        <span id="qs-last-update" style="font-size:11px;color:var(--text3);white-space:nowrap"></span>
+        <input type="text" id="qs-search" placeholder="🔍 Buscar producto o SKU..." style="max-width:220px;font-size:12px;padding:5px 9px" oninput="qsGoPage(1)">
+        <button class="btn btn-ghost btn-sm" onclick="qsRefresh()" id="qs-refresh-btn" title="Recalcular a partir de las publicaciones y órdenes ya cargadas">↻ Recalcular</button>
+        <span id="qs-status" style="font-size:11px;color:var(--text3)"></span>
+      </div>
+    </div>
+    <div class="tw">
+      <table id="qs-table">
+        <thead><tr>
+          <th>Producto</th>
+          <th onclick="qsSort('price')"      style="cursor:pointer;user-select:none;white-space:nowrap;text-align:right">Precio <span id="qs-sort-price" style="font-size:10px"></span></th>
+          <th onclick="qsSort('stock')"      style="cursor:pointer;user-select:none;white-space:nowrap;text-align:center">Stock <span id="qs-sort-stock" style="font-size:10px"></span></th>
+          <th onclick="qsSort('sold60')"     style="cursor:pointer;user-select:none;white-space:nowrap;text-align:center" title="Ventas últimos 60 días">Ventas 60d <span id="qs-sort-sold60" style="font-size:10px"></span></th>
+          <th onclick="qsSort('vpd')"        style="cursor:pointer;user-select:none;white-space:nowrap;text-align:center" title="Promedio ventas/día sobre 60d">Ventas/día <span id="qs-sort-vpd" style="font-size:10px"></span></th>
+          <th onclick="qsSort('dos')"        style="cursor:pointer;user-select:none;white-space:nowrap;text-align:center" title="Días estimados de stock restante">Días stock <span id="qs-sort-dos" style="font-size:10px"></span></th>
+          <th onclick="qsSort('lastSale')"   style="cursor:pointer;user-select:none;white-space:nowrap;text-align:center" title="Fecha última venta">Última venta <span id="qs-sort-lastSale" style="font-size:10px"></span></th>
+          <th style="text-align:center;min-width:100px">Estado</th>
+          <th style="text-align:center;min-width:150px">Acciones</th>
+        </tr></thead>
+        <tbody id="qs-tbody">
+          <tr><td colspan="9" style="text-align:center;padding:32px;color:var(--text3)">Cargá las publicaciones primero desde el módulo 📦 Publicaciones (allItems).</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div id="qs-pagination" style="display:flex;align-items:center;justify-content:space-between;padding:12px 0 0;gap:8px;flex-wrap:wrap"></div>
+  </div>
+
+  <div class="alert a-info" style="margin-top:14px;font-size:11px">
+    💡 <strong>Cómo se calcula:</strong> Las "ventas/día" son el promedio de los últimos 60 días sobre las órdenes ya cargadas en el panel. "Días de stock" = stock actual ÷ ventas/día. Todo se calcula <strong>localmente en el navegador</strong> — no consume requests adicionales al Worker.
+  </div>
+
+</div>
 
   <!-- Status bar compacto -->
   <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;align-items:center">
@@ -12041,6 +12157,7 @@ const titles={
   mensajes:['🔔 Notificaciones','Notificaciones y mensajes de ML'],
   reputacion:['⭐ Reputación','Indicadores oficiales de ML'],
   stock:['📋 Control de stock','Alertas y actualización de inventario'],
+  'quiebre-stock':['🔴 Quiebre de Stock','Productos agotados y próximos a agotarse · Histórico 60 días'],
   reclamos:['🚨 Reclamos','Gestión de disputas'],
   horarios:['🕐 Horarios y días festivos','Información logística de tu tienda'],
   publicidad:['📢 Publicidad','Product Ads, ACOS y ROI'],
@@ -12093,6 +12210,7 @@ function showSection(id){
   if(id==='publicidad'){loadAdsData();}
   if(id==='bulk') renderPubs();
   if(id==='woo-seo') wooSeoInit();
+  if(id==='quiebre-stock') qsInit();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -15694,6 +15812,436 @@ function wseoShowDetail(productId){
     </div>`;
 
   panel.style.display='flex';
+}
+
+// ═══════════════════════════════════════════════════════════
+// QUIEBRE DE STOCK — análisis de agotados y próximos a agotarse
+// ═══════════════════════════════════════════════════════════
+
+// Ventana de análisis: 60 días de historia de órdenes para calcular ventas/día
+const QS_WINDOW_DAYS   = 60;
+const QS_THR_CRITICAL  = 7;    // ≤7 días de stock = crítico
+const QS_THR_WARN      = 15;   // ≤15 días de stock = aviso
+
+// Estado del módulo
+var _qsRows = [];              // filas analizadas (se recalculan)
+var _qsComputedAt = null;      // timestamp del último cálculo
+var _qsState = {
+  page: 1, perPage: 50,
+  sortCol: 'dos', sortDir: 1,  // días de stock ASC (los más críticos primero)
+  filter: null,                // quickFilter desde tarjetas o chips
+  statusFilter: 'active',      // por defecto solo activas
+};
+
+// ── Init: al entrar a la sección, calcula a partir de allItems + allOrders ────
+function qsInit(){
+  if(!Array.isArray(allItems) || !allItems.length){
+    const tbody = document.getElementById('qs-tbody');
+    if(tbody) tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--text3)">⚠️ Aún no hay publicaciones cargadas. Andá al módulo 📦 Publicaciones para cargarlas.</td></tr>';
+    return;
+  }
+  if(!_qsRows.length) qsRefresh();
+  else { qsUpdateStats(); qsRenderTable(); qsUpdateFreshLabel(); }
+}
+
+// ── Recalcular filas: combina allItems con allOrders (60d) ──────────────────
+function qsRefresh(){
+  const status = document.getElementById('qs-status');
+  if(status){ status.textContent = 'Calculando...'; status.style.color = 'var(--text3)'; }
+
+  const cutoff = Date.now() - QS_WINDOW_DAYS * 24 * 3600 * 1000;
+  const orders = Array.isArray(allOrders) ? allOrders : [];
+
+  // Construir mapa de ventas por item_id en los últimos QS_WINDOW_DAYS
+  // { itemId: { units60: N, lastSaleTs: ms, datesWithSales: Set<yyyy-mm-dd> } }
+  const salesMap = {};
+  for(const o of orders){
+    if(!o || !o.date_created) continue;
+    // Excluir canceladas e inválidas — no cuentan como venta
+    if(o.status === 'cancelled' || o.status === 'invalid') continue;
+    const ts = new Date(o.date_created).getTime();
+    if(isNaN(ts) || ts < cutoff) continue;
+    const items = o.order_items || [];
+    for(const oi of items){
+      const id = oi?.item?.id;
+      if(!id) continue;
+      if(!salesMap[id]) salesMap[id] = { units60: 0, lastSaleTs: 0 };
+      salesMap[id].units60 += (oi.quantity || 1);
+      if(ts > salesMap[id].lastSaleTs) salesMap[id].lastSaleTs = ts;
+    }
+  }
+
+  // Construir filas a partir de allItems
+  const rows = [];
+  for(const it of allItems){
+    if(!it || !it.id) continue;
+    const stock   = (it.available_quantity == null) ? 0 : it.available_quantity;
+    const sales   = salesMap[it.id] || { units60: 0, lastSaleTs: 0 };
+    const vpd     = sales.units60 / QS_WINDOW_DAYS;              // ventas por día (promedio 60d)
+    const vpdR    = Math.round(vpd * 100) / 100;                 // redondeo 2 decimales
+    // Días de stock: si no hay ventas, Infinity; si stock = 0, 0; resto = stock/vpd
+    const dos     = (stock <= 0) ? 0 : (vpd <= 0 ? Infinity : Math.ceil(stock / vpd));
+    // Categoría de alerta
+    let severity;
+    if(stock <= 0)                       severity = 'agotado';
+    else if(vpd <= 0)                    severity = 'sin_ventas';
+    else if(dos <= QS_THR_CRITICAL)      severity = 'critico';
+    else if(dos <= QS_THR_WARN)          severity = 'aviso';
+    else                                 severity = 'sano';
+
+    rows.push({
+      id:       it.id,
+      title:    it.title || '—',
+      thumbnail: it.thumbnail || '',
+      permalink: it.permalink || '',
+      price:    it.price || 0,
+      status:   it.status || 'active',
+      stock:    stock,
+      sold_total: it.sold_quantity || 0,
+      sold60:   sales.units60,
+      vpd:      vpdR,
+      dos:      dos,
+      lastSaleTs: sales.lastSaleTs || null,
+      sku:      (it.seller_custom_field || it.attributes?.find(a=>a.id==='SELLER_SKU')?.value_name || ''),
+      severity: severity,
+    });
+  }
+
+  _qsRows = rows;
+  _qsComputedAt = Date.now();
+
+  if(status){ status.textContent = '✓ '+rows.length+' productos analizados'; status.style.color='var(--green)'; }
+
+  qsUpdateStats();
+  qsRenderTable();
+  qsUpdateFreshLabel();
+}
+
+// ── Label de "Calculado hace X min" ──────────────────────────
+function qsUpdateFreshLabel(){
+  const el = document.getElementById('qs-last-update');
+  if(!el) return;
+  if(!_qsComputedAt){ el.textContent = ''; return; }
+  const mins = Math.floor((Date.now() - _qsComputedAt)/60000);
+  if(mins < 1)       el.textContent = '✓ Recién calculado';
+  else if(mins < 60) el.textContent = '🕐 Hace '+mins+' min';
+  else               el.textContent = '🕐 Hace '+Math.floor(mins/60)+' h — clic en ↻ para recalcular';
+  el.style.color = mins > 30 ? 'var(--amber)' : 'var(--text3)';
+}
+
+// ── Métricas resumen ─────────────────────────────────────────
+function qsUpdateStats(){
+  const rows = _qsRows.filter(r => r.status === (_qsState.statusFilter || r.status) || !_qsState.statusFilter);
+  const safe = (id,v)=>{ const el=document.getElementById(id); if(el) el.textContent=v; };
+
+  safe('qs-total',     rows.length.toLocaleString('es-AR'));
+  safe('qs-agotados',  rows.filter(r=>r.severity==='agotado').length);
+  safe('qs-critico',   rows.filter(r=>r.severity==='critico').length);
+  safe('qs-aviso',     rows.filter(r=>r.severity==='aviso').length);
+  safe('qs-sano',      rows.filter(r=>r.severity==='sano').length);
+  safe('qs-sin-ventas', rows.filter(r=>r.severity==='sin_ventas').length);
+  safe('qs-alta-rot',  rows.filter(r=>r.vpd >= 0.5).length);
+  safe('qs-unidades',  rows.reduce((a,r)=>a + (r.stock||0), 0).toLocaleString('es-AR'));
+  safe('qs-valor',     '$'+Math.round(rows.reduce((a,r)=>a + (r.stock||0)*(r.price||0), 0)).toLocaleString('es-AR'));
+  // Reponer ya: agotados que tenían ventas en los últimos 60 días
+  safe('qs-reponer',   rows.filter(r=>r.severity==='agotado' && r.sold60 > 0).length);
+}
+
+// ── Sorting (clic en encabezado) ─────────────────────────────
+function qsSort(col){
+  if(_qsState.sortCol === col) _qsState.sortDir *= -1;
+  else { _qsState.sortCol = col; _qsState.sortDir = (col==='dos' || col==='vpd') ? 1 : -1; }
+  _qsState.page = 1;
+  ['price','stock','sold60','vpd','dos','lastSale'].forEach(c=>{
+    const el = document.getElementById('qs-sort-'+c);
+    if(el) el.innerHTML = sortArrow(c, _qsState.sortCol, _qsState.sortDir);
+  });
+  qsRenderTable();
+}
+
+// ── Filtros rápidos ──────────────────────────────────────────
+function qsSetFilter(f){
+  _qsState.filter = f;
+  _qsState.page = 1;
+  qsRefreshChips();
+  qsUpdateStats();
+  qsRenderTable();
+}
+
+function qsSetStatus(st){
+  _qsState.statusFilter = st;
+  _qsState.page = 1;
+  qsRefreshChips();
+  qsUpdateStats();
+  qsRenderTable();
+}
+
+function qsRefreshChips(){
+  const setActive = (id, active) => {
+    const el = document.getElementById(id);
+    if(!el) return;
+    if(active){ el.style.background='var(--accent)'; el.style.color='#fff'; el.style.borderColor='var(--accent)'; }
+    else      { el.style.background=''; el.style.color=''; el.style.borderColor=''; }
+  };
+  // Severidad
+  const fMap = {
+    all:null, agotados:'agotados', critico:'critico', aviso:'aviso',
+    sano:'sano', sin_ventas:'sin_ventas', alta_rotacion:'alta_rotacion', reponer:'reponer',
+  };
+  Object.entries(fMap).forEach(([id,val])=>{
+    const active = (val===null && !_qsState.filter) || (_qsState.filter===val);
+    setActive('qschip-'+id, active);
+  });
+  // Status
+  const stMap = { all:null, active:'active', paused:'paused', closed:'closed' };
+  Object.entries(stMap).forEach(([id,val])=>{
+    setActive('qschip-st-'+id, _qsState.statusFilter===val);
+  });
+  // Agotados con fondo rojo suave cuando activo (refinar el chip "Reponer")
+  const reponerChip = document.getElementById('qschip-reponer');
+  if(reponerChip && _qsState.filter!=='reponer'){
+    reponerChip.style.background = '#fef2f2';
+    reponerChip.style.borderColor = '#fca5a5';
+    reponerChip.style.color = '';
+  }
+}
+
+// ── Paginación ──────────────────────────────────────────────
+function qsGoPage(n){ _qsState.page = Math.max(1, n); qsRenderTable(); }
+
+// ── Obtener filas filtradas + ordenadas ─────────────────────
+function qsGetFilteredRows(){
+  const q = (document.getElementById('qs-search')?.value || '').toLowerCase();
+  let rows = [..._qsRows];
+
+  // Filtro de publicación (status)
+  if(_qsState.statusFilter) rows = rows.filter(r=>r.status===_qsState.statusFilter);
+
+  // Búsqueda
+  if(q) rows = rows.filter(r =>
+    (r.title||'').toLowerCase().includes(q) ||
+    (r.sku||'').toLowerCase().includes(q)   ||
+    String(r.id).toLowerCase().includes(q)
+  );
+
+  // Filtro de severidad
+  const f = _qsState.filter;
+  if(f === 'agotados')      rows = rows.filter(r => r.severity === 'agotado');
+  else if(f === 'critico')  rows = rows.filter(r => r.severity === 'critico');
+  else if(f === 'aviso')    rows = rows.filter(r => r.severity === 'aviso');
+  else if(f === 'sano')     rows = rows.filter(r => r.severity === 'sano');
+  else if(f === 'sin_ventas') rows = rows.filter(r => r.severity === 'sin_ventas');
+  else if(f === 'alta_rotacion') rows = rows.filter(r => r.vpd >= 0.5);
+  else if(f === 'reponer')  rows = rows.filter(r => r.severity === 'agotado' && r.sold60 > 0);
+
+  // Sort
+  const col = _qsState.sortCol, dir = _qsState.sortDir;
+  rows.sort((a,b)=>{
+    let va, vb;
+    switch(col){
+      case 'price':    va=a.price;         vb=b.price;         return (vb-va)*(dir>0?1:-1);
+      case 'stock':    va=a.stock;         vb=b.stock;         return (vb-va)*(dir>0?1:-1);
+      case 'sold60':   va=a.sold60;        vb=b.sold60;        return (vb-va)*(dir>0?1:-1);
+      case 'vpd':      va=a.vpd;           vb=b.vpd;           return (va-vb)*dir;
+      case 'dos': {
+        // Infinity se manda al final siempre que sea ascendente
+        const aI = a.dos === Infinity ? 1e9 : a.dos;
+        const bI = b.dos === Infinity ? 1e9 : b.dos;
+        return (aI - bI) * dir;
+      }
+      case 'lastSale': va=a.lastSaleTs||0; vb=b.lastSaleTs||0; return (vb-va)*(dir>0?1:-1);
+      default:         va=a.dos;           vb=b.dos;           return (va-vb)*dir;
+    }
+  });
+  return rows;
+}
+
+// ── Render de la tabla ───────────────────────────────────────
+function qsRenderTable(){
+  const tbody = document.getElementById('qs-tbody');
+  if(!tbody) return;
+
+  // Actualizar flechas en encabezados
+  ['price','stock','sold60','vpd','dos','lastSale'].forEach(c=>{
+    const el = document.getElementById('qs-sort-'+c);
+    if(el) el.innerHTML = sortArrow(c, _qsState.sortCol, _qsState.sortDir);
+  });
+
+  const all = qsGetFilteredRows();
+  const total = all.length;
+  const pp = _qsState.perPage;
+  const pages = Math.max(1, Math.ceil(total/pp));
+  if(_qsState.page > pages) _qsState.page = pages;
+  const start = (_qsState.page-1) * pp;
+  const rows = all.slice(start, start + pp);
+
+  const countEl = document.getElementById('qs-result-count');
+  if(countEl) countEl.textContent = total ? total+' productos · página '+_qsState.page+'/'+pages : 'Sin resultados';
+
+  if(!rows.length){
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text3)">Sin productos para este filtro.</td></tr>';
+    qsRenderPagination(pages, total);
+    return;
+  }
+
+  tbody.innerHTML = rows.map(r => {
+    // Severidad → color y etiqueta
+    const sevMap = {
+      agotado:    { c:'#dc2626', bg:'#fef2f2', icon:'🔴', label:'Agotado' },
+      critico:    { c:'#c2410c', bg:'#fff7ed', icon:'⚠️', label:'Crítico' },
+      aviso:      { c:'#92400e', bg:'#fffbeb', icon:'🟡', label:'Aviso' },
+      sano:       { c:'#16a34a', bg:'#f0fdf4', icon:'🟢', label:'Sano' },
+      sin_ventas: { c:'#475569', bg:'#f1f5f9', icon:'😴', label:'Sin ventas' },
+    };
+    const sev = sevMap[r.severity] || sevMap.sano;
+
+    // Label de días de stock
+    let dosLabel;
+    if(r.severity === 'agotado')       dosLabel = '<span style="color:var(--red);font-weight:700">SIN STOCK</span>';
+    else if(r.dos === Infinity)        dosLabel = '<span style="color:var(--text3)">—</span>';
+    else                                dosLabel = '<span style="color:'+sev.c+';font-weight:700">'+r.dos+' día'+(r.dos!==1?'s':'')+'</span>';
+
+    // Última venta
+    let lastSaleLabel = '<span style="color:var(--text3);font-size:10px">Sin ventas 60d</span>';
+    if(r.lastSaleTs){
+      const daysSince = Math.floor((Date.now() - r.lastSaleTs) / (24*3600*1000));
+      const dateStr = new Date(r.lastSaleTs).toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit'});
+      const color = daysSince <= 3 ? 'var(--green)' : daysSince <= 14 ? 'var(--text)' : 'var(--amber)';
+      lastSaleLabel = `<div style="font-size:11px;color:${color};font-weight:500">${dateStr}</div><div style="font-size:9px;color:var(--text3)">hace ${daysSince}d</div>`;
+    }
+
+    // Status badge de la publicación
+    const stMap = { active:'🟢 Activa', paused:'⏸ Pausada', closed:'⛔ Cerrada', under_review:'🔍 En revisión' };
+    const stLabel = stMap[r.status] || r.status;
+
+    // URL de edición en ML (patrón ya usado en el panel)
+    const editUrl = `https://www.mercadolibre.com.ar/publicaciones/${r.id}/modificar`;
+
+    // Stock cell — editable inline
+    const stockColor = r.stock === 0 ? 'var(--red)' : r.stock <= 3 ? 'var(--amber)' : 'var(--text)';
+
+    const thumb = r.thumbnail
+      ? `<img src="${r.thumbnail}" alt="" style="width:38px;height:38px;object-fit:cover;border-radius:5px;flex-shrink:0;border:1px solid var(--border)" onerror="this.style.display='none'">`
+      : `<div style="width:38px;height:38px;background:var(--bg4);border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">📦</div>`;
+
+    return `<tr style="background:${r.severity==='agotado'?'#fef2f200':''}">
+      <td style="padding:8px 10px">
+        <div style="display:flex;align-items:center;gap:8px">
+          ${thumb}
+          <div style="min-width:0">
+            <div style="font-size:12px;font-weight:500;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:260px" title="${(r.title||'').replace(/"/g,'&quot;')}">${r.title||'—'}</div>
+            <div style="font-size:10px;color:var(--text3);margin-top:2px">${r.id}${r.sku?' · <span style="font-family:monospace">'+r.sku+'</span>':''}</div>
+          </div>
+        </div>
+      </td>
+      <td style="text-align:right;white-space:nowrap;font-weight:600">$${(r.price||0).toLocaleString('es-AR')}</td>
+      <td style="text-align:center" id="qs-stock-cell-${r.id}">
+        <span style="font-size:13px;font-weight:700;color:${stockColor};cursor:pointer" onclick="qsStartStockEdit('${r.id}', ${r.stock})" title="Clic para editar stock">${r.stock} ✎</span>
+      </td>
+      <td style="text-align:center;font-weight:600">${r.sold60}</td>
+      <td style="text-align:center;font-weight:600;color:${r.vpd>=0.5?'var(--green)':r.vpd>0?'var(--text)':'var(--text3)'}">${r.vpd > 0 ? r.vpd.toFixed(2) : '—'}</td>
+      <td style="text-align:center">${dosLabel}</td>
+      <td style="text-align:center">${lastSaleLabel}</td>
+      <td style="text-align:center">
+        <div style="display:inline-flex;flex-direction:column;gap:2px;align-items:center">
+          <span style="font-size:10px;padding:2px 6px;border-radius:10px;background:${sev.bg};color:${sev.c};border:1px solid ${sev.c}33;white-space:nowrap;font-weight:600">${sev.icon} ${sev.label}</span>
+          <span style="font-size:9px;color:var(--text3);white-space:nowrap">${stLabel}</span>
+        </div>
+      </td>
+      <td style="text-align:center">
+        <div style="display:flex;flex-direction:column;gap:3px;align-items:stretch">
+          <a href="${editUrl}" target="_blank" rel="noopener" class="btn btn-ghost btn-xs" style="font-size:10px;text-decoration:none;white-space:nowrap;background:#fffbeb;color:#78350f;border-color:#fde68a" title="Editar en MercadoLibre">✏️ Editar ML</a>
+          ${r.permalink?`<a href="${r.permalink}" target="_blank" rel="noopener" class="btn btn-ghost btn-xs" style="font-size:10px;text-decoration:none">🌐 Ver publ.</a>`:''}
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  qsRenderPagination(pages, total);
+}
+
+function qsRenderPagination(pages, total){
+  const pgEl = document.getElementById('qs-pagination');
+  if(!pgEl) return;
+  if(pages<=1){ pgEl.innerHTML = total ? '<span style="font-size:11px;color:var(--text3)">'+total+' resultado'+(total!==1?'s':'')+'</span>' : ''; return; }
+  const cur = _qsState.page;
+  let b = '<span style="font-size:11px;color:var(--text3)">'+total+' resultados</span><div style="display:flex;gap:4px;flex-wrap:wrap">';
+  b += '<button class="btn btn-ghost btn-xs" onclick="qsGoPage('+(cur-1)+')" '+(cur<=1?'disabled':'')+'>← Ant</button>';
+  const s = Math.max(1, cur-2), e = Math.min(pages, s+4);
+  for(let p=s; p<=e; p++) b += '<button class="btn btn-xs '+(p===cur?'btn-primary':'btn-ghost')+'" onclick="qsGoPage('+p+')">'+p+'</button>';
+  b += '<button class="btn btn-ghost btn-xs" onclick="qsGoPage('+(cur+1)+')" '+(cur>=pages?'disabled':'')+'>Sig →</button></div>';
+  pgEl.innerHTML = b;
+}
+
+// ── Edición inline de stock (reutiliza /api/items/:id) ──────
+function qsStartStockEdit(itemId, currentStock){
+  const cell = document.getElementById('qs-stock-cell-'+itemId);
+  if(!cell) return;
+  cell.innerHTML = '<div style="display:flex;align-items:center;gap:3px;justify-content:center">'+
+    '<input id="qs-stk-'+itemId+'" type="number" value="'+currentStock+'" min="0" step="1" '+
+    'style="width:70px;font-size:12px;padding:2px 5px;border-radius:4px;border:1px solid var(--accent);background:var(--bg3);color:var(--text);text-align:center" '+
+    'onkeydown="if(event.key===\'Enter\'){event.preventDefault();qsSaveStock(\''+itemId+'\');}if(event.key===\'Escape\')qsRenderTable();">'+
+    '<button class="btn btn-primary btn-xs" style="padding:1px 6px" onclick="qsSaveStock(\''+itemId+'\')">✓</button>'+
+    '<button class="btn btn-ghost btn-xs" style="padding:1px 5px" onclick="qsRenderTable()">✕</button>'+
+    '<span id="qs-stk-msg-'+itemId+'" style="font-size:9px"></span>'+
+    '</div>';
+  const inp = document.getElementById('qs-stk-'+itemId);
+  if(inp){ inp.focus(); inp.select(); }
+}
+
+async function qsSaveStock(itemId){
+  const inp   = document.getElementById('qs-stk-'+itemId);
+  const msgEl = document.getElementById('qs-stk-msg-'+itemId);
+  if(!inp) return;
+  const val = parseInt(inp.value, 10);
+  if(isNaN(val) || val < 0){
+    inp.style.borderColor = 'var(--red)';
+    if(msgEl){ msgEl.textContent='≥0'; msgEl.style.color='var(--red)'; }
+    return;
+  }
+  inp.disabled = true;
+  if(msgEl){ msgEl.textContent='...'; msgEl.style.color='var(--text3)'; }
+  try{
+    const item = allItems.find(i=>i.id===itemId);
+    const body = item?.variations?.length
+      ? { variations: item.variations.map(v=>({id:v.id, available_quantity: val})) }
+      : { available_quantity: val };
+    const res = await fetch(WORKER+'/api/items/'+itemId, {
+      method: 'PUT',
+      headers: { 'Authorization':'Bearer '+token, 'Content-Type':'application/json' },
+      body: JSON.stringify(body)
+    });
+    const d = await res.json();
+    if(d.error){
+      inp.disabled = false;
+      inp.style.borderColor = 'var(--red)';
+      if(msgEl){ msgEl.textContent='❌'+(d.message||d.error).slice(0,30); msgEl.style.color='var(--red)'; }
+      return;
+    }
+    // Actualizar local en allItems + en _qsRows
+    if(item){
+      item.available_quantity = val;
+      if(item.variations?.length) item.variations.forEach(v=>v.available_quantity = val);
+    }
+    const qRow = _qsRows.find(x=>x.id===itemId);
+    if(qRow){
+      qRow.stock = val;
+      // Recalcular severity y dos
+      const vpd = qRow.vpd;
+      qRow.dos = (val <= 0) ? 0 : (vpd <= 0 ? Infinity : Math.ceil(val / vpd));
+      if(val <= 0)                    qRow.severity = 'agotado';
+      else if(vpd <= 0)               qRow.severity = 'sin_ventas';
+      else if(qRow.dos <= QS_THR_CRITICAL) qRow.severity = 'critico';
+      else if(qRow.dos <= QS_THR_WARN)     qRow.severity = 'aviso';
+      else                            qRow.severity = 'sano';
+    }
+    if(typeof showToast==='function') showToast('📦 Stock actualizado: '+val+' u','success');
+    qsUpdateStats();
+    qsRenderTable();
+  }catch(e){
+    inp.disabled = false; inp.style.borderColor = 'var(--red)';
+    if(msgEl){ msgEl.textContent='❌'+e.message.slice(0,30); msgEl.style.color='var(--red)'; }
+  }
 }
 
 function _startSettingsAutoSave(){
