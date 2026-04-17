@@ -3053,7 +3053,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <th onclick="wseoSort('sold')"    style="cursor:pointer;user-select:none;white-space:nowrap;text-align:center" title="Ventas totales históricas">Vendidas <span id="wseo-sort-sold" style="font-size:10px"></span></th>
           <th onclick="wseoSort('sku')"     style="cursor:pointer;user-select:none;white-space:nowrap">SKU <span id="wseo-sort-sku" style="font-size:10px"></span></th>
           <th onclick="wseoSort('seo')"     style="cursor:pointer;user-select:none;white-space:nowrap;text-align:center;min-width:110px">Score SEO <span id="wseo-sort-seo" style="font-size:10px"></span></th>
-          <th style="min-width:200px">Problemas</th>
+          <th style="min-width:240px">Problemas</th>
           <th style="min-width:120px;text-align:center">Acciones</th>
         </tr></thead>
         <tbody id="wseo-tbody">
@@ -14558,6 +14558,7 @@ async function waLoadLog(){
     el.innerHTML = logs.slice(0,20).map(l=>{
       const methodLabel = l.method==='template_v1'?'✅ plantilla aprobada':l.method==='template_v2'?'✅ plantilla v2':l.method==='text_fallback'?'⚠️ texto plano (plantilla falló)':'—';
       const errInfo = l.attemptErrors?.length ? l.attemptErrors.map(e=>`código ${e.code}: ${e.msg||'?'}`).join(' / ') : '';
+      const msgIdShort = l.msgId ? String(l.msgId).slice(-14) : '';
       return `<div style="padding:8px 0;border-bottom:1px solid var(--border)">
         <div style="display:flex;align-items:center;gap:8px">
           <span style="font-size:14px">${l.event==='venta'?'🛍️':l.event==='pregunta'?'💬':l.event==='envio'?'📦':'📤'}</span>
@@ -14565,9 +14566,9 @@ async function waLoadLog(){
             <div style="font-size:12px;font-weight:500">${l.event||'Mensaje'} → +${l.to||'—'}</div>
             <div style="font-size:10px;color:var(--text3)">${l.ts ? new Date(l.ts).toLocaleString('es-AR') : '—'}</div>
           </div>
-          <span class="badge ${l.ok?'bg-green':'bg-red'}" style="font-size:9px">${l.ok?'OK':'Error'}</span>
+          <span class="badge ${l.ok?'bg-green':'bg-red'}" style="font-size:9px">${l.ok?'Meta 200':'Error'}</span>
         </div>
-        ${l.method ? `<div style="font-size:10px;color:var(--text3);margin-top:3px;padding-left:22px">${methodLabel}</div>` : ''}
+        ${l.method ? `<div style="font-size:10px;color:var(--text3);margin-top:3px;padding-left:22px">${methodLabel}${msgIdShort?' · <span style="font-family:monospace;opacity:.6" title="message_id de Meta: '+l.msgId+'">…'+msgIdShort+'</span>':''}</div>` : ''}
         ${errInfo ? `<div style="font-size:10px;color:var(--amber);margin-top:2px;padding-left:22px">⚠️ ${errInfo}</div>` : ''}
       </div>`;
     }).join('');
@@ -15024,12 +15025,18 @@ var _wseoState = {
   quickFilter:  null,            // desde tarjetas resumen (no_stock, low_stock, etc)
 };
 const WSEO_MIN_PRICE = 100;
+const WSEO_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 horas — Woo se recarga 1 vez al día
+const WSEO_SAVE_DEBOUNCE_MS = 10 * 1000;       // debounce 10s para agrupar ediciones antes de guardar en KV
+let _wseoSaveTid = null;
 
 // ── Init: al entrar a la sección, intenta hidratar desde KV ──
 async function wooSeoInit(){
+  // Si ya está cargado en memoria, solo re-renderizar
   if(_wseoLoaded) { wseoUpdateStats(); wseoRenderTable(); wseoStartFreshLabel(); return; }
-  // Intenta leer cache persistido (multi-device)
+
   const status = document.getElementById('wseo-status');
+  if(status){ status.textContent = 'Leyendo cache...'; status.style.color='var(--text3)'; }
+
   try{
     const r = await fetch(WORKER+'/woo-seo-cache', { headers:{ Authorization:'Bearer '+token } });
     if(r.ok){
@@ -15042,14 +15049,30 @@ async function wooSeoInit(){
         const refBtn = document.getElementById('wseo-refresh-btn');
         if(btn) btn.style.display='none';
         if(refBtn) refBtn.style.display='inline-flex';
-        if(status) status.textContent = d.products.length+' productos (desde cache)';
+
+        const ageMs = _wseoCachedAt ? (Date.now() - _wseoCachedAt) : Infinity;
+        const ageHrs = Math.floor(ageMs/3600000);
+
+        if(status){
+          if(ageMs < WSEO_CACHE_TTL_MS){
+            status.textContent = '✓ '+d.products.length+' productos (cache '+ageHrs+'h)';
+            status.style.color = 'var(--green)';
+          } else {
+            status.textContent = '⚠️ Cache >24h ('+ageHrs+'h) — clic en ↻ Actualizar';
+            status.style.color = 'var(--amber)';
+          }
+        }
+
         wseoUpdateStats();
         wseoRenderTable();
         wseoStartFreshLabel();
         return;
       }
     }
-  }catch(e){ /* silencioso — el usuario puede cargar manualmente */ }
+  }catch(e){ /* silencioso */ }
+
+  // Sin cache: mensaje inicial
+  if(status){ status.textContent = ''; status.style.color='var(--text3)'; }
   wseoStartFreshLabel();
 }
 
@@ -15111,13 +15134,14 @@ async function wseoLoad(refresh){
     if(refBtn){ refBtn.style.display='inline-flex'; refBtn.disabled=false; refBtn.textContent='↻ Actualizar'; }
     if(status){ status.textContent = '✓ '+_wseoProducts.length+' productos cargados'; status.style.color='var(--green)'; }
 
-    // Persistir en KV para multi-device (silencioso)
+    // Persistir en KV (inmediato en este caso — es 1 escritura grande post-carga completa)
     try{
       await fetch(WORKER+'/woo-seo-cache', {
         method:'POST',
         headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' },
         body: JSON.stringify({ products: _wseoProducts })
       });
+      console.log('[wseo] Cache guardado tras carga completa');
     }catch(e){ console.warn('[wseo] No se pudo guardar cache:', e.message); }
 
     wseoUpdateStats();
@@ -15327,12 +15351,23 @@ function wseoRenderTable(){
     const stMap = { publish:'🟢 Publicado', draft:'⚫ Borrador', pending:'🟡 Pendiente', private:'🔒 Privado' };
     const stLabel = stMap[p.status]||p.status||'—';
 
-    // Issues top 2 como chips con tooltip "clic para solucionar"
+    // Issues: mostrar todos con abreviaturas cortas + tooltip completo
     const issueArr = p.seo_issues||[];
-    const issueList = issueArr.slice(0,2).map(i =>
-      `<span onclick="wseoJumpToFix(${p.id}, decodeURIComponent('${encodeURIComponent(i||'')}'))" style="cursor:pointer;font-size:9px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:3px;padding:1px 4px;white-space:nowrap" title="Clic para solucionar en WooCommerce">${i} →</span>`
+    const issueAbbr = {
+      'Longitud título': '✏️ Título',
+      'Descripción 300+ palabras': '📝 Desc.corta',
+      'Descripción corta': '💬 Sin resumen',
+      'Alt text imagen': '🖼️ Sin alt',
+      'Galería de imágenes': '📷 <3 fotos',
+      'SKU definido': '🔖 SKU',
+      'URL amigable': '🔗 URL',
+      'Categoría asignada': '📁 Categoría',
+      'Precio definido': '💰 Precio',
+      'Etiquetas SEO (≥2)': '🏷️ Tags',
+    };
+    const issueList = issueArr.map(i =>
+      `<span onclick="wseoJumpToFix(${p.id}, decodeURIComponent('${encodeURIComponent(i||'')}'))" style="cursor:pointer;font-size:9px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:3px;padding:1px 4px;white-space:nowrap;display:inline-block" title="${i} — Clic para solucionar en WooCommerce">${issueAbbr[i]||i}</span>`
     ).join(' ');
-    const moreIssues = issueArr.length>2 ? `<span style="font-size:9px;color:var(--text3)">+${issueArr.length-2} más</span>` : '';
 
     const thumb = p.thumbnail
       ? `<img src="${p.thumbnail}" alt="" style="width:38px;height:38px;object-fit:cover;border-radius:5px;flex-shrink:0;border:1px solid var(--border)" onerror="this.style.display='none'">`
@@ -15369,7 +15404,7 @@ function wseoRenderTable(){
       </td>
       <td>
         <div style="display:flex;flex-wrap:wrap;gap:3px;align-items:center">
-          ${issueList}${moreIssues}
+          ${issueList}
           ${!issueArr.length?'<span class="badge bg-green" style="font-size:9px">✓ Sin problemas</span>':''}
         </div>
       </td>
@@ -15398,11 +15433,36 @@ function wseoRenderPagination(pages, total){
   pgEl.innerHTML = b;
 }
 
-// ── Guardar helpers: actualiza localmente + KV ───────────────
+// ── Guardar helpers: actualiza localmente + KV (con debounce para ahorrar writes) ─
 async function _wseoPersistLocal(productId, patch){
   const p = _wseoProducts.find(x=>x.id===productId);
   if(p) Object.assign(p, patch);
-  // Re-persistir en KV (silencioso)
+  _wseoScheduleCacheSave();
+}
+
+function _wseoScheduleCacheSave(){
+  // Si ya hay un guardado pendiente, cancelarlo y reprogramar (agrupa ediciones seguidas)
+  if(_wseoSaveTid) clearTimeout(_wseoSaveTid);
+  _wseoSaveTid = setTimeout(async ()=>{
+    _wseoSaveTid = null;
+    try{
+      await fetch(WORKER+'/woo-seo-cache', {
+        method:'POST',
+        headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' },
+        body: JSON.stringify({ products: _wseoProducts })
+      });
+      _wseoCachedAt = Date.now();
+      wseoUpdateFreshLabel();
+      console.log('[wseo] Cache guardado en KV ('+_wseoProducts.length+' productos)');
+    }catch(e){ console.warn('[wseo] No se pudo guardar cache:', e.message); }
+  }, WSEO_SAVE_DEBOUNCE_MS);
+}
+
+// Forzar guardado inmediato del cache (usado al cerrar ventana/cambiar sección)
+async function _wseoFlushCache(){
+  if(!_wseoSaveTid) return;
+  clearTimeout(_wseoSaveTid);
+  _wseoSaveTid = null;
   try{
     await fetch(WORKER+'/woo-seo-cache', {
       method:'POST',
@@ -15410,9 +15470,26 @@ async function _wseoPersistLocal(productId, patch){
       body: JSON.stringify({ products: _wseoProducts })
     });
     _wseoCachedAt = Date.now();
-    wseoUpdateFreshLabel();
   }catch(e){ /* silencioso */ }
 }
+
+// Al salir de la página, forzar flush si hay cambios pendientes
+window.addEventListener('beforeunload', function(){
+  if(_wseoSaveTid){
+    // sendBeacon es síncrono y no-bloqueante
+    try{
+      const blob = new Blob([JSON.stringify({ products: _wseoProducts })], { type:'application/json' });
+      // Nota: sendBeacon no envía Authorization — para KV necesitamos el token en el query.
+      // Como fallback, usamos fetch con keepalive que sí soporta headers.
+      fetch(WORKER+'/woo-seo-cache', {
+        method:'POST',
+        headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' },
+        body: JSON.stringify({ products: _wseoProducts }),
+        keepalive: true
+      });
+    }catch(e){}
+  }
+});
 
 async function _wseoApiPut(productId, body){
   const r = await fetch(WORKER+'/woo/products/'+productId, {
