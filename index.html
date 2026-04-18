@@ -54,7 +54,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 .nav{display:flex;align-items:center;gap:8px;padding:7px 12px;margin:1px 6px;border-radius:var(--rs);cursor:pointer;transition:all .14s;font-size:12.5px;color:#ffffff !important;opacity:0.9;font-weight:400;border:none;background:none;width:calc(100% - 12px);text-align:left;font-family:var(--font);text-decoration:none}
 .nav:hover, a.nav:hover{background-color:rgba(35, 209, 139, 0.9) !important;color:#000000 !important;opacity:1 !important}
 .nav.active, a.nav.active{background-color:rgba(35, 209, 139, 0.15) !important;color:var(--green) !important;opacity:1 !important}
-/* Destacar permanentemente el Dashboard para acceso rápido */
+/* Destacar permanentemente el Dashboard — acceso rápido más visible */
 #nav-dashboard{background-color:rgba(79,142,247,0.18) !important;border:1px solid rgba(79,142,247,0.35) !important;opacity:1 !important;font-weight:500 !important}
 #nav-dashboard:hover{background-color:rgba(79,142,247,0.28) !important}
 #nav-dashboard.active{background-color:rgba(79,142,247,0.32) !important;color:#7eb2ff !important;border-color:rgba(79,142,247,0.6) !important}
@@ -3628,15 +3628,7 @@ async function initApp(){
   // Si hay datos en localStorage (< 10 min), mostrar inmediatamente y hacer
   // refresh en background. Si no hay caché, carga normal desde la API.
   const _cached = _loadDataCache();
-  // Heurística anti-corrupción: si el cache tiene muy pocos items (<500), puede venir
-  // de un bug anterior donde loadItemsFast pisaba el cache completo con solo 100 items.
-  // En ese caso, lo descartamos y hacemos carga fresca con loadItemsFull.
-  const _cacheLooksCorrupted = _cached && _cached.items && _cached.items.length > 0 && _cached.items.length < 500;
-  if(_cacheLooksCorrupted){
-    console.warn('[DataCache] Cache sospechoso detectado ('+_cached.items.length+' items) — descartando y recargando fresh');
-    _clearDataCache();
-  }
-  if(_cached && !_cacheLooksCorrupted && _cached.items.length > 0){
+  if(_cached && _cached.items.length > 0){
     // Datos frescos disponibles — renderizar instantáneamente
     allItems  = _cached.items;
     allOrders = _cached.orders;
@@ -3654,22 +3646,18 @@ async function initApp(){
     renderDashboard();
     updateLast50(allOrders.slice(0,50));
     // Refresh silencioso en background (sin loader)
-    // IMPORTANTE: NO guardar en cache acá — loadItemsFast solo trae 100 items.
-    // El _saveDataCache real lo dispara loadItemsFull que trae TODOS los items via scroll.
     Promise.all([loadItemsFast(), loadOrdersRecent()]).then(() => {
-      console.log('[DataCache] Refresh BG Fast completado — allItems:', allItems.length, '| allOrders:', allOrders.length);
+      _saveDataCache(); // actualizar caché con datos frescos
       renderDashboard();
       updateLast50(allOrders.slice(0,50));
       _hideCacheAgeBadge();
       // Notificar otras pestañas para que actualicen desde caché renovado
       try{ _syncChannel && _syncChannel.postMessage({ type: 'data-updated' }); }catch{}
-    }).catch(e=>{
-      console.error('[DataCache] Refresh BG falló:', e);
     });
   } else {
-    // Sin caché (o cache corrupto) — carga normal
-    // No guardamos cache acá — lo hará loadItemsFull() en background con TODOS los items
+    // Sin caché — carga normal
     await Promise.all([loadItemsFast(), loadOrdersRecent(), loadQuestions()]);
+    _saveDataCache(); // guardar para la próxima pestaña
     renderDashboard();
     updateLast50(allOrders.slice(0,50));
   }
@@ -3781,13 +3769,12 @@ async function pollNewData(){
     }
     document.getElementById('nb-q').textContent=pend;
     if(pend!==prev&&document.getElementById('section-preguntas')?.classList.contains('active'))renderQuestions();
-    // Mensajes post-venta no leidos — uso de /messages/unread que es el endpoint oficial
+    // Mensajes post-venta no leidos — uso /messages/unread (endpoint oficial ML)
     try{
       const ru = await mlGet('/messages/unread?role=seller&tag=post_sale&limit=5');
       const packs = (ru && (ru.results || ru.data || [])) || [];
       if(packs.length){
         const p = packs[0];
-        // Intentar obtener el contenido del primer mensaje del primer pack
         const packId = p.id || p.pack_id;
         if(packId){
           try{
@@ -3879,23 +3866,12 @@ async function loadItemsFast(){
     const results=await Promise.all(chunks.map(chunk=>
       mlGet('/items?ids='+chunk.join(',')+'&include_attributes=all&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations,health&_nocache='+nc)
     ));
-    const freshItems=[];
-    results.forEach(r=>{ r.forEach(x=>{if(x.code===200)freshItems.push(x.body);}); });
-    console.log('[loadItemsFast] Items fresh:', freshItems.length, '| allItems actual:', allItems.length, '| chunks:', chunks.length);
-    // Si el fresh trae MENOS items que los ya cargados (caso típico: tenemos 2000+ en cache
-    // pero loadItemsFast solo trae los primeros 100 via scroll), MERGEAR en vez de reemplazar:
-    // actualizamos los datos de los 100 recientes y preservamos el resto del cache.
-    if(allItems.length > freshItems.length && freshItems.length > 0){
-      const freshMap = new Map(freshItems.map(i => [i.id, i]));
-      allItems = allItems.map(i => freshMap.get(i.id) || i);
-      console.log('[loadItemsFast] Modo MERGE: actualizados', freshItems.length, 'items, total preservado:', allItems.length);
-    } else {
-      allItems = freshItems;
-    }
+    allItems=[];
+    results.forEach(r=>{ r.forEach(x=>{if(x.code===200)allItems.push(x.body);}); });
     _updateItemsUI();
     // Actualizar score de salud en pantalla inmediatamente con datos frescos
     refreshHealthScores();
-  }catch(e){console.warn('[loadItemsFast] ERROR:',e.message, e);}
+  }catch(e){console.warn('[loadItemsFast]',e);}
 }
 
 async function loadItemsFull(){
@@ -3924,11 +3900,7 @@ async function loadItemsFull(){
     allItems=full;_updateItemsUI();
     // Actualizar health scores con datos recién bajados de ML
     refreshHealthScores();
-    console.log('[loadItemsFull] COMPLETADO:',allItems.length, '→ guardando cache completo');
-    // Ahora SÍ guardamos el cache completo (no antes porque loadItemsFast solo trae 100)
-    try{ _saveDataCache(); }catch(e){ console.warn('[loadItemsFull] save cache falló:', e.message); }
-    // Refrescar dashboard con el total real
-    try{ renderDashboard(); }catch{}
+    console.log('[loadItemsFull]',allItems.length);
   }catch(e){console.error('[loadItemsFull]',e);}
 }
 
@@ -4161,22 +4133,6 @@ const _ORDERS_LS_KEY  = 'mlp_orders_v1';
 
 function _saveDataCache(){
   try{
-    // Protección: no guardar si allItems tiene muy pocos items (probablemente loadItemsFast
-    // todavía no terminó o está en estado transicional). Usamos 500 como heurística:
-    // si tenés menos que eso, probablemente falta completar loadItemsFull.
-    // Excepción: si existe un cache previo con muchos items, tampoco lo pisamos.
-    if(!allItems || allItems.length < 500){
-      const rawI = localStorage.getItem(_ITEMS_LS_KEY);
-      if(rawI){
-        try{
-          const ei = JSON.parse(rawI);
-          if(ei && Array.isArray(ei.data) && ei.data.length > allItems.length){
-            console.warn('[DataCache] Skip save — allItems('+allItems.length+') < cache existente('+ei.data.length+')');
-            return;
-          }
-        }catch{}
-      }
-    }
     const ts = Date.now();
     // Items: solo campos esenciales para renderizado rápido (evitar exceder 5MB de localStorage)
     const itemsSlim = allItems.map(i => ({
@@ -12382,7 +12338,7 @@ async function renderMensajes(){
   // ── Fuente 1: Mensajes post-venta (packs) ──────────────────────────────────
   try{
     // Endpoint oficial ML: /messages/unread?role=seller&tag=post_sale
-    // Devuelve los packs con mensajes no leídos
+    // Devuelve los packs con mensajes no leídos (antes /messages/packs daba 404)
     const r = await mlGet('/messages/unread?role=seller&tag=post_sale&limit=50');
     const packs = (r && (r.results || r.data || [])) || [];
     packs.forEach(function(p){
@@ -12587,7 +12543,7 @@ var _MSG_POLL_MS     = 90 * 1000; // 90 segundos
 async function _pollMessages(){
   if(!userId || !token) return;
   try{
-    // Endpoint oficial ML: /messages/unread — todos los que trae ya están sin leer
+    // Endpoint oficial ML: /messages/unread — todos los que devuelve ya están sin leer
     var r = await mlGet('/messages/unread?role=seller&tag=post_sale&limit=50');
     var packs = (r && (r.results || r.data || [])) || [];
     var unread = packs.length;
@@ -12992,7 +12948,7 @@ async function rpSmartSearch(){
 
   try{
     // API pública ML vía el propio Worker (/pub/*) — sin auth, sin depender de corsproxy.io
-    // Nota: corsproxy.io devuelve 403 constantemente por límites de uso gratuito.
+    // (corsproxy.io devuelve 403 constantemente por límites del servicio gratuito)
     const params = new URLSearchParams({ q: query, limit: String(limit) });
     if(sort==='price_asc')  params.set('sort', 'price_asc');
     if(sort==='price_desc') params.set('sort', 'price_desc');
