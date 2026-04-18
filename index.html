@@ -3666,10 +3666,16 @@ async function initApp(){
   initAI();
   buildAlgoFactors();
   buildAdsChart();
-  // BACKGROUND: historico + estados de envio
-  loadItemsFull();
-  loadOrdersHistory();
-  loadTrends();
+  // BACKGROUND: PRIORIDAD A PUBLICACIONES primero
+  // loadItemsFull trae las 2386+ publicaciones — necesarias para casi todos los módulos.
+  // loadOrdersHistory trae 18 meses de órdenes (~1500) — menos urgente, se ejecuta DESPUÉS
+  // para no competir ancho de banda con items. Resultado: el panel se puede usar
+  // ~30-60s antes que en el flow paralelo anterior.
+  loadItemsFull().then(() => {
+    // Una vez las publicaciones están completas, traer historial de órdenes y trends
+    loadOrdersHistory();
+    loadTrends();
+  });
   // POLLING: auto-actualizar cada 60s
   startPolling();
   // POLLING MENSAJES: verificar mensajes post-venta sin leer cada 90s
@@ -12329,21 +12335,23 @@ async function renderMensajes(){
 
   // ── Fuente 1: Mensajes post-venta (packs) ──────────────────────────────────
   try{
-    const r = await mlGet('/messages/packs?role=seller&limit=50&tag=post_sale');
-    const packs = (r && (r.data||r.results)) || [];
+    // /messages/unread — endpoint oficial. limit=10 para no traer packs históricos enormes.
+    const r = await mlGet('/messages/unread?role=seller&tag=post_sale&limit=10');
+    const packs = (r && (r.results || r.data)) || [];
     packs.forEach(function(p){
-      var isUnread = p.status === 'unread' || p.status === 'UNREAD';
-      if(isUnread) unread++;
+      // Todos los de /unread están sin leer por definición
+      unread++;
       var orderId = p.order_id||p.resource_id||null;
       if(!orderId && p.resource){
         var m = String(p.resource).match(/orders\/(\d+)/i);
         if(m) orderId = m[1];
       }
+      var packId = p.id || p.pack_id || null;
       notifs.push({
         _source: 'message',
         _orderId: orderId,
+        _packId: packId,
         _thumb:  (function(){
-          // Buscar thumbnail via orderId en allOrders
           if(!orderId) return '';
           const relOrder = allOrders.find(function(o){ return String(o.id) === String(orderId); });
           if(relOrder){
@@ -12354,16 +12362,19 @@ async function renderMensajes(){
           }
           return '';
         })(),
-        is_read:  !isUnread,
+        is_read:  false,
         subject:  p.subject || 'Mensaje post-venta',
-        date:     (p.last_message && p.last_message.date) || p.date_created || '',
+        date:     p.date_created || p.last_updated || p.date || '',
         preview:  (p.last_message && p.last_message.text) || '',
-        from:     (p.participants||[]).map(function(x){ return x.nickname; }).filter(Boolean).join(', '),
+        from:     (p.participants||[]).filter(function(x){ return x.user_id !== userId; }).map(function(x){ return x.nickname || ('User '+x.user_id); }).filter(Boolean).join(', '),
       });
     });
-    console.log('[Notif] Mensajes packs:', packs.length, '| sin leer:', unread);
+    console.log('[Notif] Mensajes unread:', packs.length);
+    // Actualizar badge del sidebar también desde renderMensajes
+    var _nbSidebar = document.getElementById('nb-msg');
+    if(_nbSidebar){ _nbSidebar.textContent = packs.length; _nbSidebar.style.display = packs.length > 0 ? '' : 'none'; }
   }catch(e){
-    console.warn('[Notif] /messages/packs error:', e.message);
+    console.warn('[Notif] /messages/unread error:', e.message);
   }
 
   // ── Fuente 2: Ordenes pagadas recientes (ultimas 24 h) ─────────────────────
@@ -12526,16 +12537,15 @@ function renderMsgPacks(packs,el){
 // ══════════════════════════════════════════════════════════════════════
 var _msgPollTimer    = null;
 var _msgLastUnread   = -1; // -1 = primera vez (no notificar)
-var _MSG_POLL_MS     = 90 * 1000; // 90 segundos
+var _MSG_POLL_MS     = 60 * 60 * 1000; // 1 hora (antes 90s — consumía mucho con muchos packs históricos)
 
 async function _pollMessages(){
   if(!userId || !token) return;
   try{
-    var r = await mlGet('/messages/packs?role=seller&limit=50&tag=post_sale');
-    var packs = (r && (r.data || r.results)) || [];
-    var unread = packs.filter(function(p){
-      return p.status === 'unread' || p.status === 'UNREAD';
-    }).length;
+    // /messages/unread — endpoint oficial. limit=10 para no traer packs históricos enormes.
+    var r = await mlGet('/messages/unread?role=seller&tag=post_sale&limit=10');
+    var packs = (r && (r.results || r.data || [])) || [];
+    var unread = packs.length;
 
     // Actualizar badge del sidebar siempre
     var nbEl = document.getElementById('nb-msg');
@@ -12561,9 +12571,11 @@ async function _pollMessages(){
 function startMessagePolling(){
   if(_msgPollTimer) clearInterval(_msgPollTimer);
   _msgLastUnread = -1; // reset para no notificar en el primer ciclo
-  _pollMessages(); // ejecutar inmediatamente para cargar el badge
+  // No ejecutar inmediato al boot — esperar 2 minutos para no competir con la carga
+  // inicial de publicaciones (loadItemsFull). Luego cada 1 hora.
+  setTimeout(_pollMessages, 2 * 60 * 1000);
   _msgPollTimer = setInterval(_pollMessages, _MSG_POLL_MS);
-  console.log('[MsgPoll] Polling iniciado cada', _MSG_POLL_MS/1000, 's');
+  console.log('[MsgPoll] Polling iniciado cada', Math.round(_MSG_POLL_MS/60000), 'min (primer call en 2 min)');
 }
 
 function stopMessagePolling(){
@@ -12938,12 +12950,20 @@ async function rpSmartSearch(){
   try{
     // API pública ML vía mlGet autenticado — ML responde 403 a búsquedas anónimas
     // desde IPs de Cloudflare (/pub/), pero con token Bearer sí permite.
-    // Con token funciona perfecto y además es más rápido (sin corsproxy de por medio).
     const params = new URLSearchParams({ q: query, limit: String(limit) });
     if(sort==='price_asc')  params.set('sort', 'price_asc');
     if(sort==='price_desc') params.set('sort', 'price_desc');
     const d = await mlGet('/sites/MLA/search?' + params.toString());
-    let results = (d.results || []).map(p => ({
+    // Diagnóstico: qué devolvió exactamente la API
+    console.log('[rpSmartSearch] API response:', {
+      total: d?.paging?.total,
+      primary_results: d?.paging?.primary_results,
+      results_count: (d?.results||[]).length,
+      error: d?.error,
+      message: d?.message,
+      keys: Object.keys(d||{})
+    });
+    const rawResults = (d.results || []).map(p => ({
       id: p.id,
       title: p.title,
       price: p.price || 0,
@@ -12958,12 +12978,23 @@ async function rpSmartSearch(){
       listing_type: p.listing_type_id || '',
       official_store: !!p.official_store_id,
     }));
+    console.log('[rpSmartSearch] rawResults:', rawResults.length, '| primeros 3 seller_ids:', rawResults.slice(0,3).map(r=>r.seller_id));
 
     // Excluir mis propias publicaciones si corresponde
+    let results = rawResults;
     const exclSelf = document.getElementById('rp-smart-excl-self')?.checked;
     if(exclSelf && typeof userId !== 'undefined' && userId){
       const myId = Number(userId);
-      results = results.filter(x => x.seller_id !== myId);
+      const filtered = rawResults.filter(x => x.seller_id !== myId);
+      console.log('[rpSmartSearch] Filtro exclSelf: myId='+myId+' | antes='+rawResults.length+' | después='+filtered.length);
+      // Si el filtro elimina TODO pero había resultados crudos, mostramos los crudos
+      // con un aviso. Evita el caso donde el filtro borre todo por mala comparación.
+      if(filtered.length === 0 && rawResults.length > 0){
+        console.warn('[rpSmartSearch] Filtro dejó 0 — mostrando sin filtrar');
+        results = rawResults;
+      } else {
+        results = filtered;
+      }
     }
 
     _rpSmartResults = results;
