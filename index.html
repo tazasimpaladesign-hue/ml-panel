@@ -3628,7 +3628,15 @@ async function initApp(){
   // Si hay datos en localStorage (< 10 min), mostrar inmediatamente y hacer
   // refresh en background. Si no hay caché, carga normal desde la API.
   const _cached = _loadDataCache();
-  if(_cached && _cached.items.length > 0){
+  // Heurística anti-corrupción: si el cache tiene muy pocos items (<500), puede venir
+  // de un bug anterior donde loadItemsFast pisaba el cache completo con solo 100 items.
+  // En ese caso, lo descartamos y hacemos carga fresca con loadItemsFull.
+  const _cacheLooksCorrupted = _cached && _cached.items && _cached.items.length > 0 && _cached.items.length < 500;
+  if(_cacheLooksCorrupted){
+    console.warn('[DataCache] Cache sospechoso detectado ('+_cached.items.length+' items) — descartando y recargando fresh');
+    _clearDataCache();
+  }
+  if(_cached && !_cacheLooksCorrupted && _cached.items.length > 0){
     // Datos frescos disponibles — renderizar instantáneamente
     allItems  = _cached.items;
     allOrders = _cached.orders;
@@ -3646,9 +3654,10 @@ async function initApp(){
     renderDashboard();
     updateLast50(allOrders.slice(0,50));
     // Refresh silencioso en background (sin loader)
+    // IMPORTANTE: NO guardar en cache acá — loadItemsFast solo trae 100 items.
+    // El _saveDataCache real lo dispara loadItemsFull que trae TODOS los items via scroll.
     Promise.all([loadItemsFast(), loadOrdersRecent()]).then(() => {
-      console.log('[DataCache] Refresh BG completado — allItems:', allItems.length, '| allOrders:', allOrders.length);
-      _saveDataCache(); // actualizar caché con datos frescos
+      console.log('[DataCache] Refresh BG Fast completado — allItems:', allItems.length, '| allOrders:', allOrders.length);
       renderDashboard();
       updateLast50(allOrders.slice(0,50));
       _hideCacheAgeBadge();
@@ -3658,9 +3667,9 @@ async function initApp(){
       console.error('[DataCache] Refresh BG falló:', e);
     });
   } else {
-    // Sin caché — carga normal
+    // Sin caché (o cache corrupto) — carga normal
+    // No guardamos cache acá — lo hará loadItemsFull() en background con TODOS los items
     await Promise.all([loadItemsFast(), loadOrdersRecent(), loadQuestions()]);
-    _saveDataCache(); // guardar para la próxima pestaña
     renderDashboard();
     updateLast50(allOrders.slice(0,50));
   }
@@ -3915,7 +3924,11 @@ async function loadItemsFull(){
     allItems=full;_updateItemsUI();
     // Actualizar health scores con datos recién bajados de ML
     refreshHealthScores();
-    console.log('[loadItemsFull]',allItems.length);
+    console.log('[loadItemsFull] COMPLETADO:',allItems.length, '→ guardando cache completo');
+    // Ahora SÍ guardamos el cache completo (no antes porque loadItemsFast solo trae 100)
+    try{ _saveDataCache(); }catch(e){ console.warn('[loadItemsFull] save cache falló:', e.message); }
+    // Refrescar dashboard con el total real
+    try{ renderDashboard(); }catch{}
   }catch(e){console.error('[loadItemsFull]',e);}
 }
 
@@ -4148,6 +4161,22 @@ const _ORDERS_LS_KEY  = 'mlp_orders_v1';
 
 function _saveDataCache(){
   try{
+    // Protección: no guardar si allItems tiene muy pocos items (probablemente loadItemsFast
+    // todavía no terminó o está en estado transicional). Usamos 500 como heurística:
+    // si tenés menos que eso, probablemente falta completar loadItemsFull.
+    // Excepción: si existe un cache previo con muchos items, tampoco lo pisamos.
+    if(!allItems || allItems.length < 500){
+      const rawI = localStorage.getItem(_ITEMS_LS_KEY);
+      if(rawI){
+        try{
+          const ei = JSON.parse(rawI);
+          if(ei && Array.isArray(ei.data) && ei.data.length > allItems.length){
+            console.warn('[DataCache] Skip save — allItems('+allItems.length+') < cache existente('+ei.data.length+')');
+            return;
+          }
+        }catch{}
+      }
+    }
     const ts = Date.now();
     // Items: solo campos esenciales para renderizado rápido (evitar exceder 5MB de localStorage)
     const itemsSlim = allItems.map(i => ({
