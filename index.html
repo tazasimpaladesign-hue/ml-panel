@@ -12932,13 +12932,14 @@ async function rpSmartSearch(){
   _rpSmartSelected.clear();
 
   try{
-    // API ML autenticada — /api/ usa el token OAuth del usuario → nunca da 403 por IP
+    // API pública ML — sin autenticación, via corsproxy para evitar CORS
     const params = new URLSearchParams({ q: query, limit: String(limit) });
     if(sort==='price_asc')  params.set('sort', 'price_asc');
     if(sort==='price_desc') params.set('sort', 'price_desc');
-    const url = WORKER + '/api/sites/MLA/search?' + params.toString();
+    const targetUrl = 'https://api.mercadolibre.com/sites/MLA/search?' + params.toString();
+    const url = 'https://corsproxy.io/?' + encodeURIComponent(targetUrl);
 
-    const r = await fetch(url, { signal: AbortSignal.timeout(10000), headers: { 'Authorization': 'Bearer ' + token } });
+    const r = await fetch(url, { signal: AbortSignal.timeout(10000) });
     if(!r.ok) throw new Error('HTTP '+r.status);
     const d = await r.json();
     let results = (d.results || []).map(p => ({
@@ -13088,8 +13089,9 @@ async function rpSmartAddSelected(){
 async function buscarCompetencia(query, limit){
   limit = limit || 30;
   try{
-    const url = WORKER + '/api/sites/MLA/search?q=' + encodeURIComponent(query) + '&limit=' + limit;
-    const r = await fetch(url, { signal: AbortSignal.timeout(10000), headers: { 'Authorization': 'Bearer ' + token } });
+    const targetUrl = 'https://api.mercadolibre.com/sites/MLA/search?q='+encodeURIComponent(query)+'&limit='+limit;
+    const url = 'https://corsproxy.io/?' + encodeURIComponent(targetUrl);
+    const r = await fetch(url, { signal: AbortSignal.timeout(10000) });
     if(!r.ok) return [];
     const d = await r.json();
     return (d.results || []).map(p => ({
@@ -13114,10 +13116,11 @@ async function obtenerPrecioCompetidor(itemId){
     throw new Error('Competidor manual — usá ✎ Editar para actualizar el precio');
   }
 
-  // Estrategia 1: /items/{id} via Worker autenticado (token OAuth → ML nunca bloquea por IP)
+  // Estrategia 1: /items/{id} directo desde el browser via corsproxy.io
+  // corsproxy.io reenvía la request sin el header Origin → ML la acepta
   try{
-    const url = WORKER + '/api/items/' + itemId + '?attributes=id,title,price,thumbnail,seller_id,permalink';
-    const r = await fetch(url, { signal: AbortSignal.timeout(8000), headers: { 'Authorization': 'Bearer ' + token } });
+    const url = 'https://corsproxy.io/?'+encodeURIComponent('https://api.mercadolibre.com/items/'+itemId+'?attributes=id,title,price,thumbnail,seller_id,permalink');
+    const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
     if(!r.ok) throw new Error('HTTP '+r.status);
     const d = await r.json();
     if(d && d.id && d.price > 0){
@@ -13126,13 +13129,13 @@ async function obtenerPrecioCompetidor(itemId){
     }
     throw new Error(d.message || 'Sin precio');
   }catch(e1){
-    rpLogMsg('Worker /items/ falló ('+e1.message+'), intentando search...', 'info');
+    rpLogMsg('corsproxy /items/ falló ('+e1.message+'), intentando search...', 'info');
   }
 
-  // Estrategia 2: /sites/MLA/search?q={itemId} via Worker autenticado
+  // Estrategia 2: /sites/MLA/search?q={itemId} via corsproxy.io
   try{
-    const url2 = WORKER + '/api/sites/MLA/search?q=' + itemId + '&limit=5';
-    const r2 = await fetch(url2, { signal: AbortSignal.timeout(8000), headers: { 'Authorization': 'Bearer ' + token } });
+    const url2 = 'https://corsproxy.io/?'+encodeURIComponent('https://api.mercadolibre.com/sites/MLA/search?q='+itemId+'&limit=5');
+    const r2 = await fetch(url2, { signal: AbortSignal.timeout(8000) });
     if(!r2.ok) throw new Error('HTTP '+r2.status);
     const data = await r2.json();
     const match = (data.results||[]).find(x=>x.id===itemId) || (data.results||[])[0];
@@ -13147,8 +13150,11 @@ async function obtenerPrecioCompetidor(itemId){
   }
 }
 
-// ── buscarCompetencia y rpSearchCompetitors: implementadas arriba (línea ~13088)
-// Las versiones vacías fueron eliminadas — el Worker con camuflaje de headers resuelve el 403.
+// ── buscarCompetencia — no disponible (ML PolicyAgent bloquea desde servidores)
+async function buscarCompetencia(query){ return []; }
+
+// ── rpSearchCompetitors — no usada
+function rpSearchCompetitors(query){}
 
 
 // ── Agregar competidor seleccionado a la regla ───────────────────────
