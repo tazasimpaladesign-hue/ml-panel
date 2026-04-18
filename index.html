@@ -12932,12 +12932,12 @@ async function rpSmartSearch(){
   _rpSmartSelected.clear();
 
   try{
-    // API pública ML — sin autenticación, via corsproxy para evitar CORS
+    // API pública ML — via Worker propio con camuflaje de headers (evita 403 de Akamai)
     const params = new URLSearchParams({ q: query, limit: String(limit) });
     if(sort==='price_asc')  params.set('sort', 'price_asc');
     if(sort==='price_desc') params.set('sort', 'price_desc');
-    const targetUrl = 'https://api.mercadolibre.com/sites/MLA/search?' + params.toString();
-    const url = 'https://corsproxy.io/?' + encodeURIComponent(targetUrl);
+    // WORKER /pub/sites/MLA/search → el Worker reenvía con User-Agent de Chrome + headers AR
+    const url = WORKER + '/pub/sites/MLA/search?' + params.toString();
 
     const r = await fetch(url, { signal: AbortSignal.timeout(10000) });
     if(!r.ok) throw new Error('HTTP '+r.status);
@@ -13089,8 +13089,7 @@ async function rpSmartAddSelected(){
 async function buscarCompetencia(query, limit){
   limit = limit || 30;
   try{
-    const targetUrl = 'https://api.mercadolibre.com/sites/MLA/search?q='+encodeURIComponent(query)+'&limit='+limit;
-    const url = 'https://corsproxy.io/?' + encodeURIComponent(targetUrl);
+    const url = WORKER + '/pub/sites/MLA/search?q=' + encodeURIComponent(query) + '&limit=' + limit;
     const r = await fetch(url, { signal: AbortSignal.timeout(10000) });
     if(!r.ok) return [];
     const d = await r.json();
@@ -13116,10 +13115,9 @@ async function obtenerPrecioCompetidor(itemId){
     throw new Error('Competidor manual — usá ✎ Editar para actualizar el precio');
   }
 
-  // Estrategia 1: /items/{id} directo desde el browser via corsproxy.io
-  // corsproxy.io reenvía la request sin el header Origin → ML la acepta
+  // Estrategia 1: /items/{id} via Worker propio (camuflaje headers → ML no bloquea)
   try{
-    const url = 'https://corsproxy.io/?'+encodeURIComponent('https://api.mercadolibre.com/items/'+itemId+'?attributes=id,title,price,thumbnail,seller_id,permalink');
+    const url = WORKER + '/pub/items/' + itemId + '?attributes=id,title,price,thumbnail,seller_id,permalink';
     const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
     if(!r.ok) throw new Error('HTTP '+r.status);
     const d = await r.json();
@@ -13129,12 +13127,12 @@ async function obtenerPrecioCompetidor(itemId){
     }
     throw new Error(d.message || 'Sin precio');
   }catch(e1){
-    rpLogMsg('corsproxy /items/ falló ('+e1.message+'), intentando search...', 'info');
+    rpLogMsg('Worker /items/ falló ('+e1.message+'), intentando search...', 'info');
   }
 
-  // Estrategia 2: /sites/MLA/search?q={itemId} via corsproxy.io
+  // Estrategia 2: /sites/MLA/search?q={itemId} via Worker
   try{
-    const url2 = 'https://corsproxy.io/?'+encodeURIComponent('https://api.mercadolibre.com/sites/MLA/search?q='+itemId+'&limit=5');
+    const url2 = WORKER + '/pub/sites/MLA/search?q=' + itemId + '&limit=5';
     const r2 = await fetch(url2, { signal: AbortSignal.timeout(8000) });
     if(!r2.ok) throw new Error('HTTP '+r2.status);
     const data = await r2.json();
@@ -13150,11 +13148,8 @@ async function obtenerPrecioCompetidor(itemId){
   }
 }
 
-// ── buscarCompetencia — no disponible (ML PolicyAgent bloquea desde servidores)
-async function buscarCompetencia(query){ return []; }
-
-// ── rpSearchCompetitors — no usada
-function rpSearchCompetitors(query){}
+// ── buscarCompetencia y rpSearchCompetitors: implementadas arriba (línea ~13088)
+// Las versiones vacías fueron eliminadas — el Worker con camuflaje de headers resuelve el 403.
 
 
 // ── Agregar competidor seleccionado a la regla ───────────────────────
