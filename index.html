@@ -3662,19 +3662,24 @@ async function initApp(){
     updateLast50(allOrders.slice(0,50));
   }
 
-  loadMostVisited(false);
-  initAI();
+  // NO llamamos loadMostVisited ni initAI ACÁ — los retrasamos hasta después de
+  // que loadItemsFull haya terminado (publicaciones son prioridad máxima).
   buildAlgoFactors();
   buildAdsChart();
   // BACKGROUND: PRIORIDAD A PUBLICACIONES primero
   // loadItemsFull trae las 2386+ publicaciones — necesarias para casi todos los módulos.
-  // loadOrdersHistory trae 18 meses de órdenes (~1500) — menos urgente, se ejecuta DESPUÉS
-  // para no competir ancho de banda con items. Resultado: el panel se puede usar
-  // ~30-60s antes que en el flow paralelo anterior.
+  // Cuando termina, se disparan en orden: visitas, AI init, historial de órdenes, trends.
   loadItemsFull().then(() => {
-    // Una vez las publicaciones están completas, traer historial de órdenes y trends
+    // Una vez publicaciones completas, cargar cosas secundarias
+    loadMostVisited(false);
+    initAI();
     loadOrdersHistory();
     loadTrends();
+    // Enriquecer preguntas con nicknames (se había retrasado en loadQuestions)
+    if(window._pendingEnrichQuestions){
+      enrichQuestionsNicknames().catch(e=>console.warn('[Q] enrichNicknames:', e));
+      window._pendingEnrichQuestions = false;
+    }
   });
   // POLLING: auto-actualizar cada 60s
   startPolling();
@@ -3775,18 +3780,8 @@ async function pollNewData(){
     }
     document.getElementById('nb-q').textContent=pend;
     if(pend!==prev&&document.getElementById('section-preguntas')?.classList.contains('active'))renderQuestions();
-    // Mensajes post-venta no leidos
-    try{
-      const recentIds=(fresh.length?fresh:allOrders.slice(0,5)).map(o=>o.id).filter(Boolean);
-      for(const ordId of recentIds.slice(0,3)){
-        const msgs=await mlGet('/messages/orders/'+ordId+'?mark_as_read=false&limit=5');
-        const unread=(msgs.messages||[]).filter(m=>m.status==='unread'&&m.from&&m.from.user_id!==userId);
-        if(unread.length){
-          showToast('✉️ Mensaje post-venta de '+unread[0].from.nickname+' (Orden #'+ordId+')','info','message');
-          break; // una notif por poll es suficiente
-        }
-      }
-    }catch(e){ console.warn('[Poll msgs]',e.message); }
+    // Mensajes post-venta → movido a _pollMessages (cada 1h con /messages/unread)
+    // El endpoint /messages/orders/{id} dejó de existir en ML (daba 404).
     stamp();
   }catch(e){console.warn('[Poll]',e.message);}
 }
@@ -3934,11 +3929,13 @@ async function loadOrdersRecent(){
 // Historico 18 meses en background
 async function loadOrdersHistory(){
   try{
-    const from18=new Date();from18.setMonth(from18.getMonth()-18);
+    // 12 meses de historial (antes 18) — suficiente para Ventas, Quiebre de Stock,
+    // Facturación, Asistente IA y Rentabilidad. Achicar el rango acelera el boot.
+    const from12=new Date();from12.setMonth(from12.getMonth()-12);
     let hist=[];
     for(let offset=0;offset<2000;offset+=50){
       try{
-        const r=await mlGet('/orders/search?seller='+userId+'&order.date_created.from='+encodeURIComponent(from18.toISOString())+'&sort=date_desc&limit=50&offset='+offset);
+        const r=await mlGet('/orders/search?seller='+userId+'&order.date_created.from='+encodeURIComponent(from12.toISOString())+'&sort=date_desc&limit=50&offset='+offset);
         const res=r.results||[];hist.push(...res);
         if(res.length<50)break;
         await new Promise(r=>setTimeout(r,80));
@@ -4526,8 +4523,10 @@ async function loadQuestions(){
     s('q-today', allQuestions.filter(q=>q.status==='ANSWERED'&&isToday(q.answer?.date_created)).length);
     s('q-avgtime', calcAvgRT()+'h');
 
-    // Enriquecer con nicknames (asíncrono, sin bloquear la carga)
-    enrichQuestionsNicknames().catch(e=>console.warn('[Q] enrichNicknames:', e));
+    // Enriquecer con nicknames → retrasado para no competir con loadItemsFull.
+    // Se disparará desde el .then() de loadItemsFull (prioridad: primero publicaciones).
+    // Marcamos un flag para que el bloque principal sepa que hay que enriquecer.
+    window._pendingEnrichQuestions = true;
   }catch(e){ console.error('[Q] loadQuestions error:', e); }
 }
 
@@ -12948,19 +12947,59 @@ async function rpSmartSearch(){
   _rpSmartSelected.clear();
 
   try{
-    // API pública ML vía mlGet autenticado — ML responde 403 a búsquedas anónimas
-    // desde IPs de Cloudflare (/pub/), pero con token Bearer sí permite.
+    // API pública ML — 3 estrategias en cascada porque ML bloquea según IP/origen:
+    // 1. mlGet con token vía Worker → confirmado 403 forbidden
+    // 2. /pub/ sin token vía Worker → 403 (ML bloquea IPs de datacenter Cloudflare)
+    // 3. corsproxy.io directo desde el browser → IP residencial del user, SÍ funciona
+    //    (es el mismo patrón que usa obtenerPrecioCompetidor y que funciona probado)
     const params = new URLSearchParams({ q: query, limit: String(limit) });
     if(sort==='price_asc')  params.set('sort', 'price_asc');
     if(sort==='price_desc') params.set('sort', 'price_desc');
-    const d = await mlGet('/sites/MLA/search?' + params.toString());
-    // Diagnóstico: qué devolvió exactamente la API
+
+    let d = null, lastErr = null;
+
+    // Estrategia 1: corsproxy.io directo (IP residencial del browser)
+    // Este método funciona porque la request sale desde el navegador del user,
+    // con su IP de internet hogareña, que ML no bloquea como hace con Cloudflare.
+    try{
+      const targetUrl = 'https://api.mercadolibre.com/sites/MLA/search?' + params.toString();
+      const proxyUrl  = 'https://corsproxy.io/?' + encodeURIComponent(targetUrl);
+      const r = await fetch(proxyUrl, { signal: AbortSignal.timeout(10000) });
+      if(r.ok){
+        d = await r.json();
+        console.log('[rpSmartSearch] ✓ Estrategia 1 (corsproxy): OK');
+      } else {
+        lastErr = 'corsproxy HTTP '+r.status;
+        console.warn('[rpSmartSearch] Estrategia 1 falló:', lastErr);
+      }
+    }catch(e){
+      lastErr = 'corsproxy: '+e.message;
+      console.warn('[rpSmartSearch] Estrategia 1 excepción:', e.message);
+    }
+
+    // Estrategia 2 (fallback): mlGet con token vía Worker
+    if(!d){
+      try{
+        const d2 = await mlGet('/sites/MLA/search?' + params.toString());
+        if(d2 && !d2.error && (d2.results || []).length >= 0 && d2.paging){
+          d = d2;
+          console.log('[rpSmartSearch] ✓ Estrategia 2 (mlGet token): OK');
+        } else {
+          console.warn('[rpSmartSearch] Estrategia 2 falló:', d2?.error || 'sin paging');
+        }
+      }catch(e){
+        console.warn('[rpSmartSearch] Estrategia 2 excepción:', e.message);
+      }
+    }
+
+    if(!d) throw new Error('Ninguna estrategia funcionó — '+lastErr);
+
+    // Diagnóstico: qué devolvió la API
     console.log('[rpSmartSearch] API response:', {
       total: d?.paging?.total,
       primary_results: d?.paging?.primary_results,
       results_count: (d?.results||[]).length,
       error: d?.error,
-      message: d?.message,
       keys: Object.keys(d||{})
     });
     const rawResults = (d.results || []).map(p => ({
@@ -12978,7 +13017,7 @@ async function rpSmartSearch(){
       listing_type: p.listing_type_id || '',
       official_store: !!p.official_store_id,
     }));
-    console.log('[rpSmartSearch] rawResults:', rawResults.length, '| primeros 3 seller_ids:', rawResults.slice(0,3).map(r=>r.seller_id));
+    console.log('[rpSmartSearch] rawResults:', rawResults.length);
 
     // Excluir mis propias publicaciones si corresponde
     let results = rawResults;
@@ -12986,9 +13025,6 @@ async function rpSmartSearch(){
     if(exclSelf && typeof userId !== 'undefined' && userId){
       const myId = Number(userId);
       const filtered = rawResults.filter(x => x.seller_id !== myId);
-      console.log('[rpSmartSearch] Filtro exclSelf: myId='+myId+' | antes='+rawResults.length+' | después='+filtered.length);
-      // Si el filtro elimina TODO pero había resultados crudos, mostramos los crudos
-      // con un aviso. Evita el caso donde el filtro borre todo por mala comparación.
       if(filtered.length === 0 && rawResults.length > 0){
         console.warn('[rpSmartSearch] Filtro dejó 0 — mostrando sin filtrar');
         results = rawResults;
