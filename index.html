@@ -2105,56 +2105,13 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <div style="margin-bottom:14px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
             <div style="font-size:12px;font-weight:600;color:var(--text)">Competidores seleccionados</div>
-            <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <div style="display:flex;gap:6px">
               <button class="btn btn-ghost btn-xs" onclick="rpRefreshPrices(rpSelectedRule)" id="rp-comp-refresh" title="Actualizar precios de competidores seleccionados">↻ Actualizar precios</button>
-              <button class="btn btn-primary btn-xs" onclick="rpToggleSmartPanel(true)" id="rp-smart-toggle" title="Buscar en MercadoLibre automáticamente">🔍 Buscar en ML</button>
-              <button class="btn btn-ghost btn-xs" onclick="rpToggleSearch()" id="rp-search-toggle" title="Agregar competidor manualmente con nombre y precio">+ Manual</button>
+              <button class="btn btn-primary btn-xs" onclick="rpToggleSearch()" id="rp-search-toggle">+ Buscar competidor</button>
             </div>
           </div>
 
           <!-- Agregar competidor manualmente -->
-          <!-- NUEVO: Panel de búsqueda inteligente en ML (API pública) -->
-          <div id="rp-comp-smart-panel" style="display:none;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:14px;margin-bottom:10px">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-              <div style="font-size:12px;font-weight:600;color:var(--text)">🔍 Buscar competidores en MercadoLibre</div>
-              <button class="btn btn-ghost btn-xs" onclick="rpToggleSmartPanel(false)" style="font-size:11px">✕ Cerrar</button>
-            </div>
-            <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
-              <div style="flex:1;min-width:240px">
-                <label style="font-size:11px;font-weight:500;color:var(--text3);display:block;margin-bottom:3px">Nombre del producto</label>
-                <input type="text" id="rp-smart-query" placeholder="Ej: Taza cerámica personalizada"
-                  style="width:100%;font-size:12.5px;padding:8px 10px"
-                  onkeydown="if(event.key==='Enter'){event.preventDefault();rpSmartSearch();}">
-              </div>
-              <div>
-                <label style="font-size:11px;font-weight:500;color:var(--text3);display:block;margin-bottom:3px">Orden</label>
-                <select id="rp-smart-sort" style="font-size:12px;padding:8px 10px">
-                  <option value="relevance">Más relevantes</option>
-                  <option value="price_asc">Precio ↑</option>
-                  <option value="price_desc">Precio ↓</option>
-                </select>
-              </div>
-              <div>
-                <label style="font-size:11px;font-weight:500;color:var(--text3);display:block;margin-bottom:3px">Límite</label>
-                <select id="rp-smart-limit" style="font-size:12px;padding:8px 10px">
-                  <option value="20">20</option>
-                  <option value="30" selected>30</option>
-                  <option value="50">50</option>
-                </select>
-              </div>
-              <button class="btn btn-primary" onclick="rpSmartSearch()" id="rp-smart-btn" style="padding:8px 16px;font-size:12.5px">🔍 Buscar</button>
-              <label style="font-size:11px;color:var(--text3);display:flex;align-items:center;gap:4px;margin-left:auto">
-                <input type="checkbox" id="rp-smart-excl-self" checked> Excluir mis publicaciones
-              </label>
-            </div>
-            <div id="rp-smart-status" style="font-size:11px;color:var(--text3);margin-bottom:8px"></div>
-            <div id="rp-smart-results" style="display:flex;flex-direction:column;gap:4px;max-height:360px;overflow-y:auto"></div>
-            <div id="rp-smart-actions" style="display:none;gap:8px;padding-top:10px;border-top:1px solid var(--border);margin-top:10px;align-items:center">
-              <span id="rp-smart-selected-count" style="font-size:12px;color:var(--text3)">0 seleccionados</span>
-              <button class="btn btn-primary btn-sm" onclick="rpSmartAddSelected()" id="rp-smart-add-btn" style="margin-left:auto">+ Agregar seleccionados</button>
-            </div>
-          </div>
-
           <!-- Formulario agregar competidor — simple y visual -->
           <div id="rp-comp-search-panel" style="display:none;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:14px;margin-bottom:10px">
             <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:10px">Agregar competidor</div>
@@ -3769,6 +3726,8 @@ async function pollNewData(){
     const prev=parseInt(document.getElementById('nb-q')?.textContent)||0;
     if(pend>prev){
       showToast('💬 Nueva pregunta ('+pend+' pendientes)','warn','question');
+      // Recargar allQuestions para que el módulo Preguntas muestre las nuevas
+      loadQuestions().catch(e=>console.warn('[Poll Q] reload:', e.message));
       // ── WhatsApp: nueva pregunta ──────────────────────────────
       const newQs = (uq.questions||[]).slice(0, pend - prev);
       newQs.forEach(q => {
@@ -3785,6 +3744,28 @@ async function pollNewData(){
     stamp();
   }catch(e){console.warn('[Poll]',e.message);}
 }
+
+// ── AudioContext global — se desbloquea con la primer interacción del usuario
+// Los browsers modernos bloquean audio sin user gesture. Este fix crea UN AudioContext
+// y lo resume con el primer click/keypress — así las notificaciones posteriores suenan.
+var _globalAC = null;
+function _getAC(){
+  if(!_globalAC){
+    try{ _globalAC = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){ return null; }
+  }
+  // Si está suspendido (por política del browser), intentamos resumirlo
+  if(_globalAC.state === 'suspended'){
+    _globalAC.resume().catch(()=>{});
+  }
+  return _globalAC;
+}
+// Desbloquear al primer click/touch/keydown (una sola vez)
+['click','keydown','touchstart'].forEach(function(ev){
+  document.addEventListener(ev, function _unlockAudio(){
+    _getAC();
+    ['click','keydown','touchstart'].forEach(function(e2){ document.removeEventListener(e2, _unlockAudio); });
+  }, { once:false, passive:true });
+});
 
 function showToast(msg,type,sound){
   const cfg={success:['#f0fdf4','#166534','#bbf7d0'],warn:['#fffbeb','#78350f','#fde68a'],info:['#eff6ff','#1e40af','#bfdbfe'],error:['#fef2f2','#991b1b','#fecaca']};
@@ -3806,7 +3787,7 @@ function showToast(msg,type,sound){
     }catch(e){}
   } else if(sound==='question'){
     try{
-      var ac=new(window.AudioContext||window.webkitAudioContext)();
+      var ac=_getAC(); if(!ac) return;
       // Beep corto suave
       var o=ac.createOscillator(), g=ac.createGain();
       o.connect(g); g.connect(ac.destination);
@@ -5542,8 +5523,13 @@ function renderDashRepMini(){
 // ── Cargar visitas reales del vendedor (últimos 30 días por día) ──
 // Endpoint: GET /users/{id}/items_visits/time_window?last=30&unit=day
 // Devuelve array de { date, total } con las visitas agregadas de todos los ítems
+var _lastVisitsLoadTs = 0;
 async function loadDashVisits(){
   if(!userId) return;
+  // Cache: si ya cargamos en los últimos 5 minutos, no volver a pedir
+  if(Date.now() - _lastVisitsLoadTs < 5*60*1000 && Object.keys(globalVisitsByDay).length > 0){
+    return;
+  }
   try{
     const r = await mlGet('/users/'+userId+'/items_visits/time_window?last=30&unit=day');
     const results = r.results||r.visits||r.data||[];
@@ -5553,6 +5539,7 @@ async function loadDashVisits(){
       const dateKey = (entry.date||entry.from_date||'').slice(0,10);
       if(dateKey) globalVisitsByDay[dateKey] = (globalVisitsByDay[dateKey]||0) + (entry.total||entry.visits||0);
     });
+    _lastVisitsLoadTs = Date.now();
     console.log('[Visitas] Cargadas:', Object.keys(globalVisitsByDay).length, 'días', '| Total:', Object.values(globalVisitsByDay).reduce((s,v)=>s+v,0));
   }catch(e){
     console.warn('[Visitas] No se pudieron cargar:', e.message);
@@ -12404,6 +12391,28 @@ async function renderMensajes(){
     console.warn('[Notif] /orders/search error:', e.message);
   }
 
+  // ── Fuente 3: Preguntas sin responder (usa allQuestions ya cargado) ─────────
+  try{
+    const pendQs = (allQuestions||[]).filter(function(q){ return q.status === 'UNANSWERED'; });
+    pendQs.slice(0, 10).forEach(function(q){
+      unread++;
+      const localItem = q.item_id ? allItems.find(function(x){ return String(x.id) === String(q.item_id); }) : null;
+      notifs.push({
+        _source: 'question',
+        _itemId: q.item_id,
+        _thumb:  (localItem && localItem.thumbnail) || '',
+        is_read: false,
+        subject: '💬 Pregunta sin responder',
+        date:    q.date_created || '',
+        preview: (q.text||'').slice(0, 120),
+        from:    q._nickname || (q.from && (q.from.nickname || ('User '+q.from.id))) || 'Usuario',
+      });
+    });
+    console.log('[Notif] Preguntas sin responder:', pendQs.length);
+  }catch(e){
+    console.warn('[Notif] preguntas error:', e.message);
+  }
+
   // Ordenar por fecha desc
   notifs.sort(function(a,b){ return new Date(b.date||0) - new Date(a.date||0); });
 
@@ -12894,282 +12903,6 @@ function rpAddManual(){
 }
 // ── rpAddFromUrl — alias por compatibilidad (ya no se usa)
 function rpAddFromUrl(){ rpAddManual(); }
-
-// ═══════════════════════════════════════════════════════════
-// BÚSQUEDA INTELIGENTE DE COMPETIDORES — API pública /sites/MLA/search
-// Reemplaza el viejo "ML bloquea desde servidores externos" — funciona 100%
-// desde el navegador via corsproxy.io (misma IP residencial del usuario)
-// ═══════════════════════════════════════════════════════════
-
-var _rpSmartResults  = [];   // último set de resultados obtenidos
-var _rpSmartSelected = new Set();  // IDs seleccionados para agregar en batch
-
-function rpToggleSmartPanel(open){
-  const panel = document.getElementById('rp-comp-smart-panel');
-  const manualPanel = document.getElementById('rp-comp-search-panel');
-  if(!panel) return;
-  // Si abren búsqueda, cerrar el manual para no confundir
-  if(manualPanel) manualPanel.style.display = 'none';
-  panel.style.display = open ? 'block' : 'none';
-  if(open){
-    // Pre-llenar con título de la publicación base de la regla
-    const rule = rpRules.find(r=>r.id===rpSelectedRule);
-    const inp = document.getElementById('rp-smart-query');
-    if(inp && rule && rule.itemTitle && !inp.value){
-      // Usar primeras 5 palabras para mejor búsqueda
-      inp.value = rule.itemTitle.split(/\s+/).slice(0,5).join(' ');
-      setTimeout(()=>inp.focus(), 50);
-    } else if(inp){
-      setTimeout(()=>inp.focus(), 50);
-    }
-  }
-}
-
-// Buscar competidores vía API pública ML + corsproxy
-async function rpSmartSearch(){
-  const query = (document.getElementById('rp-smart-query')?.value || '').trim();
-  const sort  = document.getElementById('rp-smart-sort')?.value || 'relevance';
-  const limit = parseInt(document.getElementById('rp-smart-limit')?.value || '30', 10);
-  const btn   = document.getElementById('rp-smart-btn');
-  const statusEl = document.getElementById('rp-smart-status');
-  const resultsEl = document.getElementById('rp-smart-results');
-  const actionsEl = document.getElementById('rp-smart-actions');
-
-  if(!query || query.length < 3){
-    if(statusEl){ statusEl.textContent = '⚠ Escribí al menos 3 caracteres'; statusEl.style.color='var(--amber)'; }
-    return;
-  }
-
-  if(btn){ btn.disabled=true; btn.textContent='⏳ Buscando...'; }
-  if(statusEl){ statusEl.textContent='Consultando MercadoLibre...'; statusEl.style.color='var(--text3)'; }
-  if(resultsEl) resultsEl.innerHTML = '';
-  if(actionsEl) actionsEl.style.display = 'none';
-  _rpSmartSelected.clear();
-
-  try{
-    // API pública ML — 3 estrategias en cascada porque ML bloquea según IP/origen:
-    // 1. mlGet con token vía Worker → confirmado 403 forbidden
-    // 2. /pub/ sin token vía Worker → 403 (ML bloquea IPs de datacenter Cloudflare)
-    // 3. corsproxy.io directo desde el browser → IP residencial del user, SÍ funciona
-    //    (es el mismo patrón que usa obtenerPrecioCompetidor y que funciona probado)
-    const params = new URLSearchParams({ q: query, limit: String(limit) });
-    if(sort==='price_asc')  params.set('sort', 'price_asc');
-    if(sort==='price_desc') params.set('sort', 'price_desc');
-
-    let d = null, lastErr = null;
-
-    // Estrategia 1: corsproxy.io directo (IP residencial del browser)
-    // Este método funciona porque la request sale desde el navegador del user,
-    // con su IP de internet hogareña, que ML no bloquea como hace con Cloudflare.
-    try{
-      const targetUrl = 'https://api.mercadolibre.com/sites/MLA/search?' + params.toString();
-      const proxyUrl  = 'https://corsproxy.io/?' + encodeURIComponent(targetUrl);
-      const r = await fetch(proxyUrl, { signal: AbortSignal.timeout(10000) });
-      if(r.ok){
-        d = await r.json();
-        console.log('[rpSmartSearch] ✓ Estrategia 1 (corsproxy): OK');
-      } else {
-        lastErr = 'corsproxy HTTP '+r.status;
-        console.warn('[rpSmartSearch] Estrategia 1 falló:', lastErr);
-      }
-    }catch(e){
-      lastErr = 'corsproxy: '+e.message;
-      console.warn('[rpSmartSearch] Estrategia 1 excepción:', e.message);
-    }
-
-    // Estrategia 2 (fallback): mlGet con token vía Worker
-    if(!d){
-      try{
-        const d2 = await mlGet('/sites/MLA/search?' + params.toString());
-        if(d2 && !d2.error && (d2.results || []).length >= 0 && d2.paging){
-          d = d2;
-          console.log('[rpSmartSearch] ✓ Estrategia 2 (mlGet token): OK');
-        } else {
-          console.warn('[rpSmartSearch] Estrategia 2 falló:', d2?.error || 'sin paging');
-        }
-      }catch(e){
-        console.warn('[rpSmartSearch] Estrategia 2 excepción:', e.message);
-      }
-    }
-
-    if(!d) throw new Error('Ninguna estrategia funcionó — '+lastErr);
-
-    // Diagnóstico: qué devolvió la API
-    console.log('[rpSmartSearch] API response:', {
-      total: d?.paging?.total,
-      primary_results: d?.paging?.primary_results,
-      results_count: (d?.results||[]).length,
-      error: d?.error,
-      keys: Object.keys(d||{})
-    });
-    const rawResults = (d.results || []).map(p => ({
-      id: p.id,
-      title: p.title,
-      price: p.price || 0,
-      thumbnail: (p.thumbnail || '').replace(/^http:/, 'https:'),
-      permalink: p.permalink || '',
-      seller_id: p.seller?.id,
-      seller_nickname: p.seller?.nickname || '',
-      sold_quantity: p.sold_quantity || 0,
-      available_quantity: p.available_quantity || 0,
-      condition: p.condition || 'new',
-      free_shipping: !!p.shipping?.free_shipping,
-      listing_type: p.listing_type_id || '',
-      official_store: !!p.official_store_id,
-    }));
-    console.log('[rpSmartSearch] rawResults:', rawResults.length);
-
-    // Excluir mis propias publicaciones si corresponde
-    let results = rawResults;
-    const exclSelf = document.getElementById('rp-smart-excl-self')?.checked;
-    if(exclSelf && typeof userId !== 'undefined' && userId){
-      const myId = Number(userId);
-      const filtered = rawResults.filter(x => x.seller_id !== myId);
-      if(filtered.length === 0 && rawResults.length > 0){
-        console.warn('[rpSmartSearch] Filtro dejó 0 — mostrando sin filtrar');
-        results = rawResults;
-      } else {
-        results = filtered;
-      }
-    }
-
-    _rpSmartResults = results;
-    rpSmartRenderResults(results);
-    if(statusEl){
-      statusEl.textContent = '✓ '+results.length+' resultados'+(exclSelf?' (excluyendo tuyas)':'');
-      statusEl.style.color = 'var(--green)';
-    }
-    if(actionsEl) actionsEl.style.display = 'flex';
-    rpSmartUpdateCount();
-  }catch(e){
-    if(statusEl){
-      statusEl.textContent = '❌ '+(e.message||'Error de búsqueda');
-      statusEl.style.color = 'var(--red)';
-    }
-    if(resultsEl) resultsEl.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:10px;text-align:center">Sin resultados. Probá con otras palabras o tildá "Agregar manual".</div>';
-  }
-
-  if(btn){ btn.disabled=false; btn.textContent='🔍 Buscar'; }
-}
-
-function rpSmartRenderResults(rows){
-  const el = document.getElementById('rp-smart-results');
-  if(!el) return;
-  if(!rows.length){
-    el.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:14px;text-align:center">Sin resultados para esta búsqueda.</div>';
-    return;
-  }
-
-  // IDs de competidores ya agregados a la regla (para deshabilitar)
-  const rule = rpRules.find(r=>r.id===rpSelectedRule);
-  const alreadyIds = new Set((rule?.competitors || []).map(c=>c.id));
-
-  // Detectar precio mínimo para highlight
-  const minPrice = Math.min(...rows.map(r=>r.price).filter(p=>p>0));
-
-  el.innerHTML = rows.map(p => {
-    const already = alreadyIds.has(p.id);
-    const isMin = p.price === minPrice;
-    const checkId = 'rp-smart-chk-' + p.id;
-    const shipBadge = p.free_shipping ? '<span style="font-size:9px;background:#eff6ff;color:#1e40af;padding:1px 5px;border-radius:3px;border:1px solid #bfdbfe">📦 Envío gratis</span>' : '';
-    const goldBadge = p.listing_type==='gold_pro' ? '<span style="font-size:9px;background:#fef3c7;color:#92400e;padding:1px 5px;border-radius:3px;border:1px solid #fde68a">⭐ Premium</span>' : '';
-    const soldBadge = p.sold_quantity > 0 ? '<span style="font-size:9px;color:var(--text3)">'+p.sold_quantity+' vendidos</span>' : '';
-    const officialBadge = p.official_store ? '<span style="font-size:9px;background:#ede9fe;color:#5b21b6;padding:1px 5px;border-radius:3px;border:1px solid #ddd6fe">🏢 Oficial</span>' : '';
-    const priceColor = isMin ? 'var(--red)' : 'var(--text)';
-
-    return '<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;background:var(--bg2);border:1px solid '+(already?'#16a34a55':'var(--border)')+';'+(already?'opacity:.6':'')+'">'+
-      '<input type="checkbox" id="'+checkId+'" value="'+p.id+'" '+(already?'disabled':'')+' onchange="rpSmartOnCheck(\''+p.id+'\')" style="flex-shrink:0;cursor:'+(already?'not-allowed':'pointer')+'">'+
-      (p.thumbnail ? '<img src="'+p.thumbnail+'" width="42" height="42" style="object-fit:cover;border-radius:4px;flex-shrink:0;border:1px solid var(--border)" onerror="this.style.display=\'none\'">' : '<div style="width:42px;height:42px;background:var(--bg4);border-radius:4px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:14px">📦</div>')+
-      '<div style="flex:1;min-width:0">'+
-        '<div style="font-size:11.5px;font-weight:500;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.3">'+p.title+'</div>'+
-        '<div style="display:flex;align-items:center;gap:6px;margin-top:3px;flex-wrap:wrap">'+
-          '<span style="font-size:13px;font-weight:700;color:'+priceColor+'">$'+(p.price||0).toLocaleString('es-AR')+'</span>'+
-          (isMin?'<span class="badge bg-red" style="font-size:9px">mínimo</span>':'')+
-          shipBadge + goldBadge + officialBadge + soldBadge +
-          (p.seller_nickname ? '<span style="font-size:9px;color:var(--text3)">por '+p.seller_nickname+'</span>' : '')+
-          (p.permalink ? '<a href="'+p.permalink+'" target="_blank" rel="noopener" style="font-size:10px;color:var(--accent);text-decoration:none">Ver →</a>' : '')+
-        '</div>'+
-      '</div>'+
-      (already ? '<span style="font-size:10px;color:var(--green);font-weight:600;flex-shrink:0;padding-right:4px">✓ Ya agregado</span>' : '')+
-    '</div>';
-  }).join('');
-}
-
-function rpSmartOnCheck(id){
-  const chk = document.getElementById('rp-smart-chk-'+id);
-  if(!chk) return;
-  if(chk.checked) _rpSmartSelected.add(id);
-  else            _rpSmartSelected.delete(id);
-  rpSmartUpdateCount();
-}
-
-function rpSmartUpdateCount(){
-  const el = document.getElementById('rp-smart-selected-count');
-  const btn = document.getElementById('rp-smart-add-btn');
-  const n = _rpSmartSelected.size;
-  if(el) el.textContent = n + ' seleccionado' + (n!==1 ? 's' : '');
-  if(btn) btn.disabled = (n === 0);
-}
-
-async function rpSmartAddSelected(){
-  const rule = rpRules.find(r=>r.id===rpSelectedRule);
-  if(!rule){ rpLogMsg('⚠ Seleccioná una regla primero', 'warn'); return; }
-  if(!_rpSmartSelected.size){ rpLogMsg('⚠ No hay competidores seleccionados', 'warn'); return; }
-
-  const btn = document.getElementById('rp-smart-add-btn');
-  if(btn){ btn.disabled = true; btn.textContent = '⏳ Agregando...'; }
-
-  let added = 0, skipped = 0;
-  for(const id of _rpSmartSelected){
-    const row = _rpSmartResults.find(r => r.id === id);
-    if(!row){ skipped++; continue; }
-    // Evitar duplicados
-    if(rule.competitors.find(c => c.id === row.id)){ skipped++; continue; }
-    rule.competitors.push({
-      id:        row.id,
-      title:     row.title,
-      price:     row.price,
-      thumbnail: row.thumbnail,
-      sellerId:  row.seller_id,
-      permalink: row.permalink,
-      manual:    false,
-    });
-    added++;
-  }
-
-  rpSaveRules();
-  rpRenderCompetitors(rule);
-  rpRecalcPrices(rule);
-  rpLogMsg('✓ '+added+' competidor'+(added!==1?'es':'')+' agregado'+(added!==1?'s':'')+(skipped ? ' · '+skipped+' duplicados omitidos' : ''), 'ok');
-
-  // Limpiar selección y cerrar panel
-  _rpSmartSelected.clear();
-  rpSmartUpdateCount();
-  // Re-render de resultados para marcar los ya agregados
-  rpSmartRenderResults(_rpSmartResults);
-  if(btn){ btn.disabled = false; btn.textContent = '+ Agregar seleccionados'; }
-
-  // Auto-cerrar panel luego de 1.5s
-  setTimeout(()=>rpToggleSmartPanel(false), 1500);
-}
-
-// ── buscarCompetencia — ahora sí disponible vía mlGet autenticado
-async function buscarCompetencia(query, limit){
-  limit = limit || 30;
-  try{
-    const d = await mlGet('/sites/MLA/search?q='+encodeURIComponent(query)+'&limit='+limit);
-    return (d.results || []).map(p => ({
-      id: p.id, title: p.title, price: p.price || 0,
-      thumbnail: (p.thumbnail || '').replace(/^http:/, 'https:'),
-      permalink: p.permalink || '',
-      seller_id: p.seller?.id, seller_nickname: p.seller?.nickname || '',
-      sold_quantity: p.sold_quantity || 0,
-    }));
-  }catch(e){ console.warn('[buscarCompetencia]', e); return []; }
-}
-
-// ── rpSearchCompetitors — alias funcional
-function rpSearchCompetitors(query){ return buscarCompetencia(query); }
 
 // ── obtenerPrecioCompetidor — Client-Side Fetching (IP residencial del usuario)
 // El Worker tiene IPs de Cloudflare bloqueadas por ML.
