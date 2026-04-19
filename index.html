@@ -3675,17 +3675,17 @@ async function pollNewData(){
       const n=fresh[0];
       showToast('🛍️ Nueva venta: '+(n.order_items?.[0]?.item?.title||'').slice(0,40)+' $'+(n.total_amount||0).toLocaleString('es-AR'),'success','sale');
     }
-    // ── WhatsApp: nueva venta — usar dedup persistente para no perder ventas
+    // ── WhatsApp + Telegram: nueva venta — usar dedup persistente para no perder ventas
     // aunque el panel esté abierto/cerrado en el momento de la venta
     fresh.forEach(o => {
       if(!['paid','confirmed','delivered','shipped'].includes(o.status)) return;
       if(_waAlreadyNotified(o.id)) return; // ya notificada, saltar
       _waNoteOrder(o.id); // marcar como notificada ANTES de enviar
-      waTrigger('venta', {
-        producto:  (o.order_items?.[0]?.item?.title||'Producto').slice(0,60),
-        precio:    o.total_amount || 0,
-        comprador: o.buyer?.nickname || '—',
-      });
+      const producto  = (o.order_items?.[0]?.item?.title||'Producto').slice(0,60);
+      const monto     = o.total_amount || 0;
+      const comprador = o.buyer?.nickname || '—';
+      waTrigger('venta', { producto, precio: monto, comprador });
+      tgNotify('venta', { producto, monto, comprador });
     });
     // Actualizar shipping de las frescas y detectar envíos despachados
     const prevShipStatuses = {};
@@ -3728,13 +3728,13 @@ async function pollNewData(){
       showToast('💬 Nueva pregunta ('+pend+' pendientes)','warn','question');
       // Recargar allQuestions para que el módulo Preguntas muestre las nuevas
       loadQuestions().catch(e=>console.warn('[Poll Q] reload:', e.message));
-      // ── WhatsApp: nueva pregunta ──────────────────────────────
+      // ── WhatsApp + Telegram: nueva pregunta ──────────────────────────────
       const newQs = (uq.questions||[]).slice(0, pend - prev);
       newQs.forEach(q => {
-        waTrigger('pregunta', {
-          pregunta: (q.text||'').slice(0,120),
-          producto: q.item_id ? ((allItems.find(i=>String(i.id)===String(q.item_id))?.title)||('MLA '+q.item_id)) : '—',
-        });
+        const pregunta = (q.text||'').slice(0,200);
+        const producto = q.item_id ? ((allItems.find(i=>String(i.id)===String(q.item_id))?.title)||('MLA '+q.item_id)) : '—';
+        waTrigger('pregunta', { pregunta, producto });
+        tgNotify('pregunta', { pregunta, producto });
       });
     }
     document.getElementById('nb-q').textContent=pend;
@@ -14798,6 +14798,27 @@ async function waTrigger(event, data){
       console.log('[WA] Notificación disparada:', event, '→', phone);
     }catch(e){ console.warn('[WA] Error al enviar a', phone, ':', e.message); }
   }
+}
+
+// ═══════════════════════════════════════════════════════════
+// TELEGRAM — Notificaciones de ventas y preguntas
+// ═══════════════════════════════════════════════════════════
+// Config del label de cuenta — editable desde localStorage, default "Impala Design (Cristian)"
+var _tgAccountLabel = localStorage.getItem('mlp_tg_account_label') || 'Impala Design (Cristian)';
+
+async function tgNotify(type, data){
+  try{
+    await fetch(WORKER + '/api/telegram/notify', {
+      method: 'POST',
+      headers: { Authorization:'Bearer '+token, 'Content-Type':'application/json' },
+      body: JSON.stringify({
+        type: type,            // 'venta' o 'pregunta'
+        data: data,            // { producto, monto, comprador } o { pregunta, producto }
+        accountLabel: _tgAccountLabel,
+      })
+    });
+    console.log('[TG] Notificación enviada:', type);
+  }catch(e){ console.warn('[TG] Error al notificar:', e.message); }
 }
 
 // ═══════════════════════════════════════════════════════════
