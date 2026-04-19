@@ -3745,28 +3745,6 @@ async function pollNewData(){
   }catch(e){console.warn('[Poll]',e.message);}
 }
 
-// ── AudioContext global — se desbloquea con la primer interacción del usuario
-// Los browsers modernos bloquean audio sin user gesture. Este fix crea UN AudioContext
-// y lo resume con el primer click/keypress — así las notificaciones posteriores suenan.
-var _globalAC = null;
-function _getAC(){
-  if(!_globalAC){
-    try{ _globalAC = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){ return null; }
-  }
-  // Si está suspendido (por política del browser), intentamos resumirlo
-  if(_globalAC.state === 'suspended'){
-    _globalAC.resume().catch(()=>{});
-  }
-  return _globalAC;
-}
-// Desbloquear al primer click/touch/keydown (una sola vez)
-['click','keydown','touchstart'].forEach(function(ev){
-  document.addEventListener(ev, function _unlockAudio(){
-    _getAC();
-    ['click','keydown','touchstart'].forEach(function(e2){ document.removeEventListener(e2, _unlockAudio); });
-  }, { once:false, passive:true });
-});
-
 function showToast(msg,type,sound){
   const cfg={success:['#f0fdf4','#166534','#bbf7d0'],warn:['#fffbeb','#78350f','#fde68a'],info:['#eff6ff','#1e40af','#bfdbfe'],error:['#fef2f2','#991b1b','#fecaca']};
   const[bg,col,bdr]=cfg[type]||cfg.info;
@@ -3787,7 +3765,7 @@ function showToast(msg,type,sound){
     }catch(e){}
   } else if(sound==='question'){
     try{
-      var ac=_getAC(); if(!ac) return;
+      var ac=new(window.AudioContext||window.webkitAudioContext)();
       // Beep corto suave
       var o=ac.createOscillator(), g=ac.createGain();
       o.connect(g); g.connect(ac.destination);
@@ -3856,19 +3834,43 @@ async function loadItemsFull(){
       if(!ids.length)break;allIds.push(...ids);scrollId=s.scroll_id||null;
       if(!scrollId)break;await new Promise(r=>setTimeout(r,100));
     }
-    for(const status of ['paused','under_review']){
+    // Paused y under_review en paralelo (antes eran secuenciales)
+    const extraStatuses = await Promise.all(['paused','under_review'].map(async (status) => {
+      const ids = [];
       for(let offset=0;offset<500;offset+=50){
-        try{const s=await mlGet('/users/'+userId+'/items/search?limit=50&offset='+offset+'&status='+status);const ids=s.results||[];allIds.push(...ids);if(ids.length<50)break;}catch(e){break;}
+        try{
+          const s=await mlGet('/users/'+userId+'/items/search?limit=50&offset='+offset+'&status='+status);
+          const res=s.results||[];
+          ids.push(...res);
+          if(res.length<50)break;
+        }catch(e){break;}
       }
+      return ids;
+    }));
+    extraStatuses.forEach(ids => allIds.push(...ids));
+    allIds=[...new Set(allIds)];
+    const full=[];
+    // Paralelizar el fetch de detalles: 5 chunks en paralelo (antes era 1 en serie).
+    // Para 2386 items (120 chunks de 20) pasa de ~40s a ~8s.
+    // Quitado _nocache para aprovechar el HTTP cache del Worker (datos a <1h son válidos).
+    const CHUNK_SIZE = 20;
+    const PARALLEL = 5;
+    const chunks = [];
+    for(let i=0;i<allIds.length;i+=CHUNK_SIZE){
+      chunks.push(allIds.slice(i, i+CHUNK_SIZE));
     }
-    allIds=[...new Set(allIds)];const full=[];
-    for(let i=0;i<allIds.length;i+=20){
-      try{
-        const nc=Date.now();
-        const r=await mlGet('/items?ids='+allIds.slice(i,i+20).join(',')+'&include_attributes=all&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations,health&_nocache='+nc);
-        r.forEach(x=>{if(x.code===200)full.push(x.body);});
-      }catch(e){}
-      if(i>0&&i%200===0)await new Promise(r=>setTimeout(r,100));
+    // Procesar de a PARALLEL chunks simultáneos
+    for(let i=0;i<chunks.length;i+=PARALLEL){
+      const batch = chunks.slice(i, i+PARALLEL);
+      const results = await Promise.all(batch.map(async (chunk) => {
+        try{
+          const r = await mlGet('/items?ids='+chunk.join(',')+'&include_attributes=all&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations,health');
+          return r || [];
+        }catch(e){ return []; }
+      }));
+      results.forEach(r => { r.forEach(x=>{if(x.code===200)full.push(x.body);}); });
+      // Pausa breve cada 5 batches (25 reqs) para no saturar ML
+      if(i>0 && (i/PARALLEL)%5===0) await new Promise(r=>setTimeout(r,80));
     }
     allItems=full;_updateItemsUI();
     // Actualizar health scores con datos recién bajados de ML
