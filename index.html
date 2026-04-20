@@ -2674,21 +2674,43 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <button class="btn btn-ghost btn-sm" onclick="calNextMonth()">Siguiente &#8594;</button>
     </div>
     <!-- Day headers -->
-    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:3px">
-      <div style="text-align:center;font-size:10px;font-weight:700;color:var(--text3);padding:5px 0">LUN</div>
-      <div style="text-align:center;font-size:10px;font-weight:700;color:var(--text3);padding:5px 0">MAR</div>
-      <div style="text-align:center;font-size:10px;font-weight:700;color:var(--text3);padding:5px 0">MIÉ</div>
-      <div style="text-align:center;font-size:10px;font-weight:700;color:var(--text3);padding:5px 0">JUE</div>
-      <div style="text-align:center;font-size:10px;font-weight:700;color:var(--text3);padding:5px 0">VIE</div>
-      <div style="text-align:center;font-size:10px;font-weight:700;color:var(--text3);padding:5px 0">SÁB</div>
-      <div style="text-align:center;font-size:10px;font-weight:700;color:var(--text3);padding:5px 0">DOM</div>
+    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin-bottom:6px">
+      <div style="text-align:center;font-size:11px;font-weight:800;color:var(--text3);padding:8px 0;letter-spacing:.06em">LUN</div>
+      <div style="text-align:center;font-size:11px;font-weight:800;color:var(--text3);padding:8px 0;letter-spacing:.06em">MAR</div>
+      <div style="text-align:center;font-size:11px;font-weight:800;color:var(--text3);padding:8px 0;letter-spacing:.06em">MIÉ</div>
+      <div style="text-align:center;font-size:11px;font-weight:800;color:var(--text3);padding:8px 0;letter-spacing:.06em">JUE</div>
+      <div style="text-align:center;font-size:11px;font-weight:800;color:var(--text3);padding:8px 0;letter-spacing:.06em">VIE</div>
+      <div style="text-align:center;font-size:11px;font-weight:800;color:#6b7280;padding:8px 0;letter-spacing:.06em">SÁB</div>
+      <div style="text-align:center;font-size:11px;font-weight:800;color:#6b7280;padding:8px 0;letter-spacing:.06em">DOM</div>
     </div>
-    <div id="cal-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px"></div>
+    <div id="cal-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px"></div>
   </div>
 
   <!-- VISTA LISTA -->
   <div id="cal-view-lista" style="display:none">
     <div id="cal-lista"></div>
+  </div>
+
+  <!-- EFEMÉRIDES DEL DÍA — desde Wikipedia REST API -->
+  <div class="card" style="margin-top:16px;padding:16px 18px" id="cal-efem-panel">
+    <div class="card-hd" style="margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div class="card-title">🏛️ Efemérides del día</div>
+      <div style="flex:1"></div>
+      <input type="date" id="cal-efem-date" onchange="calEfemLoad()" style="font-size:12px;padding:5px 8px">
+      <button class="btn btn-ghost btn-sm" onclick="calEfemLoad(true)" id="cal-efem-refresh" title="Refrescar desde Wikipedia">↻</button>
+    </div>
+    <div id="cal-efem-status" style="font-size:11.5px;color:var(--text3);margin-bottom:10px"></div>
+    <div id="cal-efem-content" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div id="cal-efem-eventos" style="background:var(--bg3);border-radius:8px;padding:12px;border:1px solid var(--border)">
+        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">📅 Eventos históricos</div>
+        <div id="cal-efem-eventos-list" style="font-size:12px;color:var(--text3)">Seleccioná una fecha para ver efemérides.</div>
+      </div>
+      <div id="cal-efem-nacimientos" style="background:var(--bg3);border-radius:8px;padding:12px;border:1px solid var(--border)">
+        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">🎂 Nacimientos</div>
+        <div id="cal-efem-nacimientos-list" style="font-size:12px;color:var(--text3)">—</div>
+      </div>
+    </div>
+    <div style="margin-top:10px;font-size:10.5px;color:var(--text3);text-align:right">Fuente: Wikipedia REST API (es.wikipedia.org)</div>
   </div>
 
   <!-- PILAR IA — Recomendaciones Estratégicas -->
@@ -11843,11 +11865,51 @@ var _calSelDate = '';
 
 // ── Data helpers ───────────────────────────────────────────────────────
 function calGetCustom(){ try{ return JSON.parse(localStorage.getItem(CAL_LS_KEY)||'[]'); }catch(e){ return []; } }
-function calSaveCustom(arr){ localStorage.setItem(CAL_LS_KEY, JSON.stringify(arr)); }
+function calSaveCustom(arr){
+  localStorage.setItem(CAL_LS_KEY, JSON.stringify(arr));
+  _calBackupSyncDebounced();
+}
 // ── Cumpleaños — storage y generación dinámica ───────────────────────────────
 var CAL_BDAY_KEY = 'impala_cal_birthdays';
 function bday_getAll(){ try{ return JSON.parse(localStorage.getItem(CAL_BDAY_KEY)||'[]'); }catch(e){ return []; } }
-function bday_save(arr){ localStorage.setItem(CAL_BDAY_KEY, JSON.stringify(arr)); }
+function bday_save(arr){
+  localStorage.setItem(CAL_BDAY_KEY, JSON.stringify(arr));
+  _calBackupSyncDebounced();
+}
+
+// ── Sync a KV del Worker (calCustom + bdays) — debounced 3s para no saturar ───
+var _calBackupSyncTimer = null;
+function _calBackupSyncDebounced(){
+  if(_calBackupSyncTimer) clearTimeout(_calBackupSyncTimer);
+  _calBackupSyncTimer = setTimeout(_calBackupSyncNow, 3000);
+}
+async function _calBackupSyncNow(){
+  if(!token) return;
+  try{
+    // Traer estado actual para no pisar otros campos (tasks, rpRules, etc)
+    var r0 = await fetch(WORKER + '/api/backup', {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    var prev = r0.ok ? await r0.json() : {};
+    var body = {
+      tasks:        prev.tasks        || [],
+      rpRules:      prev.rpRules      || [],
+      activeRules:  prev.activeRules  || [],
+      quickReplies: prev.quickReplies || [],
+      template:     prev.template     || {},
+      competitors:  prev.competitors  || [],
+      calCustom:    calGetCustom(),
+      bdays:        bday_getAll(),
+      savedAt:      new Date().toISOString(),
+    };
+    await fetch(WORKER + '/api/backup', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    console.log('[Cal] Sync a KV:', body.calCustom.length, 'custom,', body.bdays.length, 'cumpleaños');
+  }catch(e){ console.warn('[Cal] Sync falló:', e.message); }
+}
 function bday_toEvents(){
   var bdays=bday_getAll(), yr=new Date().getFullYear(), evs=[];
   bdays.forEach(function(b){
@@ -11890,29 +11952,43 @@ function calRenderMonth(){
   var days     = new Date(_calYear,_calMonth+1,0).getDate();
   var today    = new Date().toISOString().slice(0,10);
 
+  // Altura responsive: más alta en desktop, más compacta en mobile
+  var cellH = 'min-height:110px';
   var html = '';
-  for(var i=0;i<firstDay;i++) html+='<div style="min-height:80px"></div>';
+  for(var i=0;i<firstDay;i++) html+='<div style="'+cellH+';background:transparent"></div>';
 
   for(var d=1;d<=days;d++){
     var ds = _calYear+'-'+(_calMonth+1<10?'0':'')+(_calMonth+1)+'-'+(d<10?'0':'')+d;
     var evs= calEventsForDate(ds);
     var isT= ds===today;
 
-    var evHtml = evs.slice(0,3).map(function(e){
+    // Hasta 4 eventos visibles (antes 3). Eventos más legibles con categoría visible al hover.
+    var evHtml = evs.slice(0,4).map(function(e){
       var col = (CAL_COLORS[e.cat]||CAL_COLORS.personal);
-      var short= (e.icon+' '+(e.title.length>14?e.title.slice(0,13)+'…':e.title));
-      return '<div style="background:'+col.light+';border-left:2px solid '+col.bg+';border-radius:3px;padding:2px 4px;font-size:9.5px;font-weight:600;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer" title="'+e.title+'">'+short+'</div>';
+      // Truncado más generoso: 20 chars en vez de 14
+      var short= (e.icon+' '+(e.title.length>22?e.title.slice(0,21)+'…':e.title));
+      return '<div style="background:'+col.light+';border-left:3px solid '+col.bg+';border-radius:4px;padding:3px 6px;font-size:10.5px;font-weight:600;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;line-height:1.35" title="'+e.title+'">'+short+'</div>';
     }).join('');
-    var more = evs.length>3?'<div style="font-size:8.5px;color:var(--text3);margin-top:2px">+'+( evs.length-3)+' más</div>':'';
+    var more = evs.length>4?'<div style="font-size:9.5px;color:var(--text3);margin-top:3px;font-weight:600">+'+(evs.length-4)+' más</div>':'';
+
+    // Número del día: grande (16px), en esquina superior izquierda, destacado si es hoy
+    var dayNumStyle = isT
+      ? 'display:inline-block;background:var(--accent);color:#fff;width:24px;height:24px;border-radius:50%;text-align:center;line-height:24px;font-size:12px;font-weight:900'
+      : 'font-size:15px;font-weight:700;color:var(--text);padding:2px 6px';
+
+    // Indicador visual si hay muchos eventos (dot del color más importante)
+    var hasEvents = evs.length > 0;
 
     html+='<div ondblclick="calOpenDayModal(\''+ds+'\')" onclick="calOpenDayModal(\''+ds+'\')"'
-      +' style="min-height:80px;border-radius:7px;padding:6px 5px 5px;cursor:pointer;'
-      +'background:'+(isT?'var(--accent-g)':'var(--bg3)')+';'
-      +'border:1.5px solid '+(isT?'var(--accent)':'var(--border)')+';'
-      +'transition:border-color .15s,box-shadow .15s"'
-      +' onmouseover="this.style.boxShadow=\'0 0 0 2px var(--accent)\'" onmouseout="this.style.boxShadow=\'none\'">'
-      +'<div style="font-size:11px;font-weight:'+(isT?'900':'700')+';color:'+(isT?'var(--accent)':'var(--text)')+';margin-bottom:2px">'+d+'</div>'
-      +evHtml+more
+      +' style="'+cellH+';border-radius:8px;padding:6px 6px 5px;cursor:pointer;position:relative;display:flex;flex-direction:column;'
+      +'background:'+(isT?'rgba(79,142,247,0.12)':'var(--bg3)')+';'
+      +'border:'+(isT?'2px solid var(--accent)':'1px solid var(--border)')+';'
+      +'transition:all .15s"'
+      +' onmouseover="this.style.transform=\'translateY(-2px)\';this.style.boxShadow=\'0 4px 14px rgba(0,0,0,0.15)\'" onmouseout="this.style.transform=\'none\';this.style.boxShadow=\'none\'">'
+      +'<div style="margin-bottom:2px"><span style="'+dayNumStyle+'">'+d+'</span>'
+      +(hasEvents && !isT ? '<span style="float:right;margin-top:6px;color:var(--text3);font-size:10px;font-weight:600">'+evs.length+'</span>' : '')
+      +'</div>'
+      +'<div style="flex:1;overflow:hidden">'+evHtml+more+'</div>'
       +'</div>';
   }
   grid.innerHTML = html;
@@ -12336,6 +12412,121 @@ function calCopyToClipboard(elId){
   }
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// EFEMÉRIDES — Wikipedia REST API
+// GET https://es.wikipedia.org/api/rest_v1/feed/onthisday/all/MM/DD
+// Sin auth, CORS abierto, gratis e ilimitado. Cache 24h en memoria.
+// ══════════════════════════════════════════════════════════════════════
+var _efemCache = {}; // key: 'MM-DD' → { events:[...], births:[...], ts }
+var _EFEM_TTL  = 24 * 60 * 60 * 1000; // 24 horas
+
+function calEfemInit(){
+  // Setear fecha por default al día actual al abrir el módulo
+  var inp = document.getElementById('cal-efem-date');
+  if(inp && !inp.value){
+    var t = new Date();
+    inp.value = t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0');
+    calEfemLoad();
+  }
+}
+
+async function calEfemLoad(forceRefresh){
+  var inp = document.getElementById('cal-efem-date');
+  var statusEl = document.getElementById('cal-efem-status');
+  var evEl = document.getElementById('cal-efem-eventos-list');
+  var nacEl = document.getElementById('cal-efem-nacimientos-list');
+  if(!inp || !inp.value){
+    if(statusEl){ statusEl.textContent = 'Seleccioná una fecha para ver efemérides.'; }
+    return;
+  }
+
+  var parts = inp.value.split('-'); // [YYYY, MM, DD]
+  var mm = parts[1], dd = parts[2];
+  var key = mm+'-'+dd;
+
+  // Cache hit (<24h)
+  if(!forceRefresh && _efemCache[key] && (Date.now() - _efemCache[key].ts) < _EFEM_TTL){
+    calEfemRender(_efemCache[key]);
+    if(statusEl){ statusEl.textContent = '✓ Cargado desde cache local'; statusEl.style.color='var(--green)'; }
+    return;
+  }
+
+  if(statusEl){ statusEl.textContent = '⏳ Consultando Wikipedia...'; statusEl.style.color='var(--text3)'; }
+  if(evEl) evEl.innerHTML = '<div style="color:var(--text3);font-size:11.5px">Cargando...</div>';
+  if(nacEl) nacEl.innerHTML = '<div style="color:var(--text3);font-size:11.5px">Cargando...</div>';
+
+  try{
+    var r = await fetch('https://es.wikipedia.org/api/rest_v1/feed/onthisday/all/'+mm+'/'+dd, {
+      signal: AbortSignal.timeout(10000)
+    });
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    var d = await r.json();
+
+    // Procesar: tomar los 8 eventos y 8 nacimientos más destacados (los que tienen thumbnail)
+    var events = (d.events||[])
+      .sort(function(a,b){ return (b.year||0) - (a.year||0); }) // más recientes primero
+      .slice(0, 12);
+    var births = (d.births||[])
+      .sort(function(a,b){ return (b.year||0) - (a.year||0); })
+      .slice(0, 12);
+
+    var parsed = { events: events, births: births, ts: Date.now() };
+    _efemCache[key] = parsed;
+    calEfemRender(parsed);
+
+    if(statusEl){
+      statusEl.textContent = '✓ '+d.events.length+' eventos · '+d.births.length+' nacimientos · '+(d.deaths||[]).length+' fallecimientos';
+      statusEl.style.color = 'var(--green)';
+    }
+  }catch(e){
+    if(statusEl){ statusEl.textContent = '❌ '+e.message; statusEl.style.color='var(--red)'; }
+    if(evEl) evEl.innerHTML = '<div style="color:var(--text3);font-size:11.5px">No se pudo cargar. Revisá tu conexión.</div>';
+    if(nacEl) nacEl.innerHTML = '<div style="color:var(--text3);font-size:11.5px">—</div>';
+  }
+}
+
+function calEfemRender(data){
+  var evEl = document.getElementById('cal-efem-eventos-list');
+  var nacEl = document.getElementById('cal-efem-nacimientos-list');
+  if(!evEl || !nacEl) return;
+
+  // Eventos históricos
+  if(!data.events.length){
+    evEl.innerHTML = '<div style="color:var(--text3);font-size:11.5px">Sin eventos destacados.</div>';
+  } else {
+    evEl.innerHTML = data.events.map(function(ev){
+      var textPage = ev.pages && ev.pages[0];
+      var link = textPage && textPage.content_urls && textPage.content_urls.desktop && textPage.content_urls.desktop.page;
+      var txtSafe = (ev.text||'').replace(/"/g,'&quot;').slice(0, 180);
+      return '<div style="padding:5px 0;border-bottom:1px dashed var(--border);font-size:11.5px;line-height:1.45">'
+        +'<span style="font-weight:700;color:var(--accent)">'+(ev.year||'?')+'</span> — '
+        +txtSafe
+        +(link ? ' <a href="'+link+'" target="_blank" rel="noopener" style="font-size:10px;color:var(--accent);text-decoration:none">↗</a>' : '')
+      +'</div>';
+    }).join('');
+  }
+
+  // Nacimientos
+  if(!data.births.length){
+    nacEl.innerHTML = '<div style="color:var(--text3);font-size:11.5px">Sin nacimientos destacados.</div>';
+  } else {
+    nacEl.innerHTML = data.births.map(function(b){
+      var textPage = b.pages && b.pages[0];
+      var thumb = textPage && textPage.thumbnail && textPage.thumbnail.source;
+      var link = textPage && textPage.content_urls && textPage.content_urls.desktop && textPage.content_urls.desktop.page;
+      var txtSafe = (b.text||'').replace(/"/g,'&quot;').slice(0, 150);
+      return '<div style="display:flex;gap:8px;padding:5px 0;border-bottom:1px dashed var(--border);font-size:11.5px;line-height:1.45;align-items:flex-start">'
+        +(thumb ? '<img src="'+thumb+'" width="32" height="32" style="border-radius:4px;object-fit:cover;flex-shrink:0;border:1px solid var(--border)">' : '<div style="width:32px;height:32px;background:var(--bg2);border-radius:4px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:14px">👤</div>')
+        +'<div style="flex:1;min-width:0">'
+          +'<span style="font-weight:700;color:var(--accent)">'+(b.year||'?')+'</span> — '
+          +txtSafe
+          +(link ? ' <a href="'+link+'" target="_blank" rel="noopener" style="font-size:10px;color:var(--accent);text-decoration:none">↗</a>' : '')
+        +'</div>'
+      +'</div>';
+    }).join('');
+  }
+}
+
 // ── WIDGET DASHBOARD ──────────────────────────────────────────────────
 function renderCalWidget(){
   var el=document.getElementById('dash-cal-widget');
@@ -12425,6 +12616,8 @@ function calInit(){
   _calView='mes';
   calSetView('mes',document.getElementById('cal-tab-mes'));
   renderCalWidget();
+  // Disparar efemérides del día (con cache 24h si ya se cargó hoy)
+  try{ calEfemInit(); }catch(e){ console.warn('[Efem]', e.message); }
 }
 
 
@@ -14576,6 +14769,43 @@ async function fetchBackup() {
     }
     if (Array.isArray(data.activeRules)) activeRules = data.activeRules;
     if (Array.isArray(data.competitors))  _savedCompetitors = data.competitors;
+
+    // ── Calendario custom events + cumpleaños: MERGE KV con localStorage ──
+    // Regla: si la PC tenía algo que el KV no tiene, no lo pierde (merge por id).
+    // Si KV tiene algo que la PC no tenía, lo trae (primera vez que sincroniza).
+    try{
+      if(Array.isArray(data.calCustom)){
+        var localCustom = calGetCustom();
+        var kvCustom    = data.calCustom;
+        var mergedById  = {};
+        localCustom.forEach(function(e){ if(e && e.id) mergedById[e.id] = e; });
+        kvCustom.forEach(function(e){ if(e && e.id) mergedById[e.id] = e; }); // KV gana si hay conflicto
+        var mergedArr = Object.values(mergedById);
+        localStorage.setItem(CAL_LS_KEY, JSON.stringify(mergedArr));
+        console.log('[Backup] calCustom merged: KV='+kvCustom.length+' · local='+localCustom.length+' · final='+mergedArr.length);
+      }
+      if(Array.isArray(data.bdays)){
+        var localB = bday_getAll();
+        var kvB    = data.bdays;
+        var byId   = {};
+        localB.forEach(function(b){ if(b && b.id) byId[b.id] = b; });
+        kvB.forEach(function(b){ if(b && b.id) byId[b.id] = b; });
+        var mergedBdays = Object.values(byId);
+        localStorage.setItem(CAL_BDAY_KEY, JSON.stringify(mergedBdays));
+        console.log('[Backup] bdays merged: KV='+kvB.length+' · local='+localB.length+' · final='+mergedBdays.length);
+      }
+      // Si el merge agregó cosas que no estaban en KV, sincronizar de vuelta
+      // (para que la otra PC se entere). Debounced.
+      if((data.calCustom||[]).length !== calGetCustom().length ||
+         (data.bdays||[]).length     !== bday_getAll().length){
+        _calBackupSyncDebounced();
+      }
+      // Refrescar vista del calendario si está abierto
+      if(typeof calRender === 'function' && document.getElementById('section-calendario')?.classList.contains('active')){
+        try{ calRender(); }catch(e){}
+      }
+      if(typeof renderCalWidget === 'function') renderCalWidget();
+    }catch(e){ console.warn('[Backup] Error mergeando cal/bdays:', e.message); }
     if (data.savedAt) {
       var updEl = document.getElementById('last-upd');
       if (updEl) updEl.textContent = 'Nube: ' + (data.savedAt || '—');
