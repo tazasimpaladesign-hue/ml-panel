@@ -3424,6 +3424,9 @@ let currentAccount = null;
 
 let token=null, userId=null, userData=null;
 let allItems=[], allOrders=[], allQuestions=[];
+// Flag: true cuando loadItemsFull() terminó con datos COMPLETOS de la API.
+// Evita que un broadcast data-updated de otra pestaña pise datos completos con caché slim.
+let _itemsFullLoaded = false;
 // Cache de nicknames de compradores (userId → nickname)
 var _nicknameCache = {};
 let globalVisitsByDay = {}; // { 'YYYY-MM-DD': totalVisits }
@@ -3907,6 +3910,7 @@ async function loadItemsFull(){
       if(i>0 && (i/PARALLEL)%5===0) await new Promise(r=>setTimeout(r,80));
     }
     allItems=full;_updateItemsUI();
+    _itemsFullLoaded = true; // datos completos disponibles — ignorar data-updated de otras pestañas
     // Actualizar health scores con datos recién bajados de ML
     refreshHealthScores();
     console.log('[loadItemsFull]',allItems.length);
@@ -4346,18 +4350,24 @@ function initCrossTabSync(){
         }
         updateMetricsTimestamp();
       } else if(type === 'data-updated'){
-        // Otra pestaña terminó de cargar datos frescos de la API
-        console.log('[CrossTab] Datos actualizados en otra pestaña — recargando desde caché...');
-        const fresh = _loadDataCache();
-        if(fresh && fresh.items.length > 0){
-          allItems  = fresh.items;
-          allOrders = fresh.orders;
-          _updateItemsUI();
-          _updateOrdersUI(allOrders);
-          if(document.getElementById('section-dashboard')?.classList.contains('active')){
-            renderDashboard(); updateLast50(allOrders.slice(0,50));
+        // Otra pestaña terminó de cargar datos frescos.
+        // GUARD: si esta pestaña ya cargó sus propios datos completos (loadItemsFull terminó),
+        // ignorar el mensaje — el caché slim NO debe pisar datos completos.
+        if(_itemsFullLoaded){
+          console.log('[CrossTab] data-updated ignorado — esta pestaña ya tiene datos completos.');
+        } else {
+          console.log('[CrossTab] Datos actualizados en otra pestaña — recargando desde caché...');
+          const fresh = _loadDataCache();
+          if(fresh && fresh.items.length > 0){
+            allItems  = fresh.items;
+            allOrders = fresh.orders;
+            _updateItemsUI();
+            _updateOrdersUI(allOrders);
+            if(document.getElementById('section-dashboard')?.classList.contains('active')){
+              renderDashboard(); updateLast50(allOrders.slice(0,50));
+            }
+            _hideCacheAgeBadge();
           }
-          _hideCacheAgeBadge();
         }
       } else if(type === 'config-updated'){
         // Otra pestaña detectó cambio en config via sync multi-device
