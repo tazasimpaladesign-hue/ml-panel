@@ -710,7 +710,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v2.0 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v65 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1200,7 +1200,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <table>
         <thead><tr>
           <th>Publicación</th>
-          <th>Chars</th>
+          <th onclick="seoSort('created')" style="cursor:pointer;user-select:none;white-space:nowrap" title="Fecha de creación del producto en ML">Creada ↕<span id="seo-sort-created" style="font-size:10px"></span></th>
           <th onclick="seoSort('seo')"     style="cursor:pointer;user-select:none;white-space:nowrap">Score SEO <span id="seo-sort-seo" style="font-size:10px"></span></th>
           <th onclick="seoSort('quality')" style="cursor:pointer;user-select:none;white-space:nowrap">Calidad pub. <span id="seo-sort-quality" style="font-size:10px"></span></th>
           <th onclick="seoSort('price')" style="cursor:pointer;user-select:none;white-space:nowrap">Precio ↕</th>
@@ -2700,14 +2700,18 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <button class="btn btn-ghost btn-sm" onclick="calEfemLoad(true)" id="cal-efem-refresh" title="Refrescar desde Wikipedia">↻</button>
     </div>
     <div id="cal-efem-status" style="font-size:11.5px;color:var(--text3);margin-bottom:10px"></div>
-    <div id="cal-efem-content" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-      <div id="cal-efem-eventos" style="background:var(--bg3);border-radius:8px;padding:12px;border:1px solid var(--border)">
-        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">📅 Eventos históricos</div>
-        <div id="cal-efem-eventos-list" style="font-size:12px;color:var(--text3)">Seleccioná una fecha para ver efemérides.</div>
+    <div id="cal-efem-content" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+      <div id="cal-efem-eventos" style="background:var(--bg3);border-radius:8px;padding:12px;border:1px solid var(--border);display:flex;flex-direction:column;min-height:0">
+        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;flex-shrink:0">📅 Eventos históricos</div>
+        <div id="cal-efem-eventos-list" style="font-size:12px;color:var(--text3);max-height:320px;overflow-y:auto;padding-right:4px">Seleccioná una fecha para ver efemérides.</div>
       </div>
-      <div id="cal-efem-nacimientos" style="background:var(--bg3);border-radius:8px;padding:12px;border:1px solid var(--border)">
-        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">🎂 Nacimientos</div>
-        <div id="cal-efem-nacimientos-list" style="font-size:12px;color:var(--text3)">—</div>
+      <div id="cal-efem-nacimientos" style="background:var(--bg3);border-radius:8px;padding:12px;border:1px solid var(--border);display:flex;flex-direction:column;min-height:0">
+        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;flex-shrink:0">🎂 Nacimientos</div>
+        <div id="cal-efem-nacimientos-list" style="font-size:12px;color:var(--text3);max-height:320px;overflow-y:auto;padding-right:4px">—</div>
+      </div>
+      <div id="cal-efem-fallecimientos" style="background:var(--bg3);border-radius:8px;padding:12px;border:1px solid var(--border);display:flex;flex-direction:column;min-height:0">
+        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;flex-shrink:0">✝️ Fallecimientos</div>
+        <div id="cal-efem-fallecimientos-list" style="font-size:12px;color:var(--text3);max-height:320px;overflow-y:auto;padding-right:4px">—</div>
       </div>
     </div>
     <div style="margin-top:10px;font-size:10.5px;color:var(--text3);text-align:right">Fuente: Wikipedia REST API (es.wikipedia.org)</div>
@@ -6460,6 +6464,7 @@ function renderSEOTable(){
       else if(seoState.sortCol==='conv') { va=ma?.conv||0;                 vb=mb?.conv||0; }
       else if(seoState.sortCol==='price') { va=a.price||0;                 vb=b.price||0; }
       else if(seoState.sortCol==='stock') { va=a.available_quantity??0;    vb=b.available_quantity??0; }
+      else if(seoState.sortCol==='created'){ va=a.date_created ? new Date(a.date_created).getTime() : 0; vb=b.date_created ? new Date(b.date_created).getTime() : 0; }
       else                               { va=qualityScore(a);             vb=qualityScore(b); }
       return seoState.sortDir*(vb-va);
     });
@@ -6530,7 +6535,22 @@ function renderSEOTable(){
           </div>
         </div>
       </td>
-      <td><span class="${item.title.length>60?'badge bg-red':item.title.length<30?'badge bg-amber':'badge bg-green'}">${item.title.length}</span></td>
+      <td style="white-space:nowrap;text-align:center">${(()=>{
+        const dc = item.date_created;
+        if(!dc) return '<span style="font-size:10.5px;color:var(--text3)">—</span>';
+        // ML devuelve ISO (ej: "2023-04-15T18:30:00.000Z"). Formateamos a DD/MM/YYYY en local AR.
+        // Parseo seguro: si no es una fecha válida caemos a '—'.
+        const d = new Date(dc);
+        if(isNaN(d.getTime())) return '<span style="font-size:10.5px;color:var(--text3)">—</span>';
+        const dd = String(d.getDate()).padStart(2,'0');
+        const mm = String(d.getMonth()+1).padStart(2,'0');
+        const yy = d.getFullYear();
+        // Antigüedad en días (para colorear)
+        const ageDays = Math.floor((Date.now()-d.getTime())/(1000*60*60*24));
+        const ageColor = ageDays<30 ? 'var(--green)' : ageDays<180 ? 'var(--text)' : 'var(--text3)';
+        return '<div style="font-size:11px;font-weight:600;color:'+ageColor+'">'+dd+'/'+mm+'/'+yy+'</div>'
+          + '<div style="font-size:9.5px;color:var(--text3);margin-top:1px">'+ageDays+'d</div>';
+      })()}</td>
       <td><div style="display:flex;align-items:center;gap:5px"><div class="pbar" style="width:48px"><div class="pfill" style="width:${sc}%;background:${scC}"></div></div><span style="font-size:11px;font-weight:700;color:${scC}">${sc}</span></div></td>
       <td>
         <div style="display:flex;align-items:center;gap:6px">
@@ -9358,6 +9378,24 @@ function refreshAlerts(){
     }));
   }
 
+  // ── Enriquecimiento: añadir _sold (ventas históricas) a cada alerta ─────────
+  // Permite (a) concatenarlo al render y (b) ordenar por ventas DESC.
+  filteredAlerts.forEach(function(a){
+    if(a._sold !== undefined) return; // ya seteado
+    if(a.item_id){
+      var _it = allItems.find(function(x){ return x.id === a.item_id; });
+      a._sold = _it ? (_it.sold_quantity || 0) : 0;
+    } else {
+      a._sold = 0; // alertas globales (preguntas, reglas)
+    }
+  });
+
+  // ── Ordenamiento global: ventas históricas DESC (más vendidos primero) ──────
+  // Las alertas globales (sin item_id, _sold = 0) quedan al final naturalmente.
+  filteredAlerts.sort(function(a,b){
+    return (b._sold || 0) - (a._sold || 0);
+  });
+
   // Actualizar pill de total
   const pillEl = document.getElementById('alm-total-pill');
   if(pillEl) pillEl.textContent = filteredAlerts.length + ' alerta' + (filteredAlerts.length !== 1 ? 's' : '') + ' · ' + alerts.length + ' total';
@@ -9472,16 +9510,16 @@ function refreshAlerts(){
       <div class="alert-action-card priority-${a.priority === 1 ? 'critical' : a.priority === 2 ? 'warn' : 'info'}"
            id="alertcard-${a.uid}"
            style="border-left-color:${p.borderColor}">
-        <div class="alert-icon">${a.icon}</div>
-        <div style="display:flex;align-items:flex-start;gap:8px;flex:1;min-width:0">
-          ${(()=>{const _ai=a.item_id?allItems.find(i=>i.id===a.item_id):null;const _th=_ai&&_ai.thumbnail?_ai.thumbnail:'';return _th?`<img src="${_th}" width="36" height="36" loading="lazy" style="object-fit:cover;border-radius:5px;flex-shrink:0;border:1px solid var(--border);margin-top:2px" onerror="this.style.display='none'">`:'';})()} 
+        <div class="alert-icon" style="font-size:18px;line-height:1;align-self:flex-start;margin-top:4px">${a.icon}</div>
+        <div style="display:flex;align-items:flex-start;gap:10px;flex:1;min-width:0">
+          ${(()=>{const _ai=a.item_id?allItems.find(i=>i.id===a.item_id):null;const _th=_ai&&_ai.thumbnail?_ai.thumbnail:'';return _th?`<img src="${_th}" width="56" height="56" loading="lazy" style="object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border);margin-top:2px" onerror="this.style.display='none'">`:'';})()} 
           <div class="alert-body" style="flex:1;min-width:0">
           <div class="alert-head">
             <span class="badge ${p.badgeCls}" style="font-size:9px;letter-spacing:.04em">${p.label}</span>
             <span class="alert-title">${a.title}</span>
           </div>
           <div class="alert-sub" title="${a.subtitle}">${a.subtitle}</div>
-          <div class="alert-detail">${a.detail}</div>
+          <div class="alert-detail">${a.detail}${(a._sold && a._sold > 0) ? ' <span style="color:var(--text3);font-weight:500">· '+a._sold+' u. vendidas</span>' : ''}</div>
           </div>
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:0;flex-shrink:0">
@@ -9669,20 +9707,92 @@ function renderBulkList(){
   el.innerHTML=_bulkFiltered.map(i=>{
     const qty=i.available_quantity??0;
     const qColor=qty===0?'var(--red)':qty<=3?'var(--amber)':'var(--green)';
+    const editUrl = (typeof mlEditLink==='function') ? mlEditLink(i.id) : ('https://www.mercadolibre.com.ar/publicaciones/'+i.id+'/modificar');
+    const statusBadge = '<span class="badge '+(i.status==='active'?'bg-green':'bg-amber')+'" style="white-space:nowrap">'+(i.status==='active'?'● Activa':'⏸ Pausada')+'</span>';
     return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">'
       +'<input type="checkbox" class="bulk-item-cb" value="'+i.id+'" style="flex-shrink:0">'
       +(i.thumbnail?'<img src="'+i.thumbnail+'" width="36" height="36" style="object-fit:cover;border-radius:4px;flex-shrink:0" onerror="this.style.display=\'none\'">':'')
       +'<div style="flex:1;min-width:0">'
         +'<div style="font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+i.title+'</div>'
-        +'<div style="font-size:10.5px;color:var(--text3);display:flex;gap:8px;margin-top:2px">'
+        +'<div style="font-size:10.5px;color:var(--text3);display:flex;gap:8px;margin-top:2px;align-items:center">'
           +'<span>'+i.id+'</span>'
-          +'<span>$'+(i.price||0).toLocaleString('es-AR')+'</span>'
           +'<span style="color:'+qColor+'">Stock: '+qty+'</span>'
         +'</div>'
       +'</div>'
-      +'<span class="badge '+(i.status==='active'?'bg-green':'bg-amber')+'" style="flex-shrink:0">'+(i.status==='active'?'● Activa':'⏸ Pausada')+'</span>'
+      // ── Columna PRECIO (edición inline — misma lógica que SEO/Publicaciones) ──
+      +'<div id="bulk-price-cell-'+i.id+'" style="flex-shrink:0;min-width:110px;text-align:right">'
+        +'<span style="font-size:12px;font-weight:600;color:var(--text);cursor:pointer" '
+          +'onclick="bulkStartPriceEdit(\''+i.id+'\','+(i.price||0)+')" '
+          +'title="Clic para editar precio">$'+(i.price||0).toLocaleString('es-AR')+' ✎</span>'
+      +'</div>'
+      // ── Estado + acción Editar en ML ──────────────────────────────────────
+      +'<div style="display:flex;flex-direction:column;gap:4px;align-items:stretch;flex-shrink:0;min-width:118px">'
+        +statusBadge
+        +(editUrl ? '<a href="'+editUrl+'" target="_blank" rel="noopener" class="btn btn-ghost btn-xs" style="text-decoration:none;background:#fffbeb;color:#78350f;border-color:#fde68a;font-size:10px;white-space:nowrap;text-align:center" title="Editar en MercadoLibre">✏️ Editar en ML</a>' : '')
+      +'</div>'
       +'</div>';
   }).join('');
+}
+
+// ── Edición inline de precio en Edición Masiva ────────────────────────────
+// Usa exactamente el mismo endpoint y validación (min $100) que seoSavePrice.
+function bulkStartPriceEdit(itemId, currentPrice){
+  const cell = document.getElementById('bulk-price-cell-'+itemId);
+  if(!cell) return;
+  const minPrice = (typeof SEO_MIN_PRICE !== 'undefined') ? SEO_MIN_PRICE : 100;
+  cell.innerHTML = '<div style="display:flex;align-items:center;gap:3px;justify-content:flex-end">'
+    +'<span style="font-size:10px;color:var(--text3)">$</span>'
+    +'<input id="bulk-prc-'+itemId+'" type="number" value="'+currentPrice+'" min="'+minPrice+'" step="1" '
+      +'style="width:80px;font-size:12px;padding:2px 5px;border-radius:4px;border:1px solid var(--accent);background:var(--bg3);color:var(--text)" '
+      +'onkeydown="if(event.key===\'Enter\'){event.preventDefault();bulkSavePrice(\''+itemId+'\');}if(event.key===\'Escape\')renderBulkList();">'
+    +'<button class="btn btn-primary btn-xs" style="padding:1px 6px" onclick="bulkSavePrice(\''+itemId+'\')">✓</button>'
+    +'<button class="btn btn-ghost btn-xs" style="padding:1px 5px" onclick="renderBulkList()">✕</button>'
+    +'<span id="bulk-prc-msg-'+itemId+'" style="font-size:9px"></span>'
+  +'</div>';
+  const inp = document.getElementById('bulk-prc-'+itemId);
+  if(inp){ inp.focus(); inp.select(); }
+}
+
+async function bulkSavePrice(itemId){
+  const inp   = document.getElementById('bulk-prc-'+itemId);
+  const msgEl = document.getElementById('bulk-prc-msg-'+itemId);
+  if(!inp) return;
+  const minPrice = (typeof SEO_MIN_PRICE !== 'undefined') ? SEO_MIN_PRICE : 100;
+  const val = parseFloat(inp.value);
+  if(isNaN(val) || val < minPrice){
+    inp.style.borderColor='var(--red)';
+    if(msgEl){ msgEl.textContent='Mín $'+minPrice; msgEl.style.color='var(--red)'; }
+    return;
+  }
+  inp.disabled = true;
+  if(msgEl){ msgEl.textContent='...'; msgEl.style.color='var(--text3)'; }
+  const item = allItems.find(i=>i.id===itemId);
+  const body = item?.variations?.length
+    ? { variations: item.variations.map(v=>({id:v.id,price:val})) }
+    : { price: val };
+  try{
+    const res = await fetch(WORKER+'/api/items/'+itemId,{
+      method:'PUT',
+      headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
+      body:JSON.stringify(body)
+    });
+    const d = await res.json();
+    if(d.error){
+      inp.disabled=false;
+      inp.style.borderColor='var(--red)';
+      if(msgEl){ msgEl.textContent='❌'+(d.message||d.error).slice(0,30); msgEl.style.color='var(--red)'; }
+      return;
+    }
+    if(item){
+      item.price = val;
+      if(item.variations?.length) item.variations.forEach(v=>v.price=val);
+    }
+    if(typeof showToast==='function') showToast('💰 Precio actualizado: $'+val.toLocaleString('es-AR'),'success');
+    renderBulkList();
+  }catch(e){
+    inp.disabled=false;
+    if(msgEl){ msgEl.textContent='❌'+e.message.slice(0,25); msgEl.style.color='var(--red)'; }
+  }
 }
 
 function bulkToggleAll(cb){
@@ -10964,23 +11074,46 @@ var AI_DATES = [
 ];
 
 function aiDatesAnalyze(){
+  // ── FIX Timezone (AR/UTC-3) ─────────────────────────────────────────────
+  // Problema: new Date('2026-05-01') se interpreta como UTC → en AR queda 30/04 21:00.
+  // Solución: parsear YYYY-MM-DD manualmente como fecha LOCAL (sin offset).
+  // También comparar contra el INICIO del día actual, no el instante exacto,
+  // para que los eventos del día en curso sigan apareciendo como "0 días".
+  var _parseLocalDate = function(ymd){
+    // Acepta 'YYYY-MM-DD' o 'YYYY-MM-DDTHH:MM:SS...'; toma solo la parte de fecha.
+    var parts = String(ymd).slice(0,10).split('-');
+    if(parts.length !== 3) return new Date(NaN);
+    var y = parseInt(parts[0],10);
+    var m = parseInt(parts[1],10);
+    var d = parseInt(parts[2],10);
+    if(isNaN(y)||isNaN(m)||isNaN(d)) return new Date(NaN);
+    return new Date(y, m-1, d, 0, 0, 0, 0); // midnight local (AR)
+  };
+
   var now = new Date();
+  var startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+
   var upcoming = AI_DATES.filter(function(e){
-    return new Date(e.date) > now;
-  }).sort(function(a,b){ return new Date(a.date)-new Date(b.date); });
+    var dt = _parseLocalDate(e.date);
+    return !isNaN(dt.getTime()) && dt.getTime() >= startOfToday.getTime();
+  }).sort(function(a,b){
+    return _parseLocalDate(a.date).getTime() - _parseLocalDate(b.date).getTime();
+  });
 
   var html = upcoming.slice(0,10).map(function(e){
-    var d        = new Date(e.date);
-    var diffDays = Math.round((d-now)/(1000*60*60*24));
+    var d        = _parseLocalDate(e.date);
+    // diffDays positivo e inclusivo para "hoy" = 0 días
+    var diffDays = Math.round((d.getTime() - startOfToday.getTime())/(1000*60*60*24));
     var urgency  = diffDays<14 ? 'bg-red' : diffDays<30 ? 'bg-amber' : diffDays<60 ? 'bg-blue' : 'bg-green';
     var dateStr  = d.toLocaleDateString('es-AR',{day:'2-digit',month:'long'});
+    var badgeTxt = diffDays === 0 ? 'Hoy' : (diffDays+' día'+(diffDays===1?'':'s'));
     return '<div style="display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)">'
       +'<span style="font-size:18px;line-height:1">'+e.icon+'</span>'
       +'<div>'
         +'<div style="font-size:12px;font-weight:600">'+e.label+'</div>'
         +'<div style="font-size:10px;color:var(--text3);margin-top:1px">'+dateStr+' · '+e.relevance+'</div>'
       +'</div>'
-      +'<span class="badge '+urgency+'" style="font-size:10px;white-space:nowrap">'+diffDays+' días</span>'
+      +'<span class="badge '+urgency+'" style="font-size:10px;white-space:nowrap">'+badgeTxt+'</span>'
       +'</div>';
   }).join('');
 
@@ -11004,8 +11137,9 @@ function aiDatesAnalyze(){
   var nextEvent= upcoming[0];
   if(!nextEvent) return;
 
+  var _nextEventDays = Math.round((_parseLocalDate(nextEvent.date).getTime() - startOfToday.getTime())/(1000*60*60*24));
   var sysPrompt='Sos un experto en e-commerce y marketing estacional para MercadoLibre Argentina. Respondé en español argentino. Máximo 5 bullets cortos. Sin saludos ni conclusiones.';
-  var userMsg='Próximo evento: '+nextEvent.label+' en '+Math.round((new Date(nextEvent.date)-now)/(1000*60*60*24))+' días.\n'
+  var userMsg='Próximo evento: '+nextEvent.label+' en '+_nextEventDays+' días.\n'
     +'Productos más vendidos del vendedor:\n'+topList.map(function(p){return '- '+p.title+' ('+p.qty+' vendidos)';}).join('\n')+'\n'
     +'¿Qué acciones concretas debería tomar para prepararse para '+nextEvent.label+'? (stock, precios, publicidad, descripción)';
   aiAsk(sysPrompt, userMsg, 'ai-dates-result');
@@ -12479,68 +12613,84 @@ async function calEfemLoad(forceRefresh){
     if(!r.ok) throw new Error('HTTP '+r.status);
     var d = await r.json();
 
-    // Procesar: tomar los 8 eventos y 8 nacimientos más destacados (los que tienen thumbnail)
-    var events = (d.events||[])
-      .sort(function(a,b){ return (b.year||0) - (a.year||0); }) // más recientes primero
-      .slice(0, 12);
-    var births = (d.births||[])
-      .sort(function(a,b){ return (b.year||0) - (a.year||0); })
-      .slice(0, 12);
+    // Sort de dos niveles: (1) items con thumbnail primero, (2) año descendente (más reciente primero)
+    // Sin slice: mostramos TODOS los eventos, el scroll del contenedor se encarga del overflow.
+    var _hasThumb = function(it){
+      var p = it && it.pages && it.pages[0];
+      return !!(p && p.thumbnail && p.thumbnail.source);
+    };
+    var _efemSort = function(a,b){
+      var ta = _hasThumb(a) ? 1 : 0;
+      var tb = _hasThumb(b) ? 1 : 0;
+      if(ta !== tb) return tb - ta;                 // thumbnail primero
+      return (b.year||0) - (a.year||0);             // año DESC
+    };
 
-    var parsed = { events: events, births: births, ts: Date.now() };
+    var events = (d.events||[]).slice().sort(_efemSort);
+    var births = (d.births||[]).slice().sort(_efemSort);
+    var deaths = (d.deaths||[]).slice().sort(_efemSort);
+
+    var parsed = { events: events, births: births, deaths: deaths, ts: Date.now() };
     _efemCache[key] = parsed;
     calEfemRender(parsed);
 
     if(statusEl){
-      statusEl.textContent = '✓ '+d.events.length+' eventos · '+d.births.length+' nacimientos · '+(d.deaths||[]).length+' fallecimientos';
+      statusEl.textContent = '✓ '+events.length+' eventos · '+births.length+' nacimientos · '+deaths.length+' fallecimientos';
       statusEl.style.color = 'var(--green)';
     }
   }catch(e){
     if(statusEl){ statusEl.textContent = '❌ '+e.message; statusEl.style.color='var(--red)'; }
     if(evEl) evEl.innerHTML = '<div style="color:var(--text3);font-size:11.5px">No se pudo cargar. Revisá tu conexión.</div>';
     if(nacEl) nacEl.innerHTML = '<div style="color:var(--text3);font-size:11.5px">—</div>';
+    var defEl = document.getElementById('cal-efem-fallecimientos-list');
+    if(defEl) defEl.innerHTML = '<div style="color:var(--text3);font-size:11.5px">—</div>';
   }
 }
 
 function calEfemRender(data){
-  var evEl = document.getElementById('cal-efem-eventos-list');
+  var evEl  = document.getElementById('cal-efem-eventos-list');
   var nacEl = document.getElementById('cal-efem-nacimientos-list');
-  if(!evEl || !nacEl) return;
+  var defEl = document.getElementById('cal-efem-fallecimientos-list');
+  if(!evEl || !nacEl || !defEl) return;
 
-  // Eventos históricos
-  if(!data.events.length){
-    evEl.innerHTML = '<div style="color:var(--text3);font-size:11.5px">Sin eventos destacados.</div>';
-  } else {
-    evEl.innerHTML = data.events.map(function(ev){
-      var textPage = ev.pages && ev.pages[0];
-      var link = textPage && textPage.content_urls && textPage.content_urls.desktop && textPage.content_urls.desktop.page;
-      var txtSafe = (ev.text||'').replace(/"/g,'&quot;').slice(0, 180);
-      return '<div style="padding:5px 0;border-bottom:1px dashed var(--border);font-size:11.5px;line-height:1.45">'
-        +'<span style="font-weight:700;color:var(--accent)">'+(ev.year||'?')+'</span> — '
+  // Helper: renderiza una fila uniforme con thumbnail opcional, año y texto
+  var _renderRow = function(it, fallbackIcon){
+    var page  = it.pages && it.pages[0];
+    var thumb = page && page.thumbnail && page.thumbnail.source;
+    var link  = page && page.content_urls && page.content_urls.desktop && page.content_urls.desktop.page;
+    var txtSafe = (it.text||'').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+    var imgHtml = thumb
+      ? '<img src="'+thumb+'" width="32" height="32" style="border-radius:4px;object-fit:cover;flex-shrink:0;border:1px solid var(--border)" loading="lazy" onerror="this.style.display=\'none\'">'
+      : '<div style="width:32px;height:32px;background:var(--bg2);border-radius:4px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:14px">'+fallbackIcon+'</div>';
+    return '<div style="display:flex;gap:8px;padding:6px 0;border-bottom:1px dashed var(--border);font-size:11.5px;line-height:1.45;align-items:flex-start">'
+      +imgHtml
+      +'<div style="flex:1;min-width:0">'
+        +'<span style="font-weight:700;color:var(--accent)">'+(it.year||'?')+'</span> — '
         +txtSafe
         +(link ? ' <a href="'+link+'" target="_blank" rel="noopener" style="font-size:10px;color:var(--accent);text-decoration:none">↗</a>' : '')
-      +'</div>';
-    }).join('');
+      +'</div>'
+    +'</div>';
+  };
+
+  // Eventos históricos
+  if(!data.events || !data.events.length){
+    evEl.innerHTML = '<div style="color:var(--text3);font-size:11.5px">Sin eventos destacados.</div>';
+  } else {
+    evEl.innerHTML = data.events.map(function(ev){ return _renderRow(ev, '📜'); }).join('');
   }
 
   // Nacimientos
-  if(!data.births.length){
+  if(!data.births || !data.births.length){
     nacEl.innerHTML = '<div style="color:var(--text3);font-size:11.5px">Sin nacimientos destacados.</div>';
   } else {
-    nacEl.innerHTML = data.births.map(function(b){
-      var textPage = b.pages && b.pages[0];
-      var thumb = textPage && textPage.thumbnail && textPage.thumbnail.source;
-      var link = textPage && textPage.content_urls && textPage.content_urls.desktop && textPage.content_urls.desktop.page;
-      var txtSafe = (b.text||'').replace(/"/g,'&quot;').slice(0, 150);
-      return '<div style="display:flex;gap:8px;padding:5px 0;border-bottom:1px dashed var(--border);font-size:11.5px;line-height:1.45;align-items:flex-start">'
-        +(thumb ? '<img src="'+thumb+'" width="32" height="32" style="border-radius:4px;object-fit:cover;flex-shrink:0;border:1px solid var(--border)">' : '<div style="width:32px;height:32px;background:var(--bg2);border-radius:4px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:14px">👤</div>')
-        +'<div style="flex:1;min-width:0">'
-          +'<span style="font-weight:700;color:var(--accent)">'+(b.year||'?')+'</span> — '
-          +txtSafe
-          +(link ? ' <a href="'+link+'" target="_blank" rel="noopener" style="font-size:10px;color:var(--accent);text-decoration:none">↗</a>' : '')
-        +'</div>'
-      +'</div>';
-    }).join('');
+    nacEl.innerHTML = data.births.map(function(b){ return _renderRow(b, '👤'); }).join('');
+  }
+
+  // Fallecimientos
+  if(!data.deaths || !data.deaths.length){
+    defEl.innerHTML = '<div style="color:var(--text3);font-size:11.5px">Sin fallecimientos destacados.</div>';
+  } else {
+    defEl.innerHTML = data.deaths.map(function(dd){ return _renderRow(dd, '✝️'); }).join('');
   }
 }
 
