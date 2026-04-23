@@ -710,7 +710,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v66 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v67 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4984,22 +4984,13 @@ function renderMainChart(mode){
     }
   });
 
-  // Preguntas (período actual + período anterior)
-  // Fix v66: antes solo se llenaba .curr, por lo que la línea "prev" nunca se dibujaba
-  // cuando se seleccionaba solo el botón "💬 Preguntas".
+  // Preguntas (solo período actual)
+  // v67: se revierte a solo .curr. El período anterior no funciona de forma confiable
+  // porque q.date_created puede venir en formato UTC mientras los keys del gráfico
+  // están en hora AR; el usuario prefiere mantener solo el período actual.
   (allQuestions||[]).forEach(q=>{
-    const ts = new Date(q.date_created||0);
     const k = (q.date_created||'').slice(0,10);
-    if(k && acc.questions.curr[k]!==undefined){
-      acc.questions.curr[k]++;
-    }
-    // Período anterior: desplazar al rango actual para visualización comparativa
-    if(ts >= prevCutoff && ts < currCutoff){
-      const kPrev = new Date(ts.getTime() + days*86400000).toISOString().slice(0,10);
-      if(kPrev && acc.questions.prev[kPrev]!==undefined){
-        acc.questions.prev[kPrev]++;
-      }
-    }
+    if(k && acc.questions.curr[k]!==undefined) acc.questions.curr[k]++;
   });
 
   // Visitas desde globalVisitsByDay (datos reales de items_visits/time_window)
@@ -12585,7 +12576,11 @@ async function calGenerateContent(eventId, dateStr){
     resultEl.innerHTML = '<div class="alert a-warn" style="font-size:11.5px;line-height:1.4">'
       +'<strong>Error generando:</strong> '+(e.message||'desconocido')
       +'<div style="margin-top:6px;font-size:10.5px;color:var(--text3)">'
-      +'Causas frecuentes: (1) OPENROUTER_KEY sin crédito o inválida · (2) modelos gratuitos agotados por rate-limit (20 req/min en OpenRouter) · (3) modelos :free obsoletos en el Worker. Esperá 1 min y probá de nuevo, o actualizá AI_MODELS en el Worker.'
+      +'<strong>Solución recomendada:</strong> sacá una API key gratis en '
+      +'<a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--accent)">Google AI Studio</a> '
+      +'(15 req/min, sin tarjeta) y configurala como <code>GEMINI_KEY</code> en Cloudflare Workers → Settings → Variables. '
+      +'Es más estable que OpenRouter (que comparte cupo entre todos los usuarios gratuitos). '
+      +'Esperá 1 min y probá de nuevo mientras tanto.'
       +'</div>'
     +'</div>';
   }finally{
