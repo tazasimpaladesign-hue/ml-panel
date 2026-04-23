@@ -2700,18 +2700,14 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <button class="btn btn-ghost btn-sm" onclick="calEfemLoad(true)" id="cal-efem-refresh" title="Refrescar desde Wikipedia">↻</button>
     </div>
     <div id="cal-efem-status" style="font-size:11.5px;color:var(--text3);margin-bottom:10px"></div>
-    <div id="cal-efem-content" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
-      <div id="cal-efem-eventos" style="background:var(--bg3);border-radius:8px;padding:12px;border:1px solid var(--border);display:flex;flex-direction:column">
+    <div id="cal-efem-content" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div id="cal-efem-eventos" style="background:var(--bg3);border-radius:8px;padding:12px;border:1px solid var(--border)">
         <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">📅 Eventos históricos</div>
-        <div id="cal-efem-eventos-list" style="font-size:12px;color:var(--text3);overflow-y:auto;max-height:320px;padding-right:4px">Seleccioná una fecha para ver efemérides.</div>
+        <div id="cal-efem-eventos-list" style="font-size:12px;color:var(--text3)">Seleccioná una fecha para ver efemérides.</div>
       </div>
-      <div id="cal-efem-nacimientos" style="background:var(--bg3);border-radius:8px;padding:12px;border:1px solid var(--border);display:flex;flex-direction:column">
+      <div id="cal-efem-nacimientos" style="background:var(--bg3);border-radius:8px;padding:12px;border:1px solid var(--border)">
         <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">🎂 Nacimientos</div>
-        <div id="cal-efem-nacimientos-list" style="font-size:12px;color:var(--text3);overflow-y:auto;max-height:320px;padding-right:4px">—</div>
-      </div>
-      <div id="cal-efem-fallecimientos" style="background:var(--bg3);border-radius:8px;padding:12px;border:1px solid var(--border);display:flex;flex-direction:column">
-        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">✝️ Fallecimientos</div>
-        <div id="cal-efem-fallecimientos-list" style="font-size:12px;color:var(--text3);overflow-y:auto;max-height:320px;padding-right:4px">—</div>
+        <div id="cal-efem-nacimientos-list" style="font-size:12px;color:var(--text3)">—</div>
       </div>
     </div>
     <div style="margin-top:10px;font-size:10.5px;color:var(--text3);text-align:right">Fuente: Wikipedia REST API (es.wikipedia.org)</div>
@@ -3428,9 +3424,6 @@ let currentAccount = null;
 
 let token=null, userId=null, userData=null;
 let allItems=[], allOrders=[], allQuestions=[];
-// true cuando loadItemsFull() terminó — evita que data-updated de otra pestaña
-// pise datos completos con el caché slim y vacíe las publicaciones.
-let _itemsFullLoaded = false;
 // Cache de nicknames de compradores (userId → nickname)
 var _nicknameCache = {};
 let globalVisitsByDay = {}; // { 'YYYY-MM-DD': totalVisits }
@@ -3690,9 +3683,9 @@ function stopPolling(){if(_pollingInterval){clearInterval(_pollingInterval);_pol
 async function pollNewData(){
   if(!token||!userId)return;
   try{
-    // Órdenes últimas 6 horas (antes 2h — por si el panel estaba cerrado durante la venta)
-    const from6h=new Date(Date.now()-6*60*60*1000).toISOString();
-    const r=await mlGet('/orders/search?seller='+userId+'&order.date_created.from='+encodeURIComponent(from6h)+'&sort=date_desc&limit=20');
+    // Órdenes últimas 24 horas — cubre el caso de PC apagada todo el día
+    const from24h=new Date(Date.now()-24*60*60*1000).toISOString();
+    const r=await mlGet('/orders/search?seller='+userId+'&order.date_created.from='+encodeURIComponent(from24h)+'&sort=date_desc&limit=50');
     const fresh=r.results||[];
     let hasNew=false;
     const newOrders=[];
@@ -3712,11 +3705,15 @@ async function pollNewData(){
       if(!['paid','confirmed','delivered','shipped'].includes(o.status)) return;
       if(_waAlreadyNotified(o.id)) return; // ya notificada, saltar
       _waNoteOrder(o.id); // marcar como notificada ANTES de enviar
-      const producto  = (o.order_items?.[0]?.item?.title||'Producto').slice(0,60);
+      // Armar descripción con todos los items de la orden (puede tener múltiples productos)
+      const items = o.order_items || [];
+      const producto = items.length === 1
+        ? (items[0]?.item?.title||'Producto').slice(0,60)
+        : items.map(i => (i.quantity>1 ? i.quantity+'x ' : '') + (i.item?.title||'Producto').slice(0,40)).join(' + ');
       const monto     = o.total_amount || 0;
       const comprador = o.buyer?.nickname || '—';
       // Thumbnail: buscar en el item de ML o en el order_item
-      const firstItem = o.order_items && o.order_items[0] && o.order_items[0].item;
+      const firstItem = items[0] && items[0].item;
       const itemId    = firstItem && firstItem.id ? String(firstItem.id) : null;
       const localItem = itemId ? allItems.find(x => String(x.id) === itemId) : null;
       const thumbnail = (localItem && localItem.thumbnail)
@@ -3914,7 +3911,6 @@ async function loadItemsFull(){
       if(i>0 && (i/PARALLEL)%5===0) await new Promise(r=>setTimeout(r,80));
     }
     allItems=full;_updateItemsUI();
-    _itemsFullLoaded = true; // datos completos cargados — ignorar broadcasts data-updated
     // Actualizar health scores con datos recién bajados de ML
     refreshHealthScores();
     console.log('[loadItemsFull]',allItems.length);
@@ -4354,24 +4350,18 @@ function initCrossTabSync(){
         }
         updateMetricsTimestamp();
       } else if(type === 'data-updated'){
-        // Otra pestaña terminó de cargar datos frescos.
-        // Si esta pestaña ya tiene datos completos (loadItemsFull terminó), ignorar:
-        // el caché slim NO debe pisar datos completos y vaciar las publicaciones.
-        if(_itemsFullLoaded){
-          console.log('[CrossTab] data-updated ignorado — esta pestaña ya tiene datos completos.');
-        } else {
-          console.log('[CrossTab] Datos actualizados en otra pestaña — recargando desde caché...');
-          const fresh = _loadDataCache();
-          if(fresh && fresh.items.length > 0){
-            allItems  = fresh.items;
-            allOrders = fresh.orders;
-            _updateItemsUI();
-            _updateOrdersUI(allOrders);
-            if(document.getElementById('section-dashboard')?.classList.contains('active')){
-              renderDashboard(); updateLast50(allOrders.slice(0,50));
-            }
-            _hideCacheAgeBadge();
+        // Otra pestaña terminó de cargar datos frescos de la API
+        console.log('[CrossTab] Datos actualizados en otra pestaña — recargando desde caché...');
+        const fresh = _loadDataCache();
+        if(fresh && fresh.items.length > 0){
+          allItems  = fresh.items;
+          allOrders = fresh.orders;
+          _updateItemsUI();
+          _updateOrdersUI(allOrders);
+          if(document.getElementById('section-dashboard')?.classList.contains('active')){
+            renderDashboard(); updateLast50(allOrders.slice(0,50));
           }
+          _hideCacheAgeBadge();
         }
       } else if(type === 'config-updated'){
         // Otra pestaña detectó cambio en config via sync multi-device
@@ -12469,8 +12459,6 @@ async function calEfemLoad(forceRefresh){
   if(statusEl){ statusEl.textContent = '⏳ Consultando Wikipedia...'; statusEl.style.color='var(--text3)'; }
   if(evEl) evEl.innerHTML = '<div style="color:var(--text3);font-size:11.5px">Cargando...</div>';
   if(nacEl) nacEl.innerHTML = '<div style="color:var(--text3);font-size:11.5px">Cargando...</div>';
-  var defLoadEl = document.getElementById('cal-efem-fallecimientos-list');
-  if(defLoadEl) defLoadEl.innerHTML = '<div style="color:var(--text3);font-size:11.5px">Cargando...</div>';
 
   try{
     var r = await fetch('https://es.wikipedia.org/api/rest_v1/feed/onthisday/all/'+mm+'/'+dd, {
@@ -12479,20 +12467,15 @@ async function calEfemLoad(forceRefresh){
     if(!r.ok) throw new Error('HTTP '+r.status);
     var d = await r.json();
 
-    // Ordenar: primero los que tienen thumbnail (más relevantes para redes), luego por año asc
-    function _efemSort(arr){
-      return arr.slice().sort(function(a, b){
-        var aImg = (a.pages && a.pages[0] && a.pages[0].thumbnail) ? 1 : 0;
-        var bImg = (b.pages && b.pages[0] && b.pages[0].thumbnail) ? 1 : 0;
-        if(aImg !== bImg) return bImg - aImg; // con imagen primero
-        return (a.year||0) - (b.year||0);     // luego más antiguo primero
-      });
-    }
-    var events = _efemSort(d.events||[]).slice(0, 30);
-    var births  = _efemSort(d.births||[]).slice(0, 30);
-    var deaths  = _efemSort(d.deaths||[]).slice(0, 30);
+    // Procesar: tomar los 8 eventos y 8 nacimientos más destacados (los que tienen thumbnail)
+    var events = (d.events||[])
+      .sort(function(a,b){ return (b.year||0) - (a.year||0); }) // más recientes primero
+      .slice(0, 12);
+    var births = (d.births||[])
+      .sort(function(a,b){ return (b.year||0) - (a.year||0); })
+      .slice(0, 12);
 
-    var parsed = { events: events, births: births, deaths: deaths, ts: Date.now() };
+    var parsed = { events: events, births: births, ts: Date.now() };
     _efemCache[key] = parsed;
     calEfemRender(parsed);
 
@@ -12504,71 +12487,48 @@ async function calEfemLoad(forceRefresh){
     if(statusEl){ statusEl.textContent = '❌ '+e.message; statusEl.style.color='var(--red)'; }
     if(evEl) evEl.innerHTML = '<div style="color:var(--text3);font-size:11.5px">No se pudo cargar. Revisá tu conexión.</div>';
     if(nacEl) nacEl.innerHTML = '<div style="color:var(--text3);font-size:11.5px">—</div>';
-    var defErrEl = document.getElementById('cal-efem-fallecimientos-list');
-    if(defErrEl) defErrEl.innerHTML = '<div style="color:var(--text3);font-size:11.5px">—</div>';
   }
 }
 
 function calEfemRender(data){
-  var evEl  = document.getElementById('cal-efem-eventos-list');
+  var evEl = document.getElementById('cal-efem-eventos-list');
   var nacEl = document.getElementById('cal-efem-nacimientos-list');
-  var defEl = document.getElementById('cal-efem-fallecimientos-list');
   if(!evEl || !nacEl) return;
 
-  // Helper: fila de persona con thumb (nacimientos / fallecimientos)
-  function _personaRow(p){
-    var textPage = p.pages && p.pages[0];
-    var thumb = textPage && textPage.thumbnail && textPage.thumbnail.source;
-    var link  = textPage && textPage.content_urls && textPage.content_urls.desktop && textPage.content_urls.desktop.page;
-    var txt   = (p.text||'').replace(/"/g,'&quot;').slice(0, 150);
-    return '<div style="display:flex;gap:8px;padding:5px 0;border-bottom:1px dashed var(--border);font-size:11.5px;line-height:1.45;align-items:flex-start">'
-      +(thumb
-        ? '<img src="'+thumb+'" width="32" height="32" style="border-radius:4px;object-fit:cover;flex-shrink:0;border:1px solid var(--border)" loading="lazy">'
-        : '<div style="width:32px;height:32px;background:var(--bg2);border-radius:4px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:14px">👤</div>')
-      +'<div style="flex:1;min-width:0">'
-        +'<span style="font-weight:700;color:var(--accent)">'+(p.year||'?')+'</span> — '
-        +txt
-        +(link ? ' <a href="'+link+'" target="_blank" rel="noopener" style="font-size:10px;color:var(--accent);text-decoration:none">↗</a>' : '')
-      +'</div>'
-    +'</div>';
-  }
-
   // Eventos históricos
-  if(!(data.events||[]).length){
+  if(!data.events.length){
     evEl.innerHTML = '<div style="color:var(--text3);font-size:11.5px">Sin eventos destacados.</div>';
   } else {
     evEl.innerHTML = data.events.map(function(ev){
       var textPage = ev.pages && ev.pages[0];
-      var thumb = textPage && textPage.thumbnail && textPage.thumbnail.source;
-      var link  = textPage && textPage.content_urls && textPage.content_urls.desktop && textPage.content_urls.desktop.page;
-      var txt   = (ev.text||'').replace(/"/g,'&quot;').slice(0, 180);
-      return '<div style="display:flex;gap:8px;padding:5px 0;border-bottom:1px dashed var(--border);font-size:11.5px;line-height:1.45;align-items:flex-start">'
-        +(thumb
-          ? '<img src="'+thumb+'" width="32" height="32" style="border-radius:4px;object-fit:cover;flex-shrink:0;border:1px solid var(--border)" loading="lazy">'
-          : '<div style="width:32px;height:32px;background:var(--bg2);border-radius:4px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:14px">📅</div>')
-        +'<div style="flex:1;min-width:0">'
-          +'<span style="font-weight:700;color:var(--accent)">'+(ev.year||'?')+'</span> — '
-          +txt
-          +(link ? ' <a href="'+link+'" target="_blank" rel="noopener" style="font-size:10px;color:var(--accent);text-decoration:none">↗</a>' : '')
-        +'</div>'
+      var link = textPage && textPage.content_urls && textPage.content_urls.desktop && textPage.content_urls.desktop.page;
+      var txtSafe = (ev.text||'').replace(/"/g,'&quot;').slice(0, 180);
+      return '<div style="padding:5px 0;border-bottom:1px dashed var(--border);font-size:11.5px;line-height:1.45">'
+        +'<span style="font-weight:700;color:var(--accent)">'+(ev.year||'?')+'</span> — '
+        +txtSafe
+        +(link ? ' <a href="'+link+'" target="_blank" rel="noopener" style="font-size:10px;color:var(--accent);text-decoration:none">↗</a>' : '')
       +'</div>';
     }).join('');
   }
 
   // Nacimientos
-  if(!(data.births||[]).length){
+  if(!data.births.length){
     nacEl.innerHTML = '<div style="color:var(--text3);font-size:11.5px">Sin nacimientos destacados.</div>';
   } else {
-    nacEl.innerHTML = data.births.map(_personaRow).join('');
-  }
-
-  // Fallecimientos
-  if(defEl){
-    if(!(data.deaths||[]).length){
-      defEl.innerHTML = '<div style="color:var(--text3);font-size:11.5px">Sin fallecimientos destacados.</div>';
-    } else {
-      defEl.innerHTML = data.deaths.map(_personaRow).join('');
-    }
+    nacEl.innerHTML = data.births.map(function(b){
+      var textPage = b.pages && b.pages[0];
+      var thumb = textPage && textPage.thumbnail && textPage.thumbnail.source;
+      var link = textPage && textPage.content_urls && textPage.content_urls.desktop && textPage.content_urls.desktop.page;
+      var txtSafe = (b.text||'').replace(/"/g,'&quot;').slice(0, 150);
+      return '<div style="display:flex;gap:8px;padding:5px 0;border-bottom:1px dashed var(--border);font-size:11.5px;line-height:1.45;align-items:flex-start">'
+        +(thumb ? '<img src="'+thumb+'" width="32" height="32" style="border-radius:4px;object-fit:cover;flex-shrink:0;border:1px solid var(--border)">' : '<div style="width:32px;height:32px;background:var(--bg2);border-radius:4px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:14px">👤</div>')
+        +'<div style="flex:1;min-width:0">'
+          +'<span style="font-weight:700;color:var(--accent)">'+(b.year||'?')+'</span> — '
+          +txtSafe
+          +(link ? ' <a href="'+link+'" target="_blank" rel="noopener" style="font-size:10px;color:var(--accent);text-decoration:none">↗</a>' : '')
+        +'</div>'
+      +'</div>';
+    }).join('');
   }
 }
 
