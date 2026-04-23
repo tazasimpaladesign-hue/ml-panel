@@ -3594,6 +3594,22 @@ async function initApp(){
   document.getElementById('login-screen').style.display='none';
   userData=await mlGet('/users/me');
   userId=userData.id;
+  // Registrar refresh_token en el Worker para que el webhook pueda enviar Telegram
+  // aunque el panel esté cerrado. Se hace en background, sin bloquear el inicio.
+  (async () => {
+    try {
+      const appId = localStorage.getItem('ml_active_app') || '';
+      const rt = localStorage.getItem('ml_refresh_' + appId) || localStorage.getItem('ml_ref_' + appId) || '';
+      if (rt && userId) {
+        await fetch(WORKER + '/api/register-token', {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: rt, user_id: String(userId) }),
+        });
+        console.log('[Webhook] refresh_token registrado en Worker para notificaciones 24/7');
+      }
+    } catch(e) { console.warn('[Webhook] Error registrando token:', e.message); }
+  })();
   const acctName  = APP_CONFIG.STORE_NAME  || userData.nickname || 'Tu tienda';
   const acctColor = APP_CONFIG.STORE_COLOR || 'var(--accent)';
   document.getElementById('sb-store').textContent = acctName;
@@ -3683,9 +3699,9 @@ function stopPolling(){if(_pollingInterval){clearInterval(_pollingInterval);_pol
 async function pollNewData(){
   if(!token||!userId)return;
   try{
-    // Órdenes últimas 24 horas — cubre el caso de PC apagada todo el día
-    const from24h=new Date(Date.now()-24*60*60*1000).toISOString();
-    const r=await mlGet('/orders/search?seller='+userId+'&order.date_created.from='+encodeURIComponent(from24h)+'&sort=date_desc&limit=50');
+    // Órdenes últimas 6 horas (antes 2h — por si el panel estaba cerrado durante la venta)
+    const from6h=new Date(Date.now()-6*60*60*1000).toISOString();
+    const r=await mlGet('/orders/search?seller='+userId+'&order.date_created.from='+encodeURIComponent(from6h)+'&sort=date_desc&limit=20');
     const fresh=r.results||[];
     let hasNew=false;
     const newOrders=[];
@@ -3705,15 +3721,11 @@ async function pollNewData(){
       if(!['paid','confirmed','delivered','shipped'].includes(o.status)) return;
       if(_waAlreadyNotified(o.id)) return; // ya notificada, saltar
       _waNoteOrder(o.id); // marcar como notificada ANTES de enviar
-      // Armar descripción con todos los items de la orden (puede tener múltiples productos)
-      const items = o.order_items || [];
-      const producto = items.length === 1
-        ? (items[0]?.item?.title||'Producto').slice(0,60)
-        : items.map(i => (i.quantity>1 ? i.quantity+'x ' : '') + (i.item?.title||'Producto').slice(0,40)).join(' + ');
+      const producto  = (o.order_items?.[0]?.item?.title||'Producto').slice(0,60);
       const monto     = o.total_amount || 0;
       const comprador = o.buyer?.nickname || '—';
       // Thumbnail: buscar en el item de ML o en el order_item
-      const firstItem = items[0] && items[0].item;
+      const firstItem = o.order_items && o.order_items[0] && o.order_items[0].item;
       const itemId    = firstItem && firstItem.id ? String(firstItem.id) : null;
       const localItem = itemId ? allItems.find(x => String(x.id) === itemId) : null;
       const thumbnail = (localItem && localItem.thumbnail)
