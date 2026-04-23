@@ -710,7 +710,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v65 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v66 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -3870,7 +3870,7 @@ async function loadItemsFast(){
     // _nocache rompe cualquier caché de red/Worker — health incluido en atributos
     const nc=Date.now();
     const results=await Promise.all(chunks.map(chunk=>
-      mlGet('/items?ids='+chunk.join(',')+'&include_attributes=all&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations,health&_nocache='+nc)
+      mlGet('/items?ids='+chunk.join(',')+'&include_attributes=all&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations,health,date_created&_nocache='+nc)
     ));
     allItems=[];
     results.forEach(r=>{ r.forEach(x=>{if(x.code===200)allItems.push(x.body);}); });
@@ -3918,7 +3918,7 @@ async function loadItemsFull(){
       const batch = chunks.slice(i, i+PARALLEL);
       const results = await Promise.all(batch.map(async (chunk) => {
         try{
-          const r = await mlGet('/items?ids='+chunk.join(',')+'&include_attributes=all&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations,health');
+          const r = await mlGet('/items?ids='+chunk.join(',')+'&include_attributes=all&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations,health,date_created');
           return r || [];
         }catch(e){ return []; }
       }));
@@ -4984,18 +4984,44 @@ function renderMainChart(mode){
     }
   });
 
-  // Preguntas (período actual)
+  // Preguntas (período actual + período anterior)
+  // Fix v66: antes solo se llenaba .curr, por lo que la línea "prev" nunca se dibujaba
+  // cuando se seleccionaba solo el botón "💬 Preguntas".
   (allQuestions||[]).forEach(q=>{
+    const ts = new Date(q.date_created||0);
     const k = (q.date_created||'').slice(0,10);
-    if(k && acc.questions.curr[k]!==undefined) acc.questions.curr[k]++;
+    if(k && acc.questions.curr[k]!==undefined){
+      acc.questions.curr[k]++;
+    }
+    // Período anterior: desplazar al rango actual para visualización comparativa
+    if(ts >= prevCutoff && ts < currCutoff){
+      const kPrev = new Date(ts.getTime() + days*86400000).toISOString().slice(0,10);
+      if(kPrev && acc.questions.prev[kPrev]!==undefined){
+        acc.questions.prev[kPrev]++;
+      }
+    }
   });
 
   // Visitas desde globalVisitsByDay (datos reales de items_visits/time_window)
+  // Fix v66: el cálculo del key del período anterior usaba new Date(k) + toISOString,
+  // lo que introducía un desfase de timezone (UTC vs AR UTC-3) y hacía que
+  // globalVisitsByDay[prevDate] casi nunca matcheara. Ahora calculamos el día previo
+  // de forma timezone-safe usando aritmética de fecha local.
+  const _shiftDayKey = function(ymd, deltaDays){
+    // Parsea 'YYYY-MM-DD' como fecha LOCAL (misma estrategia que _parseLocalDate)
+    const parts = String(ymd).split('-');
+    if(parts.length !== 3) return '';
+    const dt = new Date(parseInt(parts[0],10), parseInt(parts[1],10)-1, parseInt(parts[2],10));
+    dt.setDate(dt.getDate() + deltaDays);
+    return dt.getFullYear() + '-'
+      + String(dt.getMonth()+1).padStart(2,'0') + '-'
+      + String(dt.getDate()).padStart(2,'0');
+  };
   keys.forEach(k=>{
     acc.visits.curr[k] = globalVisitsByDay[k]||0;
-    // Período anterior
-    const prevDate = new Date(new Date(k).getTime()-days*86400000).toISOString().slice(0,10);
-    acc.visits.prev[k] = globalVisitsByDay[prevDate]||0;
+    // Período anterior → mismo día, 30 días antes (fecha local, sin UTC shift)
+    const prevDate = _shiftDayKey(k, -days);
+    acc.visits.prev[k] = (prevDate && globalVisitsByDay[prevDate]) || 0;
   });
 
   // Performance = conv% = ventas del día / visitas del día × 100
@@ -5575,9 +5601,11 @@ function renderDashRepMini(){
 }
 
 // ── Entry point del dashboard ──────────────────────────────
-// ── Cargar visitas reales del vendedor (últimos 30 días por día) ──
-// Endpoint: GET /users/{id}/items_visits/time_window?last=30&unit=day
-// Devuelve array de { date, total } con las visitas agregadas de todos los ítems
+// ── Cargar visitas reales del vendedor (últimos 60 días por día) ──
+// Endpoint: GET /users/{id}/items_visits/time_window?last=60&unit=day
+// Devuelve array de { date, total } con las visitas agregadas de todos los ítems.
+// v66: ampliado de 30→60 días para que el gráfico "30d vs 30d anteriores" pueda
+// dibujar la línea comparativa del período anterior (días 31-60) en visitas y conv%.
 var _lastVisitsLoadTs = 0;
 async function loadDashVisits(){
   if(!userId) return;
@@ -5586,7 +5614,7 @@ async function loadDashVisits(){
     return;
   }
   try{
-    const r = await mlGet('/users/'+userId+'/items_visits/time_window?last=30&unit=day');
+    const r = await mlGet('/users/'+userId+'/items_visits/time_window?last=60&unit=day');
     const results = r.results||r.visits||r.data||[];
     globalVisitsByDay = {};
     results.forEach(entry=>{
@@ -9374,6 +9402,7 @@ function refreshAlerts(){
       actionLabel: 'Ir a Publicidad',
       item_id:     i.id,
       item_title:  i.title,
+      _sales30d:   i._sales30d || 0,   // ← clave para el sort cuando el filtro es mas_vendidos
       _adUrl:      'https://www.mercadolibre.com.ar/publicidad/resumen-anunciante?from=seller_central&validate_user=true#from=menu_mkt',
     }));
   }
@@ -9390,11 +9419,18 @@ function refreshAlerts(){
     }
   });
 
-  // ── Ordenamiento global: ventas históricas DESC (más vendidos primero) ──────
-  // Las alertas globales (sin item_id, _sold = 0) quedan al final naturalmente.
-  filteredAlerts.sort(function(a,b){
-    return (b._sold || 0) - (a._sold || 0);
-  });
+  // ── Ordenamiento ────────────────────────────────────────────────────────────
+  // Filtro 'mas_vendidos' (🏆 Top 50 · 30d) → ordenar por ventas de los últimos 30 días.
+  // Resto de filtros → ordenar por ventas históricas DESC (productos más vendidos primero).
+  if (_alertFilter === 'mas_vendidos') {
+    filteredAlerts.sort(function(a,b){
+      return (b._sales30d || 0) - (a._sales30d || 0);
+    });
+  } else {
+    filteredAlerts.sort(function(a,b){
+      return (b._sold || 0) - (a._sold || 0);
+    });
+  }
 
   // Actualizar pill de total
   const pillEl = document.getElementById('alm-total-pill');
@@ -9657,6 +9693,29 @@ function setBulkTab(tab,btn){
 // EDICIÓN MASIVA — Filtros + Acciones
 // ══════════════════════════════════════════════════════════
 let _bulkFiltered = []; // ítems que pasan el filtro activo
+let _bulkSort = { col: null, dir: -1 }; // {col: 'price'|'title'|'stock', dir: 1=asc, -1=desc}
+
+function bulkSetSort(col){
+  if(_bulkSort.col === col){
+    _bulkSort.dir = _bulkSort.dir * -1; // toggle
+  } else {
+    _bulkSort.col = col;
+    _bulkSort.dir = -1; // por defecto DESC (precio alto primero, stock alto primero)
+  }
+  renderBulkList();
+}
+
+function _bulkApplySort(arr){
+  if(!_bulkSort.col) return arr;
+  const col = _bulkSort.col, dir = _bulkSort.dir;
+  return arr.slice().sort((a,b)=>{
+    let va = 0, vb = 0;
+    if(col === 'price'){ va = a.price||0; vb = b.price||0; }
+    else if(col === 'stock'){ va = a.available_quantity??0; vb = b.available_quantity??0; }
+    else if(col === 'title'){ return dir * String(a.title||'').localeCompare(String(b.title||''), 'es'); }
+    return dir * (vb - va);
+  });
+}
 
 function bulkClearFilters(){
   ['bulk-filter-q','bulk-filter-pmin','bulk-filter-pmax','bulk-filter-smin','bulk-filter-smax'].forEach(id=>{
@@ -9704,34 +9763,51 @@ function renderBulkList(){
     el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:16px 0">Sin resultados para estos filtros.</div>';
     return;
   }
-  el.innerHTML=_bulkFiltered.map(i=>{
+
+  // ── Encabezado con botones de ordenamiento ─────────────────────────────
+  const arrow = (c)=> _bulkSort.col===c ? (_bulkSort.dir===-1 ? ' ↓' : ' ↑') : ' ↕';
+  const headerHtml = '<div style="display:flex;gap:8px;align-items:center;padding:6px 0 10px 28px;border-bottom:1px solid var(--border);margin-bottom:4px;font-size:11px;color:var(--text3);flex-wrap:wrap">'
+    +'<span style="font-weight:600">Ordenar:</span>'
+    +'<button class="btn btn-xs '+(_bulkSort.col==='title'?'btn-primary':'btn-ghost')+'" onclick="bulkSetSort(\'title\')" style="font-size:10.5px">Título'+arrow('title')+'</button>'
+    +'<button class="btn btn-xs '+(_bulkSort.col==='price'?'btn-primary':'btn-ghost')+'" onclick="bulkSetSort(\'price\')" style="font-size:10.5px">Precio'+arrow('price')+'</button>'
+    +'<button class="btn btn-xs '+(_bulkSort.col==='stock'?'btn-primary':'btn-ghost')+'" onclick="bulkSetSort(\'stock\')" style="font-size:10.5px">Stock'+arrow('stock')+'</button>'
+  +'</div>';
+
+  const items = _bulkApplySort(_bulkFiltered);
+
+  const rowsHtml = items.map(i=>{
     const qty=i.available_quantity??0;
     const qColor=qty===0?'var(--red)':qty<=3?'var(--amber)':'var(--green)';
     const editUrl = (typeof mlEditLink==='function') ? mlEditLink(i.id) : ('https://www.mercadolibre.com.ar/publicaciones/'+i.id+'/modificar');
-    const statusBadge = '<span class="badge '+(i.status==='active'?'bg-green':'bg-amber')+'" style="white-space:nowrap">'+(i.status==='active'?'● Activa':'⏸ Pausada')+'</span>';
-    return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">'
+    const statusBadge = '<span class="badge '+(i.status==='active'?'bg-green':'bg-amber')+'" style="white-space:nowrap;font-size:9.5px">'+(i.status==='active'?'● Activa':'⏸ Pausada')+'</span>';
+    return '<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)">'
+      // (1) checkbox
       +'<input type="checkbox" class="bulk-item-cb" value="'+i.id+'" style="flex-shrink:0">'
-      +(i.thumbnail?'<img src="'+i.thumbnail+'" width="36" height="36" style="object-fit:cover;border-radius:4px;flex-shrink:0" onerror="this.style.display=\'none\'">':'')
-      +'<div style="flex:1;min-width:0">'
-        +'<div style="font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+i.title+'</div>'
-        +'<div style="font-size:10.5px;color:var(--text3);display:flex;gap:8px;margin-top:2px;align-items:center">'
-          +'<span>'+i.id+'</span>'
-          +'<span style="color:'+qColor+'">Stock: '+qty+'</span>'
+      // (2) imagen — ampliada de 36 a 52
+      +(i.thumbnail
+        ? '<img src="'+i.thumbnail+'" width="52" height="52" style="object-fit:cover;border-radius:5px;flex-shrink:0;border:1px solid var(--border)" onerror="this.style.display=\'none\'">'
+        : '<div style="width:52px;height:52px;background:var(--bg3);border-radius:5px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:18px">📦</div>')
+      // (3) bloque título + metadata + precio (todo junto, alineado a la izquierda)
+      +'<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">'
+        +'<div style="font-size:12.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+(i.title||'').replace(/"/g,'&quot;')+'">'+i.title+'</div>'
+        +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:10.5px;color:var(--text3)">'
+          // Precio editable — AHORA al lado del título, no al final
+          +'<span id="bulk-price-cell-'+i.id+'">'
+            +'<span style="font-size:12px;font-weight:700;color:var(--text);cursor:pointer" '
+              +'onclick="bulkStartPriceEdit(\''+i.id+'\','+(i.price||0)+')" '
+              +'title="Clic para editar precio">$'+(i.price||0).toLocaleString('es-AR')+' ✎</span>'
+          +'</span>'
+          +'<span style="color:'+qColor+';font-weight:600">Stock: '+qty+'</span>'
+          +statusBadge
+          +'<span style="color:var(--text3)">'+i.id+'</span>'
         +'</div>'
       +'</div>'
-      // ── Columna PRECIO (edición inline — misma lógica que SEO/Publicaciones) ──
-      +'<div id="bulk-price-cell-'+i.id+'" style="flex-shrink:0;min-width:110px;text-align:right">'
-        +'<span style="font-size:12px;font-weight:600;color:var(--text);cursor:pointer" '
-          +'onclick="bulkStartPriceEdit(\''+i.id+'\','+(i.price||0)+')" '
-          +'title="Clic para editar precio">$'+(i.price||0).toLocaleString('es-AR')+' ✎</span>'
-      +'</div>'
-      // ── Estado + acción Editar en ML ──────────────────────────────────────
-      +'<div style="display:flex;flex-direction:column;gap:4px;align-items:stretch;flex-shrink:0;min-width:118px">'
-        +statusBadge
-        +(editUrl ? '<a href="'+editUrl+'" target="_blank" rel="noopener" class="btn btn-ghost btn-xs" style="text-decoration:none;background:#fffbeb;color:#78350f;border-color:#fde68a;font-size:10px;white-space:nowrap;text-align:center" title="Editar en MercadoLibre">✏️ Editar en ML</a>' : '')
-      +'</div>'
+      // (4) Botón Editar en ML — siempre a la derecha
+      +(editUrl ? '<a href="'+editUrl+'" target="_blank" rel="noopener" class="btn btn-ghost btn-xs" style="flex-shrink:0;text-decoration:none;background:#fffbeb;color:#78350f;border-color:#fde68a;font-size:10px;white-space:nowrap" title="Editar en MercadoLibre">✏️ Editar en ML</a>' : '')
       +'</div>';
   }).join('');
+
+  el.innerHTML = headerHtml + rowsHtml;
 }
 
 // ── Edición inline de precio en Edición Masiva ────────────────────────────
@@ -9740,7 +9816,7 @@ function bulkStartPriceEdit(itemId, currentPrice){
   const cell = document.getElementById('bulk-price-cell-'+itemId);
   if(!cell) return;
   const minPrice = (typeof SEO_MIN_PRICE !== 'undefined') ? SEO_MIN_PRICE : 100;
-  cell.innerHTML = '<div style="display:flex;align-items:center;gap:3px;justify-content:flex-end">'
+  cell.innerHTML = '<span style="display:inline-flex;align-items:center;gap:3px;vertical-align:middle">'
     +'<span style="font-size:10px;color:var(--text3)">$</span>'
     +'<input id="bulk-prc-'+itemId+'" type="number" value="'+currentPrice+'" min="'+minPrice+'" step="1" '
       +'style="width:80px;font-size:12px;padding:2px 5px;border-radius:4px;border:1px solid var(--accent);background:var(--bg3);color:var(--text)" '
@@ -9748,7 +9824,7 @@ function bulkStartPriceEdit(itemId, currentPrice){
     +'<button class="btn btn-primary btn-xs" style="padding:1px 6px" onclick="bulkSavePrice(\''+itemId+'\')">✓</button>'
     +'<button class="btn btn-ghost btn-xs" style="padding:1px 5px" onclick="renderBulkList()">✕</button>'
     +'<span id="bulk-prc-msg-'+itemId+'" style="font-size:9px"></span>'
-  +'</div>';
+  +'</span>';
   const inp = document.getElementById('bulk-prc-'+itemId);
   if(inp){ inp.focus(); inp.select(); }
 }
@@ -12479,14 +12555,39 @@ async function calGenerateContent(eventId, dateStr){
         } : null,
       })
     });
-    if(!r.ok) throw new Error('HTTP '+r.status);
+
+    // ── Lectura de error robusta ────────────────────────────────────────────
+    // Antes: throw new Error('HTTP '+r.status) → el usuario solo veía "HTTP 503"
+    //        sin saber qué modelos fallaron ni por qué.
+    // Ahora: si el body es JSON con {error, details}, mostramos ambos.
+    if(!r.ok){
+      var errMsg = 'HTTP '+r.status;
+      try{
+        var errData = await r.json();
+        if(errData && errData.error){
+          errMsg = errData.error;
+          if(errData.details && Array.isArray(errData.details) && errData.details.length){
+            errMsg += ' · Modelos probados: '+errData.details.slice(0,3).join(' | ');
+          } else if(errData.raw){
+            errMsg += ' · '+String(errData.raw).slice(0,120);
+          }
+        }
+      }catch(_e){ /* body no es JSON, dejamos HTTP X */ }
+      throw new Error(errMsg);
+    }
+
     var d = await r.json();
     if(!d || !d.content) throw new Error('Respuesta vacía');
 
     _calContentCache[eventId+'_'+dateStr] = d.content;
     calRenderContent(eventId, d.content);
   }catch(e){
-    resultEl.innerHTML = '<div class="alert a-warn">Error generando: '+e.message+'</div>';
+    resultEl.innerHTML = '<div class="alert a-warn" style="font-size:11.5px;line-height:1.4">'
+      +'<strong>Error generando:</strong> '+(e.message||'desconocido')
+      +'<div style="margin-top:6px;font-size:10.5px;color:var(--text3)">'
+      +'Causas frecuentes: (1) OPENROUTER_KEY sin crédito o inválida · (2) modelos gratuitos agotados por rate-limit (20 req/min en OpenRouter) · (3) modelos :free obsoletos en el Worker. Esperá 1 min y probá de nuevo, o actualizá AI_MODELS en el Worker.'
+      +'</div>'
+    +'</div>';
   }finally{
     btn.disabled = false;
     btn.textContent = '✨ Regenerar con IA';
