@@ -710,7 +710,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v69 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v70 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -9047,8 +9047,20 @@ function initRules(){
 
 var _alertFilter = 'all';
 
+// ── v70: Bulk Actions (Pausa Masiva de publicaciones) ───────────────────────
+// Set de item_ids seleccionados para pausado masivo. Se limpia cada vez que
+// cambia el filtro activo para evitar mezclas entre distintas categorías.
+var _alertBulkSelected = new Set();
+
+// Categorías donde tiene sentido mostrar checkboxes de selección masiva.
+// Excluimos 'paused' (ya están pausadas) y 'preguntas' (no son publicaciones).
+var _ALERT_BULK_ENABLED = new Set(['all','stock','quality','sin_visitas','sin_ventas','sinvis','fuga_conv','mas_vendidos','rank_drop']);
+function _alertBulkIsEnabled(){ return _ALERT_BULK_ENABLED.has(_alertFilter); }
+
 function setAlertFilter(filter, btn) {
   _alertFilter = filter;
+  // v70: limpiar selección de pausa masiva al cambiar filtro
+  _alertBulkSelected.clear();
   // Reset todos los botones al estado ghost y remover af-active
   document.querySelectorAll('#alerts-filter-bar button[id^="af-"]').forEach(b => {
     b.className = 'btn btn-ghost btn-sm';
@@ -9584,6 +9596,39 @@ function refreshAlerts(){
       <div style="margin-left:auto;font-size:11px;color:var(--text3)">${alerts.length} alertas en total</div>
     </div>`;
 
+  // ── v70: Barra de acciones masivas (solo filtros donde tiene sentido) ──────
+  // Calculamos qué alertas tienen item_id (son publicaciones pausables)
+  const _bulkEligible = filteredAlerts.filter(a => a.item_id);
+  const _bulkEnabled  = _alertBulkIsEnabled() && _bulkEligible.length > 0;
+
+  // Limpiar selección de IDs que ya no están en filtro actual (evita fantasmas)
+  if(_bulkEnabled){
+    const currentIds = new Set(_bulkEligible.map(a => a.item_id));
+    Array.from(_alertBulkSelected).forEach(id => { if(!currentIds.has(id)) _alertBulkSelected.delete(id); });
+  } else {
+    _alertBulkSelected.clear();
+  }
+
+  const _allSelected = _bulkEnabled && _bulkEligible.every(a => _alertBulkSelected.has(a.item_id));
+  const _selCount    = _alertBulkSelected.size;
+
+  const bulkBar = _bulkEnabled ? `
+    <div id="alert-bulk-bar" style="position:sticky;top:54px;z-index:10;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;margin-bottom:8px;display:flex;align-items:center;gap:12px;box-shadow:0 2px 4px rgba(0,0,0,.04)">
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;user-select:none">
+        <input type="checkbox" id="alert-bulk-master" ${_allSelected?'checked':''} onchange="alertBulkToggleAll(this.checked)" style="width:16px;height:16px;cursor:pointer">
+        <span>Seleccionar todas <span style="color:var(--text3);font-weight:400">(${_bulkEligible.length})</span></span>
+      </label>
+      <div style="flex:1;min-width:0"></div>
+      ${_selCount > 0 ? `
+        <span style="font-size:12px;color:var(--text3)">${_selCount} seleccionada${_selCount!==1?'s':''}</span>
+        <button class="btn btn-sm" id="alert-bulk-pause-btn" onclick="alertBulkPauseConfirm()" style="background:#fef3c7;color:#92400e;border:1px solid #fbbf24;font-weight:600;white-space:nowrap">
+          ⏸️ Pausar seleccionadas en ML
+        </button>
+      ` : `
+        <span style="font-size:11px;color:var(--text3);font-style:italic">Seleccioná publicaciones para pausar en bloque</span>
+      `}
+    </div>` : '';
+
   // ── Configuración visual por prioridad ────────────────
   const PRI = {
     1: { label:'CRÍTICA',    badgeCls:'bg-red',   borderColor:'#f4645f', btnBg:'#fef2f2', btnColor:'#991b1b', btnBorder:'#fecaca' },
@@ -9601,10 +9646,21 @@ function refreshAlerts(){
     const extraBtn = a._adUrl && safeId
       ? `<button class="btn btn-sm" onclick="window.open('https://www.mercadolibre.com.ar/publicaciones/${safeId}/modificar','_blank','noopener')" style="flex-shrink:0;background:#fffbeb;color:#78350f;border:1px solid #fde68a;font-weight:600;white-space:nowrap;margin-top:4px">✏️ Editar en ML -></button>`
       : '';
+
+    // v70: checkbox individual para alertas con item_id, solo en filtros bulk-enabled
+    const bulkCheckbox = (_bulkEnabled && a.item_id) ? `
+      <input type="checkbox" class="alert-bulk-cb" data-item-id="${safeId}"
+        ${_alertBulkSelected.has(a.item_id) ? 'checked' : ''}
+        onchange="alertBulkToggleOne('${safeId}', this.checked)"
+        style="width:18px;height:18px;cursor:pointer;align-self:center;margin:0 4px 0 2px;flex-shrink:0"
+        title="Seleccionar para pausa masiva">` : '';
+
     return `
       <div class="alert-action-card priority-${a.priority === 1 ? 'critical' : a.priority === 2 ? 'warn' : 'info'}"
            id="alertcard-${a.uid}"
+           data-item-id="${safeId}"
            style="border-left-color:${p.borderColor}">
+        ${bulkCheckbox}
         <div class="alert-icon" style="font-size:18px;line-height:1;align-self:flex-start;margin-top:4px">${a.icon}</div>
         <div style="display:flex;align-items:flex-start;gap:10px;flex:1;min-width:0">
           ${(()=>{const _ai=a.item_id?allItems.find(i=>i.id===a.item_id):null;const _th=_ai&&_ai.thumbnail?_ai.thumbnail:'';return _th?`<img src="${_th}" width="56" height="56" loading="lazy" style="object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border);margin-top:2px" onerror="this.style.display='none'">`:'';})()} 
@@ -9628,7 +9684,137 @@ function refreshAlerts(){
       </div>`;
   }).join('');
 
-  el.innerHTML = summaryBar + `<div style="display:flex;flex-direction:column;gap:8px">${cards}</div>`;
+  el.innerHTML = summaryBar + bulkBar + `<div style="display:flex;flex-direction:column;gap:8px">${cards}</div>`;
+}
+
+// ═══════════════════════════════════════════════════════════
+// v70: BULK ACTIONS — Selección y Pausado Masivo de publicaciones
+// ═══════════════════════════════════════════════════════════
+
+// Toggle individual de un item por su ID ML
+function alertBulkToggleOne(itemId, checked){
+  if(!itemId) return;
+  if(checked) _alertBulkSelected.add(itemId);
+  else        _alertBulkSelected.delete(itemId);
+  // Re-render SOLO la barra de bulk (no la lista completa, para mantener scroll)
+  _alertBulkRefreshBar();
+  // Sincronizar el checkbox master
+  _alertBulkSyncMaster();
+}
+
+// Toggle "seleccionar todas las visibles"
+function alertBulkToggleAll(checked){
+  // Solo los ids de las alertas actualmente visibles con item_id
+  const visibleCards = document.querySelectorAll('.alert-bulk-cb');
+  visibleCards.forEach(cb => {
+    const id = cb.getAttribute('data-item-id');
+    if(!id) return;
+    cb.checked = checked;
+    if(checked) _alertBulkSelected.add(id);
+    else        _alertBulkSelected.delete(id);
+  });
+  _alertBulkRefreshBar();
+}
+
+// Refresco silencioso del estado del master checkbox al marcar/desmarcar uno
+function _alertBulkSyncMaster(){
+  const master = document.getElementById('alert-bulk-master');
+  if(!master) return;
+  const visible = Array.from(document.querySelectorAll('.alert-bulk-cb'));
+  if(!visible.length){ master.checked = false; return; }
+  master.checked = visible.every(cb => cb.checked);
+  // Estado intermedio si hay algunos seleccionados (indicador visual)
+  master.indeterminate = visible.some(cb => cb.checked) && !master.checked;
+}
+
+// Refresca solo el panel de bulk (contador + botón) sin re-renderizar la lista
+function _alertBulkRefreshBar(){
+  const bar = document.getElementById('alert-bulk-bar');
+  if(!bar) return;
+  const n = _alertBulkSelected.size;
+  // Encontrar los spans/botones a actualizar
+  const existingBtn = document.getElementById('alert-bulk-pause-btn');
+  if(n > 0 && !existingBtn){
+    // Aparece la acción — re-render completo de la barra
+    refreshAlerts();
+    return;
+  }
+  if(n === 0 && existingBtn){
+    // Se vació la selección — re-render para ocultar el botón
+    refreshAlerts();
+    return;
+  }
+  // Solo actualizar contador si ambos estados se mantienen
+  const counter = bar.querySelector('span[style*="font-size:12px"]');
+  if(counter) counter.textContent = n + ' seleccionada' + (n!==1?'s':'');
+}
+
+// Confirmación + ejecución del pausado masivo
+async function alertBulkPauseConfirm(){
+  const ids = Array.from(_alertBulkSelected);
+  if(!ids.length) return;
+  const confirmMsg = '¿Pausar ' + ids.length + ' publicación' + (ids.length!==1?'es':'') + ' en MercadoLibre?\n\n'
+    + 'Quedarán ocultas para compradores hasta que las reactives manualmente.\n'
+    + 'Podrás reactivarlas desde la sección Publicaciones > Pausadas.';
+  if(!confirm(confirmMsg)) return;
+
+  const btn = document.getElementById('alert-bulk-pause-btn');
+  if(btn){
+    btn.disabled = true;
+    btn.innerHTML = '⏳ Pausando ' + ids.length + '...';
+    btn.style.opacity = '0.7';
+  }
+
+  try{
+    const r = await fetch(WORKER + '/api/items/bulk-pause', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    });
+    const d = await r.json();
+    if(!r.ok){
+      throw new Error(d.error || ('HTTP ' + r.status));
+    }
+
+    const okCount     = (d.ok || []).length;
+    const failCount   = (d.failed || []).length;
+    const okSet       = new Set(d.ok || []);
+
+    console.log('[BulkPause] Resultado:', { okCount, failCount, failed: d.failed });
+
+    // Actualizar estado local: los items pausados pasan a status='paused'
+    (d.ok || []).forEach(id => {
+      const it = allItems.find(x => x.id === id);
+      if(it) it.status = 'paused';
+    });
+
+    // Limpiar selección de los que fueron pausados OK
+    okSet.forEach(id => _alertBulkSelected.delete(id));
+
+    // Toast con resultado
+    if(okCount > 0 && failCount === 0){
+      showToast('✅ ' + okCount + ' publicación' + (okCount!==1?'es':'') + ' pausada' + (okCount!==1?'s':'') + ' en ML', 'success', 5000);
+    } else if(okCount > 0 && failCount > 0){
+      showToast('⚠️ ' + okCount + ' OK · ' + failCount + ' falló' + (failCount!==1?'aron':''), 'warn', 7000);
+      // Mostrar errores en consola para diagnóstico
+      (d.failed || []).forEach(f => console.warn('[BulkPause] Falló', f.id, ':', f.error));
+    } else {
+      showToast('❌ No se pudo pausar ninguna publicación', 'error', 7000);
+      (d.failed || []).forEach(f => console.warn('[BulkPause] Falló', f.id, ':', f.error));
+    }
+
+    // Re-render: las pausadas ya no aparecerán como alertas activas (su categoría
+    // cambia a 'paused' en la próxima generación), y refreshAlerts las recalcula
+    refreshAlerts();
+  }catch(e){
+    console.error('[BulkPause] Error:', e);
+    showToast('❌ Error al pausar: ' + e.message, 'error', 7000);
+    if(btn){
+      btn.disabled = false;
+      btn.innerHTML = '⏸️ Pausar seleccionadas en ML';
+      btn.style.opacity = '';
+    }
+  }
 }
 
 // ── Dispatcher principal de acciones ──────────────────────
