@@ -710,7 +710,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v68 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v69 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -3562,7 +3562,28 @@ async function tryRefreshToken(){
   try{
     const r=await fetch(WORKER+'/refresh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({refresh_token:rt,app_id:appId})});
     const d=await r.json();
-    if(d.access_token){token=d.access_token;localStorage.setItem('ml_token_'+appId,token);return true;}
+    if(d.access_token){
+      token=d.access_token;
+      localStorage.setItem('ml_token_'+appId,token);
+      // v69: ML puede rotar el refresh_token en cada refresh. Si vino uno nuevo,
+      // actualizarlo en localStorage Y re-registrarlo en el KV del Worker para
+      // que el webhook siga pudiendo enviar Telegram cuando la PC esté apagada.
+      if(d.refresh_token && d.refresh_token !== rt){
+        localStorage.setItem('ml_refresh_'+appId, d.refresh_token);
+        console.log('[Webhook] Refresh token rotado — re-registrando en KV...');
+        if(userId){
+          try{
+            await fetch(WORKER + '/api/register-token', {
+              method: 'POST',
+              headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ refresh_token: d.refresh_token, user_id: String(userId) }),
+            });
+            console.log('[Webhook] Token rotado registrado OK');
+          }catch(e){ console.warn('[Webhook] No se pudo re-registrar token rotado:', e.message); }
+        }
+      }
+      return true;
+    }
   }catch(e){}
   return false;
 }
@@ -3604,15 +3625,28 @@ async function initApp(){
     try {
       const appId = localStorage.getItem('ml_active_app') || '';
       const rt = localStorage.getItem('ml_refresh_' + appId) || localStorage.getItem('ml_ref_' + appId) || '';
-      if (rt && userId) {
-        await fetch(WORKER + '/api/register-token', {
-          method: 'POST',
-          headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refresh_token: rt, user_id: String(userId) }),
-        });
-        console.log('[Webhook] refresh_token registrado en Worker para notificaciones 24/7');
+      if (!rt) {
+        console.warn('[Webhook] ⚠ Sin refresh_token en localStorage — notificaciones 24/7 NO activas. Hacé logout y login de nuevo.');
+        return;
       }
-    } catch(e) { console.warn('[Webhook] Error registrando token:', e.message); }
+      if (!userId) {
+        console.warn('[Webhook] ⚠ Sin userId todavía');
+        return;
+      }
+      const r = await fetch(WORKER + '/api/register-token', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: rt, user_id: String(userId) }),
+      });
+      if (r.ok) {
+        console.log('[Webhook] ✅ refresh_token registrado — notificaciones 24/7 activas para ventas y preguntas');
+      } else {
+        const d = await r.json().catch(()=>({}));
+        console.warn('[Webhook] ❌ Error registrando token: HTTP ' + r.status + ' — ' + (d.error||''));
+      }
+    } catch(e) {
+      console.warn('[Webhook] Error registrando token:', e.message);
+    }
   })();
   const acctName  = APP_CONFIG.STORE_NAME  || userData.nickname || 'Tu tienda';
   const acctColor = APP_CONFIG.STORE_COLOR || 'var(--accent)';
