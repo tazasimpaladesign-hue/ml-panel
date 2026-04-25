@@ -710,7 +710,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v71 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v72 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1205,10 +1205,12 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <th onclick="seoSort('quality')" style="cursor:pointer;user-select:none;white-space:nowrap">Calidad pub. <span id="seo-sort-quality" style="font-size:10px"></span></th>
           <th onclick="seoSort('price')" style="cursor:pointer;user-select:none;white-space:nowrap">Precio ↕</th>
           <th onclick="seoSort('stock')" style="cursor:pointer;user-select:none;white-space:nowrap">Stock ↕</th>
-          <th onclick="seoSort('sold')" style="cursor:pointer;user-select:none;white-space:nowrap" title="Total ventas históricas del ítem">Vendidas ↕<span id="seo-sort-sold" style="font-size:10px"></span></th>
-          <th onclick="seoSort('sales7')" style="cursor:pointer;user-select:none;white-space:nowrap;background:#f0fdf4" title="Ventas últimos 7 días">Ventas 7d ↕<span id="seo-sort-sales7" style="font-size:10px"></span></th>
-          <th onclick="seoSort('visits')" style="cursor:pointer;user-select:none;white-space:nowrap;background:#eff6ff" title="Visitas últimos 7 días">Visitas 7d ↕<span id="seo-sort-visits" style="font-size:10px"></span></th>
-          <th onclick="seoSort('conv')" style="cursor:pointer;user-select:none;white-space:nowrap;background:#fefce8" title="Tasa de conversión = Ventas/Visitas">Conv% ↕<span id="seo-sort-conv" style="font-size:10px"></span></th>
+          <th onclick="seoSort('visits30')" style="cursor:pointer;user-select:none;white-space:nowrap;background:#dbeafe;text-align:center" title="Visitas últimos 30 días">Visitas 30d ↕<span id="seo-sort-visits30" style="font-size:10px"></span></th>
+          <th onclick="seoSort('sales60')" style="cursor:pointer;user-select:none;white-space:nowrap;background:#dcfce7;text-align:center" title="Ventas últimos 60 días">Ventas 60d ↕<span id="seo-sort-sales60" style="font-size:10px"></span></th>
+          <th onclick="seoSort('sold')" style="cursor:pointer;user-select:none;white-space:nowrap;text-align:center" title="Total ventas históricas del ítem">Vendidas históricas ↕<span id="seo-sort-sold" style="font-size:10px"></span></th>
+          <th onclick="seoSort('sales7')" style="cursor:pointer;user-select:none;white-space:nowrap;background:#f0fdf4;text-align:center" title="Ventas últimos 7 días">Ventas 7d ↕<span id="seo-sort-sales7" style="font-size:10px"></span></th>
+          <th onclick="seoSort('visits')" style="cursor:pointer;user-select:none;white-space:nowrap;background:#eff6ff;text-align:center" title="Visitas últimos 7 días">Visitas 7d ↕<span id="seo-sort-visits" style="font-size:10px"></span></th>
+          <th onclick="seoSort('conv')" style="cursor:pointer;user-select:none;white-space:nowrap;background:#fefce8;text-align:center" title="Tasa de conversión = Ventas/Visitas">Conv% ↕<span id="seo-sort-conv" style="font-size:10px"></span></th>
           <th style="white-space:nowrap;background:#f5f3ff;min-width:140px">Estrategia</th>
           <th>Problemas</th>
           <th>Acciones</th>
@@ -4463,9 +4465,11 @@ async function loadPubMetricsBatch(ids){
   const now   = nowAR();
   const from7 = new Date(now - 7*86400000);
   const from14= new Date(now - 14*86400000);
+  // v72: Ventana 60 días para nueva columna "Ventas 60d" en Analizador SEO
+  const from60= new Date(now - 60*86400000);
 
-  // Ventas 7d y prev desde allOrders en memoria
-  const salesMap7 = {}, salesMap_prev = {};
+  // Ventas 7d, prev (7-14d), y 60d desde allOrders en memoria
+  const salesMap7 = {}, salesMap_prev = {}, salesMap60 = {};
   allOrders.forEach(o => {
     if(o.status === 'cancelled' || o.status === 'invalid') return;
     const dt = dateAR(o.date_created||0);
@@ -4477,6 +4481,8 @@ async function loadPubMetricsBatch(ids){
       const qty = oi.quantity||1;
       if(dt >= from7)       salesMap7[id]     = (salesMap7[id]||0)     + qty;
       else if(dt >= from14) salesMap_prev[id] = (salesMap_prev[id]||0) + qty;
+      // 60d acumula TODO (incluyendo los últimos 7 días)
+      if(dt >= from60)      salesMap60[id]    = (salesMap60[id]||0)    + qty;
     });
   });
 
@@ -4489,6 +4495,7 @@ async function loadPubMetricsBatch(ids){
       // Datos de visitas válidos del caché — actualizar ventas (siempre frescos de allOrders)
       cached.sales      = salesMap7[id]    || 0;
       cached.salesPrev  = salesMap_prev[id] || 0;
+      cached.sales60    = salesMap60[id]    || 0;
       const sp = cached.salesPrev, s = cached.sales, v = cached.visits || 0;
       cached.salesTrend  = sp>0 ? Math.round((s-sp)/sp*100) : (s>0?100:0);
       cached.conv        = v > 0 ? +((s/v)*100).toFixed(1) : 0;
@@ -4504,15 +4511,26 @@ async function loadPubMetricsBatch(ids){
   }
 
   // 2. Fetch secuencial con for...of + delay 200ms (anti-429)
-  //    Prioridad: items sin caché primero (ya está así por el filtro toFetch)
+  //    v72: Pedimos 30 días en una sola llamada y derivamos 7d (últimos 7 elementos)
+  //    + 30d (suma total). Esto evita duplicar llamadas API.
   for(const id of toFetch){
-    let visits = 0, visitsPrev = 0;
+    let visits = 0, visitsPrev = 0, visits30 = 0;
 
-    // Visitas período actual
+    // Visitas últimos 30 días
     try{
-      const r = await mlGet('/items/'+id+'/visits/time_window?last=7&unit=day');
-      if(r && typeof r.total_visits === 'number')   visits = r.total_visits;
-      else if(r && Array.isArray(r.visits)) visits = r.visits.reduce((s,d)=>s+(d.total||d.quantity||0),0);
+      const r = await mlGet('/items/'+id+'/visits/time_window?last=30&unit=day');
+      if(r && Array.isArray(r.results)){
+        // Array por día — sumar todo para 30d y los últimos 7 para 7d
+        visits30 = r.results.reduce((s,d)=>s+(d.total||d.quantity||0),0);
+        visits   = r.results.slice(-7).reduce((s,d)=>s+(d.total||d.quantity||0),0);
+      } else if(r && Array.isArray(r.visits)){
+        visits30 = r.visits.reduce((s,d)=>s+(d.total||d.quantity||0),0);
+        visits   = r.visits.slice(-7).reduce((s,d)=>s+(d.total||d.quantity||0),0);
+      } else if(r && typeof r.total_visits === 'number'){
+        // Fallback: API devolvió solo total — usamos eso para 30d y aproximamos 7d=total/4
+        visits30 = r.total_visits;
+        visits   = Math.round(r.total_visits / 4);
+      }
     }catch(e){
       console.warn('[Metricas] time_window error', id, '—', e.message);
       try{
@@ -4524,7 +4542,7 @@ async function loadPubMetricsBatch(ids){
       }
     }
 
-    // Visitas período anterior (para tendencia)
+    // Visitas período anterior (para tendencia 7d vs 7-14d)
     try{
       const rp = await mlGet('/items/'+id+'/visits?date_from='+from14.toISOString().slice(0,10)+'&date_to='+from7.toISOString().slice(0,10));
       visitsPrev = (rp && rp.total_visits) || 0;
@@ -4532,11 +4550,12 @@ async function loadPubMetricsBatch(ids){
 
     const sales      = salesMap7[id]    || 0;
     const salesPrev  = salesMap_prev[id] || 0;
+    const sales60    = salesMap60[id]   || 0;
     const conv       = visits > 0 ? +((sales/visits)*100).toFixed(1) : 0;
     const salesTrend = salesPrev>0 ? Math.round((sales-salesPrev)/salesPrev*100) : (sales>0?100:0);
     const visitsTrend= visitsPrev>0 ? Math.round((visits-visitsPrev)/visitsPrev*100) : (visits>0?100:0);
 
-    const data = { visits, visitsPrev, sales, salesPrev, conv, salesTrend, visitsTrend };
+    const data = { visits, visitsPrev, visits30, sales, salesPrev, sales60, conv, salesTrend, visitsTrend };
     itemMetrics[id] = data;
     metricsToCache(id, data); // persistir en localStorage
 
@@ -4547,8 +4566,16 @@ async function loadPubMetricsBatch(ids){
   // Poblar ventas para ítems con ventas pero sin visitas aún
   Object.keys(salesMap7).forEach(id => {
     if(!itemMetrics[id]) itemMetrics[id] = {
-      visits:0, visitsPrev:0,
-      sales: salesMap7[id], salesPrev: salesMap_prev[id]||0,
+      visits:0, visitsPrev:0, visits30:0,
+      sales: salesMap7[id], salesPrev: salesMap_prev[id]||0, sales60: salesMap60[id]||0,
+      conv:0, salesTrend:0, visitsTrend:0
+    };
+  });
+  // Poblar ventas 60d para ítems que vendieron en 60d pero no en 7d
+  Object.keys(salesMap60).forEach(id => {
+    if(!itemMetrics[id]) itemMetrics[id] = {
+      visits:0, visitsPrev:0, visits30:0,
+      sales:0, salesPrev:0, sales60: salesMap60[id]||0,
       conv:0, salesTrend:0, visitsTrend:0
     };
   });
@@ -6285,7 +6312,7 @@ function seoSort(col){
   if(seoState.sortCol===col) seoState.sortDir*=-1;
   else{ seoState.sortCol=col; seoState.sortDir=-1; }
   seoState.page=1;
-  ['seo','quality','sold','sales7','visits','conv'].forEach(c=>{
+  ['seo','quality','sold','sales7','visits','conv','visits30','sales60','created'].forEach(c=>{
     const el=document.getElementById('seo-sort-'+c);
     if(el) el.innerHTML=sortArrow(c,seoState.sortCol,seoState.sortDir);
   });
@@ -6545,7 +6572,9 @@ function renderSEOTable(){
       if(seoState.sortCol==='seo')      { va=seoScore(a.title);          vb=seoScore(b.title); }
       else if(seoState.sortCol==='sold')   { va=a.sold_quantity||0;           vb=b.sold_quantity||0; }
       else if(seoState.sortCol==='sales7') { va=ma?.sales||0;                 vb=mb?.sales||0; }
+      else if(seoState.sortCol==='sales60'){ va=ma?.sales60||0;               vb=mb?.sales60||0; }
       else if(seoState.sortCol==='visits'){ va=ma?.visits||0;              vb=mb?.visits||0; }
+      else if(seoState.sortCol==='visits30'){ va=ma?.visits30||0;            vb=mb?.visits30||0; }
       else if(seoState.sortCol==='conv') { va=ma?.conv||0;                 vb=mb?.conv||0; }
       else if(seoState.sortCol==='price') { va=a.price||0;                 vb=b.price||0; }
       else if(seoState.sortCol==='stock') { va=a.available_quantity??0;    vb=b.available_quantity??0; }
@@ -6655,6 +6684,16 @@ function renderSEOTable(){
         <span style="font-size:12px;font-weight:600;color:${(item.available_quantity??0)===0?'var(--red)':(item.available_quantity??0)<=3?'var(--amber)':'var(--text)'};cursor:pointer"
           onclick="seoStartStockEdit('${item.id}',${item.available_quantity??0})"
           title="Clic para editar stock">${item.available_quantity??0} ✎</span>
+      </td>
+      <td style="text-align:center;background:#dbeafe">
+        ${m
+          ? '<span style="font-size:14px;font-weight:700;color:var(--text)">'+(m.visits30||0).toLocaleString('es-AR')+'</span>'
+          : '<span style="font-size:10px;color:var(--text3)">—</span>'}
+      </td>
+      <td style="text-align:center;background:#dcfce7">
+        ${m
+          ? '<span style="font-size:14px;font-weight:700;color:'+((m.sales60||0)===0?'#9ca3af':'var(--text)')+'">'+(m.sales60||0)+'</span>'
+          : '<span style="font-size:10px;color:var(--text3)">—</span>'}
       </td>
       <td style="text-align:center">
         <span style="font-size:14px;font-weight:700;color:var(--text)">${item.sold_quantity||0}</span>
