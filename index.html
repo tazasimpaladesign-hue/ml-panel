@@ -710,7 +710,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v72 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v73 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4188,7 +4188,9 @@ function itemHealthPct(item){
 // Endpoint: GET /users/{USER_ID}/items_visits?date_from=...&date_to=...
 // Este endpoint es el correcto para obtener visitas por ítem del vendedor.
 // ── Caché de métricas en localStorage (persiste 24h entre recargas) ──
-const METRICS_CACHE_KEY = 'mlp_metrics_v1_';
+// v73: Bump v1 → v2 porque la estructura cacheada cambió (agregamos visits30 + sales60).
+// Esto invalida automáticamente los caches viejos sin tener que borrarlos manualmente.
+const METRICS_CACHE_KEY = 'mlp_metrics_v2_';
 const METRICS_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 horas
 
 // ── Caché de datos principales entre pestañas/recargas ─────────────────────
@@ -4308,6 +4310,19 @@ function metricsToCache(id, data){
 // de caché válidas (no expiradas) y las carga en memoria antes de renderizar.
 function restoreMetricsFromCache(){
   try{
+    // v73: Limpiar caché v1 antiguo (one-time cleanup) — la estructura cambió
+    // y v1 no tiene visits30. Quitar evita que ocupe espacio inutilmente.
+    const v1Prefix = 'mlp_metrics_v1_';
+    const oldKeys = [];
+    for(let i = 0; i < localStorage.length; i++){
+      const k = localStorage.key(i);
+      if(k && k.startsWith(v1Prefix)) oldKeys.push(k);
+    }
+    if(oldKeys.length){
+      oldKeys.forEach(k => { try{ localStorage.removeItem(k); }catch{} });
+      console.log('[Métricas] Limpieza de caché v1 obsoleto:', oldKeys.length, 'entradas');
+    }
+
     let restored = 0;
     for(let i = 0; i < localStorage.length; i++){
       const key = localStorage.key(i);
@@ -4488,11 +4503,14 @@ async function loadPubMetricsBatch(ids){
 
   // 1. Cargar desde localStorage (instantáneo, sin API)
   //    y actualizar ventas en caché existente
+  // v73: Si el cache existe pero NO tiene `visits30` (cache de versiones anteriores),
+  // marcamos el item para re-fetch para que traiga el dato nuevo. Antes este bug
+  // hacía que items con cache viejo mostraran "Visitas 30d = 0" pese a tener visitas.
   const toFetch = [];
   for(const id of ids){
     const cached = metricsFromCache(id);
-    if(cached){
-      // Datos de visitas válidos del caché — actualizar ventas (siempre frescos de allOrders)
+    if(cached && typeof cached.visits30 === 'number'){
+      // Datos completos del caché — actualizar ventas (siempre frescos de allOrders)
       cached.sales      = salesMap7[id]    || 0;
       cached.salesPrev  = salesMap_prev[id] || 0;
       cached.sales60    = salesMap60[id]    || 0;
@@ -4502,6 +4520,7 @@ async function loadPubMetricsBatch(ids){
       itemMetrics[id] = cached;
       metricsToCache(id, cached); // refrescar timestamp de ventas
     } else {
+      // Sin cache, o cache viejo sin visits30 → fetch a API
       toFetch.push(id);
     }
   }
