@@ -710,7 +710,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v78 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v79 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1165,22 +1165,12 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <div class="chip" id="chip-st-inactive" onclick="seoSetStatus('under_review')" style="font-size:11px">🔍 Inactivas</div>
       </div>
     </div>
-    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-      <span style="font-size:11px;color:var(--text3);font-weight:600;white-space:nowrap">Problema:</span>
-      <div class="chips" style="margin:0;gap:5px">
-        <div class="chip" id="chip-titulo"   onclick="seoSetFilter('titulo')"   style="font-size:11px">✏️ Mejorar título</div>
-        <div class="chip" id="chip-fotos"    onclick="seoSetFilter('fotos')"    style="font-size:11px">📷 Sin fotos</div>
-        <div class="chip" id="chip-stock"    onclick="seoSetFilter('stock')"    style="font-size:11px">📦 Poco stock</div>
-        <div class="chip" id="chip-promo"    onclick="seoSetFilter('promo')"    style="font-size:11px">📢 Sin promoción</div>
-        <div class="chip" id="chip-ean"      onclick="seoSetFilter('ean')"      style="font-size:11px">🔢 Sin EAN</div>
-        <div class="chip" id="chip-pausada"  onclick="seoSetFilter('pausada')"  style="font-size:11px">⏸ Pausadas</div>
-        <div class="chip" id="chip-str-sinvis"  onclick="seoSetFilter('str_sinvis')"   style="font-size:11px;background:#f1f5f9;border-color:#cbd5e1">🤓 Poca Visibilidad</div>
-        <div class="chip" id="chip-str-novisits" onclick="seoSetFilter('str_novisits')" style="font-size:11px;background:#f8fafc;border-color:#e2e8f0">👻 Sin Visitas</div>
-        <div class="chip" id="chip-str-hotstock" onclick="seoSetFilter('str_hotstock')" style="font-size:11px;background:#fff7ed;border-color:#fed7aa">🔥 Alta Conv/Bajo Stock</div>
-        <div class="chip" id="chip-str-trafico" onclick="seoSetFilter('str_trafico')"  style="font-size:11px;background:#fffbeb;border-color:#fde68a">⚠️ Tráfico sin Ventas</div>
-        <button class="btn btn-ghost btn-xs" onclick="seoSetFilter(null)" id="seo-clear-btn" style="display:none;font-size:11px">✕ Limpiar</button>
-      </div>
+    <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap">
+      <span style="font-size:11px;color:var(--text3);font-weight:600;white-space:nowrap;padding-top:5px">Escenarios:</span>
+      <div class="chips" id="seo-scenario-chips" style="margin:0;gap:5px;flex:1"></div>
     </div>
+    <!-- v79: Panel descriptivo del escenario activo (vacío si no hay ninguno seleccionado) -->
+    <div id="seo-scenario-info" style="display:none;margin-top:8px;background:var(--bg2);border:1px solid var(--border);border-left-width:4px;border-radius:6px;padding:10px 14px;font-size:12px;line-height:1.45"></div>
   </div>
 
   <!-- Tabla principal -->
@@ -2283,6 +2273,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <button class="btn btn-ghost btn-sm"   id="af-fuga-conv"    onclick="setAlertFilter('fuga_conv',this)">⚠️ Fuga Conv. <span id="afc-fuga-conv"    class="afc-badge"></span></button>
     <button class="btn btn-ghost btn-sm"   id="af-mas-vendidos" onclick="setAlertFilter('mas_vendidos',this)">🏆 Top 50 (30d) <span id="afc-mas-vendidos" class="afc-badge"></span></button>
     <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+      <button class="btn btn-ghost btn-sm" onclick="alertOpenScenariosModal()" title="Filtrar por uno de los 22 escenarios de la Ruta Maestra MeLi 2026">📚 Ruta Maestra</button>
       <span id="alm-total-pill" style="font-size:11px;color:var(--text3)"></span>
       <button class="btn btn-ghost btn-sm" onclick="refreshAlerts()">&#8635; Actualizar</button>
     </div>
@@ -6408,6 +6399,257 @@ const SEO_SORT_COLUMNS = [
   { key:'title',      label:'Título (alfabético)',  getValue: i => (i.title || '').toLowerCase(), isString: true },
 ];
 
+// ═══════════════════════════════════════════════════════════════════════════
+// v79: SEO_SCENARIOS — Ruta Maestra MeLi 2026 (22 escenarios)
+// ═══════════════════════════════════════════════════════════════════════════
+// Catálogo unificado de "escenarios" del Analizador SEO. Cada escenario define:
+//  - emoji, label, color (UI)
+//  - description (qué problema detecta)
+//  - actionMain (qué hacer hoy)
+//  - actionSecondary (mejora a planear)
+//  - criteria: array de { col, dir } para ordenamiento cascada (igual format que multi-sort)
+//  - filter: función opcional que filtra (para Sin Fotos / Sin EAN que son booleanos puros)
+//
+// Este catálogo es la fuente de verdad — tanto el Analizador SEO como Alertas
+// lo consumen. Si querés agregar/modificar escenarios, hacelo acá.
+const SEO_SCENARIOS = {
+  // ── Fusionados desde chips originales (prioridad emoji original) ────────────
+  'sin_fotos': {
+    emoji: '📷', label: 'Sin Fotos', color: '#f59e0b',
+    description: 'Publicaciones con menos de 2 fotos. La primera foto define el CTR de la búsqueda.',
+    actionMain:      'Subir al menos 4 fotos en fondo blanco con distintos ángulos.',
+    actionSecondary: 'Agregar 1 foto contextual con persona usando el producto para humanizar.',
+    filter: i => {
+      const pics = i.pictures || [];
+      return pics.length < 2;
+    },
+  },
+  'sin_ean': {
+    emoji: '🏷️', label: 'Sin EAN', color: '#f59e0b',
+    description: 'Falta el código universal del producto (GTIN/EAN). ML penaliza el ranking.',
+    actionMain:      'Cargar el código de barras del producto en la ficha técnica.',
+    actionSecondary: 'Si no tenés EAN, usar el SKU interno en seller_custom_field.',
+    filter: i => !itemHasEAN(i) && !i.seller_custom_field,
+  },
+  // ── Reformulados desde chips originales (prioridad emoji original) ──────────
+  'poca_visibilidad': {
+    emoji: '🤓', label: 'Poca Visibilidad', color: '#3b82f6',
+    description: 'Buena calidad pero pocas visitas — falta exposición.',
+    actionMain:      'Encender publicidad (Product Ads) moderadamente.',
+    actionSecondary: 'Mejorar la primera foto para aumentar el CTR.',
+    criteria: [
+      { col: 'visits30', dir: 'asc' },
+      { col: 'quality',  dir: 'desc' },
+    ],
+  },
+  'sin_visitas': {
+    emoji: '👻', label: 'Sin Visitas', color: '#6b7280',
+    description: 'Casi sin visitas tanto en 7 como en 30 días. Invisible al algoritmo.',
+    actionMain:      'Renovar título con palabras clave actuales y subir foto principal.',
+    actionSecondary: 'Evaluar si la categoría es la correcta o si conviene re-publicar.',
+    criteria: [
+      { col: 'visits',   dir: 'asc' },
+      { col: 'visits30', dir: 'asc' },
+    ],
+  },
+  'trafico_esteril': {
+    emoji: '⚠️', label: 'Tráfico sin Ventas', color: '#dc2626',
+    description: 'Mucho tráfico pero hace mucho que no vende. El algoritmo va a castigar.',
+    actionMain:      'Bajar precio 24hs para forzar venta y resetear contador.',
+    actionSecondary: 'Revisar si hay una duda recurrente en preguntas que frena la compra.',
+    criteria: [
+      { col: 'visits30',   dir: 'desc' },
+      { col: 'daysNoSale', dir: 'desc' },
+    ],
+  },
+  'alta_conv_bajo_stock': {
+    emoji: '🔥', label: 'Alta Conv / Bajo Stock', color: '#ea580c',
+    description: 'Convierte muy bien pero queda poco stock. Riesgo inmediato de quiebre.',
+    actionMain:      'Reponer stock con prioridad máxima o subir precio +5% para frenar.',
+    actionSecondary: 'Verificar tiempos de despacho para no afectar la medalla.',
+    criteria: [
+      { col: 'conv',  dir: 'desc' },
+      { col: 'stock', dir: 'asc' },
+    ],
+  },
+  // ── Nuevos del PDF ──────────────────────────────────────────────────────────
+  'peligro_quiebre': {
+    emoji: '🚨', label: 'Peligro de Quiebre', color: '#dc2626',
+    description: 'Vendió mucho hace poco y queda poco stock. Alto riesgo de quedar sin nada hoy.',
+    actionMain:      'Reponer stock urgente o subir precio +5% para frenar ventas.',
+    actionSecondary: 'Verificar tiempos de despacho para no afectar la medalla.',
+    criteria: [
+      { col: 'sales7', dir: 'desc' },
+      { col: 'stock',  dir: 'asc' },
+    ],
+  },
+  'tendencia_alza': {
+    emoji: '📈', label: 'Tendencia de Alza', color: '#16a34a',
+    description: 'Producto que sube en ventas tanto en 7 como en 60 días. Ojo con la competencia.',
+    actionMain:      'Asegurar stock y blindar el precio. Aprovechar el momentum.',
+    actionSecondary: 'Revisar si califica para Ofertas del Día o promoción destacada.',
+    criteria: [
+      { col: 'sales7',  dir: 'desc' },
+      { col: 'sales60', dir: 'desc' },
+    ],
+  },
+  'declive_cuenta': {
+    emoji: '📉', label: 'Declive', color: '#ef4444',
+    description: 'Vendía bien antes pero las ventas semanales cayeron. Señal de alarma.',
+    actionMain:      'Analizar si entró un competidor nuevo con mejor precio o título.',
+    actionSecondary: 'Renovar el título con nuevas palabras clave de búsqueda.',
+    criteria: [
+      { col: 'sales60', dir: 'desc' },
+      { col: 'sales7',  dir: 'asc' },
+    ],
+  },
+  'traccion_estreno': {
+    emoji: '🆕', label: 'Tracción de Estreno', color: '#06b6d4',
+    description: 'Producto nuevo que ya empezó a vender solo. Acelerar el posicionamiento.',
+    actionMain:      'Acelerar con publicidad para posicionar rápido en los primeros 30 días.',
+    actionSecondary: 'Pedir a los compradores que dejen su opinión (sube reputación rápido).',
+    criteria: [
+      { col: 'created', dir: 'desc' },
+      { col: 'sales7',  dir: 'desc' },
+    ],
+  },
+  'falla_cierre': {
+    emoji: '🚪', label: 'Falla de Cierre', color: '#f59e0b',
+    description: 'Entran muchos pero se van sin comprar. El precio o el envío los frena.',
+    actionMain:      'Ofrecer cuotas sin interés o envío gratis para destrabar la conversión.',
+    actionSecondary: 'Verificar que la descripción sea clara y sin errores frecuentes.',
+    criteria: [
+      { col: 'visits', dir: 'desc' },
+      { col: 'conv',   dir: 'asc' },
+    ],
+  },
+  'sobre_stock': {
+    emoji: '📦', label: 'Sobre-stock Crítico', color: '#a855f7',
+    description: 'Mucho stock + hace mucho que no vende. Capital inmovilizado.',
+    actionMain:      'Armar un combo con el producto más vendido para liquidar de a poco.',
+    actionSecondary: 'Liquidar al costo si el ratio días/stock es muy malo.',
+    criteria: [
+      { col: 'stock',      dir: 'desc' },
+      { col: 'daysNoSale', dir: 'desc' },
+    ],
+  },
+  'lider_caido': {
+    emoji: '💤', label: 'Líder Caído', color: '#64748b',
+    description: 'Top vendedor histórico que está dormido. Fue tu mejor producto y hoy no vende.',
+    actionMain:      'Cambiar la foto principal por una actual (fondo blanco profesional).',
+    actionSecondary: 'Re-categorizar si ML abrió una categoría más específica para este tipo.',
+    criteria: [
+      { col: 'sold',       dir: 'desc' },
+      { col: 'daysNoSale', dir: 'desc' },
+    ],
+  },
+  'seo_desactualizado': {
+    emoji: '🔧', label: 'SEO Desactualizado', color: '#0891b2',
+    description: 'Calidad baja + sin ventas recientes. Posiblemente el título quedó viejo.',
+    actionMain:      'Usar la IA para regenerar título según búsquedas actuales 2026.',
+    actionSecondary: 'Completar atributos faltantes en la ficha técnica para subir calidad.',
+    criteria: [
+      { col: 'quality',    dir: 'asc' },
+      { col: 'daysNoSale', dir: 'desc' },
+    ],
+  },
+  'alto_valor': {
+    emoji: '💎', label: 'Venta de Alto Valor', color: '#a16207',
+    description: 'Producto caro que convierte bien. Cada venta importa, cuidá la atención.',
+    actionMain:      'Responder preguntas en menos de 2 minutos para no perder al cliente.',
+    actionSecondary: 'Ofrecer un empaque premium o un detalle para fidelizar al comprador.',
+    criteria: [
+      { col: 'price', dir: 'desc' },
+      { col: 'conv',  dir: 'desc' },
+    ],
+  },
+  'fin_temporada': {
+    emoji: '🏁', label: 'Fin de Temporada', color: '#94a3b8',
+    description: 'Vendía bien hace 60d pero el interés desapareció en la última semana.',
+    actionMain:      'Pausar publicidad de este producto para no quemar plata.',
+    actionSecondary: 'Planear stock y comunicación de la temporada que viene.',
+    criteria: [
+      { col: 'sales60', dir: 'desc' },
+      { col: 'sales7',  dir: 'asc' },
+    ],
+  },
+  'mantenimiento_puesto': {
+    emoji: '🛡️', label: 'Mantenimiento de Puesto', color: '#0d9488',
+    description: 'Top vendedor histórico con conversión cayendo. Riesgo de caída de posición.',
+    actionMain:      'Hacer un descuento temporal del 5% para subir volumen y mantener posición.',
+    actionSecondary: 'Revisar tiempos de respuesta a preguntas en el panel.',
+    criteria: [
+      { col: 'sold', dir: 'desc' },
+      { col: 'conv', dir: 'asc' },
+    ],
+  },
+  'nicho_eficiente': {
+    emoji: '🎯', label: 'Nicho Eficiente', color: '#15803d',
+    description: 'Pocas visitas pero altísima conversión. Casi todos los que entran compran.',
+    actionMain:      'Duplicar la exposición — ampliar a Premium o publicidad para escalar.',
+    actionSecondary: 'Evaluar si se puede ampliar con un color o talle nuevo del mismo producto.',
+    criteria: [
+      { col: 'conv',   dir: 'desc' },
+      { col: 'visits', dir: 'asc' },
+    ],
+  },
+  'candidato_flex': {
+    emoji: '⚡', label: 'Candidato a Flex', color: '#eab308',
+    description: 'Vende constante y tenés stock disponible para acelerar despachos.',
+    actionMain:      'Habilitar Mercado Envíos Flex para entrega en el día.',
+    actionSecondary: 'Evaluar mandar stock a colecta o Full para mejorar el SLA.',
+    criteria: [
+      { col: 'sales7', dir: 'desc' },
+      { col: 'stock',  dir: 'desc' },
+    ],
+  },
+  'rescate_historico': {
+    emoji: '🪦', label: 'Rescate Histórico', color: '#7c3aed',
+    description: 'Sin ventas hace mucho pero el producto fue popular. Hay potencial dormido.',
+    actionMain:      'Re-publicar como nueva publicación para ganar el boost inicial.',
+    actionSecondary: 'Eliminar la publicación vieja si no tiene reputación que rescatar.',
+    criteria: [
+      { col: 'daysNoSale', dir: 'desc' },
+      { col: 'sold',       dir: 'desc' },
+    ],
+  },
+  'pausa_salud': {
+    emoji: '🛌', label: 'Pausa de Salud', color: '#94a3b8',
+    description: 'Sin ventas hace mucho + stock ocupando lugar. Afecta el promedio de la cuenta.',
+    actionMain:      'Pausar publicación para que no afecte el score general de la cuenta.',
+    actionSecondary: 'Reevaluar si el producto sigue siendo competitivo o conviene rematarlo.',
+    criteria: [
+      { col: 'daysNoSale', dir: 'desc' },
+      { col: 'stock',      dir: 'desc' },
+    ],
+  },
+  'sin_ventas': {
+    emoji: '📉', label: 'Sin Ventas', color: '#9ca3af',
+    description: 'Hace mucho que no vende y poco vendido históricamente. Producto a evaluar.',
+    actionMain:      'Decidir: invertir en mejora SEO (foto+título) o pausarlo definitivamente.',
+    actionSecondary: 'Si tiene 0 visitas también, eliminar y re-publicar es más rápido.',
+    criteria: [
+      { col: 'daysNoSale', dir: 'desc' },
+      { col: 'sold',       dir: 'asc' },
+    ],
+  },
+};
+
+// Orden de los chips en la UI (de izquierda a derecha)
+const SEO_SCENARIO_ORDER = [
+  // Críticos / urgentes (rojos/naranjas)
+  'peligro_quiebre', 'alta_conv_bajo_stock', 'trafico_esteril', 'falla_cierre',
+  // Crecimiento / oportunidad (verdes/azules)
+  'tendencia_alza', 'traccion_estreno', 'nicho_eficiente', 'candidato_flex',
+  // Mantenimiento (amarillos/cian)
+  'mantenimiento_puesto', 'alto_valor', 'declive_cuenta', 'fin_temporada',
+  // Problemas crónicos (grises/morados)
+  'lider_caido', 'sobre_stock', 'rescate_historico', 'pausa_salud',
+  'seo_desactualizado', 'sin_ventas', 'sin_visitas', 'poca_visibilidad',
+  // Calidad de ficha
+  'sin_fotos', 'sin_ean',
+];
+
 // Estado: array de { col, dir } donde dir es 'asc' o 'desc'
 let _seoMultiSort = [];
 
@@ -6823,15 +7065,113 @@ function renderSEOSection(){
   renderSEOTable();
 }
 
-function seoSetFilter(f){
-  seoState.filter=f; seoState.page=1;
-  // Solo resetear chips de problema (no los de estado)
-  document.querySelectorAll('[id^="chip-"]:not([id^="chip-st-"])').forEach(c=>{
-    c.style.background=''; c.style.color=''; c.style.borderColor='';
-  });
-  if(f){const chip=document.getElementById('chip-'+f);if(chip){chip.style.background='var(--accent)';chip.style.color='#fff';chip.style.borderColor='var(--accent)';}}
-  const cb=document.getElementById('seo-clear-btn');if(cb)cb.style.display=f?'':'none';
+// v79: Sistema de Escenarios — reemplaza el viejo seoSetFilter
+// Estado: cuál escenario está activo (key del SEO_SCENARIOS o null)
+let _seoActiveScenario = null;
+
+// Renderizar todos los chips de escenarios al cargar la sección
+function renderScenarioChips(){
+  const cont = document.getElementById('seo-scenario-chips');
+  if(!cont) return;
+  const html = SEO_SCENARIO_ORDER.map(key => {
+    const sc = SEO_SCENARIOS[key];
+    if(!sc) return '';
+    const isActive = _seoActiveScenario === key;
+    const bg = isActive ? sc.color : '';
+    const fg = isActive ? '#fff' : '';
+    const bd = isActive ? sc.color : '';
+    return `<div class="chip seo-scenario-chip" data-key="${key}" onclick="seoSetScenario('${key}')"
+      style="font-size:11px;cursor:pointer;background:${bg};color:${fg};border-color:${bd};transition:all .15s">
+      ${sc.emoji} ${sc.label}
+    </div>`;
+  }).join('');
+  cont.innerHTML = html
+    + `<button class="btn btn-ghost btn-xs" onclick="seoSetScenario(null)" id="seo-scenario-clear" style="font-size:11px;${_seoActiveScenario?'':'display:none'}">✕ Limpiar escenario</button>`;
+}
+
+// Activar un escenario (o desactivarlo si pasás null o el mismo key dos veces)
+function seoSetScenario(key){
+  // Toggle: clic en el activo lo desactiva
+  if(key === _seoActiveScenario) key = null;
+  _seoActiveScenario = key;
+  seoState.page = 1;
+
+  if(!key){
+    // Limpiar — cerrar el panel info y resetear multi-sort si fue puesto por escenario
+    const info = document.getElementById('seo-scenario-info');
+    if(info){ info.style.display = 'none'; info.innerHTML = ''; }
+    // Si el multi-sort actual vino de un escenario, lo limpiamos
+    if(_seoMultiSort.length && _seoMultiSort.__fromScenario){
+      _seoMultiSort = [];
+      _seoMultiSortUpdateUI();
+    }
+    renderScenarioChips();
+    renderSEOTable();
+    return;
+  }
+
+  const sc = SEO_SCENARIOS[key];
+  if(!sc){ console.warn('[Scenario] no existe:', key); return; }
+
+  // Si el escenario tiene criterios de orden cascada, los aplicamos al multi-sort
+  if(sc.criteria && sc.criteria.length){
+    _seoMultiSort = sc.criteria.map(c => ({ col: c.col, dir: c.dir }));
+    _seoMultiSort.__fromScenario = true; // marca para saber que vino de escenario
+    seoState.sortCol = null; // desactiva sort simple
+    _seoMultiSortUpdateUI();
+  } else {
+    // Sin criterios — limpiamos el multi-sort previo de otro escenario
+    if(_seoMultiSort.__fromScenario){
+      _seoMultiSort = [];
+      _seoMultiSortUpdateUI();
+    }
+  }
+
+  // Mostrar el panel descriptivo
+  const info = document.getElementById('seo-scenario-info');
+  if(info){
+    info.style.borderLeftColor = sc.color;
+    info.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:6px">
+        <div style="font-size:13px;font-weight:700;color:${sc.color}">
+          ${sc.emoji} ${sc.label}
+        </div>
+        <button onclick="seoSetScenario(null)" title="Cerrar"
+          style="background:transparent;border:none;color:var(--text3);cursor:pointer;font-size:14px;padding:0;line-height:1">✕</button>
+      </div>
+      <div style="color:var(--text2);margin-bottom:6px">${sc.description}</div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px">
+        <div style="flex:1;min-width:240px">
+          <span style="font-weight:700;color:var(--accent)">▶ Acción hoy:</span>
+          <span style="color:var(--text)">${sc.actionMain}</span>
+        </div>
+        <div style="flex:1;min-width:240px">
+          <span style="font-weight:700;color:var(--text3)">+ Mejora:</span>
+          <span style="color:var(--text2)">${sc.actionSecondary}</span>
+        </div>
+      </div>`;
+    info.style.display = 'block';
+  }
+
+  renderScenarioChips();
   renderSEOTable();
+}
+
+// Mantenemos seoSetFilter como alias para retro-compat (si algo del panel viejo lo llama)
+function seoSetFilter(f){
+  // Mapeo de nombres viejos → nuevos
+  const legacyMap = {
+    'fotos':'sin_fotos', 'ean':'sin_ean',
+    'str_sinvis':'poca_visibilidad', 'str_novisits':'sin_visitas',
+    'str_hotstock':'alta_conv_bajo_stock', 'str_trafico':'trafico_esteril',
+    'stock':'sobre_stock', 'q_low':'seo_desactualizado',
+  };
+  if(f === null || f === undefined){ seoSetScenario(null); return; }
+  if(legacyMap[f]) return seoSetScenario(legacyMap[f]);
+  // Si viene un key de escenario directo, usarlo
+  if(SEO_SCENARIOS[f]) return seoSetScenario(f);
+  // No existe — log y no hacer nada
+  console.warn('[seoSetFilter] filtro no mapeado:', f);
 }
 
 function seoGoPage(n){
@@ -6860,6 +7200,14 @@ function renderSEOTable(){
     )) return false;
     if(st&&i.status!==st) return false;
     if(seoState.tipoFilter && getPubType(i)!==seoState.tipoFilter) return false;
+
+    // v79: Filtro por escenario activo (Sin Fotos / Sin EAN tienen .filter; el resto solo ordena)
+    if(_seoActiveScenario){
+      const sc = SEO_SCENARIOS[_seoActiveScenario];
+      if(sc && sc.filter && !sc.filter(i)) return false;
+    }
+
+    // Filtros viejos de score/calidad (mantenemos por retro-compat con insightGoToSEO)
     if(!f) return true;
     const sc=seoScore(i.title),qs=qualityScore(i),ch=qualityChecks(i);
     const hasErr=/[.!?,;:()]/.test(i.title)||i.title===i.title.toUpperCase();
@@ -6871,29 +7219,6 @@ function renderSEOTable(){
     if(f==='q_mid')    return qs>=40&&qs<70;
     if(f==='q_low')    return qs<40;
     if(f==='q_err')    return ch.some(p=>p.sev===2);
-    // ── Filtros de estrategia ──────────────────────────────
-    if(f==='str_sinvis'){
-      const m=itemMetrics[i.id];
-      const v7=m?.visits??i.visits_7d??null;
-      return v7!==null && v7>=1 && v7<=5;  // Poca Visibilidad: 1-5 visitas
-    }
-    if(f==='str_novisits'){
-      const m=itemMetrics[i.id];
-      const v7=m?.visits??i.visits_7d??null;
-      return v7!==null && v7===0;           // Sin Visitas: exactamente 0
-    }
-    if(f==='str_hotstock'){
-      const m=itemMetrics[i.id];
-      const conv=m?.conv??0;
-      const stk=i.available_quantity??0;
-      return conv>5 && stk<10;
-    }
-    if(f==='str_trafico'){
-      const m=itemMetrics[i.id];
-      const v7=m?.visits??i.visits_7d??null;
-      const s7=m?.sales??0;
-      return v7!==null && v7>30 && s7===0;
-    }
     return ch.some(c=>c.id===f);
   });
 
@@ -7077,22 +7402,59 @@ function renderSEOTable(){
       </td>
       <td style="background:#f5f3ff;padding:6px 8px">
         ${(()=>{
-          const badges=[];
-          const v7=m?.visits??item.visits_7d??null;
+          // v79: Detectar qué escenarios aplican a este ítem específico.
+          // Para los que tienen .filter (Sin Fotos / Sin EAN) usamos esa función.
+          // Para los demás usamos heurísticas inline (las mismas condiciones que
+          // el escenario describe — ej: peligro_quiebre = ventas7>0 + stock<5).
+          const v7=m?.visits??item.visits_7d??0;
+          const v30=m?.visits30??0;
           const s7=m?.sales??0;
+          const s60=m?.sales60??0;
           const conv=m?.conv??0;
           const stk=item.available_quantity??0;
-          if(v7!==null && v7===0)
-            badges.push('<span style="display:inline-flex;align-items:center;gap:3px;font-size:9px;padding:2px 6px;border-radius:10px;background:#f8fafc;color:#475569;border:1px solid #e2e8f0;white-space:nowrap;margin-bottom:3px">👻 Sin Visitas</span>');
-          if(v7!==null && v7>=1 && v7<=5)
-            badges.push('<span style="display:inline-flex;align-items:center;gap:3px;font-size:9px;padding:2px 6px;border-radius:10px;background:#f1f5f9;color:#475569;border:1px solid #cbd5e1;white-space:nowrap;margin-bottom:3px">🤓 Poca Visibilidad</span>');
-          if(conv>5 && stk<10)
-            badges.push('<span style="display:inline-flex;align-items:center;gap:3px;font-size:9px;padding:2px 6px;border-radius:10px;background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;white-space:nowrap;margin-bottom:3px">🔥 Alta Conv/Bajo Stock</span>');
-          if(v7!==null && v7>30 && s7===0)
-            badges.push('<span style="display:inline-flex;align-items:center;gap:3px;font-size:9px;padding:2px 6px;border-radius:10px;background:#fffbeb;color:#92400e;border:1px solid #fde68a;white-space:nowrap;margin-bottom:3px">⚠️ Revisar Precio/Fotos</span>');
-          return badges.length
-            ? `<div style="display:flex;flex-direction:column;align-items:flex-start">${badges.join('')}</div>`
-            : '<span style="font-size:9px;color:var(--text3)">—</span>';
+          const sold=item.sold_quantity??0;
+          const days=getDaysSinceLastSale(item.id);
+          const qual=qualityScore(item);
+          const ageDays = item.date_created ? Math.floor((Date.now()-new Date(item.date_created))/86400000) : 9999;
+
+          const tags = [];
+          // Filtros booleanos puros (Sin Fotos / Sin EAN)
+          if(SEO_SCENARIOS.sin_fotos.filter(item)) tags.push(SEO_SCENARIOS.sin_fotos);
+          if(SEO_SCENARIOS.sin_ean.filter(item))   tags.push(SEO_SCENARIOS.sin_ean);
+          // Escenarios deducidos por heurística (matching de las condiciones del escenario)
+          if(s7>=2 && stk>0 && stk<=5)             tags.push(SEO_SCENARIOS.peligro_quiebre);
+          if(conv>=5 && stk>0 && stk<=8)           tags.push(SEO_SCENARIOS.alta_conv_bajo_stock);
+          if(v30>=20 && days>=30 && days!==Infinity)tags.push(SEO_SCENARIOS.trafico_esteril);
+          if(v7>=15 && conv<1)                     tags.push(SEO_SCENARIOS.falla_cierre);
+          if(s7>=2 && s60>=10)                     tags.push(SEO_SCENARIOS.tendencia_alza);
+          if(ageDays<=45 && s7>=1)                 tags.push(SEO_SCENARIOS.traccion_estreno);
+          if(conv>=10 && v7<10)                    tags.push(SEO_SCENARIOS.nicho_eficiente);
+          if(s7>=2 && stk>=10)                     tags.push(SEO_SCENARIOS.candidato_flex);
+          if(s60>=10 && s7===0)                    tags.push(SEO_SCENARIOS.fin_temporada);
+          if(sold>=20 && conv<1.5 && s60>=1)       tags.push(SEO_SCENARIOS.mantenimiento_puesto);
+          if((item.price||0)>=5000 && conv>=3)     tags.push(SEO_SCENARIOS.alto_valor);
+          if(s60>=10 && s7===0 && days<60)         tags.push(SEO_SCENARIOS.declive_cuenta);
+          if(sold>=50 && days>=60 && days!==Infinity)tags.push(SEO_SCENARIOS.lider_caido);
+          if(qual<40 && days>=30 && days!==Infinity)tags.push(SEO_SCENARIOS.seo_desactualizado);
+          if(stk>=15 && days>=60 && days!==Infinity)tags.push(SEO_SCENARIOS.sobre_stock);
+          if(days>=180 && sold>=10 && days!==Infinity)tags.push(SEO_SCENARIOS.rescate_historico);
+          if(days>=120 && stk>=5 && item.status==='active' && days!==Infinity)tags.push(SEO_SCENARIOS.pausa_salud);
+          if(v7===0 && v30<=2)                     tags.push(SEO_SCENARIOS.sin_visitas);
+          if(v7>=1 && v7<=5 && qual>=50)           tags.push(SEO_SCENARIOS.poca_visibilidad);
+          if(days>=90 && sold<5 && days!==Infinity)tags.push(SEO_SCENARIOS.sin_ventas);
+
+          if(!tags.length) return '<span style="font-size:9px;color:var(--text3)">—</span>';
+
+          // Mostrar máx 3 tags para no saturar la celda
+          const top3 = tags.slice(0, 3);
+          const more = tags.length - 3;
+          const html = top3.map(t => {
+            // Extraer color con suficiente contraste para fondo claro
+            const bg = t.color + '22'; // hex + alpha 13%
+            return `<span title="${t.description.replace(/"/g,'&quot;')}" style="display:inline-flex;align-items:center;gap:3px;font-size:9px;padding:2px 6px;border-radius:10px;background:${bg};color:${t.color};border:1px solid ${t.color}55;white-space:nowrap;margin-bottom:3px;font-weight:600">${t.emoji} ${t.label}</span>`;
+          }).join('');
+          const moreSpan = more>0 ? `<span style="font-size:9px;color:var(--text3)">+${more} más</span>` : '';
+          return `<div style="display:flex;flex-direction:column;align-items:flex-start;gap:2px">${html}${moreSpan}</div>`;
         })()}
       </td>
       <td style="max-width:160px"><div style="display:flex;flex-wrap:wrap;gap:3px">
@@ -9471,6 +9833,60 @@ function setAlertFilter(filter, btn) {
     btn.classList.add('af-active');
   }
   refreshAlerts();
+}
+
+// v79: Modal de Ruta Maestra (22 escenarios) en sección Alertas
+function alertOpenScenariosModal(){
+  // Cierra modal previo si existe
+  let modal = document.getElementById('alert-scenarios-modal');
+  if(modal){ modal.remove(); }
+  modal = document.createElement('div');
+  modal.id = 'alert-scenarios-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.onclick = (e) => { if(e.target === modal) modal.remove(); };
+
+  // Construir tarjetas dinámicamente desde SEO_SCENARIOS
+  const cards = SEO_SCENARIO_ORDER.map(key => {
+    const sc = SEO_SCENARIOS[key];
+    if(!sc) return '';
+    return `<div onclick="alertGoToScenario('${key}')" style="cursor:pointer;background:var(--bg);border:1px solid var(--border);border-left:4px solid ${sc.color};border-radius:8px;padding:10px 12px;transition:transform .1s, box-shadow .15s" onmouseover="this.style.transform='translateX(2px)';this.style.boxShadow='0 2px 8px rgba(0,0,0,.08)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
+      <div style="display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;color:${sc.color};margin-bottom:4px">
+        <span style="font-size:14px">${sc.emoji}</span> <span>${sc.label}</span>
+      </div>
+      <div style="font-size:11px;color:var(--text2);line-height:1.4;margin-bottom:6px">${sc.description}</div>
+      <div style="font-size:10.5px;color:var(--text3)">
+        <span style="font-weight:700;color:${sc.color}">▶</span> ${sc.actionMain}
+      </div>
+    </div>`;
+  }).join('');
+
+  modal.innerHTML = `
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;max-width:920px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.2)">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-size:15px;font-weight:700;color:var(--text)">📚 Ruta Maestra MeLi 2026</div>
+          <div style="font-size:11.5px;color:var(--text3);margin-top:2px">22 escenarios de optimización · clic para ver las publicaciones que califican en el Analizador SEO</div>
+        </div>
+        <button onclick="document.getElementById('alert-scenarios-modal').remove()" class="btn btn-ghost btn-sm" style="font-size:14px;padding:4px 10px">✕</button>
+      </div>
+      <div style="padding:16px 20px;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">
+        ${cards}
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+}
+
+// Llevar al usuario al Analizador SEO con un escenario activo (desde el modal de Alertas)
+function alertGoToScenario(key){
+  document.getElementById('alert-scenarios-modal')?.remove();
+  showSection('seo');
+  // Esperar a que la sección SEO se renderice y luego activar escenario
+  setTimeout(() => {
+    seoSetScenario(key);
+    // Scroll suave hasta el panel de información
+    const info = document.getElementById('seo-scenario-info');
+    if(info) info.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 250);
 }
 
 // ── Helper: ventas de un ítem en los últimos N días ─────────────────
@@ -13723,7 +14139,7 @@ function showSection(id){
 
   if(id==='dashboard' && token) renderDashboard();
   if(id==='publicaciones') renderPubs();
-  if(id==='seo'){ renderSEOSection(); updateMetricsTimestamp(); }
+  if(id==='seo'){ renderSEOSection(); updateMetricsTimestamp(); renderScenarioChips(); }
   if(id==='ventas') renderVentas();
   if(id==='preguntas') renderQuestions();
   if(id==='mensajes') renderMensajes();
