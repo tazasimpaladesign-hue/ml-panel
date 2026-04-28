@@ -710,7 +710,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v75 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v76 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1197,18 +1197,25 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <button class="btn btn-ghost btn-sm" onclick="analyzeSEOAll()">↻ Actualizar</button>
       </div>
     </div>
-    <!-- v75: Panel de Orden Avanzado (oculto por defecto) -->
-    <div id="seo-multi-sort-panel" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px;margin:0 0 12px 0">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <div style="font-size:12.5px;font-weight:700;color:var(--text)">🔢 Orden multi-criterio (cascada)</div>
-        <div style="font-size:10.5px;color:var(--text3)">Si dos productos empatan en el primer criterio, se aplica el segundo, y así sucesivamente.</div>
+    <!-- v76: Panel de Orden Avanzado — diseño compacto, centrado, con sombra -->
+    <div id="seo-multi-sort-panel" style="display:none;max-width:680px;margin:0 0 12px 0;background:linear-gradient(180deg,var(--bg2) 0%,var(--bg) 100%);border:1px solid var(--border);border-radius:10px;padding:12px 14px;box-shadow:0 4px 12px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04)">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;gap:12px">
+        <div>
+          <div style="font-size:12.5px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:6px">
+            <span style="font-size:14px">🔢</span> Orden multi-criterio (cascada)
+          </div>
+          <div style="font-size:10.5px;color:var(--text3);margin-top:2px;line-height:1.35">
+            Si dos productos empatan en el primer criterio, se aplica el segundo, y así sucesivamente.
+          </div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="seoMultiSortToggle()" title="Cerrar panel" style="padding:3px 8px;font-size:14px;line-height:1">✕</button>
       </div>
-      <div id="seo-multi-sort-rows" style="display:flex;flex-direction:column;gap:6px"></div>
-      <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
-        <button class="btn btn-ghost btn-sm" onclick="seoMultiSortAddRow()">+ Agregar criterio</button>
-        <button class="btn btn-primary btn-sm" onclick="seoMultiSortApply()">Aplicar orden</button>
-        <button class="btn btn-ghost btn-sm" onclick="seoMultiSortClear()">Limpiar</button>
-        <div style="margin-left:auto;font-size:10.5px;color:var(--text3);align-self:center" id="seo-multi-sort-status"></div>
+      <div id="seo-multi-sort-rows" style="display:flex;flex-direction:column;gap:5px"></div>
+      <div style="display:flex;gap:6px;margin-top:10px;align-items:center;flex-wrap:wrap;padding-top:10px;border-top:1px solid var(--border)">
+        <button class="btn btn-ghost btn-sm" onclick="seoMultiSortAddRow()" style="font-size:11px">+ Agregar criterio</button>
+        <button class="btn btn-primary btn-sm" onclick="seoMultiSortApply()" style="font-size:11px">✓ Aplicar orden</button>
+        <button class="btn btn-ghost btn-sm" onclick="seoMultiSortClear()" style="font-size:11px">Limpiar</button>
+        <div style="margin-left:auto;font-size:10.5px;color:var(--text3)" id="seo-multi-sort-status"></div>
       </div>
     </div>
     <div class="tw">
@@ -3772,6 +3779,13 @@ async function initApp(){
     initAI();
     loadOrdersHistory();
     loadTrends();
+    // v76: Verificar Clips de todas las publicaciones (mapa con caché 24h en KV).
+    // Llamamos en background después de un breve delay para no competir con
+    // ordenes/trends que se ejecutan inmediatamente.
+    setTimeout(() => {
+      const ids = (allItems || []).filter(i => i && i.id && i.status === 'active').map(i => i.id);
+      if(ids.length) loadClipsStatus(ids);
+    }, 5000);
     // Enriquecer preguntas con nicknames (se había retrasado en loadQuestions)
     if(window._pendingEnrichQuestions){
       enrichQuestionsNicknames().catch(e=>console.warn('[Q] enrichNicknames:', e));
@@ -5592,10 +5606,10 @@ function renderDashInsights(){
   }
 
   // ── SIN VIDEO / CLIP ────────────────────────────────────
-  const noVideo = active.filter(i=>{
-    const hasVideo=!!(i.video_id||i.clip_id||(i.attributes||[]).find(a=>a.id==='VIDEO_URL'||a.id==='CLIP_ID'));
-    return !hasVideo;
-  });
+  // v76: Usamos el mapa real de _itemClipsMap (poblado por /api/items/clips-check).
+  // Solo contamos como "sin video" los que el Worker confirmó como false.
+  // Los null (aún no verificados) se omiten para no inflar el conteo.
+  const noVideo = active.filter(i => itemHasVideo(i) === false);
   if(noVideo.length>0 && noVideo.length>active.length*0.6){
     insights.push({
       level:'low', icon:'🎬',
@@ -6282,30 +6296,81 @@ function itemHasEAN(item){
   return false;
 }
 
-// ── Detección correcta de video desde item.video_id ────────
-// Campo oficial de ML para clips/videos.
-// NO usar attributes ni textos del frontend — SOLO este campo.
+// ── Detección correcta de Clip nativo de ML ──────────
+// v76: Los Clips ya NO vienen en el objeto raíz del ítem. ML los expone en
+// el endpoint /items/{id}/videos. Como llamarlo por cada ítem sería caro,
+// el Worker tiene un endpoint batch (/api/items/clips-check) con caché KV 24h.
+// Esta función SOLO consulta el mapa local _itemClipsMap que se llena por
+// loadClipsStatus(). Si el item no fue verificado todavía → devuelve null
+// (modo "desconocido", para no marcar como "Sin Clip" antes de saber).
+let _itemClipsMap = {};      // { itemId: true | false }
+let _clipsLoadedAt = 0;       // timestamp de la última carga global
+
 function itemHasVideo(item){
-  if(!item) return false;
-
-  // 1. Campo estándar: video de YouTube vinculado al ítem
-  const v = item.video_id;
-  if(v !== null && v !== undefined && v !== 'null' && v !== 'undefined' && String(v).trim() !== ''){
-    return true;
-  }
-
-  // 2. Clips/Shorts nativos: ML los devuelve en clips[] (preparado para el futuro)
-  // if(item.clips && Array.isArray(item.clips) && item.clips.length > 0) return true;
-
-  // 3. Short videos nativos (posible campo futuro de ML)
-  // if(item.short_videos && Array.isArray(item.short_videos) && item.short_videos.length > 0) return true;
-
-  // 4. Atributo VIDEO_CLIP en el array de attributes (posible campo futuro)
-  // const clipAttr = (item.attributes||[]).find(a => a.id === 'VIDEO_CLIP');
-  // if(clipAttr && clipAttr.value_name && clipAttr.value_name.trim()) return true;
-
-  return false;
+  if(!item || !item.id) return null;
+  // Si el mapa ya tiene una respuesta para este ítem, usarla (es la verdad)
+  if(item.id in _itemClipsMap) return _itemClipsMap[item.id];
+  // Aún no consultamos a ML — devolver null (= desconocido)
+  // Los renders deben tratar null como "no marcar como sin clip".
+  return null;
 }
+
+// ── v76: loadClipsStatus — verifica clips de un batch de ítems ──────────────
+// Llama al Worker /api/items/clips-check (que tiene caché KV 24h por ítem).
+// Llamada típica: pasar TODOS los allItems IDs después del primer load.
+// El backend resuelve solo los que no están en cache, devuelve un mapa.
+// Persistimos también en localStorage para que el próximo boot tenga datos al instante.
+const _CLIPS_LS_KEY = 'mlp_clips_map_v1';
+async function loadClipsStatus(ids){
+  if(!Array.isArray(ids) || !ids.length || !token) return;
+  // Saltamos los que ya están en el mapa de RAM (puede venir de localStorage)
+  const toAsk = ids.filter(id => !(id in _itemClipsMap));
+  if(!toAsk.length) return;
+  console.log('[Clips] Verificando '+toAsk.length+' ítems en /api/items/clips-check...');
+  try{
+    // Procesar en batches de 200 para no enviar requests gigantes
+    const BATCH = 200;
+    for(let i = 0; i < toAsk.length; i += BATCH){
+      const slice = toAsk.slice(i, i + BATCH);
+      const r = await fetch(WORKER + '/api/items/clips-check', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: slice }),
+      });
+      if(!r.ok){ console.warn('[Clips] HTTP '+r.status); break; }
+      const d = await r.json();
+      if(d.hasClip){
+        Object.assign(_itemClipsMap, d.hasClip);
+      }
+      console.log('[Clips] Batch '+(i/BATCH+1)+' — '+(d.cached||0)+' desde caché, '+(d.fetched||0)+' fetched');
+    }
+    _clipsLoadedAt = Date.now();
+    // Persistir en localStorage (reduce TTL a 24h igual que en KV)
+    try{
+      localStorage.setItem(_CLIPS_LS_KEY, JSON.stringify({ ts: Date.now(), map: _itemClipsMap }));
+    }catch{}
+    // Re-render de la SEO table si está visible (para sacar las "Sin Clip" erróneas)
+    if(document.getElementById('section-seo')?.classList.contains('active')){
+      try{ renderSEOTable(); }catch{}
+    }
+  }catch(e){ console.warn('[Clips] error:', e.message); }
+}
+
+// Restaurar mapa de clips desde localStorage al boot (instant, sin API)
+function _restoreClipsMap(){
+  try{
+    const raw = localStorage.getItem(_CLIPS_LS_KEY);
+    if(!raw) return;
+    const entry = JSON.parse(raw);
+    if(!entry || !entry.map) return;
+    // TTL local: 24h igual que KV — datos más viejos se ignoran y se re-fetchean
+    if(Date.now() - (entry.ts || 0) > 24 * 60 * 60 * 1000) return;
+    _itemClipsMap = entry.map;
+    _clipsLoadedAt = entry.ts;
+    console.log('[Clips] Restaurado del localStorage:', Object.keys(_itemClipsMap).length, 'ítems');
+  }catch{}
+}
+_restoreClipsMap();
 
 // ── Sistema de objetivos de calidad (basado en datos reales) ─
 // Retorna { goals: [{id, label, achieved}], score: 0-100 }
@@ -6321,8 +6386,9 @@ function qualityGoals(item){
   const hasPics = pics.length >= 2 || (pics.length === 0 && !!item.thumbnail);
   goals.push({ id:'fotos', label:'Fotos suficientes (≥2)', achieved: hasPics && pics.length >= 2 });
 
-  // 3. Video / clip
-  goals.push({ id:'video', label:'Video / clip', achieved: itemHasVideo(item) });
+  // 3. Video / clip — null (= aún no verificado por loadClipsStatus) lo tratamos
+  // como "logrado" para no penalizar la calidad antes de tener datos reales.
+  goals.push({ id:'video', label:'Video / clip', achieved: itemHasVideo(item) !== false });
 
   // 4. Código universal (GTIN/EAN)
   goals.push({ id:'ean', label:'Código universal (EAN)', achieved: itemHasEAN(item) });
@@ -6373,8 +6439,9 @@ function qualityChecks(item){
   const noPromo=lt===''||lt==='free'||lt==='bronze'||lt==='silver';
   if(noPromo) problems.push({id:'promo',label:'Sin promoción activa',sev:1});
 
-  // Video/clip — usa detección correcta por video_id
-  if(!itemHasVideo(item)) problems.push({id:'clip',label:'Sin video/clip',sev:1});
+  // Video/clip — solo marcar problema cuando el Worker confirmó que NO tiene clip.
+  // null (aún no verificado) NO se considera problema para evitar falsos positivos.
+  if(itemHasVideo(item) === false) problems.push({id:'clip',label:'Sin video/clip',sev:1});
 
   // EAN/GTIN — usa detección correcta por attributes.GTIN
   if(!itemHasEAN(item) && !item.seller_custom_field)
@@ -6453,37 +6520,147 @@ function seoMultiSortAddRow(presetCol, presetDir){
     document.getElementById('seo-multi-sort-status').textContent = 'Máximo 5 criterios';
     return;
   }
+  const col = presetCol || SEO_SORT_COLUMNS[0].key;
+  const dir = presetDir || 'desc';
+  const rowId = 'ms-row-' + Date.now() + '-' + idx;
   const row = document.createElement('div');
   row.className = 'ms-row';
-  row.style.cssText = 'display:flex;gap:8px;align-items:center;background:var(--bg);padding:8px 10px;border-radius:6px;border:1px solid var(--border)';
-  const optsHtml = SEO_SORT_COLUMNS.map(c => `<option value="${c.key}"${presetCol===c.key?' selected':''}>${c.label}</option>`).join('');
+  row.id = rowId;
+  row.dataset.col = col;
+  row.dataset.dir = dir;
+  row.style.cssText = 'display:flex;gap:8px;align-items:center;background:var(--bg);padding:6px 10px;border-radius:6px;border:1px solid var(--border)';
   row.innerHTML = `
-    <span style="font-size:11px;font-weight:700;color:var(--text3);width:18px">#${idx}</span>
-    <select class="ms-col" style="flex:1;font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg)">
-      ${optsHtml}
-    </select>
-    <select class="ms-dir" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg)">
-      <option value="desc"${presetDir==='desc'?' selected':''}>↓ Descendente (mayor a menor)</option>
-      <option value="asc"${presetDir==='asc'?' selected':''}>↑ Ascendente (menor a mayor)</option>
-    </select>
-    <button class="btn btn-ghost btn-sm" onclick="seoMultiSortRemoveRow(this)" title="Quitar criterio" style="padding:4px 8px">✕</button>`;
+    <span class="ms-num" style="font-size:10.5px;font-weight:700;color:var(--text3);width:18px;flex-shrink:0">#${idx}</span>
+    <div style="position:relative;flex:1;min-width:0">
+      <button type="button" class="ms-trigger" onclick="_msToggleDropdown(this,'col')"
+        style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:6px;padding:6px 10px;background:var(--bg2);border:1px solid var(--border);border-radius:5px;cursor:pointer;font-size:11.5px;color:var(--text);transition:border-color .15s;text-align:left">
+        <span class="ms-col-label" style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span>
+        <span style="color:var(--text3);font-size:9px">▼</span>
+      </button>
+      <div class="ms-dropdown" style="display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;background:var(--bg);border:1px solid var(--border);border-radius:6px;box-shadow:0 6px 16px rgba(0,0,0,.12);z-index:50;max-height:280px;overflow-y:auto;padding:4px"></div>
+    </div>
+    <div style="position:relative;flex-shrink:0">
+      <button type="button" class="ms-trigger" onclick="_msToggleDropdown(this,'dir')"
+        style="display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--bg2);border:1px solid var(--border);border-radius:5px;cursor:pointer;font-size:11.5px;color:var(--text);min-width:130px">
+        <span class="ms-dir-label" style="font-weight:600"></span>
+        <span style="color:var(--text3);font-size:9px;margin-left:auto">▼</span>
+      </button>
+      <div class="ms-dropdown" style="display:none;position:absolute;top:calc(100% + 4px);right:0;background:var(--bg);border:1px solid var(--border);border-radius:6px;box-shadow:0 6px 16px rgba(0,0,0,.12);z-index:50;padding:4px;min-width:180px"></div>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="seoMultiSortRemoveRow(this)" title="Quitar criterio" style="padding:4px 7px;font-size:12px;line-height:1;flex-shrink:0">✕</button>`;
   cont.appendChild(row);
-  // Renumerar
+  // Renderizar labels iniciales
+  _msUpdateRowLabels(row);
+  _msRenumber();
+}
+
+// Actualiza los textos visibles del trigger (columna + dirección) según data-col / data-dir
+function _msUpdateRowLabels(row){
+  const col = row.dataset.col;
+  const dir = row.dataset.dir;
+  const def = SEO_SORT_COLUMNS.find(c => c.key === col);
+  const colLbl = row.querySelector('.ms-col-label');
+  const dirLbl = row.querySelector('.ms-dir-label');
+  if(colLbl) colLbl.textContent = def ? def.label : '—';
+  if(dirLbl){
+    dirLbl.innerHTML = dir === 'asc'
+      ? '<span style="color:var(--accent)">↑</span> Ascendente'
+      : '<span style="color:var(--accent)">↓</span> Descendente';
+  }
+}
+
+// Toggle del dropdown (cierra los demás abiertos primero)
+function _msToggleDropdown(btn, type){
+  const dropdown = btn.nextElementSibling;
+  const isOpen = dropdown.style.display !== 'none';
+  // Cerrar todos
+  document.querySelectorAll('.ms-dropdown').forEach(d => d.style.display = 'none');
+  document.querySelectorAll('.ms-trigger').forEach(t => t.style.borderColor = 'var(--border)');
+  if(isOpen) return;
+  // Llenar contenido si está vacío o renderizar de nuevo (para reflejar selección actual)
+  const row = btn.closest('.ms-row');
+  if(type === 'col') _msPopulateColMenu(dropdown, row);
+  else _msPopulateDirMenu(dropdown, row);
+  dropdown.style.display = 'block';
+  btn.style.borderColor = 'var(--accent)';
+}
+
+// Llena el menú de columnas, marcando la activa
+function _msPopulateColMenu(dropdown, row){
+  const activeCol = row.dataset.col;
+  dropdown.innerHTML = SEO_SORT_COLUMNS.map(c => {
+    const isActive = c.key === activeCol;
+    return `<div onclick="_msSelectCol(this,'${c.key}')" data-active="${isActive?'1':'0'}"
+      style="padding:6px 10px;cursor:pointer;border-radius:4px;font-size:11.5px;display:flex;align-items:center;gap:6px;${isActive?'background:rgba(79,142,247,0.15);color:var(--accent);font-weight:700':'color:var(--text)'}"
+      onmouseover="if(this.dataset.active!=='1')this.style.background='var(--bg2)'"
+      onmouseout="if(this.dataset.active!=='1')this.style.background=''">
+      ${isActive?'<span style="font-size:11px">✓</span>':'<span style="width:11px"></span>'}
+      <span>${c.label}</span>
+    </div>`;
+  }).join('');
+}
+
+// Llena el menú de dirección
+function _msPopulateDirMenu(dropdown, row){
+  const activeDir = row.dataset.dir;
+  const opts = [
+    { key:'desc', label:'<span style="color:var(--accent)">↓</span> Descendente', desc:'Mayor a menor' },
+    { key:'asc',  label:'<span style="color:var(--accent)">↑</span> Ascendente', desc:'Menor a mayor' },
+  ];
+  dropdown.innerHTML = opts.map(o => {
+    const isActive = o.key === activeDir;
+    return `<div onclick="_msSelectDir(this,'${o.key}')" data-active="${isActive?'1':'0'}"
+      style="padding:6px 10px;cursor:pointer;border-radius:4px;font-size:11.5px;display:flex;align-items:center;gap:8px;${isActive?'background:rgba(79,142,247,0.15);color:var(--accent);font-weight:700':'color:var(--text)'}"
+      onmouseover="if(this.dataset.active!=='1')this.style.background='var(--bg2)'"
+      onmouseout="if(this.dataset.active!=='1')this.style.background=''">
+      ${isActive?'<span style="font-size:11px">✓</span>':'<span style="width:11px"></span>'}
+      <span>${o.label}</span>
+      <span style="margin-left:auto;font-size:10px;color:var(--text3);font-weight:400">${o.desc}</span>
+    </div>`;
+  }).join('');
+}
+
+function _msSelectCol(el, col){
+  const row = el.closest('.ms-row');
+  if(!row) return;
+  row.dataset.col = col;
+  _msUpdateRowLabels(row);
+  // Cerrar el dropdown
+  document.querySelectorAll('.ms-dropdown').forEach(d => d.style.display = 'none');
+  document.querySelectorAll('.ms-trigger').forEach(t => t.style.borderColor = 'var(--border)');
+}
+
+function _msSelectDir(el, dir){
+  const row = el.closest('.ms-row');
+  if(!row) return;
+  row.dataset.dir = dir;
+  _msUpdateRowLabels(row);
+  document.querySelectorAll('.ms-dropdown').forEach(d => d.style.display = 'none');
+  document.querySelectorAll('.ms-trigger').forEach(t => t.style.borderColor = 'var(--border)');
+}
+
+// Renumerar todas las filas (#1, #2, ...)
+function _msRenumber(){
+  const cont = document.getElementById('seo-multi-sort-rows');
+  if(!cont) return;
   Array.from(cont.querySelectorAll('.ms-row')).forEach((r,i)=>{
-    const span = r.querySelector('span');
+    const span = r.querySelector('.ms-num');
     if(span) span.textContent = '#'+(i+1);
   });
 }
 
+// Cerrar dropdowns al clickear fuera
+document.addEventListener('click', (e) => {
+  if(!e.target.closest('.ms-trigger') && !e.target.closest('.ms-dropdown')){
+    document.querySelectorAll('.ms-dropdown').forEach(d => d.style.display = 'none');
+    document.querySelectorAll('.ms-trigger').forEach(t => t.style.borderColor = 'var(--border)');
+  }
+});
+
 function seoMultiSortRemoveRow(btn){
   const row = btn.closest('.ms-row');
   if(row) row.remove();
-  // Renumerar
-  const cont = document.getElementById('seo-multi-sort-rows');
-  Array.from(cont.querySelectorAll('.ms-row')).forEach((r,i)=>{
-    const span = r.querySelector('span');
-    if(span) span.textContent = '#'+(i+1);
-  });
+  _msRenumber();
 }
 
 function seoMultiSortApply(){
@@ -6491,8 +6668,8 @@ function seoMultiSortApply(){
   if(!cont) return;
   const rows = Array.from(cont.querySelectorAll('.ms-row'));
   const criteria = rows.map(r => ({
-    col: r.querySelector('.ms-col').value,
-    dir: r.querySelector('.ms-dir').value,
+    col: r.dataset.col,
+    dir: r.dataset.dir,
   })).filter(c => c.col);
   if(!criteria.length){
     document.getElementById('seo-multi-sort-status').textContent = 'Agregá al menos 1 criterio';
@@ -6862,8 +7039,10 @@ function renderSEOTable(){
     const eanArg = eanP?"'faltante'":'null';
     const m      = itemMetrics[item.id];
 
-    // Clip badge (solo si NO tiene video)
-    const clipBadge = !hasClip
+    // Clip badge: solo mostrar "Sin clip" cuando el Worker confirmó que NO tiene
+    // (hasClip === false). Si es null = aún no verificamos → no mostramos badge
+    // erróneo de Sin clip; si es true tampoco lo mostramos.
+    const clipBadge = (hasClip === false)
       ? '<span style="display:inline-flex;align-items:center;gap:3px;font-size:9px;padding:1px 5px;border-radius:3px;background:#fef3c7;color:#92400e;border:1px solid #fde68a">▶ Sin clip</span>'
       : '';
 
