@@ -710,7 +710,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v79 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v80 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -3471,6 +3471,8 @@ function computeGlobalLastSaleMap(){
   }
   _globalLastSaleMap = map;
   _globalLastSaleComputedAt = Date.now();
+  // v80: Invalidar caché de scenarios (los counts cambiaron porque los días sin venta cambiaron)
+  if(typeof _scenarioCountsCache !== 'undefined') _scenarioCountsCache = null;
   console.log('[LastSaleMap] Calculado:', Object.keys(map).length, 'ítems con ventas históricas');
 }
 
@@ -6355,7 +6357,10 @@ function qualityChecks(item){
 }
 
 function qualityScore(item){
-  // Usar el nuevo sistema de objetivos para consistencia
+  // v80: Priorizamos item.health de ML (0-1) → es el score oficial que aparece
+  // en la app de ML. Esto evita discrepancias con la ficha de la publicación.
+  // Si ML no envió health (publicación nueva, raras), caemos al cálculo local.
+  if(item && typeof item.health === 'number') return Math.round(item.health * 100);
   return qualityGoals(item).score;
 }
 
@@ -6419,9 +6424,11 @@ const SEO_SCENARIOS = {
     description: 'Publicaciones con menos de 2 fotos. La primera foto define el CTR de la búsqueda.',
     actionMain:      'Subir al menos 4 fotos en fondo blanco con distintos ángulos.',
     actionSecondary: 'Agregar 1 foto contextual con persona usando el producto para humanizar.',
+    // v80: Mismo criterio que qualityChecks() — si tiene 0 pictures pero hay
+    // thumbnail (caso común en ML), NO se considera "sin fotos".
     filter: i => {
       const pics = i.pictures || [];
-      return pics.length < 2;
+      return pics.length >= 1 ? pics.length < 2 : !i.thumbnail;
     },
   },
   'sin_ean': {
@@ -6429,7 +6436,12 @@ const SEO_SCENARIOS = {
     description: 'Falta el código universal del producto (GTIN/EAN). ML penaliza el ranking.',
     actionMain:      'Cargar el código de barras del producto en la ficha técnica.',
     actionSecondary: 'Si no tenés EAN, usar el SKU interno en seller_custom_field.',
-    filter: i => !itemHasEAN(i) && !i.seller_custom_field,
+    // v80: Si la publicación es de catálogo (catalog_listing/catalog_product_id),
+    // el EAN viene heredado del catálogo padre — NO marcar como falta.
+    filter: i => {
+      if(i.catalog_listing === true || i.catalog_product_id) return false;
+      return !itemHasEAN(i) && !i.seller_custom_field;
+    },
   },
   // ── Reformulados desde chips originales (prioridad emoji original) ──────────
   'poca_visibilidad': {
@@ -6649,6 +6661,81 @@ const SEO_SCENARIO_ORDER = [
   // Calidad de ficha
   'sin_fotos', 'sin_ean',
 ];
+
+// v80: ¿Califica un ítem para un escenario? Esta función es la fuente de verdad
+// para tres usos: (1) filtrar la tabla cuando se selecciona un escenario,
+// (2) badges en la columna Estrategia, (3) contadores de cantidad por chip.
+// Si el escenario tiene .filter explícito, usa ese; si no, evalúa la heurística.
+function _scenarioMatchesItem(key, item){
+  const sc = SEO_SCENARIOS[key];
+  if(!sc || !item) return false;
+  // Filtros booleanos puros (Sin Fotos / Sin EAN)
+  if(sc.filter) return sc.filter(item);
+
+  // Solo aplicamos heurísticas a publicaciones activas (las pausadas no entran)
+  if(item.status !== 'active') return false;
+
+  const m = itemMetrics[item.id];
+  const v7   = m?.visits   ?? 0;
+  const v30  = m?.visits30 ?? 0;
+  const s7   = m?.sales    ?? 0;
+  const s60  = m?.sales60  ?? 0;
+  const conv = m?.conv     ?? 0;
+  const stk  = item.available_quantity ?? 0;
+  const sold = item.sold_quantity ?? 0;
+  const days = getDaysSinceLastSale(item.id);
+  const qual = qualityScore(item);
+  const ageDays = item.date_created ? Math.floor((Date.now()-new Date(item.date_created))/86400000) : 9999;
+  const price = item.price || 0;
+
+  switch(key){
+    case 'peligro_quiebre':       return s7 >= 2 && stk > 0 && stk <= 5;
+    case 'alta_conv_bajo_stock':  return conv >= 5 && stk > 0 && stk <= 8;
+    case 'trafico_esteril':       return v30 >= 20 && days >= 30 && days !== Infinity;
+    case 'falla_cierre':          return v7 >= 15 && conv < 1;
+    case 'tendencia_alza':        return s7 >= 2 && s60 >= 10;
+    case 'traccion_estreno':      return ageDays <= 45 && s7 >= 1;
+    case 'nicho_eficiente':       return conv >= 10 && v7 < 10 && v7 > 0;
+    case 'candidato_flex':        return s7 >= 2 && stk >= 10;
+    case 'mantenimiento_puesto':  return sold >= 20 && conv < 1.5 && s60 >= 1;
+    case 'alto_valor':            return price >= 5000 && conv >= 3;
+    case 'declive_cuenta':        return s60 >= 10 && s7 === 0 && days < 60;
+    case 'fin_temporada':         return s60 >= 10 && s7 === 0;
+    case 'lider_caido':           return sold >= 50 && days >= 60 && days !== Infinity;
+    case 'sobre_stock':           return stk >= 15 && days >= 60 && days !== Infinity;
+    case 'rescate_historico':     return days >= 180 && sold >= 10 && days !== Infinity;
+    case 'pausa_salud':           return days >= 120 && stk >= 5 && days !== Infinity;
+    case 'seo_desactualizado':   return qual < 40 && days >= 30 && days !== Infinity;
+    case 'sin_ventas':            return days >= 90 && sold < 5 && days !== Infinity;
+    case 'sin_visitas':           return v7 === 0 && v30 <= 2;
+    case 'poca_visibilidad':      return v7 >= 1 && v7 <= 5 && qual >= 50;
+  }
+  return false;
+}
+
+// Cuenta cuántos ítems califican para cada escenario (para los badges en chips).
+// Se cachea durante el render porque iterar 2400 items × 22 escenarios cada vez
+// que se renderiza la tabla es caro. La caché se invalida cuando cambia allItems.
+let _scenarioCountsCache = null;
+let _scenarioCountsCacheKey = '';
+function _getScenarioCounts(){
+  // Invalidación basada en cantidad de items + timestamp del último itemMetrics
+  const key = (allItems?.length || 0) + ':' + (_globalLastSaleComputedAt || 0);
+  if(_scenarioCountsCache && _scenarioCountsCacheKey === key) return _scenarioCountsCache;
+  const counts = {};
+  for(const k of SEO_SCENARIO_ORDER) counts[k] = 0;
+  if(!Array.isArray(allItems)) return counts;
+  // Solo iteramos publicaciones que aparecerían en la lista (excluyendo cerradas)
+  const visible = allItems.filter(i => i && i.status !== 'closed' && i.status !== 'deleted');
+  for(const item of visible){
+    for(const k of SEO_SCENARIO_ORDER){
+      if(_scenarioMatchesItem(k, item)) counts[k]++;
+    }
+  }
+  _scenarioCountsCache = counts;
+  _scenarioCountsCacheKey = key;
+  return counts;
+}
 
 // Estado: array de { col, dir } donde dir es 'asc' o 'desc'
 let _seoMultiSort = [];
@@ -7073,16 +7160,25 @@ let _seoActiveScenario = null;
 function renderScenarioChips(){
   const cont = document.getElementById('seo-scenario-chips');
   if(!cont) return;
+  // v80: Calcular cuántos ítems califican para cada escenario
+  const counts = _getScenarioCounts();
   const html = SEO_SCENARIO_ORDER.map(key => {
     const sc = SEO_SCENARIOS[key];
     if(!sc) return '';
     const isActive = _seoActiveScenario === key;
+    const n = counts[key] || 0;
     const bg = isActive ? sc.color : '';
     const fg = isActive ? '#fff' : '';
     const bd = isActive ? sc.color : '';
+    // Contador con estilo distinto según estado activo
+    const cBg = isActive ? 'rgba(255,255,255,.25)' : sc.color + '22';
+    const cFg = isActive ? '#fff' : sc.color;
+    const counter = `<span style="background:${cBg};color:${cFg};font-weight:700;font-size:10px;padding:1px 6px;border-radius:8px;margin-left:2px">${n}</span>`;
+    // Si no hay ningún ítem que califique, atenuar (opacity)
+    const opacity = n === 0 && !isActive ? '0.45' : '1';
     return `<div class="chip seo-scenario-chip" data-key="${key}" onclick="seoSetScenario('${key}')"
-      style="font-size:11px;cursor:pointer;background:${bg};color:${fg};border-color:${bd};transition:all .15s">
-      ${sc.emoji} ${sc.label}
+      style="font-size:11px;cursor:pointer;background:${bg};color:${fg};border-color:${bd};opacity:${opacity};transition:all .15s">
+      ${sc.emoji} ${sc.label} ${counter}
     </div>`;
   }).join('');
   cont.innerHTML = html
@@ -7131,6 +7227,25 @@ function seoSetScenario(key){
   const info = document.getElementById('seo-scenario-info');
   if(info){
     info.style.borderLeftColor = sc.color;
+    // v80: Mostrar columnas + dirección del orden cascada como pills legibles
+    let orderPills = '';
+    if(sc.criteria && sc.criteria.length){
+      const colLabels = {};
+      SEO_SORT_COLUMNS.forEach(c => { colLabels[c.key] = c.label; });
+      orderPills = sc.criteria.map((c, idx) => {
+        const arrow = c.dir === 'desc' ? '↓' : '↑';
+        const arrowLbl = c.dir === 'desc' ? 'mayor → menor' : 'menor → mayor';
+        const label = colLabels[c.col] || c.col;
+        return `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:${sc.color}15;border:1px solid ${sc.color}55;border-radius:6px;font-size:10.5px;color:${sc.color};font-weight:600">
+          <span style="opacity:.7">${idx+1}.</span> ${label} <span style="font-size:13px;line-height:1">${arrow}</span> <span style="font-weight:400;opacity:.85">${arrowLbl}</span>
+        </span>`;
+      }).join('<span style="color:var(--text3);font-size:10px;align-self:center">→</span>');
+      orderPills = `<div style="margin-top:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <span style="font-size:11px;color:var(--text3);font-weight:600">Orden aplicado:</span>
+        ${orderPills}
+      </div>`;
+    }
+
     info.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:6px">
         <div style="font-size:13px;font-weight:700;color:${sc.color}">
@@ -7149,7 +7264,8 @@ function seoSetScenario(key){
           <span style="font-weight:700;color:var(--text3)">+ Mejora:</span>
           <span style="color:var(--text2)">${sc.actionSecondary}</span>
         </div>
-      </div>`;
+      </div>
+      ${orderPills}`;
     info.style.display = 'block';
   }
 
@@ -7201,10 +7317,10 @@ function renderSEOTable(){
     if(st&&i.status!==st) return false;
     if(seoState.tipoFilter && getPubType(i)!==seoState.tipoFilter) return false;
 
-    // v79: Filtro por escenario activo (Sin Fotos / Sin EAN tienen .filter; el resto solo ordena)
+    // v80: Filtro por escenario activo. Antes solo Sin Fotos/EAN tenían filter.
+    // Ahora cada escenario filtra: solo se ven los ítems que califican.
     if(_seoActiveScenario){
-      const sc = SEO_SCENARIOS[_seoActiveScenario];
-      if(sc && sc.filter && !sc.filter(i)) return false;
+      if(!_scenarioMatchesItem(_seoActiveScenario, i)) return false;
     }
 
     // Filtros viejos de score/calidad (mantenemos por retro-compat con insightGoToSEO)
@@ -7402,55 +7518,19 @@ function renderSEOTable(){
       </td>
       <td style="background:#f5f3ff;padding:6px 8px">
         ${(()=>{
-          // v79: Detectar qué escenarios aplican a este ítem específico.
-          // Para los que tienen .filter (Sin Fotos / Sin EAN) usamos esa función.
-          // Para los demás usamos heurísticas inline (las mismas condiciones que
-          // el escenario describe — ej: peligro_quiebre = ventas7>0 + stock<5).
-          const v7=m?.visits??item.visits_7d??0;
-          const v30=m?.visits30??0;
-          const s7=m?.sales??0;
-          const s60=m?.sales60??0;
-          const conv=m?.conv??0;
-          const stk=item.available_quantity??0;
-          const sold=item.sold_quantity??0;
-          const days=getDaysSinceLastSale(item.id);
-          const qual=qualityScore(item);
-          const ageDays = item.date_created ? Math.floor((Date.now()-new Date(item.date_created))/86400000) : 9999;
-
+          // v80: Reutilizamos _scenarioMatchesItem (fuente de verdad única).
+          // Iteramos los escenarios en orden de prioridad y mostramos máx 3.
           const tags = [];
-          // Filtros booleanos puros (Sin Fotos / Sin EAN)
-          if(SEO_SCENARIOS.sin_fotos.filter(item)) tags.push(SEO_SCENARIOS.sin_fotos);
-          if(SEO_SCENARIOS.sin_ean.filter(item))   tags.push(SEO_SCENARIOS.sin_ean);
-          // Escenarios deducidos por heurística (matching de las condiciones del escenario)
-          if(s7>=2 && stk>0 && stk<=5)             tags.push(SEO_SCENARIOS.peligro_quiebre);
-          if(conv>=5 && stk>0 && stk<=8)           tags.push(SEO_SCENARIOS.alta_conv_bajo_stock);
-          if(v30>=20 && days>=30 && days!==Infinity)tags.push(SEO_SCENARIOS.trafico_esteril);
-          if(v7>=15 && conv<1)                     tags.push(SEO_SCENARIOS.falla_cierre);
-          if(s7>=2 && s60>=10)                     tags.push(SEO_SCENARIOS.tendencia_alza);
-          if(ageDays<=45 && s7>=1)                 tags.push(SEO_SCENARIOS.traccion_estreno);
-          if(conv>=10 && v7<10)                    tags.push(SEO_SCENARIOS.nicho_eficiente);
-          if(s7>=2 && stk>=10)                     tags.push(SEO_SCENARIOS.candidato_flex);
-          if(s60>=10 && s7===0)                    tags.push(SEO_SCENARIOS.fin_temporada);
-          if(sold>=20 && conv<1.5 && s60>=1)       tags.push(SEO_SCENARIOS.mantenimiento_puesto);
-          if((item.price||0)>=5000 && conv>=3)     tags.push(SEO_SCENARIOS.alto_valor);
-          if(s60>=10 && s7===0 && days<60)         tags.push(SEO_SCENARIOS.declive_cuenta);
-          if(sold>=50 && days>=60 && days!==Infinity)tags.push(SEO_SCENARIOS.lider_caido);
-          if(qual<40 && days>=30 && days!==Infinity)tags.push(SEO_SCENARIOS.seo_desactualizado);
-          if(stk>=15 && days>=60 && days!==Infinity)tags.push(SEO_SCENARIOS.sobre_stock);
-          if(days>=180 && sold>=10 && days!==Infinity)tags.push(SEO_SCENARIOS.rescate_historico);
-          if(days>=120 && stk>=5 && item.status==='active' && days!==Infinity)tags.push(SEO_SCENARIOS.pausa_salud);
-          if(v7===0 && v30<=2)                     tags.push(SEO_SCENARIOS.sin_visitas);
-          if(v7>=1 && v7<=5 && qual>=50)           tags.push(SEO_SCENARIOS.poca_visibilidad);
-          if(days>=90 && sold<5 && days!==Infinity)tags.push(SEO_SCENARIOS.sin_ventas);
-
+          for(const key of SEO_SCENARIO_ORDER){
+            if(_scenarioMatchesItem(key, item)){
+              tags.push(SEO_SCENARIOS[key]);
+            }
+          }
           if(!tags.length) return '<span style="font-size:9px;color:var(--text3)">—</span>';
-
-          // Mostrar máx 3 tags para no saturar la celda
           const top3 = tags.slice(0, 3);
           const more = tags.length - 3;
           const html = top3.map(t => {
-            // Extraer color con suficiente contraste para fondo claro
-            const bg = t.color + '22'; // hex + alpha 13%
+            const bg = t.color + '22';
             return `<span title="${t.description.replace(/"/g,'&quot;')}" style="display:inline-flex;align-items:center;gap:3px;font-size:9px;padding:2px 6px;border-radius:10px;background:${bg};color:${t.color};border:1px solid ${t.color}55;white-space:nowrap;margin-bottom:3px;font-weight:600">${t.emoji} ${t.label}</span>`;
           }).join('');
           const moreSpan = more>0 ? `<span style="font-size:9px;color:var(--text3)">+${more} más</span>` : '';
@@ -9849,27 +9929,27 @@ function alertOpenScenariosModal(){
   const cards = SEO_SCENARIO_ORDER.map(key => {
     const sc = SEO_SCENARIOS[key];
     if(!sc) return '';
-    return `<div onclick="alertGoToScenario('${key}')" style="cursor:pointer;background:var(--bg);border:1px solid var(--border);border-left:4px solid ${sc.color};border-radius:8px;padding:10px 12px;transition:transform .1s, box-shadow .15s" onmouseover="this.style.transform='translateX(2px)';this.style.boxShadow='0 2px 8px rgba(0,0,0,.08)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
-      <div style="display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;color:${sc.color};margin-bottom:4px">
-        <span style="font-size:14px">${sc.emoji}</span> <span>${sc.label}</span>
+    return `<div onclick="alertGoToScenario('${key}')" style="cursor:pointer;background:#ffffff;border:1px solid #e5e7eb;border-left:4px solid ${sc.color};border-radius:8px;padding:12px 14px;transition:transform .1s, box-shadow .15s" onmouseover="this.style.transform='translateX(2px)';this.style.boxShadow='0 4px 12px rgba(0,0,0,.1)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
+      <div style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:${sc.color};margin-bottom:6px">
+        <span style="font-size:15px">${sc.emoji}</span> <span>${sc.label}</span>
       </div>
-      <div style="font-size:11px;color:var(--text2);line-height:1.4;margin-bottom:6px">${sc.description}</div>
-      <div style="font-size:10.5px;color:var(--text3)">
-        <span style="font-weight:700;color:${sc.color}">▶</span> ${sc.actionMain}
+      <div style="font-size:11.5px;color:#374151;line-height:1.5;margin-bottom:8px">${sc.description}</div>
+      <div style="font-size:11px;color:#1f2937;background:#f9fafb;padding:6px 8px;border-radius:5px;border-left:2px solid ${sc.color}">
+        <span style="font-weight:700;color:${sc.color}">▶ Acción hoy:</span> ${sc.actionMain}
       </div>
     </div>`;
   }).join('');
 
   modal.innerHTML = `
-    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;max-width:920px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.2)">
-      <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+    <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;max-width:920px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.25);color:#111827">
+      <div style="padding:18px 22px;border-bottom:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;background:#f9fafb;border-radius:12px 12px 0 0">
         <div>
-          <div style="font-size:15px;font-weight:700;color:var(--text)">📚 Ruta Maestra MeLi 2026</div>
-          <div style="font-size:11.5px;color:var(--text3);margin-top:2px">22 escenarios de optimización · clic para ver las publicaciones que califican en el Analizador SEO</div>
+          <div style="font-size:16px;font-weight:700;color:#111827">📚 Ruta Maestra MeLi 2026</div>
+          <div style="font-size:12px;color:#6b7280;margin-top:3px">22 escenarios de optimización · clic en cualquier tarjeta para ver las publicaciones que califican en el Analizador SEO</div>
         </div>
-        <button onclick="document.getElementById('alert-scenarios-modal').remove()" class="btn btn-ghost btn-sm" style="font-size:14px;padding:4px 10px">✕</button>
+        <button onclick="document.getElementById('alert-scenarios-modal').remove()" style="background:#ffffff;border:1px solid #d1d5db;color:#374151;cursor:pointer;font-size:14px;padding:6px 12px;border-radius:6px;font-weight:600">✕ Cerrar</button>
       </div>
-      <div style="padding:16px 20px;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">
+      <div style="padding:18px 22px;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;background:#f3f4f6">
         ${cards}
       </div>
     </div>`;
