@@ -710,7 +710,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v77 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v78 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4268,7 +4268,11 @@ const METRICS_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 horas
 // Objetivo: abrir nueva pestaña o recargar no fuerza esperar la API nuevamente.
 // TTL de 10 min — datos frescos sin sacrificar UX. Se actualiza en background igual.
 const _DATA_CACHE_TTL = 10 * 60 * 1000; // 10 minutos
-const _ITEMS_LS_KEY   = 'mlp_items_v1';
+const _ITEMS_LS_KEY   = 'mlp_items_v2';
+
+// v78: Limpieza one-time del cache v1 (puede estar desactualizado y causar
+// que el filtro Catálogo no funcione bien por ítems sin catalog_listing)
+try{ localStorage.removeItem('mlp_items_v1'); }catch(e){}
 const _ORDERS_LS_KEY  = 'mlp_orders_v1';
 
 function _saveDataCache(){
@@ -12782,6 +12786,19 @@ function _calBackupSyncNow(){ return cloudSyncAll(); }
 // divergencias históricas — algunos módulos (Competencia, QR, plantillas) guardan en
 // /api/settings y otros (tasks, calendario, pcHistory) en /api/backup. Ambos endpoints
 // tienen manejo merge-safe (leen prev antes de POST), así que es seguro escribir a los dos.
+// v78: Hash del último payload sincronizado para evitar escrituras redundantes
+// (si los datos no cambiaron, no escribimos en KV).
+var _lastSyncHash = null;
+function _hashCode(s){
+  var h = 0;
+  if(!s) return 0;
+  for(var i = 0; i < s.length; i++){
+    h = ((h << 5) - h) + s.charCodeAt(i);
+    h |= 0;
+  }
+  return h;
+}
+
 async function cloudSyncAll(){
   if(!token) return;
   try{
@@ -12800,7 +12817,9 @@ async function cloudSyncAll(){
     var localQR        = (typeof qGetQR === 'function') ? qGetQR() : (prev.quickReplies || []);
     var localTmpl      = (typeof qGetTmpl === 'function') ? qGetTmpl() : (prev.template || {});
 
-    // 3) Payload completo para /api/backup (tasks + calendario + pcHistory + aiRules)
+    // 3) Payload único para /api/backup (incluye TODO — tasks, calendario, pcHistory,
+    //    aiRules, configs). v78: ya NO duplicamos a /api/settings — el endpoint ahora
+    //    lee del mismo storage (ahorra 50% de escrituras).
     var backupBody = {
       tasks:        prev.tasks || [],   // tasks se maneja aparte (_saveTasks)
       rpRules:      localRp,
@@ -12815,31 +12834,44 @@ async function cloudSyncAll(){
       savedAt:      new Date().toISOString(),
     };
 
-    // 4) Payload para /api/settings (overlap intencional — los campos compartidos
-    //    quedan idénticos en ambos KV, eliminando divergencias históricas)
-    var settingsBody = {
-      quickReplies: localQR,
-      template:     localTmpl,
-      rpRules:      localRp,
-      activeRules:  localActive,
-      competitors:  localComp,
-    };
+    // v78: Dedup — si el payload (sin savedAt) es idéntico al último sincronizado,
+    // no escribimos en KV. Esto evita writes redundantes que cuentan contra el
+    // límite diario gratuito de Cloudflare KV (1000/día).
+    var hashable = JSON.stringify({
+      ...backupBody,
+      savedAt: undefined,  // excluir el timestamp del hash
+    });
+    var hash = _hashCode(hashable);
+    if(hash === _lastSyncHash){
+      console.log('[CloudSync] Sin cambios — skip write a KV (ahorra cuota diaria)');
+      return;
+    }
+    _lastSyncHash = hash;
 
-    // 5) POST en paralelo a ambos endpoints
-    await Promise.all([
-      fetch(WORKER + '/api/backup', {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-        body: JSON.stringify(backupBody)
-      }),
-      fetch(WORKER + '/api/settings', {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-        body: JSON.stringify(settingsBody)
-      })
-    ]);
+    // 4) UNA sola escritura a /api/backup (v78: removed dual write)
+    var r = await fetch(WORKER + '/api/backup', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify(backupBody)
+    });
+    if(!r.ok){
+      var errText = await r.text().catch(()=>'');
+      // Detectar específicamente el error 500 KV write limit del free tier
+      if(r.status === 500 && errText.includes('limit exceeded')){
+        console.warn('[CloudSync] ⚠️ Cuota KV diaria de Cloudflare agotada. Se renueva en pocas horas.');
+        // Mostrar toast solo una vez por sesión
+        if(!window._kvLimitWarned){
+          window._kvLimitWarned = true;
+          if(typeof showToast === 'function')
+            showToast('⚠️ Cuota de sincronización diaria agotada. Tus cambios se guardan localmente y se subirán en pocas horas.', 'warn', 8000);
+        }
+      } else {
+        console.warn('[CloudSync] HTTP ' + r.status + ' — ' + errText.slice(0, 200));
+      }
+      return;
+    }
 
-    console.log('[CloudSync] → KV (backup+settings): '
+    console.log('[CloudSync] ✓ KV escrito: '
       + 'cal=' + backupBody.calCustom.length
       + ' · bdays=' + backupBody.bdays.length
       + ' · pcHistory=' + backupBody.pcHistory.length
@@ -12850,10 +12882,13 @@ async function cloudSyncAll(){
 }
 
 // Versión debounced para llamar desde handlers de save (no saturar la red)
+// v78: Aumentamos el debounce de 2.5s a 30s para reducir drásticamente las
+// escrituras a Cloudflare KV (límite free: 1000/día). Si tocás 10 cosas en
+// 30s, se hace 1 sola escritura al final en lugar de 10.
 var _cloudSyncTimer = null;
 function cloudSyncDebounced(ms){
   if(_cloudSyncTimer) clearTimeout(_cloudSyncTimer);
-  _cloudSyncTimer = setTimeout(cloudSyncAll, ms || 2500);
+  _cloudSyncTimer = setTimeout(cloudSyncAll, ms || 30000);
 }
 function bday_toEvents(){
   var bdays=bday_getAll(), yr=new Date().getFullYear(), evs=[];
