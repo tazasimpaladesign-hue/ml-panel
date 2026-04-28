@@ -710,7 +710,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v73 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v74 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1201,7 +1201,8 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <thead><tr>
           <th>Publicación</th>
           <th onclick="seoSort('created')" style="cursor:pointer;user-select:none;white-space:nowrap" title="Fecha de creación del producto en ML">Creada ↕<span id="seo-sort-created" style="font-size:10px"></span></th>
-          <th onclick="seoSort('seo')"     style="cursor:pointer;user-select:none;white-space:nowrap">Score SEO <span id="seo-sort-seo" style="font-size:10px"></span></th>
+          <th onclick="seoSort('lastSale')" style="cursor:pointer;user-select:none;white-space:nowrap;text-align:center" title="Fecha de la última venta. Si no hubo ventas en 360 días muestra 'Sin Ventas 1 año'">Última venta ↕<span id="seo-sort-lastSale" style="font-size:10px"></span></th>
+          <th onclick="seoSort('daysNoSale')" style="cursor:pointer;user-select:none;white-space:nowrap;text-align:center" title="Días transcurridos desde la última venta">Días sin ventas ↕<span id="seo-sort-daysNoSale" style="font-size:10px"></span></th>
           <th onclick="seoSort('quality')" style="cursor:pointer;user-select:none;white-space:nowrap">Calidad pub. <span id="seo-sort-quality" style="font-size:10px"></span></th>
           <th onclick="seoSort('price')" style="cursor:pointer;user-select:none;white-space:nowrap">Precio ↕</th>
           <th onclick="seoSort('stock')" style="cursor:pointer;user-select:none;white-space:nowrap">Stock ↕</th>
@@ -3430,6 +3431,49 @@ let currentAccount = null;
 
 let token=null, userId=null, userData=null;
 let allItems=[], allOrders=[], allQuestions=[];
+
+// v74: Mapa global { itemId → ms timestamp de la última venta }
+// Se computa una sola vez tras cada actualización de allOrders.
+// Lo consumen Analizador SEO ("Última venta" / "Días sin ventas") y Quiebre de Stock.
+// El item_id puede venir con o sin prefijo "MLA" según el endpoint, así que
+// guardamos la versión con prefijo (formato canónico de allItems).
+let _globalLastSaleMap = {};
+let _globalLastSaleComputedAt = 0;
+
+function computeGlobalLastSaleMap(){
+  const map = {};
+  const orders = Array.isArray(allOrders) ? allOrders : [];
+  for(const o of orders){
+    if(!o || !o.date_created) continue;
+    if(o.status === 'cancelled' || o.status === 'invalid') continue;
+    const ts = new Date(o.date_created).getTime();
+    if(!ts || isNaN(ts)) continue;
+    const items = o.order_items || [];
+    for(const oi of items){
+      const rawId = oi?.item?.id;
+      if(!rawId) continue;
+      const sid = String(rawId);
+      const id  = sid.startsWith('MLA') ? sid : ('MLA' + sid);
+      if(!map[id] || ts > map[id]) map[id] = ts;
+    }
+  }
+  _globalLastSaleMap = map;
+  _globalLastSaleComputedAt = Date.now();
+  console.log('[LastSaleMap] Calculado:', Object.keys(map).length, 'ítems con ventas históricas');
+}
+
+// Helpers públicos para los renders
+// Devuelve null si no hay venta registrada
+function getLastSaleTs(itemId){
+  if(!itemId) return null;
+  return _globalLastSaleMap[itemId] || null;
+}
+// Días desde la última venta. Devuelve Infinity si no hay venta.
+function getDaysSinceLastSale(itemId){
+  const ts = getLastSaleTs(itemId);
+  if(!ts) return Infinity;
+  return Math.floor((Date.now() - ts) / (24 * 3600 * 1000));
+}
 // Cache de nicknames de compradores (userId → nickname)
 var _nicknameCache = {};
 let globalVisitsByDay = {}; // { 'YYYY-MM-DD': totalVisits }
@@ -3668,6 +3712,8 @@ async function initApp(){
     // Datos frescos disponibles — renderizar instantáneamente
     allItems  = _cached.items;
     allOrders = _cached.orders;
+    // v74: Recalcular mapa de última venta tras restaurar desde caché
+    computeGlobalLastSaleMap();
     _updateItemsUI();
     _updateOrdersUI(allOrders);
     console.log('[DataCache] Datos desde caché (' + _cached.ageMin + ' min) — actualizando en background...');
@@ -3989,6 +4035,8 @@ async function loadOrdersRecent(){
     const from=new Date(now.getFullYear(),now.getMonth(),1).toISOString();
     const r=await mlGet('/orders/search?seller='+userId+'&order.date_created.from='+encodeURIComponent(from)+'&sort=date_desc&limit=50');
     allOrders=r.results||[];
+    // v74: Computar lastSaleMap (parcial — luego se recompone con loadOrdersHistory)
+    computeGlobalLastSaleMap();
     _updateOrdersUI(allOrders);
     // Shipments en paralelo, sin bloquear
     loadShippingStatuses(allOrders.filter(o=>o.shipping?.id)).then(()=>{
@@ -4017,6 +4065,8 @@ async function loadOrdersHistory(){
     allOrders=[...hist].filter(o=>{if(seen.has(o.id))return false;seen.add(o.id);return true;});
     allOrders.sort((a,b)=>new Date(b.date_created)-new Date(a.date_created));
     console.log('[loadOrdersHistory]',allOrders.length);
+    // v74: Recalcular mapa global de última venta por ítem (lo usan Analizador SEO + Quiebre Stock)
+    computeGlobalLastSaleMap();
     updateLast50(allOrders.slice(0,100)); // Fill Últimos 50 from full history
     // Cargar envios del ultimo mes
     const recent=allOrders.filter(o=>o.shipping?.id&&!o.shipping._statusLoaded&&new Date(o.date_created)>new Date(Date.now()-30*24*3600*1000));
@@ -6331,7 +6381,7 @@ function seoSort(col){
   if(seoState.sortCol===col) seoState.sortDir*=-1;
   else{ seoState.sortCol=col; seoState.sortDir=-1; }
   seoState.page=1;
-  ['seo','quality','sold','sales7','visits','conv','visits30','sales60','created'].forEach(c=>{
+  ['quality','sold','sales7','visits','conv','visits30','sales60','created','lastSale','daysNoSale'].forEach(c=>{
     const el=document.getElementById('seo-sort-'+c);
     if(el) el.innerHTML=sortArrow(c,seoState.sortCol,seoState.sortDir);
   });
@@ -6598,6 +6648,18 @@ function renderSEOTable(){
       else if(seoState.sortCol==='price') { va=a.price||0;                 vb=b.price||0; }
       else if(seoState.sortCol==='stock') { va=a.available_quantity??0;    vb=b.available_quantity??0; }
       else if(seoState.sortCol==='created'){ va=a.date_created ? new Date(a.date_created).getTime() : 0; vb=b.date_created ? new Date(b.date_created).getTime() : 0; }
+      else if(seoState.sortCol==='lastSale'){
+        // 0 = sin venta (las publicaciones sin ventas quedan al final en DESC, al inicio en ASC)
+        va = getLastSaleTs(a.id) || 0;
+        vb = getLastSaleTs(b.id) || 0;
+      }
+      else if(seoState.sortCol==='daysNoSale'){
+        // Las publicaciones sin ventas reciben 999999 (al final en ASC, primero en DESC)
+        const da = getDaysSinceLastSale(a.id);
+        const db = getDaysSinceLastSale(b.id);
+        va = (da === Infinity) ? 999999 : da;
+        vb = (db === Infinity) ? 999999 : db;
+      }
       else                               { va=qualityScore(a);             vb=qualityScore(b); }
       return seoState.sortDir*(vb-va);
     });
@@ -6684,7 +6746,27 @@ function renderSEOTable(){
         return '<div style="font-size:11px;font-weight:600;color:'+ageColor+'">'+dd+'/'+mm+'/'+yy+'</div>'
           + '<div style="font-size:9.5px;color:var(--text3);margin-top:1px">'+ageDays+'d</div>';
       })()}</td>
-      <td><div style="display:flex;align-items:center;gap:5px"><div class="pbar" style="width:48px"><div class="pfill" style="width:${sc}%;background:${scC}"></div></div><span style="font-size:11px;font-weight:700;color:${scC}">${sc}</span></div></td>
+      <td style="text-align:center">${(()=>{
+        const ts = getLastSaleTs(item.id);
+        if(!ts) return '<span style="font-size:10px;color:var(--text3);font-weight:600">Sin Ventas 1 año</span>';
+        const days = Math.floor((Date.now()-ts)/(24*3600*1000));
+        if(days >= 360) return '<span style="font-size:10px;color:var(--text3);font-weight:600">Sin Ventas 1 año</span>';
+        const d = new Date(ts);
+        const dd = String(d.getDate()).padStart(2,'0');
+        const mm = String(d.getMonth()+1).padStart(2,'0');
+        const yy = d.getFullYear();
+        return '<div style="font-size:11px;font-weight:600;color:var(--text)">'+dd+'/'+mm+'/'+yy+'</div>';
+      })()}</td>
+      <td style="text-align:center">${(()=>{
+        const days = getDaysSinceLastSale(item.id);
+        if(days === Infinity || days >= 360) return '<span style="font-size:11px;color:var(--text3)">—</span>';
+        // Código de colores según rango de días
+        let bg, fg;
+        if(days < 30)      { bg = '#dcfce7'; fg = '#166534'; }   // Verde
+        else if(days < 180){ bg = '#fef3c7'; fg = '#92400e'; }   // Amarillo
+        else               { bg = '#fee2e2'; fg = '#991b1b'; }   // Rojo (180-359)
+        return '<span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;background:'+bg+';color:'+fg+'">'+days+' días</span>';
+      })()}</td>
       <td>
         <div style="display:flex;align-items:center;gap:6px">
           <span style="font-size:13px">${qE}</span>
