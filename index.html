@@ -710,7 +710,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v76 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v77 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1212,10 +1212,9 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       </div>
       <div id="seo-multi-sort-rows" style="display:flex;flex-direction:column;gap:5px"></div>
       <div style="display:flex;gap:6px;margin-top:10px;align-items:center;flex-wrap:wrap;padding-top:10px;border-top:1px solid var(--border)">
-        <button class="btn btn-ghost btn-sm" onclick="seoMultiSortAddRow()" style="font-size:11px">+ Agregar criterio</button>
-        <button class="btn btn-primary btn-sm" onclick="seoMultiSortApply()" style="font-size:11px">✓ Aplicar orden</button>
-        <button class="btn btn-ghost btn-sm" onclick="seoMultiSortClear()" style="font-size:11px">Limpiar</button>
-        <div style="margin-left:auto;font-size:10.5px;color:var(--text3)" id="seo-multi-sort-status"></div>
+        <button class="btn btn-primary btn-sm" onclick="seoMultiSortAddRow()" style="font-size:11px">+ Agregar criterio</button>
+        <button class="btn btn-ghost btn-sm" onclick="seoMultiSortClear()" style="font-size:11px">🗑️ Limpiar todo</button>
+        <div style="margin-left:auto;font-size:10.5px;color:var(--text3)" id="seo-multi-sort-status">El orden se aplica automáticamente</div>
       </div>
     </div>
     <div class="tw">
@@ -3779,13 +3778,6 @@ async function initApp(){
     initAI();
     loadOrdersHistory();
     loadTrends();
-    // v76: Verificar Clips de todas las publicaciones (mapa con caché 24h en KV).
-    // Llamamos en background después de un breve delay para no competir con
-    // ordenes/trends que se ejecutan inmediatamente.
-    setTimeout(() => {
-      const ids = (allItems || []).filter(i => i && i.id && i.status === 'active').map(i => i.id);
-      if(ids.length) loadClipsStatus(ids);
-    }, 5000);
     // Enriquecer preguntas con nicknames (se había retrasado en loadQuestions)
     if(window._pendingEnrichQuestions){
       enrichQuestionsNicknames().catch(e=>console.warn('[Q] enrichNicknames:', e));
@@ -5605,19 +5597,8 @@ function renderDashInsights(){
     });
   }
 
-  // ── SIN VIDEO / CLIP ────────────────────────────────────
-  // v76: Usamos el mapa real de _itemClipsMap (poblado por /api/items/clips-check).
-  // Solo contamos como "sin video" los que el Worker confirmó como false.
-  // Los null (aún no verificados) se omiten para no inflar el conteo.
-  const noVideo = active.filter(i => itemHasVideo(i) === false);
-  if(noVideo.length>0 && noVideo.length>active.length*0.6){
-    insights.push({
-      level:'low', icon:'🎬',
-      title:`${noVideo.length} publicaciones sin video/clip`,
-      text:`${noVideo.length} publicaciones no tienen video. Agregar un clip puede mejorar la conversión hasta un 20% según datos de ML.`,
-      action:'Ver en SEO', fn:"insightGoToSEO('clip')"
-    });
-  }
+  // v77: Eliminado el insight "publicaciones sin video/clip" — no se puede
+  // detectar con confiabilidad sin un endpoint costoso por ítem.
 
   // ── CALIDAD BAJA ────────────────────────────────────────
   const lowQuality = active.filter(i=>qualityScore(i)<40);
@@ -6296,81 +6277,12 @@ function itemHasEAN(item){
   return false;
 }
 
-// ── Detección correcta de Clip nativo de ML ──────────
-// v76: Los Clips ya NO vienen en el objeto raíz del ítem. ML los expone en
-// el endpoint /items/{id}/videos. Como llamarlo por cada ítem sería caro,
-// el Worker tiene un endpoint batch (/api/items/clips-check) con caché KV 24h.
-// Esta función SOLO consulta el mapa local _itemClipsMap que se llena por
-// loadClipsStatus(). Si el item no fue verificado todavía → devuelve null
-// (modo "desconocido", para no marcar como "Sin Clip" antes de saber).
-let _itemClipsMap = {};      // { itemId: true | false }
-let _clipsLoadedAt = 0;       // timestamp de la última carga global
-
-function itemHasVideo(item){
-  if(!item || !item.id) return null;
-  // Si el mapa ya tiene una respuesta para este ítem, usarla (es la verdad)
-  if(item.id in _itemClipsMap) return _itemClipsMap[item.id];
-  // Aún no consultamos a ML — devolver null (= desconocido)
-  // Los renders deben tratar null como "no marcar como sin clip".
-  return null;
-}
-
-// ── v76: loadClipsStatus — verifica clips de un batch de ítems ──────────────
-// Llama al Worker /api/items/clips-check (que tiene caché KV 24h por ítem).
-// Llamada típica: pasar TODOS los allItems IDs después del primer load.
-// El backend resuelve solo los que no están en cache, devuelve un mapa.
-// Persistimos también en localStorage para que el próximo boot tenga datos al instante.
-const _CLIPS_LS_KEY = 'mlp_clips_map_v1';
-async function loadClipsStatus(ids){
-  if(!Array.isArray(ids) || !ids.length || !token) return;
-  // Saltamos los que ya están en el mapa de RAM (puede venir de localStorage)
-  const toAsk = ids.filter(id => !(id in _itemClipsMap));
-  if(!toAsk.length) return;
-  console.log('[Clips] Verificando '+toAsk.length+' ítems en /api/items/clips-check...');
-  try{
-    // Procesar en batches de 200 para no enviar requests gigantes
-    const BATCH = 200;
-    for(let i = 0; i < toAsk.length; i += BATCH){
-      const slice = toAsk.slice(i, i + BATCH);
-      const r = await fetch(WORKER + '/api/items/clips-check', {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: slice }),
-      });
-      if(!r.ok){ console.warn('[Clips] HTTP '+r.status); break; }
-      const d = await r.json();
-      if(d.hasClip){
-        Object.assign(_itemClipsMap, d.hasClip);
-      }
-      console.log('[Clips] Batch '+(i/BATCH+1)+' — '+(d.cached||0)+' desde caché, '+(d.fetched||0)+' fetched');
-    }
-    _clipsLoadedAt = Date.now();
-    // Persistir en localStorage (reduce TTL a 24h igual que en KV)
-    try{
-      localStorage.setItem(_CLIPS_LS_KEY, JSON.stringify({ ts: Date.now(), map: _itemClipsMap }));
-    }catch{}
-    // Re-render de la SEO table si está visible (para sacar las "Sin Clip" erróneas)
-    if(document.getElementById('section-seo')?.classList.contains('active')){
-      try{ renderSEOTable(); }catch{}
-    }
-  }catch(e){ console.warn('[Clips] error:', e.message); }
-}
-
-// Restaurar mapa de clips desde localStorage al boot (instant, sin API)
-function _restoreClipsMap(){
-  try{
-    const raw = localStorage.getItem(_CLIPS_LS_KEY);
-    if(!raw) return;
-    const entry = JSON.parse(raw);
-    if(!entry || !entry.map) return;
-    // TTL local: 24h igual que KV — datos más viejos se ignoran y se re-fetchean
-    if(Date.now() - (entry.ts || 0) > 24 * 60 * 60 * 1000) return;
-    _itemClipsMap = entry.map;
-    _clipsLoadedAt = entry.ts;
-    console.log('[Clips] Restaurado del localStorage:', Object.keys(_itemClipsMap).length, 'ítems');
-  }catch{}
-}
-_restoreClipsMap();
+// v77: Eliminada toda la lógica de detección de Clips de ML.
+// El endpoint /items/{id}/videos consumía demasiados recursos en Cloudflare
+// (warning del plan free) y la utilidad real era baja. Si en el futuro ML
+// expone los clips en el payload de /items, podemos reincorporarlo sin costo.
+// Limpiamos cualquier residuo en localStorage del intento anterior.
+try{ localStorage.removeItem('mlp_clips_map_v1'); }catch{}
 
 // ── Sistema de objetivos de calidad (basado en datos reales) ─
 // Retorna { goals: [{id, label, achieved}], score: 0-100 }
@@ -6386,23 +6298,19 @@ function qualityGoals(item){
   const hasPics = pics.length >= 2 || (pics.length === 0 && !!item.thumbnail);
   goals.push({ id:'fotos', label:'Fotos suficientes (≥2)', achieved: hasPics && pics.length >= 2 });
 
-  // 3. Video / clip — null (= aún no verificado por loadClipsStatus) lo tratamos
-  // como "logrado" para no penalizar la calidad antes de tener datos reales.
-  goals.push({ id:'video', label:'Video / clip', achieved: itemHasVideo(item) !== false });
-
-  // 4. Código universal (GTIN/EAN)
+  // 3. Código universal (GTIN/EAN)
   goals.push({ id:'ean', label:'Código universal (EAN)', achieved: itemHasEAN(item) });
 
-  // 5. Stock disponible
+  // 4. Stock disponible
   const qty = item.available_quantity ?? 0;
   goals.push({ id:'stock', label:'Stock disponible', achieved: qty > 0 });
 
-  // 6. Tipo de publicación (Gold/Premium = mayor visibilidad)
+  // 5. Tipo de publicación (Gold/Premium = mayor visibilidad)
   const lt = (item.listing_type_id || '').toLowerCase();
   const goodListing = lt === 'gold_special' || lt === 'gold_premium' || lt === 'gold_pro';
   goals.push({ id:'listing', label:'Publicación Gold/Premium', achieved: goodListing });
 
-  // 7. Envío competitivo (free shipping o ML envíos)
+  // 6. Envío competitivo (free shipping o ML envíos)
   const freeShip = !!(item.shipping?.free_shipping) || !!(item.tags||[]).includes('free_shipping');
   goals.push({ id:'envio', label:'Envío gratis o competitivo', achieved: freeShip });
 
@@ -6439,9 +6347,7 @@ function qualityChecks(item){
   const noPromo=lt===''||lt==='free'||lt==='bronze'||lt==='silver';
   if(noPromo) problems.push({id:'promo',label:'Sin promoción activa',sev:1});
 
-  // Video/clip — solo marcar problema cuando el Worker confirmó que NO tiene clip.
-  // null (aún no verificado) NO se considera problema para evitar falsos positivos.
-  if(itemHasVideo(item) === false) problems.push({id:'clip',label:'Sin video/clip',sev:1});
+  // v77: Eliminada detección "Sin video/clip" — requería un endpoint costoso.
 
   // EAN/GTIN — usa detección correcta por attributes.GTIN
   if(!itemHasEAN(item) && !item.seller_custom_field)
@@ -6552,6 +6458,8 @@ function seoMultiSortAddRow(presetCol, presetDir){
   // Renderizar labels iniciales
   _msUpdateRowLabels(row);
   _msRenumber();
+  // v77: Aplicar orden en tiempo real (la nueva fila se suma a los criterios existentes)
+  _seoMultiSortLiveApply();
 }
 
 // Actualiza los textos visibles del trigger (columna + dirección) según data-col / data-dir
@@ -6628,6 +6536,8 @@ function _msSelectCol(el, col){
   // Cerrar el dropdown
   document.querySelectorAll('.ms-dropdown').forEach(d => d.style.display = 'none');
   document.querySelectorAll('.ms-trigger').forEach(t => t.style.borderColor = 'var(--border)');
+  // v77: Aplicar el orden en tiempo real (el usuario no tiene que cerrar y abrir nada)
+  _seoMultiSortLiveApply();
 }
 
 function _msSelectDir(el, dir){
@@ -6637,6 +6547,40 @@ function _msSelectDir(el, dir){
   _msUpdateRowLabels(row);
   document.querySelectorAll('.ms-dropdown').forEach(d => d.style.display = 'none');
   document.querySelectorAll('.ms-trigger').forEach(t => t.style.borderColor = 'var(--border)');
+  // v77: Aplicar el orden en tiempo real
+  _seoMultiSortLiveApply();
+}
+
+// v77: Recoge los criterios actuales de las filas y reaplica el orden a la tabla.
+// Se llama después de cualquier cambio (seleccionar columna/dirección, agregar/quitar fila).
+// Si no hay criterios → limpiamos el orden activo. No muestra mensajes de error.
+function _seoMultiSortLiveApply(){
+  const cont = document.getElementById('seo-multi-sort-rows');
+  if(!cont) return;
+  const rows = Array.from(cont.querySelectorAll('.ms-row'));
+  const criteria = rows.map(r => ({
+    col: r.dataset.col,
+    dir: r.dataset.dir,
+  })).filter(c => c.col && c.dir);
+  if(!criteria.length){
+    // Sin criterios — desactivar multi-sort (vuelve al orden anterior)
+    if(_seoMultiSort.length){
+      _seoMultiSort = [];
+      _seoMultiSortUpdateUI();
+      renderSEOTable();
+    }
+    const st = document.getElementById('seo-multi-sort-status');
+    if(st) st.textContent = '';
+    return;
+  }
+  _seoMultiSort = criteria;
+  // El sort simple queda inactivo cuando hay multi-sort
+  seoState.sortCol = null;
+  seoState.page = 1;
+  const st = document.getElementById('seo-multi-sort-status');
+  if(st) st.textContent = '✓ Aplicado: ' + criteria.length + ' criterio' + (criteria.length>1?'s':'');
+  _seoMultiSortUpdateUI();
+  renderSEOTable();
 }
 
 // Renumerar todas las filas (#1, #2, ...)
@@ -6661,35 +6605,20 @@ function seoMultiSortRemoveRow(btn){
   const row = btn.closest('.ms-row');
   if(row) row.remove();
   _msRenumber();
+  // v77: Reaplicar orden en tiempo real tras quitar fila
+  _seoMultiSortLiveApply();
 }
 
-function seoMultiSortApply(){
-  const cont = document.getElementById('seo-multi-sort-rows');
-  if(!cont) return;
-  const rows = Array.from(cont.querySelectorAll('.ms-row'));
-  const criteria = rows.map(r => ({
-    col: r.dataset.col,
-    dir: r.dataset.dir,
-  })).filter(c => c.col);
-  if(!criteria.length){
-    document.getElementById('seo-multi-sort-status').textContent = 'Agregá al menos 1 criterio';
-    return;
-  }
-  _seoMultiSort = criteria;
-  // Limpiar el sort simple (queda inactivo cuando hay multi-sort)
-  seoState.sortCol = null;
-  seoState.page = 1;
-  document.getElementById('seo-multi-sort-status').textContent = '✓ Aplicado: ' + criteria.length + ' criterio' + (criteria.length>1?'s':'');
-  _seoMultiSortUpdateUI();
-  renderSEOTable();
-}
+// v77: seoMultiSortApply() eliminada — reemplazada por _seoMultiSortLiveApply()
+// que se dispara automáticamente al cambiar criterios. Si algún botón externo
+// la sigue llamando, simplemente reaplica:
+function seoMultiSortApply(){ _seoMultiSortLiveApply(); }
 
 function seoMultiSortClear(){
   _seoMultiSort = [];
-  // Vaciar UI del modal
+  // Vaciar UI del panel (sin agregar una nueva fila default — eso reaplicaría)
   document.getElementById('seo-multi-sort-rows').innerHTML = '';
-  seoMultiSortAddRow();
-  document.getElementById('seo-multi-sort-status').textContent = '';
+  document.getElementById('seo-multi-sort-status').textContent = 'Limpiado · agregá un criterio para empezar';
   _seoMultiSortUpdateUI();
   renderSEOTable();
 }
@@ -7033,18 +6962,10 @@ function renderSEOTable(){
     if(u.size<ws.length)                  tI.push('Repetidas');
 
     const eanP   = ch.find(c=>c.id==='ean');
-    const hasClip= itemHasVideo(item);
     const editUrl= mlEditLink(item.id);
     const sT     = item.title.replace(/'/g,"\\'");
     const eanArg = eanP?"'faltante'":'null';
     const m      = itemMetrics[item.id];
-
-    // Clip badge: solo mostrar "Sin clip" cuando el Worker confirmó que NO tiene
-    // (hasClip === false). Si es null = aún no verificamos → no mostramos badge
-    // erróneo de Sin clip; si es true tampoco lo mostramos.
-    const clipBadge = (hasClip === false)
-      ? '<span style="display:inline-flex;align-items:center;gap:3px;font-size:9px;padding:1px 5px;border-radius:3px;background:#fef3c7;color:#92400e;border:1px solid #fde68a">▶ Sin clip</span>'
-      : '';
 
     // metricsHtml removido — ahora son 3 columnas separadas
 
@@ -7060,7 +6981,6 @@ function renderSEOTable(){
             <div style="font-size:12px;font-weight:500;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.35" title="${item.title.replace(/"/g,'&quot;')}">${item.title}</div>
             <div style="font-size:10px;color:var(--text3);margin-top:2px;display:flex;gap:5px;flex-wrap:wrap">
               <span>${item.id}</span>
-              ${clipBadge}
             </div>
           </div>
         </div>
