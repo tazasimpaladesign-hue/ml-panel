@@ -710,7 +710,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v81 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v82 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1159,8 +1159,8 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
       <span style="font-size:11px;color:var(--text3);font-weight:600;white-space:nowrap">Estado:</span>
       <div class="chips" style="margin:0;gap:5px">
-        <div class="chip" id="chip-st-all"      onclick="seoSetStatus(null)"         style="font-size:11px;background:var(--accent);color:#fff;border-color:var(--accent)">Todas</div>
-        <div class="chip" id="chip-st-active"   onclick="seoSetStatus('active')"     style="font-size:11px">✅ Activas</div>
+        <div class="chip" id="chip-st-all"      onclick="seoSetStatus(null)"         style="font-size:11px">Todas</div>
+        <div class="chip" id="chip-st-active"   onclick="seoSetStatus('active')"     style="font-size:11px;background:var(--accent);color:#fff;border-color:var(--accent)">✅ Activas</div>
         <div class="chip" id="chip-st-paused"   onclick="seoSetStatus('paused')"     style="font-size:11px">⏸ Pausadas</div>
         <div class="chip" id="chip-st-inactive" onclick="seoSetStatus('under_review')" style="font-size:11px">🔍 Inactivas</div>
       </div>
@@ -4975,68 +4975,42 @@ function renderSmartAlerts(){
       title:`${zeroActive.length} publicación${zeroActive.length>1?'es':''} sin stock`,
       desc:'Perdés ventas mientras no haya stock disponible.',
       action:'Ver stock ->',fn:"insightGoToStock()",sev:1});
-  const seoLow = allItems.filter(i=>i.status==='active'&&seoScore(i.title)<30);
-  if(seoLow.length>0)
-    alerts.push({icon:'🔍',color:'#1e40af',bg:'#eff6ff',bdr:'#bfdbfe',
-      title:`${seoLow.length} publicación${seoLow.length>1?'es':''} con SEO crítico`,
-      desc:'Títulos muy cortos o con errores reducen la visibilidad.',
-      action:'Optimizar ->',fn:"insightGoToSEO('seo_low')",sev:2});
+  // v82: Las tarjetas del dashboard usan la MISMA función _scenarioMatchesItem
+  // que el Analizador SEO. Antes había heurísticas duplicadas y los números no
+  // coincidían. Ahora son la fuente única de verdad. Cada tarjeta se conecta a
+  // un escenario específico vía seoSetScenario().
+  // Helper para construir las tarjetas — usa la descripción + acción del escenario.
+  const _dashScenarioAlert = (scenarioKey, sevLevel) => {
+    const sc = SEO_SCENARIOS[scenarioKey];
+    if(!sc) return null;
+    const matches = allItems.filter(i => _scenarioMatchesItem(scenarioKey, i));
+    if(matches.length === 0) return null;
+    return {
+      icon:  sc.emoji,
+      color: sc.color,
+      // Generamos un fondo claro derivado del color (usamos un alpha bajo)
+      bg:    sc.color + '15',
+      bdr:   sc.color + '55',
+      title: matches.length + ' publicación' + (matches.length > 1 ? 'es' : '') + ': ' + sc.label,
+      desc:  sc.description,
+      action: 'Ver Publicaciones →',
+      fn:    "showSection('seo');setTimeout(()=>seoSetScenario('" + scenarioKey + "'),250)",
+      sev:   sevLevel,
+    };
+  };
 
-  // ── Sin Visitas (exactamente 0) ──────────────────────────
-  const sinVisitasItems = allItems.filter(i => {
-    if(i.status !== 'active') return false;
-    const m = itemMetrics[i.id];
-    const v7 = (m && typeof m.visits === 'number') ? m.visits
-             : (typeof i.visits_7d === 'number') ? i.visits_7d : null;
-    return v7 !== null && v7 === 0;
+  // Las 5 tarjetas pedidas en el orden de prioridad
+  // (sev=1 son las más críticas y aparecen primero en el grid)
+  [
+    ['trafico_esteril',  2],   // ⚠️ Tráfico sin Ventas (NUEVA)
+    ['tendencia_alza',   2],   // 📈 Tendencia de Alza (NUEVA)
+    ['sin_visitas',      2],   // 👻 Sin Visitas
+    ['falla_cierre',     2],   // 🚪 Fuga de Conversión (= Falla de Cierre en SEO_SCENARIOS)
+    ['poca_visibilidad', 2],   // 🤓 Poca Visibilidad (ahora usa el mismo criterio del SEO)
+  ].forEach(([key, sev]) => {
+    const card = _dashScenarioAlert(key, sev);
+    if(card) alerts.push(card);
   });
-  if(sinVisitasItems.length > 0)
-    alerts.push({icon:'👻',color:'#334155',bg:'#f8fafc',bdr:'#cbd5e1',
-      title:`${sinVisitasItems.length} publicación${sinVisitasItems.length>1?'es':''} Sin Visitas`,
-      desc:'Tus productos no están recibiendo tráfico. Revisá el título o la exposición.',
-      action:'Ver alertas ->',fn:"showSection('alertas');setTimeout(()=>setAlertFilter('sin_visitas',document.getElementById('af-sin-visitas')),350)",sev:2});
-
-  // ── Poca Visibilidad (1-5 visitas) ───────────────────────
-  const pocaVisItems = allItems.filter(i => {
-    if(i.status !== 'active') return false;
-    const m = itemMetrics[i.id];
-    const v7 = (m && typeof m.visits === 'number') ? m.visits
-             : (typeof i.visits_7d === 'number') ? i.visits_7d : null;
-    return v7 !== null && v7 >= 1 && v7 <= 5;
-  });
-  if(pocaVisItems.length > 0)
-    alerts.push({icon:'🤓',color:'#475569',bg:'#f1f5f9',bdr:'#94a3b8',
-      title:`${pocaVisItems.length} publicación${pocaVisItems.length>1?'es':''} con Poca Visibilidad`,
-      desc:'Estás perdiendo impresiones. Optimizá el título para atraer más clics.',
-      action:'Ver alertas ->',fn:"showSection('alertas');setTimeout(()=>setAlertFilter('sinvis',document.getElementById('af-sinvis')),350)",sev:2});
-
-  // ── Fuga de Conversión (visitas > 30, ventas 7d = 0) ────
-  const fugaConvItems = allItems.filter(i => {
-    if(i.status !== 'active' || (i.available_quantity||0) === 0) return false;
-    const m = itemMetrics[i.id];
-    const v7 = (m && typeof m.visits === 'number') ? m.visits
-             : (typeof i.visits_7d === 'number') ? i.visits_7d : null;
-    const s7 = (m && typeof m.sales === 'number') ? m.sales : null;
-    return v7 !== null && v7 > 30 && s7 !== null && s7 === 0;
-  });
-  if(fugaConvItems.length > 0)
-    alerts.push({icon:'⚠️',color:'#92400e',bg:'#fffbeb',bdr:'#fde68a',
-      title:`${fugaConvItems.length} publicación${fugaConvItems.length>1?'es':''} con Fuga de Conversión`,
-      desc:'Reciben tráfico pero no venden. Revisá precio, fotos y descripción vs. competidores.',
-      action:'Ver alertas ->',fn:"showSection('alertas');setTimeout(()=>setAlertFilter('fuga_conv',document.getElementById('af-fuga-conv')),350)",sev:2});
-
-  // ── Mala Calidad ML (health < 70%) ───────────────────────
-  const malaCalidadItems = allItems.filter(i => {
-    if(i.status !== 'active') return false;
-    const hVal = (typeof i.health === 'number') ? i.health
-               : (typeof i.qualityScore === 'number') ? i.qualityScore / 100 : null;
-    return hVal !== null && hVal < 0.70;
-  });
-  if(malaCalidadItems.length > 0)
-    alerts.push({icon:'🔴',color:'#991b1b',bg:'#fef2f2',bdr:'#fecaca',
-      title:`${malaCalidadItems.length} publicación${malaCalidadItems.length>1?'es':''} con Mala Calidad`,
-      desc:'La calidad ML < 70% penaliza el posicionamiento. Completá atributos e imágenes.',
-      action:'Ver alertas ->',fn:"showSection('alertas');setTimeout(()=>setAlertFilter('quality',document.getElementById('af-quality')),350)",sev:2});
   if(!alerts.length){el.innerHTML='';return;}
   const sorted=[...alerts.filter(a=>a.sev===1),...alerts.filter(a=>a.sev===2)].slice(0,8);
   el.innerHTML=`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-bottom:14px">
@@ -8670,7 +8644,10 @@ const seoState = {
   page: 1,
   perPage: 25,
   filter: null,
-  statusFilter: null,
+  // v82: Por default arrancamos en 'active' (en lugar de null = todas)
+  // para que la vista inicial sea más útil — el usuario casi siempre quiere
+  // ver solo las publicaciones activas, no las pausadas/cerradas.
+  statusFilter: 'active',
   tipoFilter: '',    // '' | 'classic' | 'catalog' | 'gold' | 'free'
   sortCol: null,
   sortDir: 1,
