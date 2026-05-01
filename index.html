@@ -710,7 +710,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v83 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v84 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -3798,6 +3798,9 @@ function stopPolling(){if(_pollingInterval){clearInterval(_pollingInterval);_pol
 
 async function pollNewData(){
   if(!token||!userId)return;
+  // v84: Si la pestaña está oculta, no consumimos requests al worker.
+  // Cuando vuelve a foreground, el listener _onTabVisible hace un check inmediato.
+  if(document.hidden) return;
   try{
     // Órdenes últimas 6 horas (antes 2h — por si el panel estaba cerrado durante la venta)
     const from6h=new Date(Date.now()-6*60*60*1000).toISOString();
@@ -4444,8 +4447,14 @@ let _configSyncInterval = null;
 
 function startConfigSync(){
   if(_configSyncInterval) clearInterval(_configSyncInterval);
+  // v84: Polling cada 60s, pero SOLO cuando la pestaña está visible.
+  // Si está en background (otra pestaña activa), saltamos el check para
+  // ahorrar requests al worker. Cuando vuelve a foreground, el listener
+  // _onTabVisible() ya hace un check inmediato.
+  // Ahorro estimado: ~50% de requests cuando no estás mirando el panel.
   _configSyncInterval = setInterval(async () => {
     if(!token || !userId) return;
+    if(document.hidden) return; // pestaña oculta — no consumimos request
     try{
       const r = await fetch(WORKER + '/check-sync', {
         headers: { 'Authorization': 'Bearer ' + token }
@@ -4455,12 +4464,8 @@ function startConfigSync(){
       if(lastUpdate && lastUpdate > _localConfigTs){
         console.log('[ConfigSync] Cambio detectado en otro dispositivo — recargando config...');
         _localConfigTs = lastUpdate;
-        // Recargar silenciosamente la configuración del usuario desde KV
         await loadRemoteSettings();
-        // v68: también refrescar /api/backup (pcHistory + aiRules + tasks + calendario)
-        // que no están en /api/settings.
         if(typeof fetchBackup === 'function') await fetchBackup();
-        // Notificar otras pestañas que también actualicen
         try{ _syncChannel && _syncChannel.postMessage({ type:'config-updated', ts: lastUpdate }); }catch{}
       }
     }catch(e){ /* polling silencioso — nunca mostrar error al usuario */ }
@@ -4538,6 +4543,11 @@ function _onTabVisible(){
       }
     })
     .catch(function(){ /* silencioso */ });
+  // v84: Como ahora pausamos pollNewData y _pollMessages cuando hidden,
+  // disparamos un check inmediato al volver para no perder ventas/mensajes.
+  // Throttle de 10s ya aplicado arriba — esto no spamea.
+  try{ if(typeof pollNewData === 'function') pollNewData(); }catch{}
+  try{ if(typeof _pollMessages === 'function') _pollMessages(); }catch{}
 }
 document.addEventListener('visibilitychange', _onTabVisible);
 window.addEventListener('focus', _onTabVisible);
@@ -14499,6 +14509,8 @@ var _MSG_POLL_MS     = 60 * 60 * 1000; // 1 hora (antes 90s — consumía mucho 
 
 async function _pollMessages(){
   if(!userId || !token) return;
+  // v84: Skip si la pestaña está oculta — los mensajes se chequean al volver
+  if(document.hidden) return;
   try{
     // /messages/unread — endpoint oficial. limit=10 para no traer packs históricos enormes.
     var r = await mlGet('/messages/unread?role=seller&tag=post_sale&limit=10');
