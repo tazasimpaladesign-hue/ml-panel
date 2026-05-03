@@ -710,7 +710,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v84 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v85 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -3798,9 +3798,9 @@ function stopPolling(){if(_pollingInterval){clearInterval(_pollingInterval);_pol
 
 async function pollNewData(){
   if(!token||!userId)return;
-  // v84: Si la pestaña está oculta, no consumimos requests al worker.
-  // Cuando vuelve a foreground, el listener _onTabVisible hace un check inmediato.
-  if(document.hidden) return;
+  // v85: Siempre activo (incluso pestaña oculta). Detecta ventas/preguntas y
+  // dispara Telegram cliente. Pausarlo causaba que no llegaran notifs en
+  // background. Costo: ~1.440 reqs/día/panel — sostenible con cuota 100k/día.
   try{
     // Órdenes últimas 6 horas (antes 2h — por si el panel estaba cerrado durante la venta)
     const from6h=new Date(Date.now()-6*60*60*1000).toISOString();
@@ -4447,14 +4447,12 @@ let _configSyncInterval = null;
 
 function startConfigSync(){
   if(_configSyncInterval) clearInterval(_configSyncInterval);
-  // v84: Polling cada 60s, pero SOLO cuando la pestaña está visible.
-  // Si está en background (otra pestaña activa), saltamos el check para
-  // ahorrar requests al worker. Cuando vuelve a foreground, el listener
-  // _onTabVisible() ya hace un check inmediato.
-  // Ahorro estimado: ~50% de requests cuando no estás mirando el panel.
+  // v85: Polling cada 120s (antes 60s), siempre activo (incluso hidden).
+  // Mantener la sync entre PCs siempre activa es importante para Cristian
+  // (cambios en una PC se ven en otra rápido). El intervalo de 2 min compensa
+  // el costo de no pausar — ~720 reqs/día/panel vs los 1440 de antes.
   _configSyncInterval = setInterval(async () => {
     if(!token || !userId) return;
-    if(document.hidden) return; // pestaña oculta — no consumimos request
     try{
       const r = await fetch(WORKER + '/check-sync', {
         headers: { 'Authorization': 'Bearer ' + token }
@@ -4469,7 +4467,7 @@ function startConfigSync(){
         try{ _syncChannel && _syncChannel.postMessage({ type:'config-updated', ts: lastUpdate }); }catch{}
       }
     }catch(e){ /* polling silencioso — nunca mostrar error al usuario */ }
-  }, 60000);
+  }, 120000);  // v85: 120s = 2 min (era 60s)
 }
 
 // ── Cross-tab sync via BroadcastChannel ─────────────────────────────────────
@@ -14509,8 +14507,7 @@ var _MSG_POLL_MS     = 60 * 60 * 1000; // 1 hora (antes 90s — consumía mucho 
 
 async function _pollMessages(){
   if(!userId || !token) return;
-  // v84: Skip si la pestaña está oculta — los mensajes se chequean al volver
-  if(document.hidden) return;
+  // v85: Siempre activo (corre cada 60min, ~24 reqs/día — costo despreciable)
   try{
     // /messages/unread — endpoint oficial. limit=10 para no traer packs históricos enormes.
     var r = await mlGet('/messages/unread?role=seller&tag=post_sale&limit=10');
