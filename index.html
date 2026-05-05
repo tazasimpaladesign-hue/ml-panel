@@ -711,7 +711,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v87 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v88 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -8496,6 +8496,9 @@ async function saveCompetidor(){
     if(document.getElementById('comp-save-name')) document.getElementById('comp-save-name').value='';
     if(document.getElementById('comp-save-url'))  document.getElementById('comp-save-url').value='';
     renderCompetidores();
+    // v88: También sincronizar a /api/backup para que ambos endpoints
+    // queden con la misma versión y evitar el bug de "se borran al recargar"
+    if(typeof pushFullBackup === 'function') pushFullBackup();
   }catch(e){
     _cloudStatus('error');
     if(res){ res.textContent='❌ Error: '+e.message; res.style.color='var(--red)'; }
@@ -8518,6 +8521,8 @@ async function deleteCompetidor(idx){
       })
     });
     _cloudStatus('ok');
+    // v88: Sync paralelo a /api/backup para que ambos endpoints queden consistentes
+    if(typeof pushFullBackup === 'function') pushFullBackup();
   }catch(e){ _cloudStatus('error'); }
   renderCompetidores();
 }
@@ -11307,7 +11312,6 @@ async function saveRemoteSettings(qrs, tmpl){
       template:     tmpl||qGetTmpl(),
       rpRules:      rpRules||[],
       activeRules:  activeRules||[],
-      competitors:  (_savedCompetitors||[]),
       competitors:  _savedCompetitors||[],
     };
     const r = await fetch(WORKER+'/api/settings', {
@@ -16350,7 +16354,12 @@ async function fetchBackup() {
       // v68: persistir en localStorage para que funcione offline / al reabrir
       try{ localStorage.setItem(RULES_LS_KEY, JSON.stringify(activeRules)); }catch(e){}
     }
-    if (Array.isArray(data.competitors)){
+    if (Array.isArray(data.competitors) && data.competitors.length > 0){
+      // v88: BUG FIX — antes esto sobrescribía SIEMPRE _savedCompetitors,
+      // incluso si /api/backup tenía competitors:[] viejos. Como los competidores
+      // se guardan principalmente en /api/settings (vía saveCompetidor), un
+      // /api/backup con array vacío pisaba lo cargado correctamente.
+      // Ahora solo sobrescribe si el backup trae competidores reales.
       _savedCompetitors = data.competitors;
     }
 
@@ -16639,8 +16648,16 @@ async function bkpImport(file){
     if(Array.isArray(data.bdays))     localStorage.setItem('impala_cal_birthdays', JSON.stringify(data.bdays));
     if(Array.isArray(data.pcHistory)) localStorage.setItem('impala_calc_history', JSON.stringify(data.pcHistory));
 
-    // Persistir TODO al KV inmediatamente
+    // v88: BUG FIX — el panel tiene 2 endpoints de KV separados:
+    //   /api/backup  → tasks, calendar, bdays, pcHistory, etc.
+    //   /api/settings → quickReplies, template, rpRules, activeRules, COMPETITORS
+    // Antes solo llamábamos pushFullBackup() que escribe en /api/backup, pero
+    // los competidores se leen desde /api/settings. Por eso al recargar el
+    // panel no aparecían los competidores importados — quedaban en memoria
+    // pero el endpoint que los lee tenía la versión vieja.
+    // Ahora persistimos en AMBOS endpoints.
     if(typeof pushFullBackup === 'function') await pushFullBackup();
+    if(typeof saveRemoteSettings === 'function') await saveRemoteSettings();
 
     // Re-render de las secciones afectadas
     if(typeof _renderBoard === 'function') _renderBoard();
