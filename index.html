@@ -711,7 +711,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v86 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v87 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -2484,7 +2484,11 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   <div class="card mb" id="ai-rules-panel">
     <div class="card-hd">
       <div class="card-title">⚙️ Motor de Reglas — Umbrales de alerta</div>
-      <button class="btn btn-primary btn-sm" onclick="aiSaveRules()">💾 Guardar reglas</button>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span id="ai-feed-cache-badge" style="display:none;font-size:11px;color:#92400e;background:#fef3c7;border:1px solid #fde68a;border-radius:4px;padding:2px 8px;font-weight:600;align-items:center;gap:4px"></span>
+        <button class="btn btn-ghost btn-sm" onclick="aiRefreshFeed()" title="Regenerar el feed completo con IA (consume ~7 llamadas)">↻ Refrescar feed</button>
+        <button class="btn btn-primary btn-sm" onclick="aiSaveRules()">💾 Guardar reglas</button>
+      </div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
       <div class="ff" style="margin:0">
@@ -12191,8 +12195,10 @@ function aiSaveRules(){
   localStorage.setItem('impala_ai_rules', JSON.stringify(_aiRules));
   // v68: sync automático a KV del Worker para multi-device
   if(typeof cloudSyncDebounced === 'function') cloudSyncDebounced();
-  showToast('✅ Reglas guardadas','success');
-  aiRunAll();
+  showToast('✅ Reglas guardadas. Tocá "↻ Refrescar feed" si querés re-analizar con los nuevos umbrales.','success');
+  // v87: ya NO disparamos aiRunAll automáticamente al guardar reglas — eso
+  // consumía 7 llamadas a IA cada vez que ajustabas un umbral. Ahora el usuario
+  // decide cuándo regenerar el feed con el botón explícito.
 }
 
 function aiLoadRules(){
@@ -12202,7 +12208,71 @@ function aiLoadRules(){
   });
 }
 
-function aiRunAll(){
+// v87: Caché del feed completo de IA con TTL de 6h.
+// Antes cada apertura de la sección "Asistente IA" disparaba 7 llamadas a IA
+// automáticamente. Si vos abrías la sección 7-8 veces al día, te quemabas
+// los 50 req/día gratuitos de OpenRouter sin darte cuenta.
+// Ahora el feed se cachea — la siguiente apertura dentro de 6h muestra el
+// cache sin consumir IA. Si querés un feed fresco, hay un botón "↻ Refrescar".
+const AI_FEED_CACHE_KEY = 'mlp_ai_feed_cache_v1';
+const AI_FEED_CACHE_TTL = 6 * 60 * 60 * 1000;  // 6 horas
+
+function _aiFeedSaveCache(){
+  // Guardamos el HTML de cada panel del feed para restaurar al volver
+  const cache = {
+    ts: Date.now(),
+    panels: {}
+  };
+  ['ai-dates', 'ai-opp', 'ai-comp', 'ai-stock', 'ai-fin', 'ai-coach-feed', 'ai-weekly']
+    .forEach(id => {
+      const el = document.getElementById(id);
+      if(el && el.innerHTML && !el.innerHTML.includes('spin')) {
+        cache.panels[id] = el.innerHTML;
+      }
+    });
+  try { localStorage.setItem(AI_FEED_CACHE_KEY, JSON.stringify(cache)); }
+  catch(e){ console.warn('[AI Feed] No se pudo cachear:', e.message); }
+}
+
+function _aiFeedLoadCache(){
+  try {
+    const raw = localStorage.getItem(AI_FEED_CACHE_KEY);
+    if(!raw) return null;
+    const cache = JSON.parse(raw);
+    if(!cache || !cache.ts) return null;
+    if(Date.now() - cache.ts > AI_FEED_CACHE_TTL) return null;  // expirado
+    return cache;
+  } catch(e){ return null; }
+}
+
+function aiRunAll(force){
+  // v87: Si NO se forzó manualmente, intentamos cargar del cache primero.
+  // El parámetro 'force' viene del botón "↻ Refrescar feed" que el usuario aprieta
+  // para regenerar a propósito.
+  if(!force){
+    const cache = _aiFeedLoadCache();
+    if(cache && cache.panels){
+      // Restaurar cada panel desde el cache (sin llamar a IA)
+      Object.keys(cache.panels).forEach(id => {
+        const el = document.getElementById(id);
+        if(el) el.innerHTML = cache.panels[id];
+      });
+      const ageMin = Math.round((Date.now() - cache.ts) / 60000);
+      // Mostrar aviso visual de que es cache (no fresh)
+      const badge = document.getElementById('ai-feed-cache-badge');
+      if(badge){
+        badge.style.display = 'inline-flex';
+        badge.title = 'Análisis generado hace ' + ageMin + ' min. Click en "↻ Refrescar feed" para regenerar con IA.';
+        badge.innerHTML = '🕒 cache de hace ' + ageMin + ' min';
+      }
+      console.log('[AI Feed] Cargado desde cache (' + ageMin + ' min de antigüedad). Sin consumir IA.');
+      return;
+    }
+  }
+  // Generar fresco (consume IA — 7 llamadas)
+  const badge = document.getElementById('ai-feed-cache-badge');
+  if(badge) badge.style.display = 'none';
+  console.log('[AI Feed] Generando fresco — consume 7 llamadas a IA');
   aiDatesAnalyze();
   aiOpportunities();
   aiCompetition();
@@ -12210,6 +12280,14 @@ function aiRunAll(){
   aiFinances();
   aiCoach();
   aiWeeklySummary();
+  // Guardar cache después de un delay (esperando que terminen las llamadas async)
+  setTimeout(_aiFeedSaveCache, 30000);  // 30s — tiempo suficiente para que respondan
+}
+
+// Función que se llama desde el botón "↻ Refrescar feed"
+function aiRefreshFeed(){
+  if(!confirm('Regenerar el feed completo consume ~7 llamadas a la IA. ¿Continuar?')) return;
+  aiRunAll(true);
 }
 
 // ── Utilidades ────────────────────────────────────────────────────────
