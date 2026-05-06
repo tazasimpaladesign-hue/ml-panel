@@ -8,6 +8,17 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<!-- v89 [P3]: plugin datalabels para mostrar valores fijos sobre las barras (Facturación) -->
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0"></script>
+<script>
+  // v89 [P3]: chartjs-plugin-datalabels se auto-registra globalmente al cargarse,
+  // lo que haría que TODOS los charts del panel muestren etiquetas indeseadas.
+  // Lo desregistramos para que solo aplique en charts donde lo agreguemos
+  // manualmente vía `plugins: [ChartDataLabels]` (chart-fac en Facturación).
+  if (typeof Chart !== 'undefined' && typeof ChartDataLabels !== 'undefined') {
+    try { Chart.unregister(ChartDataLabels); } catch(e) { /* tolerar */ }
+  }
+</script>
 <style>
 :root {
   /* Fondos del Panel Izquierdo (Se mantienen oscuros) */
@@ -711,7 +722,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v88 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v89 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -880,7 +891,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px;min-width:0;overflow:hidden">
     <div class="card" style="min-width:0;overflow:hidden;display:flex;flex-direction:column">
       <div class="card-hd" style="flex-shrink:0">
-        <div class="card-title">🏆 Top publicaciones</div>
+        <div class="card-title">🏆 Top publicaciones 30 días</div>
         <a href="#publicaciones" class="btn btn-ghost btn-sm" onclick="showSection('publicaciones');return false;">Ver todas →</a>
       </div>
       <div id="dash-top-pubs" style="flex:1;max-height:480px;overflow-y:auto;min-height:0">
@@ -898,7 +909,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     </div>
     <div class="card" style="min-width:0;overflow:hidden;display:flex;flex-direction:column">
       <div class="card-hd" style="flex-shrink:0">
-        <div class="card-title">👀 Los más visitados</div>
+        <div class="card-title">👀 Los más visitados 7 días</div>
         <button class="btn btn-ghost btn-sm" onclick="loadMostVisited(true)">↻ 7 días</button>
       </div>
       <div id="dash-most-visited" style="flex:1;max-height:480px;overflow-y:auto;min-height:0">
@@ -1446,6 +1457,22 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
 <!-- ═══════════════════════ COMPETENCIA ═══════════════════════ -->
 <div id="section-competencia" class="section fade-in">
+
+  <!-- v89 [P5]: Atajo a Métricas de competencia de ML ─────────────────────── -->
+  <div class="card mb" style="background:linear-gradient(135deg,#eff6ff 0%,#f5f3ff 100%);border:1px solid #c7d2fe">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap">
+      <div style="min-width:0;flex:1">
+        <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px">📊 Ranking de competidores de tus categorías</div>
+        <div style="font-size:11.5px;color:var(--text3);line-height:1.45">Abrí en Mercado Libre la herramienta oficial de Métricas de Competencia para ver tu posición en cada categoría donde vendés.</div>
+      </div>
+      <a href="https://www.mercadolibre.com.ar/metricas/competencia"
+         target="_blank" rel="noopener noreferrer"
+         class="btn btn-primary"
+         style="white-space:nowrap;text-decoration:none;padding:10px 18px;font-size:13px;font-weight:600">
+        🚀 Ver Competencia
+      </a>
+    </div>
+  </div>
 
   <div class="g2 mb">
     <div class="card">
@@ -3103,6 +3130,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <table id="wseo-table">
         <thead><tr>
           <th>Producto</th>
+          <th onclick="wseoSort('created')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:80px;max-width:80px" title="Fecha de creación del producto en WooCommerce">Creada<br><span style="font-size:10px">↕</span><span id="wseo-sort-created" style="font-size:10px"></span></th>
           <th onclick="wseoSort('status')"  style="cursor:pointer;user-select:none;white-space:nowrap">Estado <span id="wseo-sort-status" style="font-size:10px"></span></th>
           <th onclick="wseoSort('price')"   style="cursor:pointer;user-select:none;white-space:nowrap;text-align:right">Precio <span id="wseo-sort-price" style="font-size:10px"></span></th>
           <th onclick="wseoSort('stock')"   style="cursor:pointer;user-select:none;white-space:nowrap;text-align:center">Stock <span id="wseo-sort-stock" style="font-size:10px"></span></th>
@@ -3113,7 +3141,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <th style="min-width:120px;text-align:center">Acciones</th>
         </tr></thead>
         <tbody id="wseo-tbody">
-          <tr><td colspan="9" style="text-align:center;padding:32px;color:var(--text3)">Hacé clic en "Cargar productos" para analizar tu tienda WooCommerce.</td></tr>
+          <tr><td colspan="10" style="text-align:center;padding:32px;color:var(--text3)">Hacé clic en "Cargar productos" para analizar tu tienda WooCommerce.</td></tr>
         </tbody>
       </table>
     </div>
@@ -3802,8 +3830,12 @@ let _pollingInterval=null;
 function startPolling(){
   if(_pollingInterval)clearInterval(_pollingInterval);
   _pollingInterval=setInterval(pollNewData,60000);
+  // v89 [P2]: arrancar polling ligero de envíos pendientes (cada 30s)
+  if(typeof startPendingShipPoll === 'function') startPendingShipPoll();
 }
-function stopPolling(){if(_pollingInterval){clearInterval(_pollingInterval);_pollingInterval=null;}}
+function stopPolling(){if(_pollingInterval){clearInterval(_pollingInterval);_pollingInterval=null;}
+  if(typeof stopPendingShipPoll === 'function') stopPendingShipPoll();
+}
 
 async function pollNewData(){
   if(!token||!userId)return;
@@ -3905,6 +3937,102 @@ async function pollNewData(){
     // El endpoint /messages/orders/{id} dejó de existir en ML (daba 404).
     stamp();
   }catch(e){console.warn('[Poll]',e.message);}
+}
+
+// ── v89 [P2]: Polling ligero de envíos pendientes ──────────────────────────
+// Solo consulta /shipments/{id} para órdenes con status no terminal
+// (ready_to_ship, handling, pending, paid+sin shipped/delivered).
+// Esto refleja en ~30s el cambio de "Imprimir" → "En camino" sin recargar todas
+// las ventas. Costo: N llamadas/30s donde N = órdenes pendientes (típicamente <10).
+// Cero KV writes — todo va por mlGet directo.
+let _pendingShipPollTimer = null;
+const _PENDING_SHIP_POLL_MS = 30 * 1000; // 30s
+
+async function _pollPendingShipments(){
+  if(!token || !userId) return;
+  if(!Array.isArray(allOrders) || !allOrders.length) return;
+  // Pestaña oculta: respetar el patrón de v85 — seguimos activos pero con menor frecuencia
+  // (el setInterval ya marca el ritmo, acá solo evitamos work si el panel ni cargó datos)
+
+  // Identificar órdenes pendientes que necesitan refresh de shipping status
+  const NON_TERMINAL = new Set(['ready_to_ship','handling','pending','shipped','in_transit','almost_there']);
+  const pending = allOrders.filter(o => {
+    if(!o.shipping?.id) return false;
+    if(o.status === 'cancelled' || o.status === 'invalid') return false;
+    const ss = (o.shipping.status||'').toLowerCase();
+    // Si shipping.status YA está en estado terminal (delivered/not_delivered/returned/lost) → no refrescar
+    if(ss === 'delivered' || ss === 'not_delivered' || ss === 'returned' || ss === 'lost') return false;
+    // Si tenemos shipping.status cargado y está en NON_TERMINAL → refrescar
+    if(o.shipping._statusLoaded && NON_TERMINAL.has(ss)) return true;
+    // Si NO tenemos shipping.status cargado pero la orden está paid/confirmed → refrescar
+    if(!o.shipping._statusLoaded && (o.status === 'paid' || o.status === 'confirmed')) return true;
+    return false;
+  }).slice(0, 25); // tope de seguridad: 25 órdenes/ciclo
+
+  if(!pending.length) return;
+
+  let changed = 0;
+  // Lotes de 5 paralelas (mismo patrón que loadShippingStatuses)
+  for(let i=0; i<pending.length; i+=5){
+    await Promise.allSettled(pending.slice(i, i+5).map(async o => {
+      try{
+        const s = await mlGet('/shipments/' + o.shipping.id);
+        if(!s) return;
+        const prevStatus = o.shipping.status;
+        const prevSubst  = o.shipping.substatus;
+        if(s.status)    o.shipping.status = s.status;
+        if(s.substatus) o.shipping.substatus = s.substatus;
+        o.shipping._statusLoaded = true;
+        if(prevStatus !== o.shipping.status || prevSubst !== o.shipping.substatus){
+          changed++;
+          // ── WhatsApp envío: si pasó a 'shipped', notificar (mismo patrón que pollNewData)
+          if(prevStatus && prevStatus !== 'shipped' && o.shipping.status === 'shipped'){
+            try{
+              const trackingNum = o.shipping?.tracking_number || o.shipping?.id || '';
+              const carrier = (o.shipping?.service_id||'').toLowerCase().includes('correo') ? 'correoargentino' : 'paqar';
+              const trackUrl = trackingNum
+                ? (carrier === 'correoargentino'
+                    ? 'https://www.correoargentino.com.ar/formularios/oidn?id=' + trackingNum
+                    : 'https://www.paqar.com.ar/#' + trackingNum)
+                : 'https://www.correoargentino.com.ar';
+              if(typeof waTrigger === 'function'){
+                waTrigger('envio', {
+                  producto:  (o.order_items?.[0]?.item?.title||'Producto').slice(0,60),
+                  comprador: o.buyer?.nickname || '—',
+                  tracking:  trackingNum,
+                  url:       trackUrl
+                });
+              }
+            }catch(e){}
+          }
+        }
+      }catch(e){
+        // 404/403 silencioso — el envío puede haber sido cancelado o sin permisos
+      }
+    }));
+  }
+
+  if(changed > 0){
+    console.log('[PendingShipPoll] '+changed+' envío(s) actualizados de '+pending.length+' pendientes');
+    // Refrescar UI sin recargar datos
+    if(typeof _updateVentasBadge === 'function') _updateVentasBadge();
+    if(document.getElementById('section-ventas')?.classList.contains('active') && typeof renderVentasTable === 'function'){
+      renderVentasTable();
+    }
+    if(document.getElementById('section-facturacion')?.classList.contains('active') && typeof renderFacturacion === 'function'){
+      renderFacturacion();
+    }
+  }
+}
+
+function startPendingShipPoll(){
+  if(_pendingShipPollTimer) clearInterval(_pendingShipPollTimer);
+  // Primer ciclo a los 10s (no inmediato, para no chocar con loadShippingStatuses inicial)
+  setTimeout(_pollPendingShipments, 10 * 1000);
+  _pendingShipPollTimer = setInterval(_pollPendingShipments, _PENDING_SHIP_POLL_MS);
+}
+function stopPendingShipPoll(){
+  if(_pendingShipPollTimer){ clearInterval(_pendingShipPollTimer); _pendingShipPollTimer = null; }
 }
 
 function showToast(msg,type,sound){
@@ -9741,7 +9869,11 @@ async function renderFacturacion(){
     tbody.innerHTML = mesOrders.map(o=>{
       const facTitle = o.order_items?.[0]?.item?.title?.slice(0,40)||'—';
       const facThumb = (o.order_items?.[0]?.item?.thumbnail||'').replace('http://','https://');
-      const shipState= o.shipping?.status||'';
+      // v89 [P3]: usar mismas traducciones que sección Ventas/Pedidos
+      const stateLabel = (typeof ORDER_STATES !== 'undefined' && ORDER_STATES[o.status]) ? ORDER_STATES[o.status] : (o.status||'—');
+      const stateClass = o.status==='paid'||o.status==='delivered'||o.status==='confirmed' ? 'bg-green'
+                       : o.status==='cancelled' ? 'bg-red' : 'bg-amber';
+      const ship = (typeof getShippingLabel === 'function') ? getShippingLabel(o) : { label: (o.shipping?.status||'—'), cls: 'bg-blue' };
       return `<tr>
         <td style="font-family:var(--mono);font-size:11px">#${o.id}</td>
         <td style="max-width:190px">
@@ -9752,19 +9884,112 @@ async function renderFacturacion(){
         </td>
         <td>${o.buyer?.nickname||'—'}</td>
         <td style="font-weight:600;color:var(--green)">$${(o.total_amount||0).toLocaleString('es-AR')}</td>
-        <td><span class="badge ${o.status==='paid'?'bg-green':'bg-amber'}">${o.status||'—'}</span></td>
-        <td style="font-size:11px">${shipState?`<span class="badge bg-blue">${shipState}</span>`:'—'}</td>
+        <td><span class="badge ${stateClass}">${stateLabel}</span></td>
+        <td style="font-size:11px;white-space:nowrap"><span class="badge ${ship.cls}">${ship.label}</span></td>
         <td style="color:var(--text3)">${o.date_created?dateAR(o.date_created).toLocaleDateString('es-AR',{timeZone:'UTC'}):''}</td>
       </tr>`;
     }).join('');
   }
 
-  // Chart (últimos 6 meses)
+  // ── v89 [P3]: Chart con datos completos por mes (últimos 6 meses) ──────────
+  // Para cada mes calculamos: facturación, ventas, ticket promedio, publicaciones con ventas.
+  // Renderizamos los 4 valores apilados sobre la barra usando chartjs-plugin-datalabels.
   const months={};
-  for(let i=5;i>=0;i--){const d=new Date();d.setMonth(d.getMonth()-i);const k=d.getMonth()+'-'+d.getFullYear();months[k]={label:d.toLocaleDateString('es-AR',{month:'short'}),val:0};}
-  allOrders.forEach(o=>{const d=new Date(o.date_created||'');const k=d.getMonth()+'-'+d.getFullYear();if(months[k])months[k].val+=o.total_amount||0;});
-  const entries=Object.values(months);
-  makeChart('chart-fac',{type:'bar',data:{labels:entries.map(e=>e.label),datasets:[{data:entries.map(e=>e.val),backgroundColor:'#4f8ef7',borderRadius:6}]},options:{...chartDefaults(),scales:{y:{...tOpts(),ticks:{...tOpts().ticks,callback:v=>'$'+(v/1000).toFixed(0)+'k'}},x:{...tXOpts()}}}});
+  for(let i=5;i>=0;i--){
+    const d=new Date();d.setMonth(d.getMonth()-i);
+    const k=d.getMonth()+'-'+d.getFullYear();
+    months[k]={
+      label: d.toLocaleDateString('es-AR',{month:'short'}),
+      val: 0,            // facturación total
+      sales: 0,          // cantidad de órdenes
+      itemIds: new Set() // IDs únicos para "publicaciones con ventas"
+    };
+  }
+  allOrders.forEach(o=>{
+    const d=new Date(o.date_created||'');
+    const k=d.getMonth()+'-'+d.getFullYear();
+    if(months[k]){
+      months[k].val += o.total_amount || 0;
+      months[k].sales += 1;
+      const iid = o.order_items?.[0]?.item?.id;
+      if(iid) months[k].itemIds.add(String(iid));
+    }
+  });
+  const entries = Object.values(months).map(m => ({
+    label: m.label,
+    val:   m.val,
+    sales: m.sales,
+    pubs:  m.itemIds.size,
+    ticket: m.sales ? Math.round(m.val / m.sales) : 0
+  }));
+
+  // Helper formato compacto para que entre en la barra
+  const fmtK = v => {
+    if(!v) return '$0';
+    if(v >= 1000000) return '$' + (v/1000000).toFixed(v >= 10000000 ? 1 : 2).replace(/\.?0+$/,'') + 'M';
+    if(v >= 1000)    return '$' + Math.round(v/1000) + 'k';
+    return '$' + v;
+  };
+
+  // Plugin global activado solo para este chart (datalabels viene como ChartDataLabels global)
+  const hasDataLabels = (typeof ChartDataLabels !== 'undefined');
+
+  makeChart('chart-fac',{
+    type:'bar',
+    data:{
+      labels: entries.map(e=>e.label),
+      datasets:[{
+        data: entries.map(e=>e.val),
+        backgroundColor:'#4f8ef7',
+        borderRadius:6,
+        // Datos extra que el datalabels formatter consulta vía context.dataIndex
+        _facMeta: entries
+      }]
+    },
+    options:{
+      ...chartDefaults(),
+      layout:{ padding:{ top: 64 } }, // espacio arriba para el bloque de 4 líneas
+      scales:{
+        y:{...tOpts(), ticks:{...tOpts().ticks, callback:v=>'$'+(v/1000).toFixed(0)+'k'}},
+        x:{...tXOpts()}
+      },
+      plugins:{
+        legend:{display:false},
+        tooltip:{
+          callbacks:{
+            label: (ctx) => {
+              const m = entries[ctx.dataIndex] || {};
+              return [
+                'Facturación: $'+(m.val||0).toLocaleString('es-AR'),
+                'Ventas: '+(m.sales||0),
+                'Ticket prom.: $'+(m.ticket||0).toLocaleString('es-AR'),
+                'Publicaciones con ventas: '+(m.pubs||0)
+              ];
+            }
+          }
+        },
+        datalabels: hasDataLabels ? {
+          anchor:'end',
+          align:'end',
+          offset: 4,
+          color:'#1e293b',
+          font:{ size: 9.5, weight: 600 },
+          textAlign:'center',
+          formatter: (value, ctx) => {
+            const m = entries[ctx.dataIndex] || {};
+            // 4 líneas apiladas: Facturación / Ventas / Ticket / Pubs
+            return [
+              fmtK(m.val||0),
+              (m.sales||0)+' vtas',
+              'TP '+fmtK(m.ticket||0),
+              (m.pubs||0)+' pubs'
+            ];
+          }
+        } : { display: false }
+      }
+    },
+    plugins: hasDataLabels ? [ChartDataLabels] : []
+  });
 }
 
 
@@ -15960,10 +16185,27 @@ async function fetchPreviewML() {
       stock      = mlData.available_quantity || 1;
       attributes = mlData.attributes || [];
       variations = mlData.variations || [];
+      // v89 [P4]: Upscale a alta resolución (~1200px). ML por defecto sirve ~500px
+      // tanto en `url` como en `secure_url`. El truco: insertar "_2X" después de
+      // "D_NQ_NP". Esto es defensa en profundidad — el Worker también lo aplica.
+      var _wooUpscale = function(rawUrl){
+        if(!rawUrl) return rawUrl;
+        var u = String(rawUrl).replace(/^http:\/\//,'https://');
+        if(!/mlstatic\.com\//.test(u)) return u;
+        if(/D_NQ_NP_2X_/.test(u)) return u;
+        if(/D_NQ_NP_/.test(u))    return u.replace('D_NQ_NP_','D_NQ_NP_2X_');
+        if(/D_Q_NP_/.test(u))     return u.replace('D_Q_NP_','D_Q_NP_2X_');
+        return u;
+      };
       if (mlData.pictures && mlData.pictures.length) {
-        mlData.pictures.forEach(function(p) { var u = p.secure_url || p.url || ''; if (u) pictures.push(u); });
+        mlData.pictures.forEach(function(p) {
+          // Preferir secure_url > url. NUNCA usar thumbnail (90x90).
+          var u = p.secure_url || p.url || '';
+          if (u) pictures.push(_wooUpscale(u));
+        });
       }
-      if (!pictures.length && mlData.thumbnail) pictures.push(mlData.thumbnail);
+      // Solo caer al thumbnail si pictures viene vacío (caso muy raro)
+      if (!pictures.length && mlData.thumbnail) pictures.push(_wooUpscale(mlData.thumbnail));
       sku = wooExtractAttr(attributes, 'SELLER_SKU');
       ean = wooExtractAttr(attributes, 'GTIN') || wooExtractAttr(attributes, 'EAN');
 
@@ -17779,7 +18021,7 @@ function wseoSort(col){
   if(_wseoState.sortCol===col) _wseoState.sortDir *= -1;
   else{ _wseoState.sortCol=col; _wseoState.sortDir = (col==='seo') ? 1 : -1; }
   _wseoState.page = 1;
-  ['status','price','stock','sold','sku','seo'].forEach(c=>{
+  ['created','status','price','stock','sold','sku','seo'].forEach(c=>{
     const el = document.getElementById('wseo-sort-'+c);
     if(el) el.innerHTML = sortArrow(c, _wseoState.sortCol, _wseoState.sortDir);
   });
@@ -17900,6 +18142,10 @@ function wseoGetFilteredRows(){
   rows.sort((a,b)=>{
     let va, vb;
     switch(col){
+      case 'created': // v89 [P6]: ordenar por fecha de creación (timestamp)
+        va = a.date_created ? new Date(a.date_created).getTime() : 0;
+        vb = b.date_created ? new Date(b.date_created).getTime() : 0;
+        return (vb-va)*(dir>0?1:-1);
       case 'status': va=(a.status||''); vb=(b.status||''); return va.localeCompare(vb)*dir;
       case 'price':  va=parseFloat(a.price||0); vb=parseFloat(b.price||0); return (vb-va)*(dir>0?1:-1);
       case 'stock':  va=(a.stock_quantity??-1); vb=(b.stock_quantity??-1); return (vb-va)*(dir>0?1:-1);
@@ -17918,7 +18164,7 @@ function wseoRenderTable(){
   if(!tbody) return;
 
   // Sincronizar flechas en encabezados
-  ['status','price','stock','sold','sku','seo'].forEach(c=>{
+  ['created','status','price','stock','sold','sku','seo'].forEach(c=>{
     const el = document.getElementById('wseo-sort-'+c);
     if(el) el.innerHTML = sortArrow(c, _wseoState.sortCol, _wseoState.sortDir);
   });
@@ -17935,7 +18181,7 @@ function wseoRenderTable(){
   if(countEl) countEl.textContent = total ? total+' productos · página '+_wseoState.page+'/'+pages : 'Sin resultados';
 
   if(!rows.length){
-    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text3)">Sin productos para este filtro.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:24px;color:var(--text3)">Sin productos para este filtro.</td></tr>';
     wseoRenderPagination(pages, total);
     return;
   }
@@ -17984,6 +18230,20 @@ function wseoRenderTable(){
           </div>
         </div>
       </td>
+      <td style="white-space:nowrap;text-align:center">${(()=>{
+        // v89 [P6]: clon de la columna CREADA del Analizador SEO de ML
+        const dc = p.date_created;
+        if(!dc) return '<span style="font-size:10.5px;color:var(--text3)">—</span>';
+        const d = new Date(dc);
+        if(isNaN(d.getTime())) return '<span style="font-size:10.5px;color:var(--text3)">—</span>';
+        const dd = String(d.getDate()).padStart(2,'0');
+        const mm = String(d.getMonth()+1).padStart(2,'0');
+        const yy = d.getFullYear();
+        const ageDays = Math.floor((Date.now()-d.getTime())/(1000*60*60*24));
+        const ageColor = ageDays<30 ? 'var(--green)' : ageDays<180 ? 'var(--text)' : 'var(--text3)';
+        return '<div style="font-size:11px;font-weight:600;color:'+ageColor+'">'+dd+'/'+mm+'/'+yy+'</div>'
+          + '<div style="font-size:9.5px;color:var(--text3);margin-top:1px">'+ageDays+'d</div>';
+      })()}</td>
       <td style="text-align:center;white-space:nowrap;font-size:11px" id="wseo-status-cell-${p.id}">
         <span style="cursor:pointer" onclick="wseoCycleStatus(${p.id})" title="Clic para cambiar estado">${stLabel} ✎</span>
       </td>
