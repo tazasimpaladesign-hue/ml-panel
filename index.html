@@ -292,7 +292,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;heigh
 .kw-bar{height:4px;background:var(--bg4);border-radius:2px;overflow:hidden;margin-top:4px}
 .kw-fill{height:100%;background:var(--accent);border-radius:2px}
 
-@media(max-width:900px){.mgt{grid-template-columns:repeat(2,1fr)}.g2,.g3,.g60,.g40{grid-template-columns:1fr}}
+@media(max-width:900px){.mgt{grid-template-columns:repeat(2,1fr)}.g2,.g3,.g60,.g40{grid-template-columns:1fr}.q-split-layout{grid-template-columns:1fr !important}}
 
 /* ═══════════════════════════════════════════════════════════════
    SIDEBAR — fondo oscuro, TODO el texto en blanco
@@ -722,7 +722,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v90 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v91 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1952,7 +1952,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   </div>
   <div class="card mb">
     <div class="card-hd"><div class="card-title">Facturación mensual</div></div>
-    <div style="position:relative;height:220px"><canvas id="chart-fac"></canvas></div>
+    <div style="position:relative;height:300px"><canvas id="chart-fac"></canvas></div>
   </div>
   <div id="fac-invoice-detail" class="card mb" style="padding:14px 18px;min-height:48px"><!-- cargado por renderFacturacion --></div>
   <div class="card">
@@ -3853,21 +3853,36 @@ async function pollNewData(){
       const idx=allOrders.findIndex(e=>e.id===o.id);
       if(idx<0){allOrders.unshift(o);hasNew=true;newOrders.push(o);}
       else{
-        // v90 [P2]: BUG FIX — el spread shallow sobreescribía el objeto `shipping`
-        // entero, perdiendo el `shipping.status` enriquecido por loadShippingStatuses()
-        // y el flag `_statusLoaded`. Eso causaba que ventas de hoy aparecieran como
-        // "🖨️ IMPRIMIR" aunque ya estuvieran "🚚 En camino" en ML, hasta que el
-        // _pollPendingShipments las rescate ~30s después.
-        // Solución: hacer merge preservando shipping.status si ya estaba cargado.
+        // v91 [P5]: BUG FIX (definitivo) — el shallow merge previo de v89 sobreescribía
+        // shipping enriquecido. El fix de v90 era incorrecto: priorizaba SIEMPRE el
+        // status viejo, bloqueando cambios reales de envío.
+        //
+        // Lógica correcta: /orders/search NO es fuente confiable del shipping.status
+        // (suele venir vacío o desfasado). La fuente de verdad es /shipments/{id} que
+        // resuelven loadShippingStatuses() y _pollPendingShipments().
+        //
+        // Por lo tanto: preservamos siempre el shipping enriquecido cuando coincide el
+        // shipping.id. El polling de envíos pendientes (cada 20s) actualiza el status
+        // real desde /shipments/{id}.
         const prev = allOrders[idx];
         const merged = {...prev, ...o};
-        if(prev.shipping?._statusLoaded && prev.shipping?.id === o.shipping?.id){
-          merged.shipping = {
-            ...(o.shipping || {}),         // datos básicos refrescados de /orders/search
-            status:    prev.shipping.status    || o.shipping?.status,
-            substatus: prev.shipping.substatus || o.shipping?.substatus,
-            _statusLoaded: true
-          };
+        const prevShip = prev.shipping || {};
+        const newShip  = o.shipping    || {};
+        if(prevShip.id && newShip.id && String(prevShip.id) === String(newShip.id)){
+          if(prevShip._statusLoaded){
+            // Tenemos status enriquecido — preservarlo. Mergeamos los demás campos
+            // del shipping (tracking_number, service_id, etc.) que pueden venir más
+            // frescos en /orders/search.
+            merged.shipping = {
+              ...newShip,
+              status:        prevShip.status,
+              substatus:     prevShip.substatus,
+              _statusLoaded: true
+            };
+          } else {
+            // No teníamos status cargado — usamos lo que venga de /orders/search tal cual
+            merged.shipping = { ...prevShip, ...newShip };
+          }
         }
         allOrders[idx] = merged;
       }
@@ -3952,53 +3967,62 @@ const _PENDING_SHIP_POLL_MS = 20 * 1000; // v90 [P2]: 20s (antes 30s) — reflej
 async function _pollPendingShipments(){
   if(!token || !userId) return;
   if(!Array.isArray(allOrders) || !allOrders.length) return;
-  // Pestaña oculta: respetar el patrón de v85 — seguimos activos pero con menor frecuencia
-  // (el setInterval ya marca el ritmo, acá solo evitamos work si el panel ni cargó datos)
 
-  // Identificar órdenes pendientes que necesitan refresh de shipping status
+  // v91 [P5]: log detallado para diagnosticar problemas de actualización.
+  // Cada ciclo imprime cuántas órdenes detectó como pendientes, cuántas refrescó
+  // y los cambios concretos. Si el polling no corre o hay errores silenciados,
+  // el log lo va a evidenciar.
   const NON_TERMINAL = new Set(['ready_to_ship','handling','pending','shipped','in_transit','almost_there']);
   const pending = allOrders.filter(o => {
     if(!o.shipping?.id) return false;
     if(o.status === 'cancelled' || o.status === 'invalid') return false;
     const ss = (o.shipping.status||'').toLowerCase();
-    // Si shipping.status YA está en estado terminal (delivered/not_delivered/returned/lost) → no refrescar
     if(ss === 'delivered' || ss === 'not_delivered' || ss === 'returned' || ss === 'lost') return false;
-    // Si tenemos shipping.status cargado y está en NON_TERMINAL → refrescar
     if(o.shipping._statusLoaded && NON_TERMINAL.has(ss)) return true;
-    // Si NO tenemos shipping.status cargado pero la orden está paid/confirmed → refrescar
     if(!o.shipping._statusLoaded && (o.status === 'paid' || o.status === 'confirmed')) return true;
     return false;
-  }).slice(0, 25); // tope de seguridad: 25 órdenes/ciclo
+  }).slice(0, 25);
 
+  console.log('[PendingShipPoll] ciclo iniciado — '+pending.length+' órdenes pendientes de '+allOrders.length+' totales');
   if(!pending.length) return;
 
   let changed = 0;
-  // Lotes de 5 paralelas (mismo patrón que loadShippingStatuses)
+  let errors  = 0;
+  const changeLog = [];
   for(let i=0; i<pending.length; i+=5){
     await Promise.allSettled(pending.slice(i, i+5).map(async o => {
       try{
         // v90 [P2]: cache-buster para evitar respuestas cacheadas (CDN/Cloudflare/ML)
         const s = await mlGet('/shipments/' + o.shipping.id + '?_ts=' + Date.now());
-        if(!s) return;
-        const prevStatus = o.shipping.status;
-        const prevSubst  = o.shipping.substatus;
+        if(!s){
+          console.warn('[PendingShipPoll] /shipments/'+o.shipping.id+' devolvió vacío (orden '+o.id+')');
+          errors++;
+          return;
+        }
+        const prevStatus = o.shipping.status || '(none)';
+        const prevSubst  = o.shipping.substatus || '(none)';
         if(s.status)    o.shipping.status = s.status;
         if(s.substatus) o.shipping.substatus = s.substatus;
         o.shipping._statusLoaded = true;
-        if(prevStatus !== o.shipping.status || prevSubst !== o.shipping.substatus){
+        if(prevStatus !== (o.shipping.status||'(none)') || prevSubst !== (o.shipping.substatus||'(none)')){
           changed++;
-          // v90 [P2]: removida toda la lógica de WhatsApp del polling.
-          // El usuario no usa WhatsApp Biz y no quiere consumir recursos.
-          // pollNewData() también dejó de disparar waTrigger('envio') en v90.
+          changeLog.push({
+            ord:    o.id,
+            ship:   o.shipping.id,
+            from:   prevStatus + (prevSubst!=='(none)' ? '/'+prevSubst : ''),
+            to:     (o.shipping.status||'(none)') + (o.shipping.substatus ? '/'+o.shipping.substatus : '')
+          });
         }
       }catch(e){
-        // 404/403 silencioso — el envío puede haber sido cancelado o sin permisos
+        errors++;
+        console.warn('[PendingShipPoll] error orden '+o.id+' shipping '+o.shipping?.id+':', e?.message || e);
       }
     }));
   }
 
   if(changed > 0){
-    console.log('[PendingShipPoll] '+changed+' envío(s) actualizados de '+pending.length+' pendientes');
+    console.log('[PendingShipPoll] ✅ '+changed+'/'+pending.length+' actualizado(s)'+(errors?' ('+errors+' errores)':''));
+    console.table(changeLog);
     // Refrescar UI sin recargar datos
     if(typeof _updateVentasBadge === 'function') _updateVentasBadge();
     if(document.getElementById('section-ventas')?.classList.contains('active') && typeof renderVentasTable === 'function'){
@@ -7191,8 +7215,10 @@ function seoScore(t){
   if(l>=40&&l<=60)s+=30;else if(l>=25&&l<40)s+=18;else if(l>60&&l<=75)s+=12;
   if(!/[.!?,;:()'"@#\$%^&*]/.test(t))s+=20;
   const ws=t.split(' ');
-  const uniq=new Set(ws.map(w=>w.toLowerCase()));
-  if(uniq.size===ws.length)s+=15;
+  // v91 [P1]: ya no penalizamos palabras repetidas — el panel agrega modelo/color
+  // al título y generaba falsos positivos. Otorgamos siempre los 15 puntos para
+  // mantener consistencia con el comportamiento real del título en ML.
+  s+=15;
   if(ws.length>=5&&ws.length<=12)s+=15;
   if(/[a-záéíóúñü]/i.test(t))s+=10;
   if(t!==t.toUpperCase())s+=10;
@@ -7212,8 +7238,9 @@ function liveScore(t){
   if(t.length>75)issues.push('⚠️ Muy largo ('+t.length+' chars) — máx 75');
   if(/[.!?,;:()]/.test(t))issues.push('❌ Signos de puntuación detectados');
   if(t===t.toUpperCase())issues.push('❌ Todo en mayúsculas (penalizado)');
-  const ws=t.split(' '),uniq=new Set(ws.map(w=>w.toLowerCase()));
-  if(uniq.size<ws.length)issues.push('⚠️ Palabras repetidas detectadas');
+  // v91 [P1]: removido check de "Palabras repetidas detectadas".
+  // El panel agrega modelo/color al título cuando lo trae, generando falsos positivos
+  // sobre títulos que originalmente están bien en ML.
   const el=document.getElementById('seo-issues');
   if(el) el.innerHTML=issues.length?issues.map(i=>`<div style="margin-bottom:4px">${i}</div>`).join(''):`<div style="color:var(--green)">✅ Título bien optimizado (score ${sc})</div>`;
 }
@@ -7495,8 +7522,8 @@ function renderSEOTable(){
     if(item.title.length<30)              tI.push('Corto');
     if(/[.!?,;:]/.test(item.title))       tI.push('Puntuación');
     if(item.title===item.title.toUpperCase()) tI.push('Mayúsculas');
-    const ws=item.title.split(' '),u=new Set(ws.map(w=>w.toLowerCase()));
-    if(u.size<ws.length)                  tI.push('Repetidas');
+    // v91 [P1]: removido chip "Repetidas" — el panel agrega modelo/color al título
+    // generando falsos positivos sobre títulos que originalmente son correctos en ML.
 
     const eanP   = ch.find(c=>c.id==='ean');
     const editUrl= mlEditLink(item.id);
@@ -9934,8 +9961,8 @@ async function renderFacturacion(){
     },
     options:{
       ...chartDefaults(),
-      // v90 [P1]: padding generoso arriba para el bloque flotante oscuro
-      layout:{ padding:{ top: 92 } },
+      // v91 [P2]: padding generoso arriba para el bloque flotante con texto largo
+      layout:{ padding:{ top: 100 } },
       scales:{
         y:{...tOpts(), ticks:{...tOpts().ticks, callback:v=>'$'+(v/1000).toFixed(0)+'k'}},
         x:{...tXOpts()}
@@ -9968,18 +9995,22 @@ async function renderFacturacion(){
           }
         },
         datalabels: hasDataLabels ? {
-          // v90 [P1]: estilo tooltip oscuro fijo sobre cada barra
+          // v91 [P2]: formato idéntico al tooltip flotante — sin abreviaciones.
+          // El bloque será más ancho que la barra; eso es OK con 6 meses de datos
+          // porque el fondo oscuro lo hace legible aunque solape parcialmente.
           anchor:'end',
           align:'top',
           offset: 10,
           backgroundColor: 'rgba(0,0,0,0.85)',
           borderRadius: 4,
-          borderColor: 'rgba(255,255,255,0.08)',
+          borderColor: 'rgba(255,255,255,0.1)',
           borderWidth: 1,
-          padding: { top: 5, bottom: 5, left: 7, right: 7 },
+          padding: { top: 7, bottom: 7, left: 9, right: 9 },
           color: '#ffffff',
-          font: { size: 9.5, weight: 600, lineHeight: 1.35 },
-          textAlign: 'center',
+          font: { size: 10.5, weight: 500, lineHeight: 1.4 },
+          textAlign: 'left',
+          // Permitir que el bloque sobresalga del área del chart sin clipping
+          clip: false,
           // No mostrar etiquetas en barras vacías
           display: (ctx) => {
             const m = entries[ctx.dataIndex] || {};
@@ -9987,12 +10018,12 @@ async function renderFacturacion(){
           },
           formatter: (value, ctx) => {
             const m = entries[ctx.dataIndex] || {};
-            // 4 líneas apiladas — mismo formato del tooltip pero compacto
+            // v91 [P2]: 4 líneas idénticas al tooltip flotante (sin K/M/abreviar)
             return [
-              fmtK(m.val||0),
-              (m.sales||0)+' vtas',
-              'TP '+fmtK(m.ticket||0),
-              (m.pubs||0)+' pubs'
+              'Facturación: $'+(m.val||0).toLocaleString('es-AR'),
+              'Ventas: '+(m.sales||0),
+              'Ticket prom.: $'+(m.ticket||0).toLocaleString('es-AR'),
+              'Publicaciones con ventas: '+(m.pubs||0)
             ];
           }
         } : { display: false }
@@ -11418,7 +11449,8 @@ function renderVentas(){
     options:{
       ...chartDefaults(),
       // v90 [P1]: padding generoso arriba para el bloque flotante oscuro
-      layout:{ padding:{ top: compactMode ? 36 : 92 } },
+      // v91 [P3]: padding superior reducido — ahora es 1 sola línea de monto
+      layout:{ padding:{ top: compactMode ? 28 : 38 } },
       scales:{
         y:{...tOpts(), ticks:{...tOpts().ticks, callback:v=>'$'+(v>=1000?(v/1000).toFixed(0)+'k':v)}},
         x:{...tXOpts()}
@@ -11451,33 +11483,28 @@ function renderVentas(){
           }
         },
         datalabels: hasDataLabels ? {
+          // v91 [P3]: solo el monto completo, sin etiqueta "Facturación", sin abreviar.
           anchor:'end',
           align:'top',
-          offset: compactMode ? 6 : 10,
+          offset: 8,
           backgroundColor: 'rgba(0,0,0,0.85)',
           borderRadius: 4,
-          borderColor: 'rgba(255,255,255,0.08)',
+          borderColor: 'rgba(255,255,255,0.1)',
           borderWidth: 1,
-          padding: compactMode
-            ? { top: 3, bottom: 3, left: 5, right: 5 }
-            : { top: 5, bottom: 5, left: 7, right: 7 },
+          padding: { top: 5, bottom: 5, left: 8, right: 8 },
           color:'#ffffff',
-          font: { size: compactMode ? 8.5 : 9.5, weight: 600, lineHeight: 1.35 },
+          font: { size: compactMode ? 9 : 10.5, weight: 600 },
           textAlign:'center',
+          clip: false,
           display: (ctx) => {
             const m = entries[ctx.dataIndex] || {};
             return (m.val || 0) > 0;
           },
           formatter: (value, ctx) => {
             const m = entries[ctx.dataIndex] || {};
-            // Modo compacto (>12 barras): solo monto. Modo expandido: 4 líneas.
-            if(compactMode) return fmtK(m.val||0);
-            return [
-              fmtK(m.val||0),
-              (m.sales||0)+' vtas',
-              'TP '+fmtK(m.ticket||0),
-              (m.pubs||0)+' pubs'
-            ];
+            // v91 [P3]: monto completo sin K/M en ambos modos. En modo diario (>12 barras)
+            // usamos font más chica para que entre. Tooltip flotante sigue mostrando los 4 datos.
+            return '$'+(m.val||0).toLocaleString('es-AR');
           }
         } : { display: false }
       }
@@ -11877,8 +11904,13 @@ function renderQuestions(){
       const taId    = 'ans-txt-'+q.id;
 
       const qrBar = qrs.map(qr=>
-        `<button class="btn btn-xs" style="background:${qr.color};color:#fff;border:none;font-size:10px;padding:3px 9px;white-space:nowrap"
-          onclick="qInsertAtCursor('${taId}','${qr.text.replace(/'/g,"&#39;")}');document.getElementById('ans-form-${q.id}').style.display='block'"
+        // v91 [P4]: botones grandes y visibles a la derecha — color del botón al fondo,
+        // texto blanco, padding amplio. Mantenemos el comportamiento (insertar texto en
+        // el textarea + abrir el formulario de respuesta).
+        `<button class="qr-big-btn" style="background:${qr.color};color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;padding:14px 12px;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.08);transition:transform .1s,box-shadow .1s;line-height:1.25;text-align:center;min-height:48px"
+          onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 4px 8px rgba(0,0,0,0.15)'"
+          onmouseout="this.style.transform='';this.style.boxShadow='0 2px 4px rgba(0,0,0,0.08)'"
+          onclick="qInsertAtCursor('${taId}','${qr.text.replace(/'/g,"&#39;")}');document.getElementById('ans-form-${q.id}').style.display='grid'"
         >${qr.label}</button>`
       ).join('');
 
@@ -11898,25 +11930,31 @@ function renderQuestions(){
             </div>
             ${q.answer&&q.answer.text?`<div style="font-size:12px;color:var(--text3);padding:6px 10px;background:var(--bg3);border-radius:6px;border-left:2px solid var(--green);margin-bottom:6px">↩ ${q.answer.text.slice(0,160)}</div>`:''}
             ${isPend?`
-            <div style="margin-top:8px">
-              <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px;align-items:center">
-                ${qrBar}
-                <button class="btn btn-ghost btn-xs" style="font-size:10px"
-                  onclick="qOpenLink('${taId}')" title="Insertar link de publicación">🔗 #Link</button>
-                <button class="btn btn-ghost btn-xs" style="font-size:10px;background:#ede9fe;color:#7c3aed;border-color:#c4b5fd"
-                  onclick="aiAnswerQ(${q.id},this)">🤖 IA Impala</button>
-                <button class="btn btn-ghost btn-xs" style="font-size:10px"
-                  onclick="qOpenAnswer(${q.id},'${q.item_id||''}','${fromId}')">📝 Plantilla</button>
-              </div>
-              <div id="ans-form-${q.id}" style="display:${isPend?'block':'none'};margin-top:4px">
-                <textarea id="${taId}" rows="3"
-                  style="font-size:12px;margin-bottom:6px;width:100%;resize:vertical"
-                  placeholder="Escribí tu respuesta aquí..."></textarea>
+            <!-- v91 [P4]: layout 2 columnas. Izquierda: respuesta + acciones secundarias.
+                 Derecha: grilla de plantillas de quick reply en tamaño grande. -->
+            <div id="ans-form-${q.id}" class="q-split-layout" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:8px;align-items:stretch">
+              <!-- IZQUIERDA: textarea + acciones -->
+              <div style="display:flex;flex-direction:column;gap:7px;min-width:0">
+                <textarea id="${taId}" rows="5"
+                  style="font-size:12.5px;width:100%;resize:vertical;flex:1;min-height:120px"
+                  placeholder="Escribí tu respuesta aquí o usá una plantilla →"></textarea>
                 <div style="display:flex;gap:6px;flex-wrap:wrap">
-                  <button class="btn btn-primary btn-sm" onclick="submitAns(${q.id})">✓ Enviar respuesta</button>
-                  <button class="btn btn-ghost btn-sm"
-                    onclick="document.getElementById('ans-form-${q.id}').style.display='none';document.getElementById('${taId}').value=''">Cancelar</button>
+                  <button class="btn btn-primary btn-sm" onclick="submitAns(${q.id})" style="flex:1;min-width:140px">✓ Enviar respuesta</button>
+                  <button class="btn btn-ghost btn-sm" onclick="document.getElementById('${taId}').value=''" title="Limpiar">🧹</button>
                 </div>
+                <div style="display:flex;gap:5px;flex-wrap:wrap;font-size:10.5px">
+                  <button class="btn btn-ghost btn-xs" style="font-size:10px" onclick="qOpenLink('${taId}')" title="Insertar link de publicación">🔗 #Link</button>
+                  <button class="btn btn-ghost btn-xs" style="font-size:10px;background:#ede9fe;color:#7c3aed;border-color:#c4b5fd" onclick="aiAnswerQ(${q.id},this)">🤖 IA Impala</button>
+                  <button class="btn btn-ghost btn-xs" style="font-size:10px" onclick="qOpenAnswer(${q.id},'${q.item_id||''}','${fromId}')">📝 Plantilla</button>
+                </div>
+              </div>
+              <!-- DERECHA: grilla de plantillas grandes -->
+              <div style="min-width:0">
+                <div style="font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Respuestas rápidas</div>
+                ${qrs.length
+                  ? `<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px">${qrBar}</div>`
+                  : `<div style="font-size:11.5px;color:var(--text3);padding:14px;border:1px dashed var(--border);border-radius:8px;text-align:center">Aún no creaste plantillas. Tocá ⚙️ Plantilla arriba.</div>`
+                }
               </div>
             </div>`:''}
           </div>
