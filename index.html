@@ -723,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v94 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v95 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4088,7 +4088,7 @@ async function _pollPendingShipments(){
 // v93 [P5]: detector de versión del Worker. Si el Worker está desactualizado (no v55+),
 // significa que el header `x-format-new: true` no está siendo aplicado y el bug de
 // envíos sigue activo. Mostramos un banner amarillo al usuario.
-const _MIN_WORKER_VERSION = 55; // requerido para el fix del header x-format-new
+const _MIN_WORKER_VERSION = 56; // v95: requerido para auth en /ai y /woo + CORS restringido
 async function _checkWorkerVersion(){
   try {
     const r = await fetch(WORKER + '/');
@@ -4373,20 +4373,23 @@ function _updateOrdersUI(mesOrders){
 }
 
 function _updateVentasBadge(){
-  // Contar órdenes que necesitan imprimir etiqueta:
-  // - si shipping.status fue cargado: usarlo (más preciso)
-  // - si no: usar order.status=paid/confirmed como proxy confiable
-  const withShipStatus=allOrders.filter(o=>o.shipping?._statusLoaded).length;
+  // v95 [P5]: BUG FIX — antes se contaban TODAS las órdenes con shipping.status='ready_to_ship'
+  // sin distinguir el substatus. Eso incluía erróneamente envíos ya despachados con
+  // substatus='picked_up'/'dispatched'/'in_hub' que en realidad están "🚚 En camino".
+  // Ahora usamos getShippingLabel() — la misma fuente de verdad que el listado — y
+  // contamos solo las que muestran "🖨️ IMPRIMIR".
   let toPrint;
-  if(withShipStatus>0){
-    // Tenemos datos reales de shipments
-    toPrint=allOrders.filter(o=>o.shipping?.status==='ready_to_ship').length;
+  if(typeof getShippingLabel === 'function'){
+    toPrint = allOrders.filter(o => {
+      const lbl = getShippingLabel(o);
+      return lbl && lbl.label && lbl.label.includes('IMPRIMIR');
+    }).length;
   } else {
-    // Fallback: órdenes pagadas con envío asignado y sin entregar/cancelar
-    toPrint=allOrders.filter(o=>
-      (o.status==='paid'||o.status==='confirmed')&&
-      o.shipping?.id&&
-      o.status!=='shipped'&&o.status!=='delivered'&&o.status!=='cancelled'
+    // Fallback defensivo si por algún race condition getShippingLabel no está aún definido
+    toPrint = allOrders.filter(o =>
+      (o.status==='paid'||o.status==='confirmed') &&
+      o.shipping?.id &&
+      o.status!=='shipped' && o.status!=='delivered' && o.status!=='cancelled'
     ).length;
   }
   const nb=document.getElementById('nb-ventas');
@@ -12720,7 +12723,7 @@ async function aiAnswerQ(qId, btn){
 
     var r = await fetch(WORKER+'/ai', {
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
       body:JSON.stringify({
         system:   systemPrompt,
         messages: [{role:'user', content:userMsg}],
@@ -12868,7 +12871,7 @@ async function aiAsk(systemPrompt, userMsg, targetId){
   try{
     var r = await fetch(WORKER+'/ai',{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
       body:JSON.stringify({
         system: systemPrompt,
         messages:[{role:'user',content:userMsg}],
@@ -14278,7 +14281,7 @@ async function calRunIA(){
   try{
     var r=await fetch(WORKER+'/ai',{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
       body:JSON.stringify({system:sys,messages:[{role:'user',content:prompt}],max_tokens:400,temperature:0.4})
     });
     var d=await r.json();
@@ -14771,7 +14774,7 @@ async function callClaude(prompt, history){
   const messages = history || [{role:'user', content:prompt}];
   let r, rawText;
   try {
-    r = await fetch(WORKER+'/ai', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({max_tokens:1000, temperature:0.3, messages})});
+    r = await fetch(WORKER+'/ai', {method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({max_tokens:1000, temperature:0.3, messages})});
     rawText = await r.text();
   } catch(e){ throw new Error('Sin conexion: '+e.message); }
   let d;
@@ -16781,7 +16784,7 @@ async function publishToWoo() {
       dimensions:  { length: dims.length, width: dims.width, height: dims.height }
     };
 
-    var res  = await fetch(WORKER + '/woo/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    var res  = await fetch(WORKER + '/woo/import', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer '+token }, body: JSON.stringify(payload) });
     var data = await res.json();
     if (res.status === 409) { showToast('Ya existe ese producto en WooCommerce (omitido)', 'warn'); return; }
     if (!res.ok || !data.ok) throw new Error(data.error || data.message || 'Error desconocido');
