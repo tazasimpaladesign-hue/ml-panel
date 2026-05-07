@@ -293,6 +293,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;heigh
 .kw-fill{height:100%;background:var(--accent);border-radius:2px}
 
 @media(max-width:900px){.mgt{grid-template-columns:repeat(2,1fr)}.g2,.g3,.g60,.g40{grid-template-columns:1fr}.q-split-layout{grid-template-columns:1fr !important}}
+@media(max-width:1100px){.q-section-grid{grid-template-columns:1fr !important}.q-templates-panel{position:static !important}}
 
 /* ═══════════════════════════════════════════════════════════════
    SIDEBAR — fondo oscuro, TODO el texto en blanco
@@ -722,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v91 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v92 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1556,21 +1557,37 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <div class="mc c-green"><div class="mc-label">Respondidas hoy</div><div class="mc-val" id="q-today">—</div></div>
     <div class="mc c-blue"><div class="mc-label">Tiempo promedio</div><div class="mc-val" id="q-avgtime">—</div></div>
   </div>
-  <div class="card">
-    <div class="card-hd" style="flex-wrap:wrap;gap:8px">
-      <div class="tabs">
-        <button class="tab active" onclick="filterQs('UNANSWERED',this)">Sin responder</button>
-        <button class="tab" onclick="filterQs('ANSWERED',this)">Respondidas</button>
-        <button class="tab" onclick="filterQs('all',this)">Todas</button>
+  <!-- v92 [P4]: layout 2 columnas a nivel sección.
+       Izquierda (flexible): lista de preguntas con su área de respuesta.
+       Derecha (380px sticky): panel fijo de plantillas siempre visible. -->
+  <div class="q-section-grid" style="display:grid;grid-template-columns:1fr 380px;gap:14px;align-items:start">
+    <div class="card" style="min-width:0">
+      <div class="card-hd" style="flex-wrap:wrap;gap:8px">
+        <div class="tabs">
+          <button class="tab active" onclick="filterQs('UNANSWERED',this)">Sin responder</button>
+          <button class="tab" onclick="filterQs('ANSWERED',this)">Respondidas</button>
+          <button class="tab" onclick="filterQs('all',this)">Todas</button>
+        </div>
+        <div style="display:flex;gap:6px;margin-left:auto;align-items:center">
+          <span id="q-sync-status" style="font-size:10px;color:var(--text3);display:none"></span>
+          <button id="q-sync-btn" class="btn btn-ghost btn-sm" onclick="qSyncNow()" title="Sincronizar configuración con la nube" style="font-size:13px;padding:4px 8px">☁️</button>
+          <button class="btn btn-ghost btn-sm" onclick="qOpenTmpl()" title="Plantilla y respuestas rápidas" style="font-size:11px">⚙️ Plantilla</button>
+          <button class="btn btn-primary btn-sm" onclick="bulkAnswerIA()">🤖 Responder todas con IA</button>
+        </div>
       </div>
-      <div style="display:flex;gap:6px;margin-left:auto;align-items:center">
-        <span id="q-sync-status" style="font-size:10px;color:var(--text3);display:none"></span>
-        <button id="q-sync-btn" class="btn btn-ghost btn-sm" onclick="qSyncNow()" title="Sincronizar configuración con la nube" style="font-size:13px;padding:4px 8px">☁️</button>
-        <button class="btn btn-ghost btn-sm" onclick="qOpenTmpl()" title="Plantilla y respuestas rápidas" style="font-size:11px">⚙️ Plantilla</button>
-        <button class="btn btn-primary btn-sm" onclick="bulkAnswerIA()">🤖 Responder todas con IA</button>
-      </div>
+      <div id="q-list"><div class="loading"><div class="spin"></div>Cargando...</div></div>
     </div>
-    <div id="q-list"><div class="loading"><div class="spin"></div>Cargando...</div></div>
+    <!-- Panel lateral fijo de respuestas rápidas — siempre visible -->
+    <div class="card q-templates-panel" style="position:sticky;top:14px;padding:14px;min-width:0">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="font-size:13px;font-weight:600">📋 Respuestas rápidas</div>
+        <button class="btn btn-ghost btn-xs" onclick="qOpenTmpl()" title="Editar plantillas" style="font-size:10.5px">⚙️ Editar</button>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:10px;line-height:1.4">
+        Tocá una plantilla para insertarla en la respuesta de la pregunta abajo.
+      </div>
+      <div id="q-templates-list" style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px"></div>
+    </div>
   </div>
 </div>
 
@@ -3962,7 +3979,10 @@ async function pollNewData(){
 // las ventas. Costo: N llamadas/30s donde N = órdenes pendientes (típicamente <10).
 // Cero KV writes — todo va por mlGet directo.
 let _pendingShipPollTimer = null;
-const _PENDING_SHIP_POLL_MS = 20 * 1000; // v90 [P2]: 20s (antes 30s) — refleja cambios más rápido
+const _PENDING_SHIP_POLL_MS = 30 * 60 * 1000; // v92 [P5]: 30 min — el fix del header x-format-new
+                                              // hace que /orders/search ya traiga el shipping correcto
+                                              // y loadShippingStatuses lo actualice al cargar; este polling
+                                              // queda como red de seguridad de bajo costo.
 
 async function _pollPendingShipments(){
   if(!token || !userId) return;
@@ -4036,10 +4056,11 @@ async function _pollPendingShipments(){
 
 function startPendingShipPoll(){
   if(_pendingShipPollTimer) clearInterval(_pendingShipPollTimer);
-  // v90 [P2]: primer ciclo a los 3s (antes 10s) para corregir rápidamente cualquier
-  // shipping pisado por el shallow merge de pollNewData. El bug raíz se fixeó en
-  // pollNewData pero mantenemos esta red de seguridad.
-  setTimeout(_pollPendingShipments, 3 * 1000);
+  // v92 [P5]: primer ciclo a los 60s. El fix del header `x-format-new: true` en el
+  // Worker resuelve el bug en origen (loadShippingStatuses al cargar el panel ya
+  // trae estados reales). Este polling solo refresca cambios mientras el panel
+  // está abierto, sin recargar todas las órdenes. Intervalo: 30 minutos.
+  setTimeout(_pollPendingShipments, 60 * 1000);
   _pendingShipPollTimer = setInterval(_pollPendingShipments, _PENDING_SHIP_POLL_MS);
 }
 function stopPendingShipPoll(){
@@ -11449,8 +11470,9 @@ function renderVentas(){
     options:{
       ...chartDefaults(),
       // v90 [P1]: padding generoso arriba para el bloque flotante oscuro
-      // v91 [P3]: padding superior reducido — ahora es 1 sola línea de monto
-      layout:{ padding:{ top: compactMode ? 28 : 38 } },
+      // v92 [P3]: en modo diario no hay datalabels → padding mínimo. En mensual,
+      // espacio suficiente para el monto sobre cada barra.
+      layout:{ padding:{ top: compactMode ? 8 : 38 } },
       scales:{
         y:{...tOpts(), ticks:{...tOpts().ticks, callback:v=>'$'+(v>=1000?(v/1000).toFixed(0)+'k':v)}},
         x:{...tXOpts()}
@@ -11482,8 +11504,10 @@ function renderVentas(){
             }
           }
         },
-        datalabels: hasDataLabels ? {
-          // v91 [P3]: solo el monto completo, sin etiqueta "Facturación", sin abreviar.
+        datalabels: (hasDataLabels && !compactMode) ? {
+          // v92 [P3]: solo activos en modo mensual (≤12 barras). En modo diario
+          // (90 días = ~90 barras) los datalabels se solapan demasiado y resultan
+          // ilegibles. En diario solo queda el tooltip flotante en hover.
           anchor:'end',
           align:'top',
           offset: 8,
@@ -11493,7 +11517,7 @@ function renderVentas(){
           borderWidth: 1,
           padding: { top: 5, bottom: 5, left: 8, right: 8 },
           color:'#ffffff',
-          font: { size: compactMode ? 9 : 10.5, weight: 600 },
+          font: { size: 10.5, weight: 600 },
           textAlign:'center',
           clip: false,
           display: (ctx) => {
@@ -11502,8 +11526,7 @@ function renderVentas(){
           },
           formatter: (value, ctx) => {
             const m = entries[ctx.dataIndex] || {};
-            // v91 [P3]: monto completo sin K/M en ambos modos. En modo diario (>12 barras)
-            // usamos font más chica para que entre. Tooltip flotante sigue mostrando los 4 datos.
+            // v92 [P3]: solo el monto completo (sin K/M). Tooltip flotante muestra los 4 datos.
             return '$'+(m.val||0).toLocaleString('es-AR');
           }
         } : { display: false }
@@ -11796,6 +11819,8 @@ function qRenderTmplList(){
 }
 function qrDeleteRow(i){
   const qrs = qGetQR(); qrs.splice(i,1); qSaveQR(qrs); qRenderTmplList();
+  // v92 [P4]: refrescar panel lateral fijo
+  if(typeof qRenderTemplatesPanel === 'function') qRenderTemplatesPanel(qGetQR());
 }
 function qrAddNew(){
   const label = document.getElementById('qr-new-label')?.value?.trim();
@@ -11807,9 +11832,9 @@ function qrAddNew(){
   document.getElementById('qr-new-label').value='';
   document.getElementById('qr-new-text').value='';
   qRenderTmplList();
+  // v92 [P4]: refrescar panel lateral fijo
+  if(typeof qRenderTemplatesPanel === 'function') qRenderTemplatesPanel(qGetQR());
 }
-
-// ─── Insert text at cursor in a textarea ─────────────────────
 function qInsertAtCursor(taId, text){
   const ta = document.getElementById(taId);
   if(!ta) return;
@@ -11891,6 +11916,10 @@ function renderQuestions(){
 
   const qrs = qGetQR();
 
+  // v92 [P4]: render del panel lateral fijo con plantillas (siempre visible).
+  // Cada plantilla inserta texto en el textarea de la pregunta "activa".
+  qRenderTemplatesPanel(qrs);
+
   try{
     el.innerHTML = qs.map(q=>{
       const dt      = q.date_created ? new Date(q.date_created) : null;
@@ -11902,17 +11931,6 @@ function renderQuestions(){
       // Nickname: usar el enriquecido si ya se cargó, si no mostrar ID como fallback
       const fromNick = q._nickname || _nicknameCache[fromId] || (fromId ? '👤 #' + fromId : '');
       const taId    = 'ans-txt-'+q.id;
-
-      const qrBar = qrs.map(qr=>
-        // v91 [P4]: botones grandes y visibles a la derecha — color del botón al fondo,
-        // texto blanco, padding amplio. Mantenemos el comportamiento (insertar texto en
-        // el textarea + abrir el formulario de respuesta).
-        `<button class="qr-big-btn" style="background:${qr.color};color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;padding:14px 12px;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.08);transition:transform .1s,box-shadow .1s;line-height:1.25;text-align:center;min-height:48px"
-          onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 4px 8px rgba(0,0,0,0.15)'"
-          onmouseout="this.style.transform='';this.style.boxShadow='0 2px 4px rgba(0,0,0,0.08)'"
-          onclick="qInsertAtCursor('${taId}','${qr.text.replace(/'/g,"&#39;")}');document.getElementById('ans-form-${q.id}').style.display='grid'"
-        >${qr.label}</button>`
-      ).join('');
 
       return `<div data-qid="${q.id}" data-qtext="${(q.text||'').replace(/"/g,'&quot;')}" data-itemid="${q.item_id||''}"
         style="padding:12px 0;border-bottom:1px solid var(--border)">
@@ -11930,41 +11948,90 @@ function renderQuestions(){
             </div>
             ${q.answer&&q.answer.text?`<div style="font-size:12px;color:var(--text3);padding:6px 10px;background:var(--bg3);border-radius:6px;border-left:2px solid var(--green);margin-bottom:6px">↩ ${q.answer.text.slice(0,160)}</div>`:''}
             ${isPend?`
-            <!-- v91 [P4]: layout 2 columnas. Izquierda: respuesta + acciones secundarias.
-                 Derecha: grilla de plantillas de quick reply en tamaño grande. -->
-            <div id="ans-form-${q.id}" class="q-split-layout" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:8px;align-items:stretch">
-              <!-- IZQUIERDA: textarea + acciones -->
-              <div style="display:flex;flex-direction:column;gap:7px;min-width:0">
-                <textarea id="${taId}" rows="5"
-                  style="font-size:12.5px;width:100%;resize:vertical;flex:1;min-height:120px"
-                  placeholder="Escribí tu respuesta aquí o usá una plantilla →"></textarea>
-                <div style="display:flex;gap:6px;flex-wrap:wrap">
-                  <button class="btn btn-primary btn-sm" onclick="submitAns(${q.id})" style="flex:1;min-width:140px">✓ Enviar respuesta</button>
-                  <button class="btn btn-ghost btn-sm" onclick="document.getElementById('${taId}').value=''" title="Limpiar">🧹</button>
-                </div>
-                <div style="display:flex;gap:5px;flex-wrap:wrap;font-size:10.5px">
-                  <button class="btn btn-ghost btn-xs" style="font-size:10px" onclick="qOpenLink('${taId}')" title="Insertar link de publicación">🔗 #Link</button>
-                  <button class="btn btn-ghost btn-xs" style="font-size:10px;background:#ede9fe;color:#7c3aed;border-color:#c4b5fd" onclick="aiAnswerQ(${q.id},this)">🤖 IA Impala</button>
-                  <button class="btn btn-ghost btn-xs" style="font-size:10px" onclick="qOpenAnswer(${q.id},'${q.item_id||''}','${fromId}')">📝 Plantilla</button>
-                </div>
-              </div>
-              <!-- DERECHA: grilla de plantillas grandes -->
-              <div style="min-width:0">
-                <div style="font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Respuestas rápidas</div>
-                ${qrs.length
-                  ? `<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px">${qrBar}</div>`
-                  : `<div style="font-size:11.5px;color:var(--text3);padding:14px;border:1px dashed var(--border);border-radius:8px;text-align:center">Aún no creaste plantillas. Tocá ⚙️ Plantilla arriba.</div>`
-                }
+            <!-- v92 [P4]: respuesta inline (textarea + acciones). Las plantillas
+                 viven en el panel lateral derecho y siempre están visibles. -->
+            <div id="ans-form-${q.id}" style="margin-top:8px;display:flex;flex-direction:column;gap:7px">
+              <textarea id="${taId}" rows="3"
+                onfocus="qSetActive(${q.id})"
+                onclick="qSetActive(${q.id})"
+                style="font-size:12.5px;width:100%;resize:vertical;min-height:80px"
+                placeholder="Escribí tu respuesta aquí o tocá una plantilla del panel derecho →"></textarea>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+                <button class="btn btn-primary btn-sm" onclick="submitAns(${q.id})">✓ Enviar respuesta</button>
+                <button class="btn btn-ghost btn-sm" onclick="document.getElementById('${taId}').value=''" title="Limpiar">🧹</button>
+                <button class="btn btn-ghost btn-xs" style="font-size:10px" onclick="qOpenLink('${taId}')" title="Insertar link de publicación">🔗 #Link</button>
+                <button class="btn btn-ghost btn-xs" style="font-size:10px;background:#ede9fe;color:#7c3aed;border-color:#c4b5fd" onclick="aiAnswerQ(${q.id},this)">🤖 IA Impala</button>
+                <button class="btn btn-ghost btn-xs" style="font-size:10px" onclick="qOpenAnswer(${q.id},'${q.item_id||''}','${fromId}')">📝 Plantilla extendida</button>
               </div>
             </div>`:''}
           </div>
         </div>
       </div>`;
     }).join('');
+
+    // v92 [P4]: si hay alguna pregunta pendiente y no hay activa, marcar la primera
+    if(!_qActiveId){
+      const firstPend = qs.find(q=>q.status==='UNANSWERED');
+      if(firstPend) _qActiveId = firstPend.id;
+    }
   }catch(e){
     console.warn('[renderQuestions] error:', e);
     el.innerHTML='<div style="color:var(--red);font-size:12.5px;padding:16px 0">⚠ Error al mostrar las preguntas. Reintentá recargar.</div>';
   }
+}
+
+// v92 [P4]: ID de la pregunta "activa" (donde se inserta el texto al tocar plantilla).
+// Por defecto la primera pendiente. Cambia al hacer focus/click en otro textarea.
+let _qActiveId = null;
+function qSetActive(qid){
+  _qActiveId = qid;
+  // resaltado visual sutil del textarea activo
+  document.querySelectorAll('#q-list textarea').forEach(t => {
+    t.style.borderColor = '';
+    t.style.boxShadow = '';
+  });
+  const ta = document.getElementById('ans-txt-'+qid);
+  if(ta){
+    ta.style.borderColor = 'var(--accent)';
+    ta.style.boxShadow = '0 0 0 2px rgba(79,142,247,0.15)';
+  }
+}
+
+function qRenderTemplatesPanel(qrs){
+  const el = document.getElementById('q-templates-list');
+  if(!el) return;
+  if(!qrs || !qrs.length){
+    el.innerHTML = '<div style="grid-column:1/-1;font-size:11.5px;color:var(--text3);padding:14px;border:1px dashed var(--border);border-radius:8px;text-align:center">Aún no creaste plantillas. Tocá ⚙️ Editar para empezar.</div>';
+    return;
+  }
+  el.innerHTML = qrs.map(qr =>
+    `<button class="qr-big-btn" style="background:${qr.color};color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;padding:14px 10px;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.08);transition:transform .1s,box-shadow .1s;line-height:1.25;text-align:center;min-height:54px;word-break:break-word"
+      onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 4px 8px rgba(0,0,0,0.15)'"
+      onmouseout="this.style.transform='';this.style.boxShadow='0 2px 4px rgba(0,0,0,0.08)'"
+      onclick="qInsertTemplate('${qr.text.replace(/'/g,"&#39;").replace(/\\/g,'\\\\')}')"
+    >${qr.label}</button>`
+  ).join('');
+}
+
+function qInsertTemplate(text){
+  // Inserta la plantilla en el textarea de la pregunta activa.
+  // Si no hay activa, intenta la primera pendiente del DOM.
+  let qid = _qActiveId;
+  if(!qid){
+    const firstTa = document.querySelector('#q-list textarea[id^="ans-txt-"]');
+    if(firstTa){
+      qid = firstTa.id.replace('ans-txt-','');
+      _qActiveId = qid;
+    }
+  }
+  if(!qid){
+    showToast('No hay preguntas pendientes para responder', 'warn');
+    return;
+  }
+  qInsertAtCursor('ans-txt-'+qid, text);
+  // Foco al textarea para que el usuario pueda seguir editando
+  const ta = document.getElementById('ans-txt-'+qid);
+  if(ta){ ta.focus(); qSetActive(qid); }
 }
 function initAI(){
   aiHistory=[
