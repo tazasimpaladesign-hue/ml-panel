@@ -723,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v92 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v93 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -3731,6 +3731,10 @@ function showSessionExpired(){
 // ═══════════════════════════════════════════════════════════
 async function initApp(){
   document.getElementById('login-screen').style.display='none';
+  // v93 [P5]: chequear versión del Worker en background. Si está desactualizado,
+  // muestra un banner amarillo en el header advirtiendo que el bug de envíos sigue
+  // activo. El check va al endpoint raíz "/" del Worker que devuelve { msg: '... v55' }.
+  _checkWorkerVersion();
   userData=await mlGet('/users/me');
   userId=userData.id;
   // Registrar refresh_token en el Worker para que el webhook pueda enviar Telegram
@@ -3988,10 +3992,10 @@ async function _pollPendingShipments(){
   if(!token || !userId) return;
   if(!Array.isArray(allOrders) || !allOrders.length) return;
 
-  // v91 [P5]: log detallado para diagnosticar problemas de actualización.
-  // Cada ciclo imprime cuántas órdenes detectó como pendientes, cuántas refrescó
-  // y los cambios concretos. Si el polling no corre o hay errores silenciados,
-  // el log lo va a evidenciar.
+  // v93 [P5]: log detallado + dump de respuesta cruda de ML para las primeras 2
+  // órdenes pendientes. Esto permite diagnosticar EXACTAMENTE qué responde ML.
+  // Si el header x-format-new no está aplicado en el Worker, el shipment vendrá
+  // sin el campo `status` o con estructura vieja.
   const NON_TERMINAL = new Set(['ready_to_ship','handling','pending','shipped','in_transit','almost_there']);
   const pending = allOrders.filter(o => {
     if(!o.shipping?.id) return false;
@@ -4008,6 +4012,7 @@ async function _pollPendingShipments(){
 
   let changed = 0;
   let errors  = 0;
+  let dumped  = 0; // contador de respuestas crudas dumpeadas
   const changeLog = [];
   for(let i=0; i<pending.length; i+=5){
     await Promise.allSettled(pending.slice(i, i+5).map(async o => {
@@ -4019,6 +4024,32 @@ async function _pollPendingShipments(){
           errors++;
           return;
         }
+
+        // v93 [P5]: dumpear respuesta cruda de las 2 primeras órdenes pendientes.
+        // Si ves `status: undefined` o estructura sin `status_history`, el header
+        // x-format-new NO está siendo aplicado por el Worker.
+        if(dumped < 2){
+          dumped++;
+          console.log('[PendingShipPoll] ━━━━ DUMP RESPUESTA ML #'+dumped+' ━━━━');
+          console.log('  Orden:', o.id, '| Shipping:', o.shipping.id);
+          console.log('  Estado en panel ANTES:', o.shipping.status || '(vacío)', '/', o.shipping.substatus || '(vacío)');
+          console.log('  Respuesta CRUDA de ML:', JSON.stringify({
+            id: s.id,
+            status: s.status,
+            substatus: s.substatus,
+            mode: s.mode,
+            tracking_number: s.tracking_number,
+            last_updated: s.last_updated,
+            // Si tiene status_history significa que x-format-new SÍ funcionó
+            has_status_history: Array.isArray(s.status_history),
+            status_history_last: Array.isArray(s.status_history) ? s.status_history.slice(-3) : null,
+            // Detector: si NO tiene status pero SÍ otros campos, header faltante
+            _diagnostico: !s.status && (s.id || s.tracking_number)
+              ? '⚠️ ML respondió SIN status — el Worker probablemente NO está enviando el header x-format-new:true. Subí worker-master-v55.js a Cloudflare.'
+              : (s.status ? '✅ Respuesta válida' : '❓ Respuesta inesperada')
+          }, null, 2));
+        }
+
         const prevStatus = o.shipping.status || '(none)';
         const prevSubst  = o.shipping.substatus || '(none)';
         if(s.status)    o.shipping.status = s.status;
@@ -4052,6 +4083,42 @@ async function _pollPendingShipments(){
       renderFacturacion();
     }
   }
+}
+
+// v93 [P5]: detector de versión del Worker. Si el Worker está desactualizado (no v55+),
+// significa que el header `x-format-new: true` no está siendo aplicado y el bug de
+// envíos sigue activo. Mostramos un banner amarillo al usuario.
+const _MIN_WORKER_VERSION = 55; // requerido para el fix del header x-format-new
+async function _checkWorkerVersion(){
+  try {
+    const r = await fetch(WORKER + '/');
+    if(!r.ok) return;
+    const d = await r.json();
+    const msg = d?.msg || '';
+    // Match "Worker Maestro v55", "v56", etc.
+    const m = msg.match(/v(\d+)\b/);
+    if(!m) return;
+    const ver = parseInt(m[1], 10);
+    console.log('[WorkerVersion] '+msg+' (parsed='+ver+', requerido='+_MIN_WORKER_VERSION+'+)');
+    if(ver < _MIN_WORKER_VERSION){
+      _showWorkerOutdatedBanner(ver);
+    }
+  } catch(e){
+    console.warn('[WorkerVersion] no se pudo verificar:', e.message);
+  }
+}
+function _showWorkerOutdatedBanner(currentVer){
+  // Evitar duplicados
+  if(document.getElementById('worker-outdated-banner')) return;
+  const b = document.createElement('div');
+  b.id = 'worker-outdated-banner';
+  b.style.cssText = 'position:fixed;top:8px;right:8px;left:8px;z-index:9999;background:#fbbf24;color:#78350f;padding:11px 14px;border-radius:8px;border:1px solid #f59e0b;box-shadow:0 4px 12px rgba(0,0,0,.15);font-size:12.5px;line-height:1.4;display:flex;align-items:center;gap:10px;max-width:900px;margin:0 auto';
+  b.innerHTML = '<span style="font-size:20px">⚠️</span>'
+    + '<div style="flex:1"><strong>Worker desactualizado (v'+currentVer+').</strong> '
+    + 'El bug de "estado de envíos" no se va a resolver hasta que subas <code style="background:#fde68a;padding:1px 5px;border-radius:3px;font-size:11px">worker-master-v55.js</code> a Cloudflare Workers. '
+    + 'Mientras tanto, los estados se siguen viendo desactualizados.</div>'
+    + '<button onclick="this.parentElement.remove()" style="background:transparent;border:1px solid #92400e;color:#78350f;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:11.5px;font-weight:600">Cerrar</button>';
+  document.body.appendChild(b);
 }
 
 function startPendingShipPoll(){
@@ -11453,7 +11520,9 @@ function renderVentas(){
   };
 
   // 4 datos apilados solo si hay ≤12 barras (modo mensual). Más barras → solo monto.
-  const compactMode = entries.length > 12;
+  // v93 [P3]: 365 días con Math.ceil(365/30) da 13 buckets (no 12). Threshold a >13
+  // para que "12 meses" muestre datalabels. >13 solo aplica al modo diario (30/90 días).
+  const compactMode = entries.length > 13;
   const hasDataLabels = (typeof ChartDataLabels !== 'undefined');
 
   makeChart('chart-ven',{
