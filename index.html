@@ -723,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v93 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v94 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -11608,18 +11608,49 @@ function renderVentas(){
 
 function getShippingLabel(o){
   const os  = o.status || '';
-  const ss  = (o.shipping?.status||'').toLowerCase();
+  const ss  = (o.shipping?.status   || '').toLowerCase();
+  const sub = (o.shipping?.substatus|| '').toLowerCase();
   const loaded = !!o.shipping?._statusLoaded;
 
   // Cancelada siempre primero
   if(os==='cancelled') return {label:'❌ Cancelado', cls:'bg-red'};
+
+  // v94 [P5]: BUG FIX REAL — el ml endpoint devuelve `status: ready_to_ship` con
+  // substatus = picked_up / dispatched / stale cuando el envío YA fue retirado por
+  // el correo y está en tránsito. Antes mostrábamos "🖨️ IMPRIMIR" para todos los
+  // ready_to_ship sin distinguir, ignorando el substatus.
+  //
+  // Documentación oficial de substatuses (https://developers.mercadolibre.com.ar/envios):
+  //
+  //   handling:      waiting_for_label_generation, regenerating, invoice_pending
+  //   ready_to_ship: ready_to_print, printed, stale, cancelled,
+  //                  picked_up, dispatched, in_hub, on_route   ← YA EN TRÁNSITO
+  //   shipped:       first_visit, in_hub, dispatched, waiting_for_pickup
+  //   delivered:     null
+  //
+  // Substatuses que indican que el paquete YA salió del seller y está moviéndose:
+  const SHIP_IN_TRANSIT_SUBS = new Set([
+    'picked_up',     // correo retiró el paquete (Flex / drop_off)
+    'dispatched',    // despachado por el seller
+    'in_hub',        // en depósito del correo
+    'on_route',      // en ruta de reparto
+    'soon_deliver',  // cerca de entregar
+    'in_warehouse',  // en almacén
+    'stale'          // etiqueta vieja (paquete pendiente >X días)
+  ]);
 
   // Estado real del envío (cargado via /shipments/{id})
   if(loaded || ss){
     if(ss==='delivered')                                       return {label:'✅ Entregado',   cls:'bg-green'};
     if(ss==='not_delivered'||ss==='returned'||ss==='lost')     return {label:'❌ No entregado',cls:'bg-red'};
     if(ss==='shipped'||ss==='in_transit'||ss==='almost_there') return {label:'🚚 En camino',   cls:'bg-blue'};
-    if(ss==='ready_to_ship')                                   return {label:'🖨️ IMPRIMIR',    cls:'bg-amber'};
+    if(ss==='ready_to_ship'){
+      // v94 [P5]: interpretar el substatus para distinguir "imprimir" vs "ya despachado"
+      if(SHIP_IN_TRANSIT_SUBS.has(sub))     return {label:'🚚 En camino',  cls:'bg-blue'};
+      if(sub==='printed')                   return {label:'📦 Listo p/despacho', cls:'bg-blue'};
+      // ready_to_print, cancelled, vacío → IMPRIMIR
+      return {label:'🖨️ IMPRIMIR',    cls:'bg-amber'};
+    }
     if(ss==='handling')                                        return {label:'📦 Preparando',  cls:'bg-blue'};
     if(ss==='pending')                                         return {label:'⏳ Pendiente',   cls:'bg-amber'};
   }
@@ -11971,6 +12002,12 @@ function qInsertLink(itemId){
 
 // ─── Main render ─────────────────────────────────────────────
 function renderQuestions(){
+  // v94 [P4]: renderizar el panel lateral fijo SIEMPRE, independientemente de
+  // si hay preguntas en el filtro actual. Antes, si entrabas a Preguntas con
+  // la solapa "Sin responder" vacía, las plantillas no aparecían hasta cambiar
+  // de solapa. Ahora se rendea en cuanto se llama renderQuestions.
+  qRenderTemplatesPanel(qGetQR());
+
   let qs = [...(allQuestions||[])];
   if(qFilter==='UNANSWERED')      qs = qs.filter(q=>q.status==='UNANSWERED');
   else if(qFilter==='ANSWERED')   qs = qs.filter(q=>q.status==='ANSWERED');
@@ -11985,9 +12022,8 @@ function renderQuestions(){
 
   const qrs = qGetQR();
 
-  // v92 [P4]: render del panel lateral fijo con plantillas (siempre visible).
-  // Cada plantilla inserta texto en el textarea de la pregunta "activa".
-  qRenderTemplatesPanel(qrs);
+  // v94 [P4]: el render del panel lateral ya se hizo arriba (antes del early return),
+  // no es necesario repetirlo acá.
 
   try{
     el.innerHTML = qs.map(q=>{
