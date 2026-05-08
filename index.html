@@ -723,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v97 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v98 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -3048,19 +3048,25 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <div style="flex:1;min-width:200px">
       <div style="font-size:14px;font-weight:600;margin-bottom:3px">Ventas pendientes en tu tienda web</div>
       <div style="font-size:11.5px;opacity:.92;line-height:1.4">
-        Pedidos en estado <strong>Procesando</strong> que esperan despacho.
+        Pedidos en estado <strong>Procesando</strong> de los últimos 7 días.
         Las notificaciones llegan en tiempo real vía webhook + Telegram.
       </div>
     </div>
-    <div id="woo-pending-stats" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+    <div id="woo-pending-stats" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       <div style="text-align:center;background:rgba(255,255,255,.18);padding:8px 16px;border-radius:8px;border:1px solid rgba(255,255,255,.2)">
         <div style="font-size:24px;font-weight:700;line-height:1" id="woo-pending-count">—</div>
         <div style="font-size:10px;opacity:.92;text-transform:uppercase;letter-spacing:.05em;margin-top:3px">Procesando</div>
       </div>
       <a id="woo-pending-link" href="#" target="_blank" rel="noopener noreferrer"
-        style="background:#fff;color:#7c3aed;padding:11px 20px;border-radius:8px;font-weight:600;font-size:13px;text-decoration:none;box-shadow:0 4px 10px rgba(0,0,0,.18);white-space:nowrap;transition:transform .12s">
+        style="background:#fff;color:#7c3aed;padding:11px 18px;border-radius:8px;font-weight:600;font-size:13px;text-decoration:none;box-shadow:0 4px 10px rgba(0,0,0,.18);white-space:nowrap">
         🚀 Ver pedidos en WordPress
       </a>
+      <!-- v98 [Tema 2]: botón para importar pedidos pre-existentes que el webhook no detectó -->
+      <button onclick="wooBackfillPending(this)"
+        style="background:rgba(255,255,255,.18);color:#fff;padding:11px 16px;border:1px solid rgba(255,255,255,.3);border-radius:8px;font-weight:600;font-size:12.5px;cursor:pointer;white-space:nowrap"
+        title="Trae los pedidos en Procesando que ya existían antes de configurar el webhook">
+        🔄 Importar pendientes
+      </button>
     </div>
   </div>
 
@@ -4115,7 +4121,7 @@ async function _pollPendingShipments(){
 // v93 [P5]: detector de versión del Worker. Si el Worker está desactualizado (no v55+),
 // significa que el header `x-format-new: true` no está siendo aplicado y el bug de
 // envíos sigue activo. Mostramos un banner amarillo al usuario.
-const _MIN_WORKER_VERSION = 58; // v97: requerido para webhook Woo + endpoint /api/woo/notifications
+const _MIN_WORKER_VERSION = 59; // v98: requerido para /webhook/woo-diag y /api/woo/backfill-pending
 async function _checkWorkerVersion(){
   try {
     const r = await fetch(WORKER + '/');
@@ -15375,6 +15381,13 @@ async function _pollWooNotifications(){
       link.href = wpAdminUrl;
     }
 
+    // v98 [Tema 2]: si no hay nada guardado todavía, exponer en consola un hint
+    // de cómo verificar el estado del webhook
+    if((d.totalStored || 0) === 0 && _wooFirstPoll){
+      console.log('[WooPoll] ℹ️ No hay notificaciones guardadas todavía. Si configuraste el webhook hace poco, dale 1-2 ventas nuevas para empezar a ver datos. Si querés cargar los pedidos en Procesando que YA tenés, tocá "🔄 Importar pendientes" en la sección SEO Tienda Woo.');
+      console.log('[WooPoll] Para diagnóstico abrí: ' + WORKER + '/webhook/woo-diag');
+    }
+
     // ── Detectar ventas nuevas para toast ──
     // Solo en estado "processing" (= venta confirmada que requiere acción)
     if(!_wooFirstPoll){
@@ -15409,6 +15422,39 @@ function startWooPolling(){
 }
 function stopWooPolling(){
   if(_wooPollTimer){ clearInterval(_wooPollTimer); _wooPollTimer = null; }
+}
+
+// v98 [Tema 2]: backfill manual de pedidos en "processing" que ya existían
+// antes de configurar el webhook. Se llama desde el botón "🔄 Importar pendientes".
+async function wooBackfillPending(btn){
+  if(!token){ showToast('Necesitás estar logueado', 'warn'); return; }
+  const orig = btn ? btn.innerHTML : '';
+  if(btn){ btn.disabled = true; btn.innerHTML = '⏳ Importando...'; }
+  try{
+    const r = await fetch(WORKER + '/api/woo/backfill-pending', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+    });
+    const d = await r.json();
+    if(!r.ok || d.error){
+      showToast('Error importando: ' + (d.error || ('HTTP '+r.status)), 'error', 6000);
+      console.warn('[WooBackfill] Error:', d);
+    } else {
+      showToast('✅ ' + d.added + ' pedido(s) importado(s) — ahora hay ' + d.processing_now + ' en Procesando', 'success', 5000);
+      // Refrescar el polling para ver los cambios reflejados
+      _wooFirstPoll = true;  // no toastear los recién importados como "nuevos"
+      _pollWooNotifications();
+    }
+  }catch(e){
+    showToast('Error de red: ' + e.message, 'error', 5000);
+  }finally{
+    if(btn){ btn.disabled = false; btn.innerHTML = orig; }
+  }
+}
+
+// v98 [Tema 2]: abrir el endpoint de diagnóstico Woo en una pestaña nueva
+function wooOpenDiag(){
+  window.open(WORKER + '/webhook/woo-diag', '_blank', 'noopener');
 }
 
 // ══════════════════════════════════════════════════════════════════════
