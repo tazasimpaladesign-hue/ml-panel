@@ -723,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v96 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v97 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -776,7 +776,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
   <div class="sb-sec">Integraciones</div>
   <a class="nav" href="#woo-import" id="nav-woo-import" onclick="showSection('woo-import');return false;"><span class="ni">🛒</span>Importar a Woo</a>
-  <a class="nav" href="#woo-seo" id="nav-woo-seo" onclick="showSection('woo-seo');return false;"><span class="ni">🟣</span>SEO Tienda Woo</a>
+  <a class="nav" href="#woo-seo" id="nav-woo-seo" onclick="showSection('woo-seo');return false;"><span class="ni">🟣</span>SEO Tienda Woo<span class="nb nb-amber" id="nb-woo" style="display:none">0</span></a>
   <a class="nav" href="#whatsapp" id="nav-whatsapp" style="display:none" onclick="showSection('whatsapp');return false;"><span class="ni">💬</span>WhatsApp Biz</a>
   <a class="nav" href="#google-tools" id="nav-google-tools" onclick="showSection('google-tools');return false;"><span class="ni">📊</span>Google Tools</a>
 
@@ -3042,6 +3042,28 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <!-- ═══════════════════════ SEO TIENDA WOOCOMMERCE ═══════════════════════ -->
 <div id="section-woo-seo" class="section fade-in">
 
+  <!-- v97 [Tema 2]: panel de ventas Woo pendientes — destacado al inicio -->
+  <div class="card mb" id="woo-orders-panel" style="background:linear-gradient(135deg,#a78bfa 0%,#7c3aed 100%);color:#fff;padding:16px 20px;border:none;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+    <div style="font-size:32px;flex-shrink:0">🛒</div>
+    <div style="flex:1;min-width:200px">
+      <div style="font-size:14px;font-weight:600;margin-bottom:3px">Ventas pendientes en tu tienda web</div>
+      <div style="font-size:11.5px;opacity:.92;line-height:1.4">
+        Pedidos en estado <strong>Procesando</strong> que esperan despacho.
+        Las notificaciones llegan en tiempo real vía webhook + Telegram.
+      </div>
+    </div>
+    <div id="woo-pending-stats" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <div style="text-align:center;background:rgba(255,255,255,.18);padding:8px 16px;border-radius:8px;border:1px solid rgba(255,255,255,.2)">
+        <div style="font-size:24px;font-weight:700;line-height:1" id="woo-pending-count">—</div>
+        <div style="font-size:10px;opacity:.92;text-transform:uppercase;letter-spacing:.05em;margin-top:3px">Procesando</div>
+      </div>
+      <a id="woo-pending-link" href="#" target="_blank" rel="noopener noreferrer"
+        style="background:#fff;color:#7c3aed;padding:11px 20px;border-radius:8px;font-weight:600;font-size:13px;text-decoration:none;box-shadow:0 4px 10px rgba(0,0,0,.18);white-space:nowrap;transition:transform .12s">
+        🚀 Ver pedidos en WordPress
+      </a>
+    </div>
+  </div>
+
   <!-- Fila 1: Métricas resumen (clickeables → filtrar) -->
   <div class="mgt mgt-5" style="margin-bottom:8px">
     <div class="mc c-purple" style="cursor:pointer" onclick="wseoSetFilter(null)" title="Ver todos">
@@ -3247,8 +3269,9 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <span style="font-size:11px;color:var(--text3);font-weight:600;white-space:nowrap">Publicación:</span>
       <div class="chips" style="margin:0;gap:5px">
-        <div class="chip" id="qschip-st-all"      onclick="qsSetStatus(null)"     style="font-size:11px;background:var(--accent);color:#fff;border-color:var(--accent)">Todas</div>
-        <div class="chip" id="qschip-st-active"   onclick="qsSetStatus('active')"  style="font-size:11px">✅ Activas</div>
+        <!-- v97 [Tema 1]: chip activo por defecto = "Activas" (no "Todas") -->
+        <div class="chip" id="qschip-st-all"      onclick="qsSetStatus(null)"     style="font-size:11px">Todas</div>
+        <div class="chip" id="qschip-st-active"   onclick="qsSetStatus('active')"  style="font-size:11px;background:var(--accent);color:#fff;border-color:var(--accent)">✅ Activas</div>
         <div class="chip" id="qschip-st-paused"   onclick="qsSetStatus('paused')"  style="font-size:11px">⏸ Pausadas</div>
         <div class="chip" id="qschip-st-closed"   onclick="qsSetStatus('closed')"  style="font-size:11px">⛔ Cerradas</div>
         <div class="chip" id="qschip-st-under_review" onclick="qsSetStatus('under_review')" style="font-size:11px">🔍 Inactivas</div>
@@ -3839,7 +3862,9 @@ async function initApp(){
   startPolling();
   // POLLING MENSAJES: verificar mensajes post-venta sin leer cada 90s
   startMessagePolling();
-  // SYNC MULTI-DEVICE: polling silencioso de config cada 60s
+  // v97 [Tema 2]: POLLING WOO: chequear ventas nuevas en tu tienda web cada 5 min
+  if(typeof startWooPolling === 'function') startWooPolling();
+  // SYNC MULTI-DEVICE: polling silencioso de config cada 20 min
   startConfigSync();
   // SYNC CROSS-TAB: BroadcastChannel para métricas entre pestañas
   initCrossTabSync();
@@ -4063,6 +4088,8 @@ async function _pollPendingShipments(){
             from:   prevStatus + (prevSubst!=='(none)' ? '/'+prevSubst : ''),
             to:     (o.shipping.status||'(none)') + (o.shipping.substatus ? '/'+o.shipping.substatus : '')
           });
+          // v97 [Opt D]: invalidar cache para que el próximo boot lea el estado nuevo
+          if(typeof _shipCacheInvalidate === 'function') _shipCacheInvalidate(o.shipping.id);
         }
       }catch(e){
         errors++;
@@ -4088,7 +4115,7 @@ async function _pollPendingShipments(){
 // v93 [P5]: detector de versión del Worker. Si el Worker está desactualizado (no v55+),
 // significa que el header `x-format-new: true` no está siendo aplicado y el bug de
 // envíos sigue activo. Mostramos un banner amarillo al usuario.
-const _MIN_WORKER_VERSION = 57; // v96: requerido para auth en /api/calendar-ai/suggest
+const _MIN_WORKER_VERSION = 58; // v97: requerido para webhook Woo + endpoint /api/woo/notifications
 async function _checkWorkerVersion(){
   try {
     const r = await fetch(WORKER + '/');
@@ -4334,20 +4361,86 @@ async function loadOrdersHistory(){
   }catch(e){console.error('[loadOrdersHistory]',e);}
 }
 
+// v97 [Opt D]: cache de shipping status en localStorage con TTL 60 min.
+// Evita refetch de /shipments/{id} cuando se recarga el panel dentro de la
+// ventana del cache. Ahorro estimado: ~50 reqs por cada boot dentro de 60min.
+const _SHIP_CACHE_KEY = 'mlp_ship_cache_v1';
+const _SHIP_CACHE_TTL = 60 * 60 * 1000; // 60 minutos
+
+function _shipCacheLoad(){
+  try{
+    const raw = localStorage.getItem(_SHIP_CACHE_KEY);
+    if(!raw) return {};
+    const parsed = JSON.parse(raw);
+    // Limpiar entradas expiradas y devolver solo las vigentes
+    const now = Date.now();
+    const live = {};
+    Object.keys(parsed).forEach(k => {
+      if(parsed[k] && parsed[k].ts && (now - parsed[k].ts) < _SHIP_CACHE_TTL){
+        live[k] = parsed[k];
+      }
+    });
+    return live;
+  }catch(e){ return {}; }
+}
+function _shipCacheSave(cache){
+  try{ localStorage.setItem(_SHIP_CACHE_KEY, JSON.stringify(cache)); }catch(e){}
+}
+
 // Cargar status real desde /shipments/{id}, en lotes de 5
 async function loadShippingStatuses(orders){
-  const toLoad=(orders||[]).filter(o=>o.shipping?.id&&!o.shipping._statusLoaded).slice(0,60);
-  if(!toLoad.length)return;
-  for(let i=0;i<toLoad.length;i+=5){
-    await Promise.allSettled(toLoad.slice(i,i+5).map(async o=>{
+  const toCheck=(orders||[]).filter(o=>o.shipping?.id&&!o.shipping._statusLoaded);
+  if(!toCheck.length)return;
+
+  // v97 [Opt D]: intentar resolver desde cache primero
+  const cache = _shipCacheLoad();
+  const toLoad = [];
+  let cachedHits = 0;
+  toCheck.forEach(o => {
+    const cached = cache[o.shipping.id];
+    if(cached){
+      o.shipping.status    = cached.status    || o.shipping.status;
+      o.shipping.substatus = cached.substatus || o.shipping.substatus;
+      o.shipping._statusLoaded = true;
+      cachedHits++;
+    } else {
+      toLoad.push(o);
+    }
+  });
+  if(cachedHits > 0) console.log('[loadShippingStatuses] Cache hits:', cachedHits, '— evitamos esos requests');
+
+  // Fetch los que no estaban en cache (tope 60 para no inundar)
+  const toFetch = toLoad.slice(0, 60);
+  if(!toFetch.length) return;
+
+  let cacheUpdated = false;
+  for(let i=0;i<toFetch.length;i+=5){
+    await Promise.allSettled(toFetch.slice(i,i+5).map(async o=>{
       try{
         const s=await mlGet('/shipments/'+o.shipping.id);
         if(s?.status)o.shipping.status=s.status;
         if(s?.substatus)o.shipping.substatus=s.substatus;
         o.shipping._statusLoaded=true;
+        // v97 [Opt D]: persistir en cache
+        cache[o.shipping.id] = {
+          status: s?.status || null,
+          substatus: s?.substatus || null,
+          ts: Date.now()
+        };
+        cacheUpdated = true;
       }catch(e){}
     }));
   }
+  if(cacheUpdated) _shipCacheSave(cache);
+}
+
+// v97 [Opt D]: invalidar cache cuando _pollPendingShipments detecte un cambio,
+// para que el próximo boot lea el estado actualizado.
+function _shipCacheInvalidate(shipId){
+  try{
+    const cache = _shipCacheLoad();
+    if(cache[shipId]){ delete cache[shipId]; _shipCacheSave(cache); }
+  }catch(e){}
 }
 
 function makeChart(id,config){
@@ -4692,10 +4785,10 @@ let _configSyncInterval = null;
 
 function startConfigSync(){
   if(_configSyncInterval) clearInterval(_configSyncInterval);
-  // v85: Polling cada 120s (antes 60s), siempre activo (incluso hidden).
-  // Mantener la sync entre PCs siempre activa es importante para Cristian
-  // (cambios en una PC se ven en otra rápido). El intervalo de 2 min compensa
-  // el costo de no pausar — ~720 reqs/día/panel vs los 1440 de antes.
+  // v97 [Opt C]: cada 20 min (antes 120s = 2 min). Cristian decidió bajar la
+  // frecuencia para reducir consumo Cloudflare. Si necesitás sync inmediato
+  // entre PCs, recargá manualmente. Costo: 72 reqs/día/panel (antes 720).
+  // Ahorro: 648 reqs/día/panel.
   _configSyncInterval = setInterval(async () => {
     if(!token || !userId) return;
     try{
@@ -4712,7 +4805,7 @@ function startConfigSync(){
         try{ _syncChannel && _syncChannel.postMessage({ type:'config-updated', ts: lastUpdate }); }catch{}
       }
     }catch(e){ /* polling silencioso — nunca mostrar error al usuario */ }
-  }, 120000);  // v85: 120s = 2 min (era 60s)
+  }, 20 * 60 * 1000);  // v97 [Opt C]: 20 min (era 2 min)
 }
 
 // ── Cross-tab sync via BroadcastChannel ─────────────────────────────────────
@@ -14890,7 +14983,11 @@ function showSection(id){
   if(id==='reglas') initRules();
   if(id==='publicidad'){loadAdsData();}
   if(id==='bulk') renderPubs();
-  if(id==='woo-seo') wooSeoInit();
+  if(id==='woo-seo') {
+    wooSeoInit();
+    // v97 [Tema 2]: actualizar estado de ventas pendientes al entrar a la sección
+    if(typeof _pollWooNotifications === 'function') _pollWooNotifications();
+  }
   if(id==='quiebre-stock') qsInit();
 }
 
@@ -15227,6 +15324,91 @@ function startMessagePolling(){
 
 function stopMessagePolling(){
   if(_msgPollTimer){ clearInterval(_msgPollTimer); _msgPollTimer = null; }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// v97 [Tema 2]: NOTIFICACIONES DE VENTAS WOOCOMMERCE
+//
+// Fuente de datos: webhook de WooCommerce → Worker /webhook/woo → KV.
+// El Telegram lo dispara el Worker directamente. El panel solo consulta
+// /api/woo/notifications cada 5 min para refrescar el badge y mostrar
+// los toasts de ventas nuevas.
+//
+// Costo Cloudflare: 1 req cada 5 min = 288 reqs/día/panel.
+// (vs polling directo a WooCommerce que usaría más + sería irrelevante).
+// ══════════════════════════════════════════════════════════════════════
+var _wooPollTimer = null;
+var _wooLastSeenIds = new Set();   // IDs de órdenes ya vistas — para detectar nuevas
+var _wooFirstPoll = true;          // flag para no toastear todas en el primer ciclo
+const _WOO_POLL_MS = 5 * 60 * 1000; // 5 minutos
+
+async function _pollWooNotifications(){
+  if(!token || !userId) return;
+  try {
+    const r = await fetch(WORKER + '/api/woo/notifications', {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if(!r.ok) {
+      // 401 esperable durante reauth — no log
+      if(r.status !== 401) console.warn('[WooPoll] HTTP', r.status);
+      return;
+    }
+    const d = await r.json();
+    const notifs = d.notifications || [];
+    const pending = d.pendingCount || 0;
+
+    // ── Actualizar badge sidebar ──
+    const nb = document.getElementById('nb-woo');
+    if(nb){
+      nb.textContent = pending || '';
+      nb.style.display = pending > 0 ? 'inline-flex' : 'none';
+    }
+
+    // ── Actualizar card "Ventas pendientes" si está visible ──
+    const cnt = document.getElementById('woo-pending-count');
+    if(cnt) cnt.textContent = pending;
+    const link = document.getElementById('woo-pending-link');
+    if(link){
+      // Apuntar a WP-Admin > Pedidos filtrado por Procesando
+      // (necesitamos la URL base de WordPress, intentamos derivarla del primer permalink Woo)
+      const wpAdminUrl = (window._wooWpBaseUrl || 'https://tiendaimpala.com.ar') + '/wp-admin/edit.php?post_status=wc-processing&post_type=shop_order';
+      link.href = wpAdminUrl;
+    }
+
+    // ── Detectar ventas nuevas para toast ──
+    // Solo en estado "processing" (= venta confirmada que requiere acción)
+    if(!_wooFirstPoll){
+      const newProcessing = notifs.filter(n =>
+        n.status === 'processing' && !_wooLastSeenIds.has(n.orderId)
+      );
+      newProcessing.forEach(n => {
+        showToast(
+          '🛒 Nueva venta en tu tienda web! ' + n.productSummary + ' — $' + (n.total || 0).toLocaleString('es-AR'),
+          'success',
+          7000
+        );
+        if(typeof playNotifSound === 'function') playNotifSound('venta');
+      });
+    }
+    // Refrescar set con todos los IDs procesando
+    _wooLastSeenIds = new Set(notifs.filter(n => n.status === 'processing').map(n => n.orderId));
+    _wooFirstPoll = false;
+
+  } catch(e) {
+    console.warn('[WooPoll] Error:', e.message);
+  }
+}
+
+function startWooPolling(){
+  if(_wooPollTimer) clearInterval(_wooPollTimer);
+  _wooFirstPoll = true; // primer ciclo no toastea (solo carga estado inicial)
+  // Primera consulta a los 30s del boot, luego cada 5 min
+  setTimeout(_pollWooNotifications, 30 * 1000);
+  _wooPollTimer = setInterval(_pollWooNotifications, _WOO_POLL_MS);
+  console.log('[WooPoll] Iniciado — cada', _WOO_POLL_MS/60000, 'min');
+}
+function stopWooPolling(){
+  if(_wooPollTimer){ clearInterval(_wooPollTimer); _wooPollTimer = null; }
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -18936,7 +19118,9 @@ var _qsState = {
   page: 1, perPage: 50,
   sortCol: 'dos', sortDir: 1,  // días de stock ASC (los más críticos primero)
   filter: null,                // quickFilter desde tarjetas o chips
-  statusFilter: null,          // null = todas (activas, pausadas, cerradas, inactivas)
+  // v97 [Tema 1]: por defecto filtramos solo publicaciones activas. Antes era null
+  // (Todas) y mostraba pausadas/cerradas/inactivas que casi siempre son ruido.
+  statusFilter: 'active',
 };
 
 // ── Init: al entrar a la sección, calcula a partir de allItems + allOrders ────
