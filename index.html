@@ -723,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v99 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v100 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -3070,6 +3070,32 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     </div>
   </div>
 
+  <!-- v100 [Tema 2]: Listado de pedidos en Procesando (últimos 10 días) -->
+  <div class="card mb" id="woo-pending-list-card" style="display:none">
+    <div class="card-hd">
+      <div class="card-title">📋 Pedidos en Procesando · últimos 10 días</div>
+      <div style="font-size:11px;color:var(--text3)">
+        <span id="woo-pending-list-count">0</span> pedido(s) — clic en encabezados para ordenar
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr>
+          <th onclick="wooPendingSort('orderId')" style="cursor:pointer;user-select:none;white-space:nowrap">Pedido <span id="woo-sort-orderId" style="font-size:10px"></span></th>
+          <th onclick="wooPendingSort('productSummary')" style="cursor:pointer;user-select:none">Producto <span id="woo-sort-productSummary" style="font-size:10px"></span></th>
+          <th onclick="wooPendingSort('customer')" style="cursor:pointer;user-select:none">Comprador <span id="woo-sort-customer" style="font-size:10px"></span></th>
+          <th onclick="wooPendingSort('phone')" style="cursor:pointer;user-select:none;white-space:nowrap">Teléfono <span id="woo-sort-phone" style="font-size:10px"></span></th>
+          <th onclick="wooPendingSort('subtotal')" style="cursor:pointer;user-select:none;text-align:right;white-space:nowrap">Monto <span id="woo-sort-subtotal" style="font-size:10px"></span></th>
+          <th onclick="wooPendingSort('shippingMethod')" style="cursor:pointer;user-select:none">Forma de envío <span id="woo-sort-shippingMethod" style="font-size:10px"></span></th>
+          <th onclick="wooPendingSort('shippingTotal')" style="cursor:pointer;user-select:none;text-align:right;white-space:nowrap">$ Envío <span id="woo-sort-shippingTotal" style="font-size:10px"></span></th>
+          <th onclick="wooPendingSort('paymentDisplay')" style="cursor:pointer;user-select:none">Forma de pago <span id="woo-sort-paymentDisplay" style="font-size:10px"></span></th>
+          <th onclick="wooPendingSort('dateCreated')" style="cursor:pointer;user-select:none;white-space:nowrap">Fecha compra <span id="woo-sort-dateCreated" style="font-size:10px">↓</span></th>
+        </tr></thead>
+        <tbody id="woo-pending-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- Fila 1: Métricas resumen (clickeables → filtrar) -->
   <div class="mgt mgt-5" style="margin-bottom:8px">
     <div class="mc c-purple" style="cursor:pointer" onclick="wseoSetFilter(null)" title="Ver todos">
@@ -4121,7 +4147,7 @@ async function _pollPendingShipments(){
 // v93 [P5]: detector de versión del Worker. Si el Worker está desactualizado (no v55+),
 // significa que el header `x-format-new: true` no está siendo aplicado y el bug de
 // envíos sigue activo. Mostramos un banner amarillo al usuario.
-const _MIN_WORKER_VERSION = 60; // v99: requerido para fix Basic-Basic en backfill + GET /webhook/woo
+const _MIN_WORKER_VERSION = 61; // v100: requerido para shippingMethod + dateCreated en notif + tg_attempts log
 async function _checkWorkerVersion(){
   try {
     const r = await fetch(WORKER + '/');
@@ -15381,6 +15407,10 @@ async function _pollWooNotifications(){
       link.href = wpAdminUrl;
     }
 
+    // v100 [Tema 2]: persistir las pendientes para render en tabla y ordenar
+    _wooPendingOrders = (d.pendingRecent || []).slice();
+    wooRenderPendingTable();
+
     // v98 [Tema 2]: si no hay nada guardado todavía, exponer en consola un hint
     // de cómo verificar el estado del webhook
     if((d.totalStored || 0) === 0 && _wooFirstPoll){
@@ -15455,6 +15485,91 @@ async function wooBackfillPending(btn){
 // v98 [Tema 2]: abrir el endpoint de diagnóstico Woo en una pestaña nueva
 function wooOpenDiag(){
   window.open(WORKER + '/webhook/woo-diag', '_blank', 'noopener');
+}
+
+// v100 [Tema 2]: estado y render del listado de pedidos en Procesando
+var _wooPendingOrders = [];
+var _wooPendingSort = { col: 'dateCreated', dir: -1 }; // -1 = desc, 1 = asc
+
+function wooPendingSort(col){
+  if(_wooPendingSort.col === col) _wooPendingSort.dir *= -1;
+  else { _wooPendingSort.col = col; _wooPendingSort.dir = -1; }
+  // limpiar todas las flechas y poner la nueva
+  ['orderId','productSummary','customer','phone','subtotal','shippingMethod','shippingTotal','paymentDisplay','dateCreated'].forEach(c => {
+    const el = document.getElementById('woo-sort-'+c);
+    if(el) el.textContent = (c === _wooPendingSort.col) ? (_wooPendingSort.dir > 0 ? '↑' : '↓') : '';
+  });
+  wooRenderPendingTable();
+}
+
+function wooRenderPendingTable(){
+  const card  = document.getElementById('woo-pending-list-card');
+  const tbody = document.getElementById('woo-pending-tbody');
+  const cnt   = document.getElementById('woo-pending-list-count');
+  if(!card || !tbody) return;
+
+  const orders = (_wooPendingOrders || []).slice();
+  if(cnt) cnt.textContent = orders.length;
+
+  // Ocultar el card si no hay pedidos pendientes
+  if(orders.length === 0){
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = '';
+
+  // Ordenar
+  const col = _wooPendingSort.col;
+  const dir = _wooPendingSort.dir;
+  orders.sort((a,b) => {
+    let va = a[col], vb = b[col];
+    // Numéricos
+    if(col === 'subtotal' || col === 'shippingTotal' || col === 'orderId'){
+      va = Number(va) || 0; vb = Number(vb) || 0;
+      return (va - vb) * dir;
+    }
+    // Fechas
+    if(col === 'dateCreated'){
+      va = new Date(va || 0).getTime();
+      vb = new Date(vb || 0).getTime();
+      return (va - vb) * dir;
+    }
+    // Texto
+    va = (va || '').toString().toLowerCase();
+    vb = (vb || '').toString().toLowerCase();
+    return va.localeCompare(vb) * dir;
+  });
+
+  // Render filas
+  const wpBase = window._wooWpBaseUrl || 'https://tiendaimpala.com.ar';
+  tbody.innerHTML = orders.map(o => {
+    // Formato fecha argentina
+    let fechaStr = '—';
+    if(o.dateCreated){
+      try {
+        const dt = new Date(o.dateCreated);
+        fechaStr = dt.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'2-digit'})
+                  +' '+dt.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+      } catch(e){}
+    }
+    // Link al pedido en WP-Admin
+    const editUrl = wpBase + '/wp-admin/post.php?post=' + o.orderId + '&action=edit';
+    // Producto: cortar si es muy largo
+    const prodShort = (o.productSummary || '—').length > 60
+      ? (o.productSummary || '').slice(0,57) + '...'
+      : (o.productSummary || '—');
+    return `<tr>
+      <td style="white-space:nowrap"><a href="${editUrl}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);text-decoration:none;font-weight:600">#${o.orderId}</a></td>
+      <td style="font-size:11.5px" title="${(o.productSummary||'').replace(/"/g,'&quot;')}">${prodShort}</td>
+      <td style="font-size:11.5px">${o.customer || '—'}</td>
+      <td style="font-size:11.5px;white-space:nowrap">${o.phone || '—'}</td>
+      <td style="text-align:right;font-weight:600;white-space:nowrap">$${(o.subtotal || 0).toLocaleString('es-AR')}</td>
+      <td style="font-size:11.5px">${o.shippingMethod || '—'}</td>
+      <td style="text-align:right;white-space:nowrap;color:var(--text3)">${o.shippingTotal > 0 ? '$'+(o.shippingTotal).toLocaleString('es-AR') : '—'}</td>
+      <td style="font-size:11.5px">${o.paymentDisplay || '—'}</td>
+      <td style="font-size:11px;white-space:nowrap;color:var(--text3)">${fechaStr}</td>
+    </tr>`;
+  }).join('');
 }
 
 // ══════════════════════════════════════════════════════════════════════
