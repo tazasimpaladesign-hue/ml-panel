@@ -723,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v100 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v101 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4147,7 +4147,7 @@ async function _pollPendingShipments(){
 // v93 [P5]: detector de versión del Worker. Si el Worker está desactualizado (no v55+),
 // significa que el header `x-format-new: true` no está siendo aplicado y el bug de
 // envíos sigue activo. Mostramos un banner amarillo al usuario.
-const _MIN_WORKER_VERSION = 61; // v100: requerido para shippingMethod + dateCreated en notif + tg_attempts log
+const _MIN_WORKER_VERSION = 62; // v101: requerido para fix crítico del stream del webhook Woo
 async function _checkWorkerVersion(){
   try {
     const r = await fetch(WORKER + '/');
@@ -15446,7 +15446,9 @@ function startWooPolling(){
   if(_wooPollTimer) clearInterval(_wooPollTimer);
   _wooFirstPoll = true; // primer ciclo no toastea (solo carga estado inicial)
   // Primera consulta a los 30s del boot, luego cada 5 min
-  setTimeout(_pollWooNotifications, 30 * 1000);
+  // v101: primer poll a los 10s del boot (antes 30s) para ver ventas más rápido,
+  // luego cada 5 min para no saturar Cloudflare
+  setTimeout(_pollWooNotifications, 10 * 1000);
   _wooPollTimer = setInterval(_pollWooNotifications, _WOO_POLL_MS);
   console.log('[WooPoll] Iniciado — cada', _WOO_POLL_MS/60000, 'min');
 }
@@ -15500,6 +15502,43 @@ function wooPendingSort(col){
     if(el) el.textContent = (c === _wooPendingSort.col) ? (_wooPendingSort.dir > 0 ? '↑' : '↓') : '';
   });
   wooRenderPendingTable();
+}
+
+// v101 [Tema 2]: arma el link wa.me con el mensaje pre-armado de envío.
+// Acepta cualquier formato de teléfono argentino y lo normaliza a formato
+// móvil internacional: 549XXXXXXXXXX (sin espacios ni símbolos).
+//
+// Casos cubiertos:
+//   "1127537101"       → 5491127537101
+//   "11 2753 7101"     → 5491127537101
+//   "+54 9 11 2753..." → 5491127537101 (ya tenía 54 y 9)
+//   "5491127537101"    → 5491127537101 (ya correcto)
+//   "541127537101"     → 5491127537101 (54 sin 9, agregamos 9)
+//   "01127537101"      → 5491127537101 (con 0 inicial)
+//   "(11) 1234-5678"   → 5491112345678
+function wooBuildWaLink(rawPhone){
+  // Limpiar todo lo que no sea dígito
+  let p = String(rawPhone || '').replace(/\D/g, '');
+  if(!p || p.length < 8) return '#'; // muy corto para ser teléfono válido
+  // Quitar 0 inicial si aparece (ej: 01127537101 → 1127537101)
+  if(p.startsWith('0')) p = p.slice(1);
+  // Si NO empieza con 54, prefijar (asumimos AR)
+  if(!p.startsWith('54')) {
+    p = '549' + p;
+  } else if(!p.startsWith('549')) {
+    // Empieza con 54 pero falta el 9 → insertarlo
+    p = '549' + p.slice(2);
+  }
+  // Mensaje por defecto (template del usuario)
+  const msg = encodeURIComponent(
+    'Buen día 👋\n' +
+    'Tu pedido ya está en camino sucursal/domicilio: \n' +
+    'Te paso la web donde podes seguir el trayecto: \n' +
+    'https://www.correoargentino.com.ar/formularios/e-commerce\n' +
+    'y el Nº de seguimiento: \n' +
+    'Gracias, saludos'
+  );
+  return 'https://wa.me/' + p + '?text=' + msg;
 }
 
 function wooRenderPendingTable(){
@@ -15562,7 +15601,11 @@ function wooRenderPendingTable(){
       <td style="white-space:nowrap"><a href="${editUrl}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);text-decoration:none;font-weight:600">#${o.orderId}</a></td>
       <td style="font-size:11.5px" title="${(o.productSummary||'').replace(/"/g,'&quot;')}">${prodShort}</td>
       <td style="font-size:11.5px">${o.customer || '—'}</td>
-      <td style="font-size:11.5px;white-space:nowrap">${o.phone || '—'}</td>
+      <td style="font-size:11.5px;white-space:nowrap">${
+        o.phone
+          ? `<a href="${wooBuildWaLink(o.phone)}" target="_blank" rel="noopener noreferrer" style="color:#25d366;text-decoration:none;font-weight:500" title="Abrir WhatsApp con mensaje pre-armado de envío">📱 ${o.phone}</a>`
+          : '—'
+      }</td>
       <td style="text-align:right;font-weight:600;white-space:nowrap">$${(o.subtotal || 0).toLocaleString('es-AR')}</td>
       <td style="font-size:11.5px">${o.shippingMethod || '—'}</td>
       <td style="text-align:right;white-space:nowrap;color:var(--text3)">${o.shippingTotal > 0 ? '$'+(o.shippingTotal).toLocaleString('es-AR') : '—'}</td>
