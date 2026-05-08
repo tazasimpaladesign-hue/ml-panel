@@ -723,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v95 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v96 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4088,7 +4088,7 @@ async function _pollPendingShipments(){
 // v93 [P5]: detector de versión del Worker. Si el Worker está desactualizado (no v55+),
 // significa que el header `x-format-new: true` no está siendo aplicado y el bug de
 // envíos sigue activo. Mostramos un banner amarillo al usuario.
-const _MIN_WORKER_VERSION = 56; // v95: requerido para auth en /ai y /woo + CORS restringido
+const _MIN_WORKER_VERSION = 57; // v96: requerido para auth en /api/calendar-ai/suggest
 async function _checkWorkerVersion(){
   try {
     const r = await fetch(WORKER + '/');
@@ -4373,20 +4373,26 @@ function _updateOrdersUI(mesOrders){
 }
 
 function _updateVentasBadge(){
-  // v95 [P5]: BUG FIX — antes se contaban TODAS las órdenes con shipping.status='ready_to_ship'
-  // sin distinguir el substatus. Eso incluía erróneamente envíos ya despachados con
-  // substatus='picked_up'/'dispatched'/'in_hub' que en realidad están "🚚 En camino".
-  // Ahora usamos getShippingLabel() — la misma fuente de verdad que el listado — y
-  // contamos solo las que muestran "🖨️ IMPRIMIR".
+  // v96: ventana de 7 días para el badge — antes contábamos órdenes sin filtrar
+  // por fecha, lo que causaba que pedidos viejos del 26/04 hacia atrás (sin
+  // _statusLoaded por estar fuera de la ventana de 30 días de loadShippingStatuses)
+  // cayeran al fallback "IMPRIMIR" inflando el badge a 1480.
+  // 7 días cubre cualquier feriado largo sin riesgo de inflar el conteo con
+  // pedidos viejos que casi siempre están entregados.
+  const cutoff = Date.now() - 7 * 24 * 3600 * 1000;
+  const recentOrders = allOrders.filter(o => {
+    const t = new Date(o.date_created || 0).getTime();
+    return t && t >= cutoff;
+  });
   let toPrint;
   if(typeof getShippingLabel === 'function'){
-    toPrint = allOrders.filter(o => {
+    toPrint = recentOrders.filter(o => {
       const lbl = getShippingLabel(o);
       return lbl && lbl.label && lbl.label.includes('IMPRIMIR');
     }).length;
   } else {
     // Fallback defensivo si por algún race condition getShippingLabel no está aún definido
-    toPrint = allOrders.filter(o =>
+    toPrint = recentOrders.filter(o =>
       (o.status==='paid'||o.status==='confirmed') &&
       o.shipping?.id &&
       o.status!=='shipped' && o.status!=='delivered' && o.status!=='cancelled'
@@ -11662,7 +11668,16 @@ function getShippingLabel(o){
   if(os==='payment_required'||os==='payment_in_process')       return {label:'⏳ Pago pendiente',cls:'bg-amber'};
   if(os==='paid'||os==='confirmed'){
     if(!o.shipping?.id) return {label:'🏪 Sin envío', cls:'bg-gray'};
-    return {label:'🖨️ IMPRIMIR', cls:'bg-amber'};  // pagado + tiene envío = imprimir etiqueta
+    // v96: si la orden tiene más de 7 días Y no se cargó el status real del shipment,
+    // asumimos que ya está entregada (loadShippingStatuses solo carga las últimas 30
+    // días, así que las anteriores nunca tienen _statusLoaded). Antes mostraba
+    // "IMPRIMIR" para pedidos de hace meses, lo cual es absurdo.
+    const ageMs = Date.now() - new Date(o.date_created || 0).getTime();
+    const SEVEN_DAYS = 7 * 24 * 3600 * 1000;
+    if(ageMs > SEVEN_DAYS && !loaded){
+      return {label:'✅ Entregado', cls:'bg-green', _inferred:true};
+    }
+    return {label:'🖨️ IMPRIMIR', cls:'bg-amber'};  // pagado + tiene envío + reciente = imprimir etiqueta
   }
   if(os==='shipped')   return {label:'🚚 En camino', cls:'bg-blue'};
   if(os==='delivered') return {label:'✅ Entregado',  cls:'bg-green'};
@@ -14779,7 +14794,17 @@ async function callClaude(prompt, history){
   } catch(e){ throw new Error('Sin conexion: '+e.message); }
   let d;
   try { d = JSON.parse(rawText); } catch(e){ throw new Error('Respuesta invalida: '+rawText.slice(0,80)); }
-  if(!r.ok||d.error){ throw new Error(typeof d.error==='string'?d.error:(d.error?.message||'Error '+r.status)); }
+  if(!r.ok||d.error){
+    // v96: log detallado en consola + error compacto en UI
+    if(d.details && Array.isArray(d.details)){
+      console.warn('[AI] Falla con detalle por proveedor:');
+      d.details.forEach(line => console.warn('  ·', line));
+    }
+    const errMsg = typeof d.error==='string'
+      ? d.error + (d.details?.length ? ' (detalle en consola)' : '')
+      : (d.error?.message || 'Error '+r.status);
+    throw new Error(errMsg);
+  }
   let text = d.content?.map(x=>x.text||'').join('').trim()||'';
   // Limpieza de muletillas de cortesia
   var cpats=[
