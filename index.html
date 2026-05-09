@@ -723,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v102 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v103 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -3903,6 +3903,13 @@ async function initApp(){
   startMessagePolling();
   // v97 [Tema 2]: POLLING WOO: chequear ventas nuevas en tu tienda web cada 5 min
   if(typeof startWooPolling === 'function') startWooPolling();
+  // v103 [Tema 2]: pre-cargar cache de productos Woo en segundo plano para que
+  // el lookup de imágenes en el listado de pedidos pendientes funcione desde el
+  // primer render, sin esperar a que el usuario entre a la sección SEO Tienda Woo.
+  // Si la cache ya fue cargada antes (por wooSeoInit), no hace nada.
+  if(typeof _wseoPreloadCache === 'function') {
+    setTimeout(_wseoPreloadCache, 5 * 1000); // espera 5s post-boot para no competir con cargas críticas
+  }
   // SYNC MULTI-DEVICE: polling silencioso de config cada 20 min
   startConfigSync();
   // SYNC CROSS-TAB: BroadcastChannel para métricas entre pestañas
@@ -4154,7 +4161,7 @@ async function _pollPendingShipments(){
 // v93 [P5]: detector de versión del Worker. Si el Worker está desactualizado (no v55+),
 // significa que el header `x-format-new: true` no está siendo aplicado y el bug de
 // envíos sigue activo. Mostramos un banner amarillo al usuario.
-const _MIN_WORKER_VERSION = 63; // v102: requerido para productImage + sync-pending + clean-on-terminal
+const _MIN_WORKER_VERSION = 64; // v103: requerido para productId persistido en notif
 async function _checkWorkerVersion(){
   try {
     const r = await fetch(WORKER + '/');
@@ -15528,6 +15535,45 @@ async function wooSyncPending(btn){
   }
 }
 
+// v103 [Tema 2]: pre-cargar cache de productos Woo desde KV en segundo plano.
+// Esto permite que wooLookupImageById funcione apenas el panel arranca, sin
+// requerir que el usuario abra la sección SEO Tienda Woo manualmente.
+// La función se autoabortó si ya hay cache cargada (idempotente y barata).
+async function _wseoPreloadCache(){
+  if(!token || !userId) return;
+  // Si ya hay cache en memoria (por wooSeoInit previo o llamada anterior), no hacemos nada
+  if(typeof _wseoLoaded !== 'undefined' && _wseoLoaded) return;
+  if(typeof _wseoProducts !== 'undefined' && Array.isArray(_wseoProducts) && _wseoProducts.length > 0) return;
+  try{
+    const r = await fetch(WORKER + '/woo-seo-cache', {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if(!r.ok) return;
+    const d = await r.json();
+    if(Array.isArray(d.products) && d.products.length){
+      _wseoProducts = d.products;
+      if(typeof _wseoCachedAt !== 'undefined') _wseoCachedAt = d.cachedAt || null;
+      console.log('[WseoPreload] Cache precargada — '+d.products.length+' productos disponibles para lookup de imágenes');
+      // Si el listado de pendientes ya está renderizado, re-renderizar para que
+      // las imágenes faltantes aparezcan ahora con el lookup local
+      if(typeof wooRenderPendingTable === 'function'
+         && typeof _wooPendingOrders !== 'undefined'
+         && _wooPendingOrders.length > 0){
+        wooRenderPendingTable();
+      }
+    }
+  }catch(e){ /* silent */ }
+}
+
+// v103 [Tema 2]: dado un product_id de Woo, buscar el thumbnail en el cache
+// local _wseoProducts. Retorna URL o null si no encuentra.
+function wooLookupImageById(productId){
+  if(!productId) return null;
+  if(typeof _wseoProducts === 'undefined' || !Array.isArray(_wseoProducts)) return null;
+  const p = _wseoProducts.find(x => Number(x.id) === Number(productId));
+  return (p && p.thumbnail) ? p.thumbnail : null;
+}
+
 // v100 [Tema 2]: estado y render del listado de pedidos en Procesando
 var _wooPendingOrders = [];
 var _wooPendingSort = { col: 'dateCreated', dir: -1 }; // -1 = desc, 1 = asc
@@ -15636,12 +15682,19 @@ function wooRenderPendingTable(){
     const prodShort = (o.productSummary || '—').length > 60
       ? (o.productSummary || '').slice(0,57) + '...'
       : (o.productSummary || '—');
+    // v103 [Tema 2]: 3 niveles de fallback para la imagen:
+    //   1) o.productImage del webhook/backfill (puede venir vacío en algunas versiones de Woo)
+    //   2) lookup en _wseoProducts por productId (cache SEO ya cargada)
+    //   3) placeholder con emoji 📦
+    const imgUrl = o.productImage
+      || (o.productId ? wooLookupImageById(o.productId) : null)
+      || '';
     return `<tr>
       <td style="white-space:nowrap"><a href="${editUrl}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);text-decoration:none;font-weight:600">#${o.orderId}</a></td>
       <td style="text-align:center;padding:6px 4px">${
-        o.productImage
-          ? `<img src="${o.productImage}" loading="lazy" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid var(--border);display:block;margin:0 auto" onerror="this.style.display='none'">`
-          : `<div style="width:56px;height:56px;background:var(--bg3);border-radius:6px;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;margin:0 auto;font-size:18px;color:var(--text3)">📦</div>`
+        imgUrl
+          ? `<img src="${imgUrl}" loading="lazy" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid var(--border);display:block;margin:0 auto" onerror="this.style.display='none'">`
+          : `<div style="width:56px;height:56px;background:var(--bg3);border-radius:6px;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;margin:0 auto;font-size:18px;color:var(--text3)" title="Sin imagen — abrí la sección SEO Tienda Woo y tocá Cargar productos para activar el lookup local">📦</div>`
       }</td>
       <td style="font-size:11.5px" title="${(o.productSummary||'').replace(/"/g,'&quot;')}">${prodShort}</td>
       <td style="font-size:11.5px">${o.customer || '—'}</td>
