@@ -8,6 +8,17 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<!-- v89 [P3]: plugin datalabels para mostrar valores fijos sobre las barras (Facturación) -->
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0"></script>
+<script>
+  // v89 [P3]: chartjs-plugin-datalabels se auto-registra globalmente al cargarse,
+  // lo que haría que TODOS los charts del panel muestren etiquetas indeseadas.
+  // Lo desregistramos para que solo aplique en charts donde lo agreguemos
+  // manualmente vía `plugins: [ChartDataLabels]` (chart-fac en Facturación).
+  if (typeof Chart !== 'undefined' && typeof ChartDataLabels !== 'undefined') {
+    try { Chart.unregister(ChartDataLabels); } catch(e) { /* tolerar */ }
+  }
+</script>
 <style>
 :root {
   /* Fondos del Panel Izquierdo (Se mantienen oscuros) */
@@ -212,6 +223,7 @@ label{font-size:11.5px;color:var(--text2);display:block;margin-bottom:4px;font-w
 /* ── LOADING ── */
 .loading{display:flex;align-items:center;justify-content:center;gap:7px;color:var(--text3);font-size:12.5px;padding:36px}
 @keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(1.15)}}
 .spin{width:16px;height:16px;border:2px solid var(--border2);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite}
 
 /* ── LOGIN ── */
@@ -280,7 +292,8 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;heigh
 .kw-bar{height:4px;background:var(--bg4);border-radius:2px;overflow:hidden;margin-top:4px}
 .kw-fill{height:100%;background:var(--accent);border-radius:2px}
 
-@media(max-width:900px){.mgt{grid-template-columns:repeat(2,1fr)}.g2,.g3,.g60,.g40{grid-template-columns:1fr}}
+@media(max-width:900px){.mgt{grid-template-columns:repeat(2,1fr)}.g2,.g3,.g60,.g40{grid-template-columns:1fr}.q-split-layout{grid-template-columns:1fr !important}}
+@media(max-width:1100px){.q-section-grid{grid-template-columns:1fr !important}.q-templates-panel{position:static !important}}
 
 /* ═══════════════════════════════════════════════════════════════
    SIDEBAR — fondo oscuro, TODO el texto en blanco
@@ -710,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v85 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v103 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -763,8 +776,8 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
   <div class="sb-sec">Integraciones</div>
   <a class="nav" href="#woo-import" id="nav-woo-import" onclick="showSection('woo-import');return false;"><span class="ni">🛒</span>Importar a Woo</a>
-  <a class="nav" href="#woo-seo" id="nav-woo-seo" onclick="showSection('woo-seo');return false;"><span class="ni">🟣</span>SEO Tienda Woo</a>
-  <a class="nav" href="#whatsapp" id="nav-whatsapp" onclick="showSection('whatsapp');return false;"><span class="ni">💬</span>WhatsApp Biz</a>
+  <a class="nav" href="#woo-seo" id="nav-woo-seo" onclick="showSection('woo-seo');return false;"><span class="ni">🟣</span>SEO Tienda Woo<span class="nb nb-amber" id="nb-woo" style="display:none">0</span></a>
+  <a class="nav" href="#whatsapp" id="nav-whatsapp" style="display:none" onclick="showSection('whatsapp');return false;"><span class="ni">💬</span>WhatsApp Biz</a>
   <a class="nav" href="#google-tools" id="nav-google-tools" onclick="showSection('google-tools');return false;"><span class="ni">📊</span>Google Tools</a>
 
   <a class="nav" href="#tareas" id="nav-tareas" onclick="showSection('tareas');return false;"><span class="ni">&#x2705;</span>Gestor de Tareas<span class="nb nb-green" id="nb-tareas" style="display:none">0</span></a>
@@ -782,6 +795,10 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       </div>
     </div>
     <div class="topbar-r">
+      <button class="btn btn-ghost btn-sm" onclick="bkpOpenModal()" title="Exportar/Importar backup (Ctrl+B)" id="topbar-backup-btn" style="position:relative">
+        💼 Backup
+        <span id="bkp-warn-dot" style="display:none;position:absolute;top:2px;right:2px;width:8px;height:8px;border-radius:50%;background:#f59e0b;animation:pulse 2s infinite"></span>
+      </button>
       <span style="font-size:11px;color:var(--text3)" id="last-upd">—</span>
       <span id="cloud-sync-status" title="Estado de sincronizacion con la nube"
         style="font-size:12px;color:var(--text3);cursor:default;padding:4px 8px;border-radius:6px;transition:all .3s;user-select:none">&#x2601;&#xFE0F;</span>
@@ -875,7 +892,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px;min-width:0;overflow:hidden">
     <div class="card" style="min-width:0;overflow:hidden;display:flex;flex-direction:column">
       <div class="card-hd" style="flex-shrink:0">
-        <div class="card-title">🏆 Top publicaciones</div>
+        <div class="card-title">🏆 Top publicaciones 30 días</div>
         <a href="#publicaciones" class="btn btn-ghost btn-sm" onclick="showSection('publicaciones');return false;">Ver todas →</a>
       </div>
       <div id="dash-top-pubs" style="flex:1;max-height:480px;overflow-y:auto;min-height:0">
@@ -893,7 +910,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     </div>
     <div class="card" style="min-width:0;overflow:hidden;display:flex;flex-direction:column">
       <div class="card-hd" style="flex-shrink:0">
-        <div class="card-title">👀 Los más visitados</div>
+        <div class="card-title">👀 Los más visitados 7 días</div>
         <button class="btn btn-ghost btn-sm" onclick="loadMostVisited(true)">↻ 7 días</button>
       </div>
       <div id="dash-most-visited" style="flex:1;max-height:480px;overflow-y:auto;min-height:0">
@@ -1442,6 +1459,22 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <!-- ═══════════════════════ COMPETENCIA ═══════════════════════ -->
 <div id="section-competencia" class="section fade-in">
 
+  <!-- v89 [P5]: Atajo a Métricas de competencia de ML ─────────────────────── -->
+  <div class="card mb" style="background:linear-gradient(135deg,#eff6ff 0%,#f5f3ff 100%);border:1px solid #c7d2fe">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap">
+      <div style="min-width:0;flex:1">
+        <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px">📊 Ranking de competidores de tus categorías</div>
+        <div style="font-size:11.5px;color:var(--text3);line-height:1.45">Abrí en Mercado Libre la herramienta oficial de Métricas de Competencia para ver tu posición en cada categoría donde vendés.</div>
+      </div>
+      <a href="https://www.mercadolibre.com.ar/metricas/competencia"
+         target="_blank" rel="noopener noreferrer"
+         class="btn btn-primary"
+         style="white-space:nowrap;text-decoration:none;padding:10px 18px;font-size:13px;font-weight:600">
+        🚀 Ver Competencia
+      </a>
+    </div>
+  </div>
+
   <div class="g2 mb">
     <div class="card">
       <div class="card-hd"><div class="card-title">💾 Guardar competidor</div></div>
@@ -1524,21 +1557,37 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <div class="mc c-green"><div class="mc-label">Respondidas hoy</div><div class="mc-val" id="q-today">—</div></div>
     <div class="mc c-blue"><div class="mc-label">Tiempo promedio</div><div class="mc-val" id="q-avgtime">—</div></div>
   </div>
-  <div class="card">
-    <div class="card-hd" style="flex-wrap:wrap;gap:8px">
-      <div class="tabs">
-        <button class="tab active" onclick="filterQs('UNANSWERED',this)">Sin responder</button>
-        <button class="tab" onclick="filterQs('ANSWERED',this)">Respondidas</button>
-        <button class="tab" onclick="filterQs('all',this)">Todas</button>
+  <!-- v92 [P4]: layout 2 columnas a nivel sección.
+       Izquierda (flexible): lista de preguntas con su área de respuesta.
+       Derecha (380px sticky): panel fijo de plantillas siempre visible. -->
+  <div class="q-section-grid" style="display:grid;grid-template-columns:1fr 380px;gap:14px;align-items:start">
+    <div class="card" style="min-width:0">
+      <div class="card-hd" style="flex-wrap:wrap;gap:8px">
+        <div class="tabs">
+          <button class="tab active" onclick="filterQs('UNANSWERED',this)">Sin responder</button>
+          <button class="tab" onclick="filterQs('ANSWERED',this)">Respondidas</button>
+          <button class="tab" onclick="filterQs('all',this)">Todas</button>
+        </div>
+        <div style="display:flex;gap:6px;margin-left:auto;align-items:center">
+          <span id="q-sync-status" style="font-size:10px;color:var(--text3);display:none"></span>
+          <button id="q-sync-btn" class="btn btn-ghost btn-sm" onclick="qSyncNow()" title="Sincronizar configuración con la nube" style="font-size:13px;padding:4px 8px">☁️</button>
+          <button class="btn btn-ghost btn-sm" onclick="qOpenTmpl()" title="Plantilla y respuestas rápidas" style="font-size:11px">⚙️ Plantilla</button>
+          <button class="btn btn-primary btn-sm" onclick="bulkAnswerIA()">🤖 Responder todas con IA</button>
+        </div>
       </div>
-      <div style="display:flex;gap:6px;margin-left:auto;align-items:center">
-        <span id="q-sync-status" style="font-size:10px;color:var(--text3);display:none"></span>
-        <button id="q-sync-btn" class="btn btn-ghost btn-sm" onclick="qSyncNow()" title="Sincronizar configuración con la nube" style="font-size:13px;padding:4px 8px">☁️</button>
-        <button class="btn btn-ghost btn-sm" onclick="qOpenTmpl()" title="Plantilla y respuestas rápidas" style="font-size:11px">⚙️ Plantilla</button>
-        <button class="btn btn-primary btn-sm" onclick="bulkAnswerIA()">🤖 Responder todas con IA</button>
-      </div>
+      <div id="q-list"><div class="loading"><div class="spin"></div>Cargando...</div></div>
     </div>
-    <div id="q-list"><div class="loading"><div class="spin"></div>Cargando...</div></div>
+    <!-- Panel lateral fijo de respuestas rápidas — siempre visible -->
+    <div class="card q-templates-panel" style="position:sticky;top:14px;padding:14px;min-width:0">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="font-size:13px;font-weight:600">📋 Respuestas rápidas</div>
+        <button class="btn btn-ghost btn-xs" onclick="qOpenTmpl()" title="Editar plantillas" style="font-size:10.5px">⚙️ Editar</button>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:10px;line-height:1.4">
+        Tocá una plantilla para insertarla en la respuesta de la pregunta abajo.
+      </div>
+      <div id="q-templates-list" style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px"></div>
+    </div>
   </div>
 </div>
 
@@ -1920,7 +1969,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   </div>
   <div class="card mb">
     <div class="card-hd"><div class="card-title">Facturación mensual</div></div>
-    <div style="position:relative;height:220px"><canvas id="chart-fac"></canvas></div>
+    <div style="position:relative;height:300px"><canvas id="chart-fac"></canvas></div>
   </div>
   <div id="fac-invoice-detail" class="card mb" style="padding:14px 18px;min-height:48px"><!-- cargado por renderFacturacion --></div>
   <div class="card">
@@ -2479,7 +2528,11 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   <div class="card mb" id="ai-rules-panel">
     <div class="card-hd">
       <div class="card-title">⚙️ Motor de Reglas — Umbrales de alerta</div>
-      <button class="btn btn-primary btn-sm" onclick="aiSaveRules()">💾 Guardar reglas</button>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span id="ai-feed-cache-badge" style="display:none;font-size:11px;color:#92400e;background:#fef3c7;border:1px solid #fde68a;border-radius:4px;padding:2px 8px;font-weight:600;align-items:center;gap:4px"></span>
+        <button class="btn btn-ghost btn-sm" onclick="aiRefreshFeed()" title="Regenerar el feed completo con IA (consume ~7 llamadas)">↻ Refrescar feed</button>
+        <button class="btn btn-primary btn-sm" onclick="aiSaveRules()">💾 Guardar reglas</button>
+      </div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
       <div class="ff" style="margin:0">
@@ -2989,6 +3042,67 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <!-- ═══════════════════════ SEO TIENDA WOOCOMMERCE ═══════════════════════ -->
 <div id="section-woo-seo" class="section fade-in">
 
+  <!-- v97 [Tema 2]: panel de ventas Woo pendientes — destacado al inicio -->
+  <div class="card mb" id="woo-orders-panel" style="background:linear-gradient(135deg,#a78bfa 0%,#7c3aed 100%);color:#fff;padding:16px 20px;border:none;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+    <div style="font-size:32px;flex-shrink:0">🛒</div>
+    <div style="flex:1;min-width:200px">
+      <div style="font-size:14px;font-weight:600;margin-bottom:3px">Ventas pendientes en tu tienda web</div>
+      <div style="font-size:11.5px;opacity:.92;line-height:1.4">
+        Pedidos en estado <strong>Procesando</strong> de los últimos 7 días.
+        Las notificaciones llegan en tiempo real vía webhook + Telegram.
+      </div>
+    </div>
+    <div id="woo-pending-stats" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div style="text-align:center;background:rgba(255,255,255,.18);padding:8px 16px;border-radius:8px;border:1px solid rgba(255,255,255,.2)">
+        <div style="font-size:24px;font-weight:700;line-height:1" id="woo-pending-count">—</div>
+        <div style="font-size:10px;opacity:.92;text-transform:uppercase;letter-spacing:.05em;margin-top:3px">Procesando</div>
+      </div>
+      <a id="woo-pending-link" href="#" target="_blank" rel="noopener noreferrer"
+        style="background:#fff;color:#7c3aed;padding:11px 18px;border-radius:8px;font-weight:600;font-size:13px;text-decoration:none;box-shadow:0 4px 10px rgba(0,0,0,.18);white-space:nowrap">
+        🚀 Ver pedidos en WordPress
+      </a>
+      <!-- v98 [Tema 2]: botón para importar pedidos pre-existentes que el webhook no detectó -->
+      <button onclick="wooBackfillPending(this)"
+        style="background:rgba(255,255,255,.18);color:#fff;padding:11px 16px;border:1px solid rgba(255,255,255,.3);border-radius:8px;font-weight:600;font-size:12.5px;cursor:pointer;white-space:nowrap"
+        title="Trae los pedidos en Procesando que ya existían antes de configurar el webhook">
+        🔄 Importar pendientes
+      </button>
+      <!-- v102 [Tema 2]: botón para sincronizar con WP-API y limpiar pedidos ya completados/eliminados -->
+      <button onclick="wooSyncPending(this)"
+        style="background:rgba(255,255,255,.18);color:#fff;padding:11px 16px;border:1px solid rgba(255,255,255,.3);border-radius:8px;font-weight:600;font-size:12.5px;cursor:pointer;white-space:nowrap"
+        title="Verifica con WordPress y elimina pedidos que ya no estén en estado Procesando">
+        🧹 Sincronizar
+      </button>
+    </div>
+  </div>
+
+  <!-- v100 [Tema 2]: Listado de pedidos en Procesando (últimos 10 días) -->
+  <div class="card mb" id="woo-pending-list-card" style="display:none">
+    <div class="card-hd">
+      <div class="card-title">📋 Pedidos en Procesando · últimos 10 días</div>
+      <div style="font-size:11px;color:var(--text3)">
+        <span id="woo-pending-list-count">0</span> pedido(s) — clic en encabezados para ordenar
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr>
+          <th onclick="wooPendingSort('orderId')" style="cursor:pointer;user-select:none;white-space:nowrap">Pedido <span id="woo-sort-orderId" style="font-size:10px"></span></th>
+          <th style="text-align:center;width:64px">Imagen</th>
+          <th onclick="wooPendingSort('productSummary')" style="cursor:pointer;user-select:none">Producto <span id="woo-sort-productSummary" style="font-size:10px"></span></th>
+          <th onclick="wooPendingSort('customer')" style="cursor:pointer;user-select:none">Comprador <span id="woo-sort-customer" style="font-size:10px"></span></th>
+          <th onclick="wooPendingSort('phone')" style="cursor:pointer;user-select:none;white-space:nowrap">Teléfono <span id="woo-sort-phone" style="font-size:10px"></span></th>
+          <th onclick="wooPendingSort('subtotal')" style="cursor:pointer;user-select:none;text-align:right;white-space:nowrap">Monto <span id="woo-sort-subtotal" style="font-size:10px"></span></th>
+          <th onclick="wooPendingSort('shippingMethod')" style="cursor:pointer;user-select:none">Forma de envío <span id="woo-sort-shippingMethod" style="font-size:10px"></span></th>
+          <th onclick="wooPendingSort('shippingTotal')" style="cursor:pointer;user-select:none;text-align:right;white-space:nowrap">$ Envío <span id="woo-sort-shippingTotal" style="font-size:10px"></span></th>
+          <th onclick="wooPendingSort('paymentDisplay')" style="cursor:pointer;user-select:none">Forma de pago <span id="woo-sort-paymentDisplay" style="font-size:10px"></span></th>
+          <th onclick="wooPendingSort('dateCreated')" style="cursor:pointer;user-select:none;white-space:nowrap">Fecha compra <span id="woo-sort-dateCreated" style="font-size:10px">↓</span></th>
+        </tr></thead>
+        <tbody id="woo-pending-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- Fila 1: Métricas resumen (clickeables → filtrar) -->
   <div class="mgt mgt-5" style="margin-bottom:8px">
     <div class="mc c-purple" style="cursor:pointer" onclick="wseoSetFilter(null)" title="Ver todos">
@@ -3094,6 +3208,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <table id="wseo-table">
         <thead><tr>
           <th>Producto</th>
+          <th onclick="wseoSort('created')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:80px;max-width:80px" title="Fecha de creación del producto en WooCommerce">Creada<br><span style="font-size:10px">↕</span><span id="wseo-sort-created" style="font-size:10px"></span></th>
           <th onclick="wseoSort('status')"  style="cursor:pointer;user-select:none;white-space:nowrap">Estado <span id="wseo-sort-status" style="font-size:10px"></span></th>
           <th onclick="wseoSort('price')"   style="cursor:pointer;user-select:none;white-space:nowrap;text-align:right">Precio <span id="wseo-sort-price" style="font-size:10px"></span></th>
           <th onclick="wseoSort('stock')"   style="cursor:pointer;user-select:none;white-space:nowrap;text-align:center">Stock <span id="wseo-sort-stock" style="font-size:10px"></span></th>
@@ -3104,7 +3219,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <th style="min-width:120px;text-align:center">Acciones</th>
         </tr></thead>
         <tbody id="wseo-tbody">
-          <tr><td colspan="9" style="text-align:center;padding:32px;color:var(--text3)">Hacé clic en "Cargar productos" para analizar tu tienda WooCommerce.</td></tr>
+          <tr><td colspan="10" style="text-align:center;padding:32px;color:var(--text3)">Hacé clic en "Cargar productos" para analizar tu tienda WooCommerce.</td></tr>
         </tbody>
       </table>
     </div>
@@ -3193,8 +3308,9 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <span style="font-size:11px;color:var(--text3);font-weight:600;white-space:nowrap">Publicación:</span>
       <div class="chips" style="margin:0;gap:5px">
-        <div class="chip" id="qschip-st-all"      onclick="qsSetStatus(null)"     style="font-size:11px;background:var(--accent);color:#fff;border-color:var(--accent)">Todas</div>
-        <div class="chip" id="qschip-st-active"   onclick="qsSetStatus('active')"  style="font-size:11px">✅ Activas</div>
+        <!-- v97 [Tema 1]: chip activo por defecto = "Activas" (no "Todas") -->
+        <div class="chip" id="qschip-st-all"      onclick="qsSetStatus(null)"     style="font-size:11px">Todas</div>
+        <div class="chip" id="qschip-st-active"   onclick="qsSetStatus('active')"  style="font-size:11px;background:var(--accent);color:#fff;border-color:var(--accent)">✅ Activas</div>
         <div class="chip" id="qschip-st-paused"   onclick="qsSetStatus('paused')"  style="font-size:11px">⏸ Pausadas</div>
         <div class="chip" id="qschip-st-closed"   onclick="qsSetStatus('closed')"  style="font-size:11px">⛔ Cerradas</div>
         <div class="chip" id="qschip-st-under_review" onclick="qsSetStatus('under_review')" style="font-size:11px">🔍 Inactivas</div>
@@ -3407,7 +3523,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 // ═══════════════════════════════════════════════════════════
 const APP_CONFIG = {
 
-  // ── Worker de Cloudflare ────────────────────────────────
+ // ── Worker de Cloudflare ────────────────────────────────
   // Reemplazá con la URL de TU Worker
   WORKER: 'https://worker-tiendaimpala-2.tazasimpaladesign.workers.dev',
 
@@ -3677,6 +3793,10 @@ function showSessionExpired(){
 // ═══════════════════════════════════════════════════════════
 async function initApp(){
   document.getElementById('login-screen').style.display='none';
+  // v93 [P5]: chequear versión del Worker en background. Si está desactualizado,
+  // muestra un banner amarillo en el header advirtiendo que el bug de envíos sigue
+  // activo. El check va al endpoint raíz "/" del Worker que devuelve { msg: '... v55' }.
+  _checkWorkerVersion();
   userData=await mlGet('/users/me');
   userId=userData.id;
   // Registrar refresh_token en el Worker para que el webhook pueda enviar Telegram
@@ -3781,7 +3901,16 @@ async function initApp(){
   startPolling();
   // POLLING MENSAJES: verificar mensajes post-venta sin leer cada 90s
   startMessagePolling();
-  // SYNC MULTI-DEVICE: polling silencioso de config cada 60s
+  // v97 [Tema 2]: POLLING WOO: chequear ventas nuevas en tu tienda web cada 5 min
+  if(typeof startWooPolling === 'function') startWooPolling();
+  // v103 [Tema 2]: pre-cargar cache de productos Woo en segundo plano para que
+  // el lookup de imágenes en el listado de pedidos pendientes funcione desde el
+  // primer render, sin esperar a que el usuario entre a la sección SEO Tienda Woo.
+  // Si la cache ya fue cargada antes (por wooSeoInit), no hace nada.
+  if(typeof _wseoPreloadCache === 'function') {
+    setTimeout(_wseoPreloadCache, 5 * 1000); // espera 5s post-boot para no competir con cargas críticas
+  }
+  // SYNC MULTI-DEVICE: polling silencioso de config cada 20 min
   startConfigSync();
   // SYNC CROSS-TAB: BroadcastChannel para métricas entre pestañas
   initCrossTabSync();
@@ -3793,8 +3922,12 @@ let _pollingInterval=null;
 function startPolling(){
   if(_pollingInterval)clearInterval(_pollingInterval);
   _pollingInterval=setInterval(pollNewData,60000);
+  // v89 [P2]: arrancar polling ligero de envíos pendientes (cada 30s)
+  if(typeof startPendingShipPoll === 'function') startPendingShipPoll();
 }
-function stopPolling(){if(_pollingInterval){clearInterval(_pollingInterval);_pollingInterval=null;}}
+function stopPolling(){if(_pollingInterval){clearInterval(_pollingInterval);_pollingInterval=null;}
+  if(typeof stopPendingShipPoll === 'function') stopPendingShipPoll();
+}
 
 async function pollNewData(){
   if(!token||!userId)return;
@@ -3811,7 +3944,40 @@ async function pollNewData(){
     fresh.forEach(o=>{
       const idx=allOrders.findIndex(e=>e.id===o.id);
       if(idx<0){allOrders.unshift(o);hasNew=true;newOrders.push(o);}
-      else allOrders[idx]={...allOrders[idx],...o};
+      else{
+        // v91 [P5]: BUG FIX (definitivo) — el shallow merge previo de v89 sobreescribía
+        // shipping enriquecido. El fix de v90 era incorrecto: priorizaba SIEMPRE el
+        // status viejo, bloqueando cambios reales de envío.
+        //
+        // Lógica correcta: /orders/search NO es fuente confiable del shipping.status
+        // (suele venir vacío o desfasado). La fuente de verdad es /shipments/{id} que
+        // resuelven loadShippingStatuses() y _pollPendingShipments().
+        //
+        // Por lo tanto: preservamos siempre el shipping enriquecido cuando coincide el
+        // shipping.id. El polling de envíos pendientes (cada 20s) actualiza el status
+        // real desde /shipments/{id}.
+        const prev = allOrders[idx];
+        const merged = {...prev, ...o};
+        const prevShip = prev.shipping || {};
+        const newShip  = o.shipping    || {};
+        if(prevShip.id && newShip.id && String(prevShip.id) === String(newShip.id)){
+          if(prevShip._statusLoaded){
+            // Tenemos status enriquecido — preservarlo. Mergeamos los demás campos
+            // del shipping (tracking_number, service_id, etc.) que pueden venir más
+            // frescos en /orders/search.
+            merged.shipping = {
+              ...newShip,
+              status:        prevShip.status,
+              substatus:     prevShip.substatus,
+              _statusLoaded: true
+            };
+          } else {
+            // No teníamos status cargado — usamos lo que venga de /orders/search tal cual
+            merged.shipping = { ...prevShip, ...newShip };
+          }
+        }
+        allOrders[idx] = merged;
+      }
     });
     if(hasNew){
       const n=fresh[0];
@@ -3835,35 +4001,17 @@ async function pollNewData(){
                       || (firstItem && firstItem.thumbnail)
                       || (itemId && _thumbCache[itemId])
                       || '';
-      waTrigger('venta', { producto, precio: monto, comprador });
+      // v90 [P2]: WhatsApp DESACTIVADO — usuario pidió eliminar todo consumo de WA Biz.
+      // Telegram sigue activo (tgNotify) porque lo usa para notificaciones internas.
+      // waTrigger('venta', { producto, precio: monto, comprador });
       tgNotify('venta', { producto, monto, comprador, thumbnail }, 'venta_'+o.id);
     });
-    // Actualizar shipping de las frescas y detectar envíos despachados
-    const prevShipStatuses = {};
-    allOrders.forEach(o => { if(o.shipping?.id) prevShipStatuses[o.shipping.id] = o.shipping.status; });
+    // v90 [P2]: actualizar shipping de las frescas (sin notificación WhatsApp)
     await loadShippingStatuses(fresh.filter(o=>o.shipping?.id));
-    // ── WhatsApp: envío despachado ────────────────────────────
-    allOrders.forEach(o => {
-      if(!o.shipping?.id) return;
-      const prevSt = prevShipStatuses[o.shipping.id];
-      const currSt = o.shipping?.status;
-      if(prevSt && prevSt !== 'shipped' && currSt === 'shipped'){
-        // Construir URL de seguimiento
-        const trackingNum = o.shipping?.tracking_number || o.shipping?.id || '';
-        const carrier = (o.shipping?.service_id||'').toLowerCase().includes('correo') ? 'correoargentino' : 'paqar';
-        const trackUrl = trackingNum
-          ? (carrier === 'correoargentino'
-              ? `https://www.correoargentino.com.ar/formularios/oidn?id=${trackingNum}`
-              : `https://www.paqar.com.ar/#${trackingNum}`)
-          : 'https://www.correoargentino.com.ar';
-        waTrigger('envio', {
-          producto:    (o.order_items?.[0]?.item?.title||'Producto').slice(0,60),
-          comprador:   o.buyer?.nickname || '—',
-          trackingUrl: trackUrl,
-          fallbackMsg: `📦 Envío despachado!\nProducto: ${(o.order_items?.[0]?.item?.title||'Producto').slice(0,50)}\nSeguilo en: ${trackUrl}`,
-        });
-      }
-    });
+    // ── WhatsApp envío despachado: REMOVIDO en v90 ─────────────
+    // El usuario no usa WhatsApp Biz y pidió eliminar todo el consumo asociado.
+    // El shipping.status sigue actualizándose en allOrders para que la UI lo refleje
+    // (renderVentasTable y renderFacturacion lo leen vía getShippingLabel()).
 
     _updateVentasBadge();
     const arNow=nowAR();const mesOrders=allOrders.filter(o=>dateAR(o.date_created)>=new Date(Date.UTC(arNow.getUTCFullYear(),arNow.getUTCMonth(),1)));
@@ -3886,8 +4034,9 @@ async function pollNewData(){
         const localItem = q.item_id ? allItems.find(i=>String(i.id)===String(q.item_id)) : null;
         const producto  = localItem ? localItem.title : (q.item_id ? ('MLA '+q.item_id) : '—');
         const thumbnail = (localItem && localItem.thumbnail) || (q.item_id && _thumbCache[q.item_id]) || '';
-        waTrigger('pregunta', { pregunta, producto });
-        tgNotify('pregunta', { pregunta, producto, thumbnail }, 'pregunta_'+q.id);
+      // v90 [P2]: WhatsApp DESACTIVADO — solo Telegram sigue activo
+      // waTrigger('pregunta', { pregunta, producto });
+      tgNotify('pregunta', { pregunta, producto, thumbnail }, 'pregunta_'+q.id);
       });
     }
     document.getElementById('nb-q').textContent=pend;
@@ -3896,6 +4045,166 @@ async function pollNewData(){
     // El endpoint /messages/orders/{id} dejó de existir en ML (daba 404).
     stamp();
   }catch(e){console.warn('[Poll]',e.message);}
+}
+
+// ── v89 [P2]: Polling ligero de envíos pendientes ──────────────────────────
+// Solo consulta /shipments/{id} para órdenes con status no terminal
+// (ready_to_ship, handling, pending, paid+sin shipped/delivered).
+// Esto refleja en ~30s el cambio de "Imprimir" → "En camino" sin recargar todas
+// las ventas. Costo: N llamadas/30s donde N = órdenes pendientes (típicamente <10).
+// Cero KV writes — todo va por mlGet directo.
+let _pendingShipPollTimer = null;
+const _PENDING_SHIP_POLL_MS = 30 * 60 * 1000; // v92 [P5]: 30 min — el fix del header x-format-new
+                                              // hace que /orders/search ya traiga el shipping correcto
+                                              // y loadShippingStatuses lo actualice al cargar; este polling
+                                              // queda como red de seguridad de bajo costo.
+
+async function _pollPendingShipments(){
+  if(!token || !userId) return;
+  if(!Array.isArray(allOrders) || !allOrders.length) return;
+
+  // v93 [P5]: log detallado + dump de respuesta cruda de ML para las primeras 2
+  // órdenes pendientes. Esto permite diagnosticar EXACTAMENTE qué responde ML.
+  // Si el header x-format-new no está aplicado en el Worker, el shipment vendrá
+  // sin el campo `status` o con estructura vieja.
+  const NON_TERMINAL = new Set(['ready_to_ship','handling','pending','shipped','in_transit','almost_there']);
+  const pending = allOrders.filter(o => {
+    if(!o.shipping?.id) return false;
+    if(o.status === 'cancelled' || o.status === 'invalid') return false;
+    const ss = (o.shipping.status||'').toLowerCase();
+    if(ss === 'delivered' || ss === 'not_delivered' || ss === 'returned' || ss === 'lost') return false;
+    if(o.shipping._statusLoaded && NON_TERMINAL.has(ss)) return true;
+    if(!o.shipping._statusLoaded && (o.status === 'paid' || o.status === 'confirmed')) return true;
+    return false;
+  }).slice(0, 25);
+
+  console.log('[PendingShipPoll] ciclo iniciado — '+pending.length+' órdenes pendientes de '+allOrders.length+' totales');
+  if(!pending.length) return;
+
+  let changed = 0;
+  let errors  = 0;
+  let dumped  = 0; // contador de respuestas crudas dumpeadas
+  const changeLog = [];
+  for(let i=0; i<pending.length; i+=5){
+    await Promise.allSettled(pending.slice(i, i+5).map(async o => {
+      try{
+        // v90 [P2]: cache-buster para evitar respuestas cacheadas (CDN/Cloudflare/ML)
+        const s = await mlGet('/shipments/' + o.shipping.id + '?_ts=' + Date.now());
+        if(!s){
+          console.warn('[PendingShipPoll] /shipments/'+o.shipping.id+' devolvió vacío (orden '+o.id+')');
+          errors++;
+          return;
+        }
+
+        // v93 [P5]: dumpear respuesta cruda de las 2 primeras órdenes pendientes.
+        // Si ves `status: undefined` o estructura sin `status_history`, el header
+        // x-format-new NO está siendo aplicado por el Worker.
+        if(dumped < 2){
+          dumped++;
+          console.log('[PendingShipPoll] ━━━━ DUMP RESPUESTA ML #'+dumped+' ━━━━');
+          console.log('  Orden:', o.id, '| Shipping:', o.shipping.id);
+          console.log('  Estado en panel ANTES:', o.shipping.status || '(vacío)', '/', o.shipping.substatus || '(vacío)');
+          console.log('  Respuesta CRUDA de ML:', JSON.stringify({
+            id: s.id,
+            status: s.status,
+            substatus: s.substatus,
+            mode: s.mode,
+            tracking_number: s.tracking_number,
+            last_updated: s.last_updated,
+            // Si tiene status_history significa que x-format-new SÍ funcionó
+            has_status_history: Array.isArray(s.status_history),
+            status_history_last: Array.isArray(s.status_history) ? s.status_history.slice(-3) : null,
+            // Detector: si NO tiene status pero SÍ otros campos, header faltante
+            _diagnostico: !s.status && (s.id || s.tracking_number)
+              ? '⚠️ ML respondió SIN status — el Worker probablemente NO está enviando el header x-format-new:true. Subí worker-master-v55.js a Cloudflare.'
+              : (s.status ? '✅ Respuesta válida' : '❓ Respuesta inesperada')
+          }, null, 2));
+        }
+
+        const prevStatus = o.shipping.status || '(none)';
+        const prevSubst  = o.shipping.substatus || '(none)';
+        if(s.status)    o.shipping.status = s.status;
+        if(s.substatus) o.shipping.substatus = s.substatus;
+        o.shipping._statusLoaded = true;
+        if(prevStatus !== (o.shipping.status||'(none)') || prevSubst !== (o.shipping.substatus||'(none)')){
+          changed++;
+          changeLog.push({
+            ord:    o.id,
+            ship:   o.shipping.id,
+            from:   prevStatus + (prevSubst!=='(none)' ? '/'+prevSubst : ''),
+            to:     (o.shipping.status||'(none)') + (o.shipping.substatus ? '/'+o.shipping.substatus : '')
+          });
+          // v97 [Opt D]: invalidar cache para que el próximo boot lea el estado nuevo
+          if(typeof _shipCacheInvalidate === 'function') _shipCacheInvalidate(o.shipping.id);
+        }
+      }catch(e){
+        errors++;
+        console.warn('[PendingShipPoll] error orden '+o.id+' shipping '+o.shipping?.id+':', e?.message || e);
+      }
+    }));
+  }
+
+  if(changed > 0){
+    console.log('[PendingShipPoll] ✅ '+changed+'/'+pending.length+' actualizado(s)'+(errors?' ('+errors+' errores)':''));
+    console.table(changeLog);
+    // Refrescar UI sin recargar datos
+    if(typeof _updateVentasBadge === 'function') _updateVentasBadge();
+    if(document.getElementById('section-ventas')?.classList.contains('active') && typeof renderVentasTable === 'function'){
+      renderVentasTable();
+    }
+    if(document.getElementById('section-facturacion')?.classList.contains('active') && typeof renderFacturacion === 'function'){
+      renderFacturacion();
+    }
+  }
+}
+
+// v93 [P5]: detector de versión del Worker. Si el Worker está desactualizado (no v55+),
+// significa que el header `x-format-new: true` no está siendo aplicado y el bug de
+// envíos sigue activo. Mostramos un banner amarillo al usuario.
+const _MIN_WORKER_VERSION = 64; // v103: requerido para productId persistido en notif
+async function _checkWorkerVersion(){
+  try {
+    const r = await fetch(WORKER + '/');
+    if(!r.ok) return;
+    const d = await r.json();
+    const msg = d?.msg || '';
+    // Match "Worker Maestro v55", "v56", etc.
+    const m = msg.match(/v(\d+)\b/);
+    if(!m) return;
+    const ver = parseInt(m[1], 10);
+    console.log('[WorkerVersion] '+msg+' (parsed='+ver+', requerido='+_MIN_WORKER_VERSION+'+)');
+    if(ver < _MIN_WORKER_VERSION){
+      _showWorkerOutdatedBanner(ver);
+    }
+  } catch(e){
+    console.warn('[WorkerVersion] no se pudo verificar:', e.message);
+  }
+}
+function _showWorkerOutdatedBanner(currentVer){
+  // Evitar duplicados
+  if(document.getElementById('worker-outdated-banner')) return;
+  const b = document.createElement('div');
+  b.id = 'worker-outdated-banner';
+  b.style.cssText = 'position:fixed;top:8px;right:8px;left:8px;z-index:9999;background:#fbbf24;color:#78350f;padding:11px 14px;border-radius:8px;border:1px solid #f59e0b;box-shadow:0 4px 12px rgba(0,0,0,.15);font-size:12.5px;line-height:1.4;display:flex;align-items:center;gap:10px;max-width:900px;margin:0 auto';
+  b.innerHTML = '<span style="font-size:20px">⚠️</span>'
+    + '<div style="flex:1"><strong>Worker desactualizado (v'+currentVer+').</strong> '
+    + 'El bug de "estado de envíos" no se va a resolver hasta que subas <code style="background:#fde68a;padding:1px 5px;border-radius:3px;font-size:11px">worker-master-v55.js</code> a Cloudflare Workers. '
+    + 'Mientras tanto, los estados se siguen viendo desactualizados.</div>'
+    + '<button onclick="this.parentElement.remove()" style="background:transparent;border:1px solid #92400e;color:#78350f;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:11.5px;font-weight:600">Cerrar</button>';
+  document.body.appendChild(b);
+}
+
+function startPendingShipPoll(){
+  if(_pendingShipPollTimer) clearInterval(_pendingShipPollTimer);
+  // v92 [P5]: primer ciclo a los 60s. El fix del header `x-format-new: true` en el
+  // Worker resuelve el bug en origen (loadShippingStatuses al cargar el panel ya
+  // trae estados reales). Este polling solo refresca cambios mientras el panel
+  // está abierto, sin recargar todas las órdenes. Intervalo: 30 minutos.
+  setTimeout(_pollPendingShipments, 60 * 1000);
+  _pendingShipPollTimer = setInterval(_pollPendingShipments, _PENDING_SHIP_POLL_MS);
+}
+function stopPendingShipPoll(){
+  if(_pendingShipPollTimer){ clearInterval(_pendingShipPollTimer); _pendingShipPollTimer = null; }
 }
 
 function showToast(msg,type,sound){
@@ -4098,20 +4407,86 @@ async function loadOrdersHistory(){
   }catch(e){console.error('[loadOrdersHistory]',e);}
 }
 
+// v97 [Opt D]: cache de shipping status en localStorage con TTL 60 min.
+// Evita refetch de /shipments/{id} cuando se recarga el panel dentro de la
+// ventana del cache. Ahorro estimado: ~50 reqs por cada boot dentro de 60min.
+const _SHIP_CACHE_KEY = 'mlp_ship_cache_v1';
+const _SHIP_CACHE_TTL = 60 * 60 * 1000; // 60 minutos
+
+function _shipCacheLoad(){
+  try{
+    const raw = localStorage.getItem(_SHIP_CACHE_KEY);
+    if(!raw) return {};
+    const parsed = JSON.parse(raw);
+    // Limpiar entradas expiradas y devolver solo las vigentes
+    const now = Date.now();
+    const live = {};
+    Object.keys(parsed).forEach(k => {
+      if(parsed[k] && parsed[k].ts && (now - parsed[k].ts) < _SHIP_CACHE_TTL){
+        live[k] = parsed[k];
+      }
+    });
+    return live;
+  }catch(e){ return {}; }
+}
+function _shipCacheSave(cache){
+  try{ localStorage.setItem(_SHIP_CACHE_KEY, JSON.stringify(cache)); }catch(e){}
+}
+
 // Cargar status real desde /shipments/{id}, en lotes de 5
 async function loadShippingStatuses(orders){
-  const toLoad=(orders||[]).filter(o=>o.shipping?.id&&!o.shipping._statusLoaded).slice(0,60);
-  if(!toLoad.length)return;
-  for(let i=0;i<toLoad.length;i+=5){
-    await Promise.allSettled(toLoad.slice(i,i+5).map(async o=>{
+  const toCheck=(orders||[]).filter(o=>o.shipping?.id&&!o.shipping._statusLoaded);
+  if(!toCheck.length)return;
+
+  // v97 [Opt D]: intentar resolver desde cache primero
+  const cache = _shipCacheLoad();
+  const toLoad = [];
+  let cachedHits = 0;
+  toCheck.forEach(o => {
+    const cached = cache[o.shipping.id];
+    if(cached){
+      o.shipping.status    = cached.status    || o.shipping.status;
+      o.shipping.substatus = cached.substatus || o.shipping.substatus;
+      o.shipping._statusLoaded = true;
+      cachedHits++;
+    } else {
+      toLoad.push(o);
+    }
+  });
+  if(cachedHits > 0) console.log('[loadShippingStatuses] Cache hits:', cachedHits, '— evitamos esos requests');
+
+  // Fetch los que no estaban en cache (tope 60 para no inundar)
+  const toFetch = toLoad.slice(0, 60);
+  if(!toFetch.length) return;
+
+  let cacheUpdated = false;
+  for(let i=0;i<toFetch.length;i+=5){
+    await Promise.allSettled(toFetch.slice(i,i+5).map(async o=>{
       try{
         const s=await mlGet('/shipments/'+o.shipping.id);
         if(s?.status)o.shipping.status=s.status;
         if(s?.substatus)o.shipping.substatus=s.substatus;
         o.shipping._statusLoaded=true;
+        // v97 [Opt D]: persistir en cache
+        cache[o.shipping.id] = {
+          status: s?.status || null,
+          substatus: s?.substatus || null,
+          ts: Date.now()
+        };
+        cacheUpdated = true;
       }catch(e){}
     }));
   }
+  if(cacheUpdated) _shipCacheSave(cache);
+}
+
+// v97 [Opt D]: invalidar cache cuando _pollPendingShipments detecte un cambio,
+// para que el próximo boot lea el estado actualizado.
+function _shipCacheInvalidate(shipId){
+  try{
+    const cache = _shipCacheLoad();
+    if(cache[shipId]){ delete cache[shipId]; _shipCacheSave(cache); }
+  }catch(e){}
 }
 
 function makeChart(id,config){
@@ -4137,20 +4512,29 @@ function _updateOrdersUI(mesOrders){
 }
 
 function _updateVentasBadge(){
-  // Contar órdenes que necesitan imprimir etiqueta:
-  // - si shipping.status fue cargado: usarlo (más preciso)
-  // - si no: usar order.status=paid/confirmed como proxy confiable
-  const withShipStatus=allOrders.filter(o=>o.shipping?._statusLoaded).length;
+  // v96: ventana de 7 días para el badge — antes contábamos órdenes sin filtrar
+  // por fecha, lo que causaba que pedidos viejos del 26/04 hacia atrás (sin
+  // _statusLoaded por estar fuera de la ventana de 30 días de loadShippingStatuses)
+  // cayeran al fallback "IMPRIMIR" inflando el badge a 1480.
+  // 7 días cubre cualquier feriado largo sin riesgo de inflar el conteo con
+  // pedidos viejos que casi siempre están entregados.
+  const cutoff = Date.now() - 7 * 24 * 3600 * 1000;
+  const recentOrders = allOrders.filter(o => {
+    const t = new Date(o.date_created || 0).getTime();
+    return t && t >= cutoff;
+  });
   let toPrint;
-  if(withShipStatus>0){
-    // Tenemos datos reales de shipments
-    toPrint=allOrders.filter(o=>o.shipping?.status==='ready_to_ship').length;
+  if(typeof getShippingLabel === 'function'){
+    toPrint = recentOrders.filter(o => {
+      const lbl = getShippingLabel(o);
+      return lbl && lbl.label && lbl.label.includes('IMPRIMIR');
+    }).length;
   } else {
-    // Fallback: órdenes pagadas con envío asignado y sin entregar/cancelar
-    toPrint=allOrders.filter(o=>
-      (o.status==='paid'||o.status==='confirmed')&&
-      o.shipping?.id&&
-      o.status!=='shipped'&&o.status!=='delivered'&&o.status!=='cancelled'
+    // Fallback defensivo si por algún race condition getShippingLabel no está aún definido
+    toPrint = recentOrders.filter(o =>
+      (o.status==='paid'||o.status==='confirmed') &&
+      o.shipping?.id &&
+      o.status!=='shipped' && o.status!=='delivered' && o.status!=='cancelled'
     ).length;
   }
   const nb=document.getElementById('nb-ventas');
@@ -4447,10 +4831,10 @@ let _configSyncInterval = null;
 
 function startConfigSync(){
   if(_configSyncInterval) clearInterval(_configSyncInterval);
-  // v85: Polling cada 120s (antes 60s), siempre activo (incluso hidden).
-  // Mantener la sync entre PCs siempre activa es importante para Cristian
-  // (cambios en una PC se ven en otra rápido). El intervalo de 2 min compensa
-  // el costo de no pausar — ~720 reqs/día/panel vs los 1440 de antes.
+  // v97 [Opt C]: cada 20 min (antes 120s = 2 min). Cristian decidió bajar la
+  // frecuencia para reducir consumo Cloudflare. Si necesitás sync inmediato
+  // entre PCs, recargá manualmente. Costo: 72 reqs/día/panel (antes 720).
+  // Ahorro: 648 reqs/día/panel.
   _configSyncInterval = setInterval(async () => {
     if(!token || !userId) return;
     try{
@@ -4467,7 +4851,7 @@ function startConfigSync(){
         try{ _syncChannel && _syncChannel.postMessage({ type:'config-updated', ts: lastUpdate }); }catch{}
       }
     }catch(e){ /* polling silencioso — nunca mostrar error al usuario */ }
-  }, 120000);  // v85: 120s = 2 min (era 60s)
+  }, 20 * 60 * 1000);  // v97 [Opt C]: 20 min (era 2 min)
 }
 
 // ── Cross-tab sync via BroadcastChannel ─────────────────────────────────────
@@ -7067,8 +7451,10 @@ function seoScore(t){
   if(l>=40&&l<=60)s+=30;else if(l>=25&&l<40)s+=18;else if(l>60&&l<=75)s+=12;
   if(!/[.!?,;:()'"@#\$%^&*]/.test(t))s+=20;
   const ws=t.split(' ');
-  const uniq=new Set(ws.map(w=>w.toLowerCase()));
-  if(uniq.size===ws.length)s+=15;
+  // v91 [P1]: ya no penalizamos palabras repetidas — el panel agrega modelo/color
+  // al título y generaba falsos positivos. Otorgamos siempre los 15 puntos para
+  // mantener consistencia con el comportamiento real del título en ML.
+  s+=15;
   if(ws.length>=5&&ws.length<=12)s+=15;
   if(/[a-záéíóúñü]/i.test(t))s+=10;
   if(t!==t.toUpperCase())s+=10;
@@ -7088,8 +7474,9 @@ function liveScore(t){
   if(t.length>75)issues.push('⚠️ Muy largo ('+t.length+' chars) — máx 75');
   if(/[.!?,;:()]/.test(t))issues.push('❌ Signos de puntuación detectados');
   if(t===t.toUpperCase())issues.push('❌ Todo en mayúsculas (penalizado)');
-  const ws=t.split(' '),uniq=new Set(ws.map(w=>w.toLowerCase()));
-  if(uniq.size<ws.length)issues.push('⚠️ Palabras repetidas detectadas');
+  // v91 [P1]: removido check de "Palabras repetidas detectadas".
+  // El panel agrega modelo/color al título cuando lo trae, generando falsos positivos
+  // sobre títulos que originalmente están bien en ML.
   const el=document.getElementById('seo-issues');
   if(el) el.innerHTML=issues.length?issues.map(i=>`<div style="margin-bottom:4px">${i}</div>`).join(''):`<div style="color:var(--green)">✅ Título bien optimizado (score ${sc})</div>`;
 }
@@ -7371,8 +7758,8 @@ function renderSEOTable(){
     if(item.title.length<30)              tI.push('Corto');
     if(/[.!?,;:]/.test(item.title))       tI.push('Puntuación');
     if(item.title===item.title.toUpperCase()) tI.push('Mayúsculas');
-    const ws=item.title.split(' '),u=new Set(ws.map(w=>w.toLowerCase()));
-    if(u.size<ws.length)                  tI.push('Repetidas');
+    // v91 [P1]: removido chip "Repetidas" — el panel agrega modelo/color al título
+    // generando falsos positivos sobre títulos que originalmente son correctos en ML.
 
     const eanP   = ch.find(c=>c.id==='ean');
     const editUrl= mlEditLink(item.id);
@@ -8487,6 +8874,9 @@ async function saveCompetidor(){
     if(document.getElementById('comp-save-name')) document.getElementById('comp-save-name').value='';
     if(document.getElementById('comp-save-url'))  document.getElementById('comp-save-url').value='';
     renderCompetidores();
+    // v88: También sincronizar a /api/backup para que ambos endpoints
+    // queden con la misma versión y evitar el bug de "se borran al recargar"
+    if(typeof pushFullBackup === 'function') pushFullBackup();
   }catch(e){
     _cloudStatus('error');
     if(res){ res.textContent='❌ Error: '+e.message; res.style.color='var(--red)'; }
@@ -8509,6 +8899,8 @@ async function deleteCompetidor(idx){
       })
     });
     _cloudStatus('ok');
+    // v88: Sync paralelo a /api/backup para que ambos endpoints queden consistentes
+    if(typeof pushFullBackup === 'function') pushFullBackup();
   }catch(e){ _cloudStatus('error'); }
   renderCompetidores();
 }
@@ -9727,7 +10119,11 @@ async function renderFacturacion(){
     tbody.innerHTML = mesOrders.map(o=>{
       const facTitle = o.order_items?.[0]?.item?.title?.slice(0,40)||'—';
       const facThumb = (o.order_items?.[0]?.item?.thumbnail||'').replace('http://','https://');
-      const shipState= o.shipping?.status||'';
+      // v89 [P3]: usar mismas traducciones que sección Ventas/Pedidos
+      const stateLabel = (typeof ORDER_STATES !== 'undefined' && ORDER_STATES[o.status]) ? ORDER_STATES[o.status] : (o.status||'—');
+      const stateClass = o.status==='paid'||o.status==='delivered'||o.status==='confirmed' ? 'bg-green'
+                       : o.status==='cancelled' ? 'bg-red' : 'bg-amber';
+      const ship = (typeof getShippingLabel === 'function') ? getShippingLabel(o) : { label: (o.shipping?.status||'—'), cls: 'bg-blue' };
       return `<tr>
         <td style="font-family:var(--mono);font-size:11px">#${o.id}</td>
         <td style="max-width:190px">
@@ -9738,19 +10134,139 @@ async function renderFacturacion(){
         </td>
         <td>${o.buyer?.nickname||'—'}</td>
         <td style="font-weight:600;color:var(--green)">$${(o.total_amount||0).toLocaleString('es-AR')}</td>
-        <td><span class="badge ${o.status==='paid'?'bg-green':'bg-amber'}">${o.status||'—'}</span></td>
-        <td style="font-size:11px">${shipState?`<span class="badge bg-blue">${shipState}</span>`:'—'}</td>
+        <td><span class="badge ${stateClass}">${stateLabel}</span></td>
+        <td style="font-size:11px;white-space:nowrap"><span class="badge ${ship.cls}">${ship.label}</span></td>
         <td style="color:var(--text3)">${o.date_created?dateAR(o.date_created).toLocaleDateString('es-AR',{timeZone:'UTC'}):''}</td>
       </tr>`;
     }).join('');
   }
 
-  // Chart (últimos 6 meses)
+  // ── v89 [P3]: Chart con datos completos por mes (últimos 6 meses) ──────────
+  // Para cada mes calculamos: facturación, ventas, ticket promedio, publicaciones con ventas.
+  // Renderizamos los 4 valores apilados sobre la barra usando chartjs-plugin-datalabels.
   const months={};
-  for(let i=5;i>=0;i--){const d=new Date();d.setMonth(d.getMonth()-i);const k=d.getMonth()+'-'+d.getFullYear();months[k]={label:d.toLocaleDateString('es-AR',{month:'short'}),val:0};}
-  allOrders.forEach(o=>{const d=new Date(o.date_created||'');const k=d.getMonth()+'-'+d.getFullYear();if(months[k])months[k].val+=o.total_amount||0;});
-  const entries=Object.values(months);
-  makeChart('chart-fac',{type:'bar',data:{labels:entries.map(e=>e.label),datasets:[{data:entries.map(e=>e.val),backgroundColor:'#4f8ef7',borderRadius:6}]},options:{...chartDefaults(),scales:{y:{...tOpts(),ticks:{...tOpts().ticks,callback:v=>'$'+(v/1000).toFixed(0)+'k'}},x:{...tXOpts()}}}});
+  for(let i=5;i>=0;i--){
+    const d=new Date();d.setMonth(d.getMonth()-i);
+    const k=d.getMonth()+'-'+d.getFullYear();
+    months[k]={
+      label: d.toLocaleDateString('es-AR',{month:'short'}),
+      val: 0,            // facturación total
+      sales: 0,          // cantidad de órdenes
+      itemIds: new Set() // IDs únicos para "publicaciones con ventas"
+    };
+  }
+  allOrders.forEach(o=>{
+    const d=new Date(o.date_created||'');
+    const k=d.getMonth()+'-'+d.getFullYear();
+    if(months[k]){
+      months[k].val += o.total_amount || 0;
+      months[k].sales += 1;
+      const iid = o.order_items?.[0]?.item?.id;
+      if(iid) months[k].itemIds.add(String(iid));
+    }
+  });
+  const entries = Object.values(months).map(m => ({
+    label: m.label,
+    val:   m.val,
+    sales: m.sales,
+    pubs:  m.itemIds.size,
+    ticket: m.sales ? Math.round(m.val / m.sales) : 0
+  }));
+
+  // Helper formato compacto para que entre en la barra
+  const fmtK = v => {
+    if(!v) return '$0';
+    if(v >= 1000000) return '$' + (v/1000000).toFixed(v >= 10000000 ? 1 : 2).replace(/\.?0+$/,'') + 'M';
+    if(v >= 1000)    return '$' + Math.round(v/1000) + 'k';
+    return '$' + v;
+  };
+
+  // v90 [P1]: etiquetas estilo tooltip oscuro flotante (mismo formato visual)
+  const hasDataLabels = (typeof ChartDataLabels !== 'undefined');
+
+  makeChart('chart-fac',{
+    type:'bar',
+    data:{
+      labels: entries.map(e=>e.label),
+      datasets:[{
+        data: entries.map(e=>e.val),
+        backgroundColor:'#4f8ef7',
+        borderRadius:6,
+        _facMeta: entries
+      }]
+    },
+    options:{
+      ...chartDefaults(),
+      // v91 [P2]: padding generoso arriba para el bloque flotante con texto largo
+      layout:{ padding:{ top: 100 } },
+      scales:{
+        y:{...tOpts(), ticks:{...tOpts().ticks, callback:v=>'$'+(v/1000).toFixed(0)+'k'}},
+        x:{...tXOpts()}
+      },
+      plugins:{
+        legend:{display:false},
+        tooltip:{
+          // v90 [P1]: tooltip flotante en hover con los 4 datos formateados completos
+          backgroundColor: 'rgba(0,0,0,0.85)',
+          titleColor: '#fff',
+          bodyColor: '#fff',
+          borderColor: 'rgba(255,255,255,0.1)',
+          borderWidth: 1,
+          padding: 10,
+          cornerRadius: 6,
+          titleFont: { size: 12, weight: 600 },
+          bodyFont:  { size: 11.5 },
+          displayColors: false,
+          callbacks:{
+            title: (items) => items[0]?.label || '',
+            label: (ctx) => {
+              const m = entries[ctx.dataIndex] || {};
+              return [
+                'Facturación: $'+(m.val||0).toLocaleString('es-AR'),
+                'Ventas: '+(m.sales||0),
+                'Ticket prom.: $'+(m.ticket||0).toLocaleString('es-AR'),
+                'Publicaciones con ventas: '+(m.pubs||0)
+              ];
+            }
+          }
+        },
+        datalabels: hasDataLabels ? {
+          // v91 [P2]: formato idéntico al tooltip flotante — sin abreviaciones.
+          // El bloque será más ancho que la barra; eso es OK con 6 meses de datos
+          // porque el fondo oscuro lo hace legible aunque solape parcialmente.
+          anchor:'end',
+          align:'top',
+          offset: 10,
+          backgroundColor: 'rgba(0,0,0,0.85)',
+          borderRadius: 4,
+          borderColor: 'rgba(255,255,255,0.1)',
+          borderWidth: 1,
+          padding: { top: 7, bottom: 7, left: 9, right: 9 },
+          color: '#ffffff',
+          font: { size: 10.5, weight: 500, lineHeight: 1.4 },
+          textAlign: 'left',
+          // Permitir que el bloque sobresalga del área del chart sin clipping
+          clip: false,
+          // No mostrar etiquetas en barras vacías
+          display: (ctx) => {
+            const m = entries[ctx.dataIndex] || {};
+            return (m.val || 0) > 0;
+          },
+          formatter: (value, ctx) => {
+            const m = entries[ctx.dataIndex] || {};
+            // v91 [P2]: 4 líneas idénticas al tooltip flotante (sin K/M/abreviar)
+            return [
+              'Facturación: $'+(m.val||0).toLocaleString('es-AR'),
+              'Ventas: '+(m.sales||0),
+              'Ticket prom.: $'+(m.ticket||0).toLocaleString('es-AR'),
+              'Publicaciones con ventas: '+(m.pubs||0)
+            ];
+          }
+        } : { display: false }
+      }
+    },
+    plugins: hasDataLabels ? [ChartDataLabels] : []
+  });
 }
 
 
@@ -11088,6 +11604,8 @@ function renderVentas(){
   const days=parseInt(document.getElementById('ven-period')?.value||540);
   const now=new Date();
   const labels=[],data={};
+  // v90 [P1]: meta por bucket para mostrar 4 datos sobre la barra (modo mensual)
+  const meta={};
   // Para 30 días -> etiquetas diarias; más -> mensuales
   if(days<=90){
     for(let i=days-1;i>=0;i--){
@@ -11095,10 +11613,17 @@ function renderVentas(){
       const k=d.toISOString().slice(0,10);
       labels.push(d.getDate()+'/'+(d.getMonth()+1));
       data[k]=0;
+      meta[k]={ val:0, sales:0, itemIds:new Set() };
     }
     allOrders.forEach(o=>{
       const k=(o.date_created||'').slice(0,10);
-      if(data[k]!==undefined) data[k]+=o.total_amount||0;
+      if(data[k]!==undefined){
+        data[k]+=o.total_amount||0;
+        meta[k].val += o.total_amount||0;
+        meta[k].sales += 1;
+        const iid = o.order_items?.[0]?.item?.id;
+        if(iid) meta[k].itemIds.add(String(iid));
+      }
     });
   } else {
     // Agrupar por mes
@@ -11107,31 +11632,173 @@ function renderVentas(){
       const k=d.getFullYear()+'-'+(d.getMonth()+1).toString().padStart(2,'0');
       labels.push(d.toLocaleDateString('es-AR',{month:'short',year:'2-digit'}));
       data[k]=0;
+      meta[k]={ val:0, sales:0, itemIds:new Set() };
     }
     allOrders.forEach(o=>{
       const d=new Date(o.date_created||'');
       const k=d.getFullYear()+'-'+(d.getMonth()+1).toString().padStart(2,'0');
-      if(data[k]!==undefined) data[k]+=o.total_amount||0;
+      if(data[k]!==undefined){
+        data[k]+=o.total_amount||0;
+        meta[k].val += o.total_amount||0;
+        meta[k].sales += 1;
+        const iid = o.order_items?.[0]?.item?.id;
+        if(iid) meta[k].itemIds.add(String(iid));
+      }
     });
   }
-  makeChart('chart-ven',{type:'bar',data:{labels,datasets:[{data:Object.values(data),backgroundColor:'rgba(79,142,247,0.7)',borderRadius:4,hoverBackgroundColor:'#4f8ef7'}]},options:{...chartDefaults(),scales:{y:{...tOpts(),ticks:{...tOpts().ticks,callback:v=>'$'+(v>=1000?(v/1000).toFixed(0)+'k':v)}},x:{...tXOpts()}}}});
+
+  // v90 [P1]: armar entries[] alineado con labels para que datalabels indexe correcto
+  const orderedKeys = Object.keys(data);
+  const entries = orderedKeys.map(k => {
+    const m = meta[k] || { val:0, sales:0, itemIds:new Set() };
+    return {
+      val: m.val || 0,
+      sales: m.sales || 0,
+      pubs: m.itemIds.size,
+      ticket: m.sales ? Math.round(m.val / m.sales) : 0
+    };
+  });
+
+  // Helper formato compacto (mismo que Facturación)
+  const fmtK = v => {
+    if(!v) return '$0';
+    if(v >= 1000000) return '$' + (v/1000000).toFixed(v >= 10000000 ? 1 : 2).replace(/\.?0+$/,'') + 'M';
+    if(v >= 1000)    return '$' + Math.round(v/1000) + 'k';
+    return '$' + v;
+  };
+
+  // 4 datos apilados solo si hay ≤12 barras (modo mensual). Más barras → solo monto.
+  // v93 [P3]: 365 días con Math.ceil(365/30) da 13 buckets (no 12). Threshold a >13
+  // para que "12 meses" muestre datalabels. >13 solo aplica al modo diario (30/90 días).
+  const compactMode = entries.length > 13;
+  const hasDataLabels = (typeof ChartDataLabels !== 'undefined');
+
+  makeChart('chart-ven',{
+    type:'bar',
+    data:{
+      labels,
+      datasets:[{
+        data: Object.values(data),
+        backgroundColor:'rgba(79,142,247,0.7)',
+        borderRadius:4,
+        hoverBackgroundColor:'#4f8ef7'
+      }]
+    },
+    options:{
+      ...chartDefaults(),
+      // v90 [P1]: padding generoso arriba para el bloque flotante oscuro
+      // v92 [P3]: en modo diario no hay datalabels → padding mínimo. En mensual,
+      // espacio suficiente para el monto sobre cada barra.
+      layout:{ padding:{ top: compactMode ? 8 : 38 } },
+      scales:{
+        y:{...tOpts(), ticks:{...tOpts().ticks, callback:v=>'$'+(v>=1000?(v/1000).toFixed(0)+'k':v)}},
+        x:{...tXOpts()}
+      },
+      plugins:{
+        legend:{display:false},
+        tooltip:{
+          // Mismo estilo que Facturación
+          backgroundColor: 'rgba(0,0,0,0.85)',
+          titleColor: '#fff',
+          bodyColor: '#fff',
+          borderColor: 'rgba(255,255,255,0.1)',
+          borderWidth: 1,
+          padding: 10,
+          cornerRadius: 6,
+          titleFont: { size: 12, weight: 600 },
+          bodyFont:  { size: 11.5 },
+          displayColors: false,
+          callbacks:{
+            title: (items) => items[0]?.label || '',
+            label: (ctx) => {
+              const m = entries[ctx.dataIndex] || {};
+              return [
+                'Facturación: $'+(m.val||0).toLocaleString('es-AR'),
+                'Ventas: '+(m.sales||0),
+                'Ticket prom.: $'+(m.ticket||0).toLocaleString('es-AR'),
+                'Publicaciones con ventas: '+(m.pubs||0)
+              ];
+            }
+          }
+        },
+        datalabels: (hasDataLabels && !compactMode) ? {
+          // v92 [P3]: solo activos en modo mensual (≤12 barras). En modo diario
+          // (90 días = ~90 barras) los datalabels se solapan demasiado y resultan
+          // ilegibles. En diario solo queda el tooltip flotante en hover.
+          anchor:'end',
+          align:'top',
+          offset: 8,
+          backgroundColor: 'rgba(0,0,0,0.85)',
+          borderRadius: 4,
+          borderColor: 'rgba(255,255,255,0.1)',
+          borderWidth: 1,
+          padding: { top: 5, bottom: 5, left: 8, right: 8 },
+          color:'#ffffff',
+          font: { size: 10.5, weight: 600 },
+          textAlign:'center',
+          clip: false,
+          display: (ctx) => {
+            const m = entries[ctx.dataIndex] || {};
+            return (m.val || 0) > 0;
+          },
+          formatter: (value, ctx) => {
+            const m = entries[ctx.dataIndex] || {};
+            // v92 [P3]: solo el monto completo (sin K/M). Tooltip flotante muestra los 4 datos.
+            return '$'+(m.val||0).toLocaleString('es-AR');
+          }
+        } : { display: false }
+      }
+    },
+    plugins: hasDataLabels ? [ChartDataLabels] : []
+  });
   renderVentasTable();
 }
 
 function getShippingLabel(o){
   const os  = o.status || '';
-  const ss  = (o.shipping?.status||'').toLowerCase();
+  const ss  = (o.shipping?.status   || '').toLowerCase();
+  const sub = (o.shipping?.substatus|| '').toLowerCase();
   const loaded = !!o.shipping?._statusLoaded;
 
   // Cancelada siempre primero
   if(os==='cancelled') return {label:'❌ Cancelado', cls:'bg-red'};
+
+  // v94 [P5]: BUG FIX REAL — el ml endpoint devuelve `status: ready_to_ship` con
+  // substatus = picked_up / dispatched / stale cuando el envío YA fue retirado por
+  // el correo y está en tránsito. Antes mostrábamos "🖨️ IMPRIMIR" para todos los
+  // ready_to_ship sin distinguir, ignorando el substatus.
+  //
+  // Documentación oficial de substatuses (https://developers.mercadolibre.com.ar/envios):
+  //
+  //   handling:      waiting_for_label_generation, regenerating, invoice_pending
+  //   ready_to_ship: ready_to_print, printed, stale, cancelled,
+  //                  picked_up, dispatched, in_hub, on_route   ← YA EN TRÁNSITO
+  //   shipped:       first_visit, in_hub, dispatched, waiting_for_pickup
+  //   delivered:     null
+  //
+  // Substatuses que indican que el paquete YA salió del seller y está moviéndose:
+  const SHIP_IN_TRANSIT_SUBS = new Set([
+    'picked_up',     // correo retiró el paquete (Flex / drop_off)
+    'dispatched',    // despachado por el seller
+    'in_hub',        // en depósito del correo
+    'on_route',      // en ruta de reparto
+    'soon_deliver',  // cerca de entregar
+    'in_warehouse',  // en almacén
+    'stale'          // etiqueta vieja (paquete pendiente >X días)
+  ]);
 
   // Estado real del envío (cargado via /shipments/{id})
   if(loaded || ss){
     if(ss==='delivered')                                       return {label:'✅ Entregado',   cls:'bg-green'};
     if(ss==='not_delivered'||ss==='returned'||ss==='lost')     return {label:'❌ No entregado',cls:'bg-red'};
     if(ss==='shipped'||ss==='in_transit'||ss==='almost_there') return {label:'🚚 En camino',   cls:'bg-blue'};
-    if(ss==='ready_to_ship')                                   return {label:'🖨️ IMPRIMIR',    cls:'bg-amber'};
+    if(ss==='ready_to_ship'){
+      // v94 [P5]: interpretar el substatus para distinguir "imprimir" vs "ya despachado"
+      if(SHIP_IN_TRANSIT_SUBS.has(sub))     return {label:'🚚 En camino',  cls:'bg-blue'};
+      if(sub==='printed')                   return {label:'📦 Listo p/despacho', cls:'bg-blue'};
+      // ready_to_print, cancelled, vacío → IMPRIMIR
+      return {label:'🖨️ IMPRIMIR',    cls:'bg-amber'};
+    }
     if(ss==='handling')                                        return {label:'📦 Preparando',  cls:'bg-blue'};
     if(ss==='pending')                                         return {label:'⏳ Pendiente',   cls:'bg-amber'};
   }
@@ -11140,7 +11807,16 @@ function getShippingLabel(o){
   if(os==='payment_required'||os==='payment_in_process')       return {label:'⏳ Pago pendiente',cls:'bg-amber'};
   if(os==='paid'||os==='confirmed'){
     if(!o.shipping?.id) return {label:'🏪 Sin envío', cls:'bg-gray'};
-    return {label:'🖨️ IMPRIMIR', cls:'bg-amber'};  // pagado + tiene envío = imprimir etiqueta
+    // v96: si la orden tiene más de 7 días Y no se cargó el status real del shipment,
+    // asumimos que ya está entregada (loadShippingStatuses solo carga las últimas 30
+    // días, así que las anteriores nunca tienen _statusLoaded). Antes mostraba
+    // "IMPRIMIR" para pedidos de hace meses, lo cual es absurdo.
+    const ageMs = Date.now() - new Date(o.date_created || 0).getTime();
+    const SEVEN_DAYS = 7 * 24 * 3600 * 1000;
+    if(ageMs > SEVEN_DAYS && !loaded){
+      return {label:'✅ Entregado', cls:'bg-green', _inferred:true};
+    }
+    return {label:'🖨️ IMPRIMIR', cls:'bg-amber'};  // pagado + tiene envío + reciente = imprimir etiqueta
   }
   if(os==='shipped')   return {label:'🚚 En camino', cls:'bg-blue'};
   if(os==='delivered') return {label:'✅ Entregado',  cls:'bg-green'};
@@ -11298,7 +11974,6 @@ async function saveRemoteSettings(qrs, tmpl){
       template:     tmpl||qGetTmpl(),
       rpRules:      rpRules||[],
       activeRules:  activeRules||[],
-      competitors:  (_savedCompetitors||[]),
       competitors:  _savedCompetitors||[],
     };
     const r = await fetch(WORKER+'/api/settings', {
@@ -11401,6 +12076,8 @@ function qRenderTmplList(){
 }
 function qrDeleteRow(i){
   const qrs = qGetQR(); qrs.splice(i,1); qSaveQR(qrs); qRenderTmplList();
+  // v92 [P4]: refrescar panel lateral fijo
+  if(typeof qRenderTemplatesPanel === 'function') qRenderTemplatesPanel(qGetQR());
 }
 function qrAddNew(){
   const label = document.getElementById('qr-new-label')?.value?.trim();
@@ -11412,9 +12089,9 @@ function qrAddNew(){
   document.getElementById('qr-new-label').value='';
   document.getElementById('qr-new-text').value='';
   qRenderTmplList();
+  // v92 [P4]: refrescar panel lateral fijo
+  if(typeof qRenderTemplatesPanel === 'function') qRenderTemplatesPanel(qGetQR());
 }
-
-// ─── Insert text at cursor in a textarea ─────────────────────
 function qInsertAtCursor(taId, text){
   const ta = document.getElementById(taId);
   if(!ta) return;
@@ -11482,6 +12159,12 @@ function qInsertLink(itemId){
 
 // ─── Main render ─────────────────────────────────────────────
 function renderQuestions(){
+  // v94 [P4]: renderizar el panel lateral fijo SIEMPRE, independientemente de
+  // si hay preguntas en el filtro actual. Antes, si entrabas a Preguntas con
+  // la solapa "Sin responder" vacía, las plantillas no aparecían hasta cambiar
+  // de solapa. Ahora se rendea en cuanto se llama renderQuestions.
+  qRenderTemplatesPanel(qGetQR());
+
   let qs = [...(allQuestions||[])];
   if(qFilter==='UNANSWERED')      qs = qs.filter(q=>q.status==='UNANSWERED');
   else if(qFilter==='ANSWERED')   qs = qs.filter(q=>q.status==='ANSWERED');
@@ -11496,6 +12179,9 @@ function renderQuestions(){
 
   const qrs = qGetQR();
 
+  // v94 [P4]: el render del panel lateral ya se hizo arriba (antes del early return),
+  // no es necesario repetirlo acá.
+
   try{
     el.innerHTML = qs.map(q=>{
       const dt      = q.date_created ? new Date(q.date_created) : null;
@@ -11507,12 +12193,6 @@ function renderQuestions(){
       // Nickname: usar el enriquecido si ya se cargó, si no mostrar ID como fallback
       const fromNick = q._nickname || _nicknameCache[fromId] || (fromId ? '👤 #' + fromId : '');
       const taId    = 'ans-txt-'+q.id;
-
-      const qrBar = qrs.map(qr=>
-        `<button class="btn btn-xs" style="background:${qr.color};color:#fff;border:none;font-size:10px;padding:3px 9px;white-space:nowrap"
-          onclick="qInsertAtCursor('${taId}','${qr.text.replace(/'/g,"&#39;")}');document.getElementById('ans-form-${q.id}').style.display='block'"
-        >${qr.label}</button>`
-      ).join('');
 
       return `<div data-qid="${q.id}" data-qtext="${(q.text||'').replace(/"/g,'&quot;')}" data-itemid="${q.item_id||''}"
         style="padding:12px 0;border-bottom:1px solid var(--border)">
@@ -11530,35 +12210,90 @@ function renderQuestions(){
             </div>
             ${q.answer&&q.answer.text?`<div style="font-size:12px;color:var(--text3);padding:6px 10px;background:var(--bg3);border-radius:6px;border-left:2px solid var(--green);margin-bottom:6px">↩ ${q.answer.text.slice(0,160)}</div>`:''}
             ${isPend?`
-            <div style="margin-top:8px">
-              <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px;align-items:center">
-                ${qrBar}
-                <button class="btn btn-ghost btn-xs" style="font-size:10px"
-                  onclick="qOpenLink('${taId}')" title="Insertar link de publicación">🔗 #Link</button>
-                <button class="btn btn-ghost btn-xs" style="font-size:10px;background:#ede9fe;color:#7c3aed;border-color:#c4b5fd"
-                  onclick="aiAnswerQ(${q.id},this)">🤖 IA Impala</button>
-                <button class="btn btn-ghost btn-xs" style="font-size:10px"
-                  onclick="qOpenAnswer(${q.id},'${q.item_id||''}','${fromId}')">📝 Plantilla</button>
-              </div>
-              <div id="ans-form-${q.id}" style="display:${isPend?'block':'none'};margin-top:4px">
-                <textarea id="${taId}" rows="3"
-                  style="font-size:12px;margin-bottom:6px;width:100%;resize:vertical"
-                  placeholder="Escribí tu respuesta aquí..."></textarea>
-                <div style="display:flex;gap:6px;flex-wrap:wrap">
-                  <button class="btn btn-primary btn-sm" onclick="submitAns(${q.id})">✓ Enviar respuesta</button>
-                  <button class="btn btn-ghost btn-sm"
-                    onclick="document.getElementById('ans-form-${q.id}').style.display='none';document.getElementById('${taId}').value=''">Cancelar</button>
-                </div>
+            <!-- v92 [P4]: respuesta inline (textarea + acciones). Las plantillas
+                 viven en el panel lateral derecho y siempre están visibles. -->
+            <div id="ans-form-${q.id}" style="margin-top:8px;display:flex;flex-direction:column;gap:7px">
+              <textarea id="${taId}" rows="3"
+                onfocus="qSetActive(${q.id})"
+                onclick="qSetActive(${q.id})"
+                style="font-size:12.5px;width:100%;resize:vertical;min-height:80px"
+                placeholder="Escribí tu respuesta aquí o tocá una plantilla del panel derecho →"></textarea>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+                <button class="btn btn-primary btn-sm" onclick="submitAns(${q.id})">✓ Enviar respuesta</button>
+                <button class="btn btn-ghost btn-sm" onclick="document.getElementById('${taId}').value=''" title="Limpiar">🧹</button>
+                <button class="btn btn-ghost btn-xs" style="font-size:10px" onclick="qOpenLink('${taId}')" title="Insertar link de publicación">🔗 #Link</button>
+                <button class="btn btn-ghost btn-xs" style="font-size:10px;background:#ede9fe;color:#7c3aed;border-color:#c4b5fd" onclick="aiAnswerQ(${q.id},this)">🤖 IA Impala</button>
+                <button class="btn btn-ghost btn-xs" style="font-size:10px" onclick="qOpenAnswer(${q.id},'${q.item_id||''}','${fromId}')">📝 Plantilla extendida</button>
               </div>
             </div>`:''}
           </div>
         </div>
       </div>`;
     }).join('');
+
+    // v92 [P4]: si hay alguna pregunta pendiente y no hay activa, marcar la primera
+    if(!_qActiveId){
+      const firstPend = qs.find(q=>q.status==='UNANSWERED');
+      if(firstPend) _qActiveId = firstPend.id;
+    }
   }catch(e){
     console.warn('[renderQuestions] error:', e);
     el.innerHTML='<div style="color:var(--red);font-size:12.5px;padding:16px 0">⚠ Error al mostrar las preguntas. Reintentá recargar.</div>';
   }
+}
+
+// v92 [P4]: ID de la pregunta "activa" (donde se inserta el texto al tocar plantilla).
+// Por defecto la primera pendiente. Cambia al hacer focus/click en otro textarea.
+let _qActiveId = null;
+function qSetActive(qid){
+  _qActiveId = qid;
+  // resaltado visual sutil del textarea activo
+  document.querySelectorAll('#q-list textarea').forEach(t => {
+    t.style.borderColor = '';
+    t.style.boxShadow = '';
+  });
+  const ta = document.getElementById('ans-txt-'+qid);
+  if(ta){
+    ta.style.borderColor = 'var(--accent)';
+    ta.style.boxShadow = '0 0 0 2px rgba(79,142,247,0.15)';
+  }
+}
+
+function qRenderTemplatesPanel(qrs){
+  const el = document.getElementById('q-templates-list');
+  if(!el) return;
+  if(!qrs || !qrs.length){
+    el.innerHTML = '<div style="grid-column:1/-1;font-size:11.5px;color:var(--text3);padding:14px;border:1px dashed var(--border);border-radius:8px;text-align:center">Aún no creaste plantillas. Tocá ⚙️ Editar para empezar.</div>';
+    return;
+  }
+  el.innerHTML = qrs.map(qr =>
+    `<button class="qr-big-btn" style="background:${qr.color};color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;padding:14px 10px;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.08);transition:transform .1s,box-shadow .1s;line-height:1.25;text-align:center;min-height:54px;word-break:break-word"
+      onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 4px 8px rgba(0,0,0,0.15)'"
+      onmouseout="this.style.transform='';this.style.boxShadow='0 2px 4px rgba(0,0,0,0.08)'"
+      onclick="qInsertTemplate('${qr.text.replace(/'/g,"&#39;").replace(/\\/g,'\\\\')}')"
+    >${qr.label}</button>`
+  ).join('');
+}
+
+function qInsertTemplate(text){
+  // Inserta la plantilla en el textarea de la pregunta activa.
+  // Si no hay activa, intenta la primera pendiente del DOM.
+  let qid = _qActiveId;
+  if(!qid){
+    const firstTa = document.querySelector('#q-list textarea[id^="ans-txt-"]');
+    if(firstTa){
+      qid = firstTa.id.replace('ans-txt-','');
+      _qActiveId = qid;
+    }
+  }
+  if(!qid){
+    showToast('No hay preguntas pendientes para responder', 'warn');
+    return;
+  }
+  qInsertAtCursor('ans-txt-'+qid, text);
+  // Foco al textarea para que el usuario pueda seguir editando
+  const ta = document.getElementById('ans-txt-'+qid);
+  if(ta){ ta.focus(); qSetActive(qid); }
 }
 function initAI(){
   aiHistory=[
@@ -12142,7 +12877,7 @@ async function aiAnswerQ(qId, btn){
 
     var r = await fetch(WORKER+'/ai', {
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
       body:JSON.stringify({
         system:   systemPrompt,
         messages: [{role:'user', content:userMsg}],
@@ -12186,8 +12921,10 @@ function aiSaveRules(){
   localStorage.setItem('impala_ai_rules', JSON.stringify(_aiRules));
   // v68: sync automático a KV del Worker para multi-device
   if(typeof cloudSyncDebounced === 'function') cloudSyncDebounced();
-  showToast('✅ Reglas guardadas','success');
-  aiRunAll();
+  showToast('✅ Reglas guardadas. Tocá "↻ Refrescar feed" si querés re-analizar con los nuevos umbrales.','success');
+  // v87: ya NO disparamos aiRunAll automáticamente al guardar reglas — eso
+  // consumía 7 llamadas a IA cada vez que ajustabas un umbral. Ahora el usuario
+  // decide cuándo regenerar el feed con el botón explícito.
 }
 
 function aiLoadRules(){
@@ -12197,7 +12934,71 @@ function aiLoadRules(){
   });
 }
 
-function aiRunAll(){
+// v87: Caché del feed completo de IA con TTL de 6h.
+// Antes cada apertura de la sección "Asistente IA" disparaba 7 llamadas a IA
+// automáticamente. Si vos abrías la sección 7-8 veces al día, te quemabas
+// los 50 req/día gratuitos de OpenRouter sin darte cuenta.
+// Ahora el feed se cachea — la siguiente apertura dentro de 6h muestra el
+// cache sin consumir IA. Si querés un feed fresco, hay un botón "↻ Refrescar".
+const AI_FEED_CACHE_KEY = 'mlp_ai_feed_cache_v1';
+const AI_FEED_CACHE_TTL = 6 * 60 * 60 * 1000;  // 6 horas
+
+function _aiFeedSaveCache(){
+  // Guardamos el HTML de cada panel del feed para restaurar al volver
+  const cache = {
+    ts: Date.now(),
+    panels: {}
+  };
+  ['ai-dates', 'ai-opp', 'ai-comp', 'ai-stock', 'ai-fin', 'ai-coach-feed', 'ai-weekly']
+    .forEach(id => {
+      const el = document.getElementById(id);
+      if(el && el.innerHTML && !el.innerHTML.includes('spin')) {
+        cache.panels[id] = el.innerHTML;
+      }
+    });
+  try { localStorage.setItem(AI_FEED_CACHE_KEY, JSON.stringify(cache)); }
+  catch(e){ console.warn('[AI Feed] No se pudo cachear:', e.message); }
+}
+
+function _aiFeedLoadCache(){
+  try {
+    const raw = localStorage.getItem(AI_FEED_CACHE_KEY);
+    if(!raw) return null;
+    const cache = JSON.parse(raw);
+    if(!cache || !cache.ts) return null;
+    if(Date.now() - cache.ts > AI_FEED_CACHE_TTL) return null;  // expirado
+    return cache;
+  } catch(e){ return null; }
+}
+
+function aiRunAll(force){
+  // v87: Si NO se forzó manualmente, intentamos cargar del cache primero.
+  // El parámetro 'force' viene del botón "↻ Refrescar feed" que el usuario aprieta
+  // para regenerar a propósito.
+  if(!force){
+    const cache = _aiFeedLoadCache();
+    if(cache && cache.panels){
+      // Restaurar cada panel desde el cache (sin llamar a IA)
+      Object.keys(cache.panels).forEach(id => {
+        const el = document.getElementById(id);
+        if(el) el.innerHTML = cache.panels[id];
+      });
+      const ageMin = Math.round((Date.now() - cache.ts) / 60000);
+      // Mostrar aviso visual de que es cache (no fresh)
+      const badge = document.getElementById('ai-feed-cache-badge');
+      if(badge){
+        badge.style.display = 'inline-flex';
+        badge.title = 'Análisis generado hace ' + ageMin + ' min. Click en "↻ Refrescar feed" para regenerar con IA.';
+        badge.innerHTML = '🕒 cache de hace ' + ageMin + ' min';
+      }
+      console.log('[AI Feed] Cargado desde cache (' + ageMin + ' min de antigüedad). Sin consumir IA.');
+      return;
+    }
+  }
+  // Generar fresco (consume IA — 7 llamadas)
+  const badge = document.getElementById('ai-feed-cache-badge');
+  if(badge) badge.style.display = 'none';
+  console.log('[AI Feed] Generando fresco — consume 7 llamadas a IA');
   aiDatesAnalyze();
   aiOpportunities();
   aiCompetition();
@@ -12205,6 +13006,14 @@ function aiRunAll(){
   aiFinances();
   aiCoach();
   aiWeeklySummary();
+  // Guardar cache después de un delay (esperando que terminen las llamadas async)
+  setTimeout(_aiFeedSaveCache, 30000);  // 30s — tiempo suficiente para que respondan
+}
+
+// Función que se llama desde el botón "↻ Refrescar feed"
+function aiRefreshFeed(){
+  if(!confirm('Regenerar el feed completo consume ~7 llamadas a la IA. ¿Continuar?')) return;
+  aiRunAll(true);
 }
 
 // ── Utilidades ────────────────────────────────────────────────────────
@@ -12216,7 +13025,7 @@ async function aiAsk(systemPrompt, userMsg, targetId){
   try{
     var r = await fetch(WORKER+'/ai',{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
       body:JSON.stringify({
         system: systemPrompt,
         messages:[{role:'user',content:userMsg}],
@@ -13626,7 +14435,7 @@ async function calRunIA(){
   try{
     var r=await fetch(WORKER+'/ai',{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
       body:JSON.stringify({system:sys,messages:[{role:'user',content:prompt}],max_tokens:400,temperature:0.4})
     });
     var d=await r.json();
@@ -14119,12 +14928,22 @@ async function callClaude(prompt, history){
   const messages = history || [{role:'user', content:prompt}];
   let r, rawText;
   try {
-    r = await fetch(WORKER+'/ai', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({max_tokens:1000, temperature:0.3, messages})});
+    r = await fetch(WORKER+'/ai', {method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({max_tokens:1000, temperature:0.3, messages})});
     rawText = await r.text();
   } catch(e){ throw new Error('Sin conexion: '+e.message); }
   let d;
   try { d = JSON.parse(rawText); } catch(e){ throw new Error('Respuesta invalida: '+rawText.slice(0,80)); }
-  if(!r.ok||d.error){ throw new Error(typeof d.error==='string'?d.error:(d.error?.message||'Error '+r.status)); }
+  if(!r.ok||d.error){
+    // v96: log detallado en consola + error compacto en UI
+    if(d.details && Array.isArray(d.details)){
+      console.warn('[AI] Falla con detalle por proveedor:');
+      d.details.forEach(line => console.warn('  ·', line));
+    }
+    const errMsg = typeof d.error==='string'
+      ? d.error + (d.details?.length ? ' (detalle en consola)' : '')
+      : (d.error?.message || 'Error '+r.status);
+    throw new Error(errMsg);
+  }
   let text = d.content?.map(x=>x.text||'').join('').trim()||'';
   // Limpieza de muletillas de cortesia
   var cpats=[
@@ -14210,7 +15029,11 @@ function showSection(id){
   if(id==='reglas') initRules();
   if(id==='publicidad'){loadAdsData();}
   if(id==='bulk') renderPubs();
-  if(id==='woo-seo') wooSeoInit();
+  if(id==='woo-seo') {
+    wooSeoInit();
+    // v97 [Tema 2]: actualizar estado de ventas pendientes al entrar a la sección
+    if(typeof _pollWooNotifications === 'function') _pollWooNotifications();
+  }
   if(id==='quiebre-stock') qsInit();
 }
 
@@ -14547,6 +15370,346 @@ function startMessagePolling(){
 
 function stopMessagePolling(){
   if(_msgPollTimer){ clearInterval(_msgPollTimer); _msgPollTimer = null; }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// v97 [Tema 2]: NOTIFICACIONES DE VENTAS WOOCOMMERCE
+//
+// Fuente de datos: webhook de WooCommerce → Worker /webhook/woo → KV.
+// El Telegram lo dispara el Worker directamente. El panel solo consulta
+// /api/woo/notifications cada 5 min para refrescar el badge y mostrar
+// los toasts de ventas nuevas.
+//
+// Costo Cloudflare: 1 req cada 5 min = 288 reqs/día/panel.
+// (vs polling directo a WooCommerce que usaría más + sería irrelevante).
+// ══════════════════════════════════════════════════════════════════════
+var _wooPollTimer = null;
+var _wooLastSeenIds = new Set();   // IDs de órdenes ya vistas — para detectar nuevas
+var _wooFirstPoll = true;          // flag para no toastear todas en el primer ciclo
+const _WOO_POLL_MS = 5 * 60 * 1000; // 5 minutos
+
+async function _pollWooNotifications(){
+  if(!token || !userId) return;
+  try {
+    const r = await fetch(WORKER + '/api/woo/notifications', {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if(!r.ok) {
+      // 401 esperable durante reauth — no log
+      if(r.status !== 401) console.warn('[WooPoll] HTTP', r.status);
+      return;
+    }
+    const d = await r.json();
+    const notifs = d.notifications || [];
+    const pending = d.pendingCount || 0;
+
+    // ── Actualizar badge sidebar ──
+    const nb = document.getElementById('nb-woo');
+    if(nb){
+      nb.textContent = pending || '';
+      nb.style.display = pending > 0 ? 'inline-flex' : 'none';
+    }
+
+    // ── Actualizar card "Ventas pendientes" si está visible ──
+    const cnt = document.getElementById('woo-pending-count');
+    if(cnt) cnt.textContent = pending;
+    const link = document.getElementById('woo-pending-link');
+    if(link){
+      // Apuntar a WP-Admin > Pedidos filtrado por Procesando
+      // (necesitamos la URL base de WordPress, intentamos derivarla del primer permalink Woo)
+      const wpAdminUrl = (window._wooWpBaseUrl || 'https://tiendaimpala.com.ar') + '/wp-admin/edit.php?post_status=wc-processing&post_type=shop_order';
+      link.href = wpAdminUrl;
+    }
+
+    // v100 [Tema 2]: persistir las pendientes para render en tabla y ordenar
+    _wooPendingOrders = (d.pendingRecent || []).slice();
+    wooRenderPendingTable();
+
+    // v98 [Tema 2]: si no hay nada guardado todavía, exponer en consola un hint
+    // de cómo verificar el estado del webhook
+    if((d.totalStored || 0) === 0 && _wooFirstPoll){
+      console.log('[WooPoll] ℹ️ No hay notificaciones guardadas todavía. Si configuraste el webhook hace poco, dale 1-2 ventas nuevas para empezar a ver datos. Si querés cargar los pedidos en Procesando que YA tenés, tocá "🔄 Importar pendientes" en la sección SEO Tienda Woo.');
+      console.log('[WooPoll] Para diagnóstico abrí: ' + WORKER + '/webhook/woo-diag');
+    }
+
+    // ── Detectar ventas nuevas para toast ──
+    // Solo en estado "processing" (= venta confirmada que requiere acción)
+    if(!_wooFirstPoll){
+      const newProcessing = notifs.filter(n =>
+        n.status === 'processing' && !_wooLastSeenIds.has(n.orderId)
+      );
+      newProcessing.forEach(n => {
+        showToast(
+          '🛒 Nueva venta en tu tienda web! ' + n.productSummary + ' — $' + (n.total || 0).toLocaleString('es-AR'),
+          'success',
+          7000
+        );
+        if(typeof playNotifSound === 'function') playNotifSound('venta');
+      });
+    }
+    // Refrescar set con todos los IDs procesando
+    _wooLastSeenIds = new Set(notifs.filter(n => n.status === 'processing').map(n => n.orderId));
+    _wooFirstPoll = false;
+
+  } catch(e) {
+    console.warn('[WooPoll] Error:', e.message);
+  }
+}
+
+function startWooPolling(){
+  if(_wooPollTimer) clearInterval(_wooPollTimer);
+  _wooFirstPoll = true; // primer ciclo no toastea (solo carga estado inicial)
+  // Primera consulta a los 30s del boot, luego cada 5 min
+  // v101: primer poll a los 10s del boot (antes 30s) para ver ventas más rápido,
+  // luego cada 5 min para no saturar Cloudflare
+  setTimeout(_pollWooNotifications, 10 * 1000);
+  _wooPollTimer = setInterval(_pollWooNotifications, _WOO_POLL_MS);
+  console.log('[WooPoll] Iniciado — cada', _WOO_POLL_MS/60000, 'min');
+}
+function stopWooPolling(){
+  if(_wooPollTimer){ clearInterval(_wooPollTimer); _wooPollTimer = null; }
+}
+
+// v98 [Tema 2]: backfill manual de pedidos en "processing" que ya existían
+// antes de configurar el webhook. Se llama desde el botón "🔄 Importar pendientes".
+async function wooBackfillPending(btn){
+  if(!token){ showToast('Necesitás estar logueado', 'warn'); return; }
+  const orig = btn ? btn.innerHTML : '';
+  if(btn){ btn.disabled = true; btn.innerHTML = '⏳ Importando...'; }
+  try{
+    const r = await fetch(WORKER + '/api/woo/backfill-pending', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+    });
+    const d = await r.json();
+    if(!r.ok || d.error){
+      showToast('Error importando: ' + (d.error || ('HTTP '+r.status)), 'error', 6000);
+      console.warn('[WooBackfill] Error:', d);
+    } else {
+      showToast('✅ ' + d.added + ' pedido(s) importado(s) — ahora hay ' + d.processing_now + ' en Procesando', 'success', 5000);
+      // Refrescar el polling para ver los cambios reflejados
+      _wooFirstPoll = true;  // no toastear los recién importados como "nuevos"
+      _pollWooNotifications();
+    }
+  }catch(e){
+    showToast('Error de red: ' + e.message, 'error', 5000);
+  }finally{
+    if(btn){ btn.disabled = false; btn.innerHTML = orig; }
+  }
+}
+
+// v98 [Tema 2]: abrir el endpoint de diagnóstico Woo en una pestaña nueva
+function wooOpenDiag(){
+  window.open(WORKER + '/webhook/woo-diag', '_blank', 'noopener');
+}
+
+// v102 [Tema 2]: sincroniza los pedidos en KV contra WP-API. Elimina del listado
+// las órdenes que ya no estén en estado "processing" en WordPress (típico cuando
+// el webhook de un cambio se perdió por algún motivo, o el pedido fue eliminado).
+async function wooSyncPending(btn){
+  if(!token){ showToast('Necesitás estar logueado', 'warn'); return; }
+  const orig = btn ? btn.innerHTML : '';
+  if(btn){ btn.disabled = true; btn.innerHTML = '⏳ Sincronizando...'; }
+  try{
+    const r = await fetch(WORKER + '/api/woo/sync-pending', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+    });
+    const d = await r.json();
+    if(!r.ok || d.error){
+      showToast('Error sincronizando: ' + (d.error || ('HTTP '+r.status)), 'error', 6000);
+      console.warn('[WooSync] Error:', d);
+    } else {
+      const msg = d.removed > 0
+        ? '🧹 ' + d.removed + ' pedido(s) eliminado(s) del listado · ' + (d.checked - d.removed) + ' siguen en Procesando'
+        : '✅ Todo sincronizado · ' + d.checked + ' pedido(s) verificado(s), ninguno cambió';
+      showToast(msg, 'success', 5000);
+      console.log('[WooSync] Detalles:', d.details);
+      // Refrescar el listado en panel
+      _pollWooNotifications();
+    }
+  }catch(e){
+    showToast('Error de red: ' + e.message, 'error', 5000);
+  }finally{
+    if(btn){ btn.disabled = false; btn.innerHTML = orig; }
+  }
+}
+
+// v103 [Tema 2]: pre-cargar cache de productos Woo desde KV en segundo plano.
+// Esto permite que wooLookupImageById funcione apenas el panel arranca, sin
+// requerir que el usuario abra la sección SEO Tienda Woo manualmente.
+// La función se autoabortó si ya hay cache cargada (idempotente y barata).
+async function _wseoPreloadCache(){
+  if(!token || !userId) return;
+  // Si ya hay cache en memoria (por wooSeoInit previo o llamada anterior), no hacemos nada
+  if(typeof _wseoLoaded !== 'undefined' && _wseoLoaded) return;
+  if(typeof _wseoProducts !== 'undefined' && Array.isArray(_wseoProducts) && _wseoProducts.length > 0) return;
+  try{
+    const r = await fetch(WORKER + '/woo-seo-cache', {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if(!r.ok) return;
+    const d = await r.json();
+    if(Array.isArray(d.products) && d.products.length){
+      _wseoProducts = d.products;
+      if(typeof _wseoCachedAt !== 'undefined') _wseoCachedAt = d.cachedAt || null;
+      console.log('[WseoPreload] Cache precargada — '+d.products.length+' productos disponibles para lookup de imágenes');
+      // Si el listado de pendientes ya está renderizado, re-renderizar para que
+      // las imágenes faltantes aparezcan ahora con el lookup local
+      if(typeof wooRenderPendingTable === 'function'
+         && typeof _wooPendingOrders !== 'undefined'
+         && _wooPendingOrders.length > 0){
+        wooRenderPendingTable();
+      }
+    }
+  }catch(e){ /* silent */ }
+}
+
+// v103 [Tema 2]: dado un product_id de Woo, buscar el thumbnail en el cache
+// local _wseoProducts. Retorna URL o null si no encuentra.
+function wooLookupImageById(productId){
+  if(!productId) return null;
+  if(typeof _wseoProducts === 'undefined' || !Array.isArray(_wseoProducts)) return null;
+  const p = _wseoProducts.find(x => Number(x.id) === Number(productId));
+  return (p && p.thumbnail) ? p.thumbnail : null;
+}
+
+// v100 [Tema 2]: estado y render del listado de pedidos en Procesando
+var _wooPendingOrders = [];
+var _wooPendingSort = { col: 'dateCreated', dir: -1 }; // -1 = desc, 1 = asc
+
+function wooPendingSort(col){
+  if(_wooPendingSort.col === col) _wooPendingSort.dir *= -1;
+  else { _wooPendingSort.col = col; _wooPendingSort.dir = -1; }
+  // limpiar todas las flechas y poner la nueva
+  ['orderId','productSummary','customer','phone','subtotal','shippingMethod','shippingTotal','paymentDisplay','dateCreated'].forEach(c => {
+    const el = document.getElementById('woo-sort-'+c);
+    if(el) el.textContent = (c === _wooPendingSort.col) ? (_wooPendingSort.dir > 0 ? '↑' : '↓') : '';
+  });
+  wooRenderPendingTable();
+}
+
+// v101 [Tema 2]: arma el link wa.me con el mensaje pre-armado de envío.
+// Acepta cualquier formato de teléfono argentino y lo normaliza a formato
+// móvil internacional: 549XXXXXXXXXX (sin espacios ni símbolos).
+//
+// Casos cubiertos:
+//   "1127537101"       → 5491127537101
+//   "11 2753 7101"     → 5491127537101
+//   "+54 9 11 2753..." → 5491127537101 (ya tenía 54 y 9)
+//   "5491127537101"    → 5491127537101 (ya correcto)
+//   "541127537101"     → 5491127537101 (54 sin 9, agregamos 9)
+//   "01127537101"      → 5491127537101 (con 0 inicial)
+//   "(11) 1234-5678"   → 5491112345678
+function wooBuildWaLink(rawPhone){
+  // Limpiar todo lo que no sea dígito
+  let p = String(rawPhone || '').replace(/\D/g, '');
+  if(!p || p.length < 8) return '#'; // muy corto para ser teléfono válido
+  // Quitar 0 inicial si aparece (ej: 01127537101 → 1127537101)
+  if(p.startsWith('0')) p = p.slice(1);
+  // Si NO empieza con 54, prefijar (asumimos AR)
+  if(!p.startsWith('54')) {
+    p = '549' + p;
+  } else if(!p.startsWith('549')) {
+    // Empieza con 54 pero falta el 9 → insertarlo
+    p = '549' + p.slice(2);
+  }
+  // Mensaje por defecto (template del usuario)
+  const msg = encodeURIComponent(
+    'Buen día 👋\n' +
+    'Tu pedido ya está en camino sucursal/domicilio: \n' +
+    'Te paso la web donde podes seguir el trayecto: \n' +
+    'https://www.correoargentino.com.ar/formularios/e-commerce\n' +
+    'y el Nº de seguimiento: \n' +
+    'Gracias, saludos'
+  );
+  return 'https://wa.me/' + p + '?text=' + msg;
+}
+
+function wooRenderPendingTable(){
+  const card  = document.getElementById('woo-pending-list-card');
+  const tbody = document.getElementById('woo-pending-tbody');
+  const cnt   = document.getElementById('woo-pending-list-count');
+  if(!card || !tbody) return;
+
+  const orders = (_wooPendingOrders || []).slice();
+  if(cnt) cnt.textContent = orders.length;
+
+  // Ocultar el card si no hay pedidos pendientes
+  if(orders.length === 0){
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = '';
+
+  // Ordenar
+  const col = _wooPendingSort.col;
+  const dir = _wooPendingSort.dir;
+  orders.sort((a,b) => {
+    let va = a[col], vb = b[col];
+    // Numéricos
+    if(col === 'subtotal' || col === 'shippingTotal' || col === 'orderId'){
+      va = Number(va) || 0; vb = Number(vb) || 0;
+      return (va - vb) * dir;
+    }
+    // Fechas
+    if(col === 'dateCreated'){
+      va = new Date(va || 0).getTime();
+      vb = new Date(vb || 0).getTime();
+      return (va - vb) * dir;
+    }
+    // Texto
+    va = (va || '').toString().toLowerCase();
+    vb = (vb || '').toString().toLowerCase();
+    return va.localeCompare(vb) * dir;
+  });
+
+  // Render filas
+  const wpBase = window._wooWpBaseUrl || 'https://tiendaimpala.com.ar';
+  tbody.innerHTML = orders.map(o => {
+    // Formato fecha argentina
+    let fechaStr = '—';
+    if(o.dateCreated){
+      try {
+        const dt = new Date(o.dateCreated);
+        fechaStr = dt.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'2-digit'})
+                  +' '+dt.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+      } catch(e){}
+    }
+    // Link al pedido en WP-Admin
+    const editUrl = wpBase + '/wp-admin/post.php?post=' + o.orderId + '&action=edit';
+    // Producto: cortar si es muy largo
+    const prodShort = (o.productSummary || '—').length > 60
+      ? (o.productSummary || '').slice(0,57) + '...'
+      : (o.productSummary || '—');
+    // v103 [Tema 2]: 3 niveles de fallback para la imagen:
+    //   1) o.productImage del webhook/backfill (puede venir vacío en algunas versiones de Woo)
+    //   2) lookup en _wseoProducts por productId (cache SEO ya cargada)
+    //   3) placeholder con emoji 📦
+    const imgUrl = o.productImage
+      || (o.productId ? wooLookupImageById(o.productId) : null)
+      || '';
+    return `<tr>
+      <td style="white-space:nowrap"><a href="${editUrl}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);text-decoration:none;font-weight:600">#${o.orderId}</a></td>
+      <td style="text-align:center;padding:6px 4px">${
+        imgUrl
+          ? `<img src="${imgUrl}" loading="lazy" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid var(--border);display:block;margin:0 auto" onerror="this.style.display='none'">`
+          : `<div style="width:56px;height:56px;background:var(--bg3);border-radius:6px;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;margin:0 auto;font-size:18px;color:var(--text3)" title="Sin imagen — abrí la sección SEO Tienda Woo y tocá Cargar productos para activar el lookup local">📦</div>`
+      }</td>
+      <td style="font-size:11.5px" title="${(o.productSummary||'').replace(/"/g,'&quot;')}">${prodShort}</td>
+      <td style="font-size:11.5px">${o.customer || '—'}</td>
+      <td style="font-size:11.5px;white-space:nowrap">${
+        o.phone
+          ? `<a href="${wooBuildWaLink(o.phone)}" target="_blank" rel="noopener noreferrer" style="color:#25d366;text-decoration:none;font-weight:500" title="Abrir WhatsApp con mensaje pre-armado de envío">📱 ${o.phone}</a>`
+          : '—'
+      }</td>
+      <td style="text-align:right;font-weight:600;white-space:nowrap">$${(o.subtotal || 0).toLocaleString('es-AR')}</td>
+      <td style="font-size:11.5px">${o.shippingMethod || '—'}</td>
+      <td style="text-align:right;white-space:nowrap;color:var(--text3)">${o.shippingTotal > 0 ? '$'+(o.shippingTotal).toLocaleString('es-AR') : '—'}</td>
+      <td style="font-size:11.5px">${o.paymentDisplay || '—'}</td>
+      <td style="font-size:11px;white-space:nowrap;color:var(--text3)">${fechaStr}</td>
+    </tr>`;
+  }).join('');
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -15873,10 +17036,27 @@ async function fetchPreviewML() {
       stock      = mlData.available_quantity || 1;
       attributes = mlData.attributes || [];
       variations = mlData.variations || [];
+      // v89 [P4]: Upscale a alta resolución (~1200px). ML por defecto sirve ~500px
+      // tanto en `url` como en `secure_url`. El truco: insertar "_2X" después de
+      // "D_NQ_NP". Esto es defensa en profundidad — el Worker también lo aplica.
+      var _wooUpscale = function(rawUrl){
+        if(!rawUrl) return rawUrl;
+        var u = String(rawUrl).replace(/^http:\/\//,'https://');
+        if(!/mlstatic\.com\//.test(u)) return u;
+        if(/D_NQ_NP_2X_/.test(u)) return u;
+        if(/D_NQ_NP_/.test(u))    return u.replace('D_NQ_NP_','D_NQ_NP_2X_');
+        if(/D_Q_NP_/.test(u))     return u.replace('D_Q_NP_','D_Q_NP_2X_');
+        return u;
+      };
       if (mlData.pictures && mlData.pictures.length) {
-        mlData.pictures.forEach(function(p) { var u = p.secure_url || p.url || ''; if (u) pictures.push(u); });
+        mlData.pictures.forEach(function(p) {
+          // Preferir secure_url > url. NUNCA usar thumbnail (90x90).
+          var u = p.secure_url || p.url || '';
+          if (u) pictures.push(_wooUpscale(u));
+        });
       }
-      if (!pictures.length && mlData.thumbnail) pictures.push(mlData.thumbnail);
+      // Solo caer al thumbnail si pictures viene vacío (caso muy raro)
+      if (!pictures.length && mlData.thumbnail) pictures.push(_wooUpscale(mlData.thumbnail));
       sku = wooExtractAttr(attributes, 'SELLER_SKU');
       ean = wooExtractAttr(attributes, 'GTIN') || wooExtractAttr(attributes, 'EAN');
 
@@ -16112,7 +17292,7 @@ async function publishToWoo() {
       dimensions:  { length: dims.length, width: dims.width, height: dims.height }
     };
 
-    var res  = await fetch(WORKER + '/woo/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    var res  = await fetch(WORKER + '/woo/import', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer '+token }, body: JSON.stringify(payload) });
     var data = await res.json();
     if (res.status === 409) { showToast('Ya existe ese producto en WooCommerce (omitido)', 'warn'); return; }
     if (!res.ok || !data.ok) throw new Error(data.error || data.message || 'Error desconocido');
@@ -16267,7 +17447,12 @@ async function fetchBackup() {
       // v68: persistir en localStorage para que funcione offline / al reabrir
       try{ localStorage.setItem(RULES_LS_KEY, JSON.stringify(activeRules)); }catch(e){}
     }
-    if (Array.isArray(data.competitors)){
+    if (Array.isArray(data.competitors) && data.competitors.length > 0){
+      // v88: BUG FIX — antes esto sobrescribía SIEMPRE _savedCompetitors,
+      // incluso si /api/backup tenía competitors:[] viejos. Como los competidores
+      // se guardan principalmente en /api/settings (vía saveCompetidor), un
+      // /api/backup con array vacío pisaba lo cargado correctamente.
+      // Ahora solo sobrescribe si el backup trae competidores reales.
       _savedCompetitors = data.competitors;
     }
 
@@ -16393,6 +17578,277 @@ async function pushFullBackup() {
 
 // Alias legacy (calls que ya existian en el codigo)
 var saveTasks = pushFullBackup;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v86: Sistema de Backup local (Export/Import JSON)
+// ═══════════════════════════════════════════════════════════════════════════
+// Permite descargar/restaurar todos los datos del panel (excluye tokens y
+// configuración de IA por seguridad). Sirve como red de seguridad ante:
+// - Pérdida de datos por relogin/limpieza de localStorage
+// - Bug que sobrescribe el KV con versión vacía
+// - Migración entre cuentas/dispositivos
+// - Auto-recordatorio cada 7 días para que no te olvides
+//
+// Storage key: 'mlp_last_backup_export' = timestamp del último export.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const BKP_STORAGE_KEY = 'mlp_last_backup_export';
+const BKP_REMINDER_DAYS = 7;
+
+// Cuándo fue el último export — para mostrar el badge de aviso
+function _bkpDaysSinceLast(){
+  const ts = parseInt(localStorage.getItem(BKP_STORAGE_KEY) || '0', 10);
+  if(!ts) return 999;  // nunca exportó → tratamos como "muy viejo"
+  return Math.floor((Date.now() - ts) / 86400000);
+}
+
+// Activar el dot ámbar en el botón si hace >7 días que no exporta
+function _bkpUpdateWarnDot(){
+  const dot = document.getElementById('bkp-warn-dot');
+  if(!dot) return;
+  const days = _bkpDaysSinceLast();
+  if(days >= BKP_REMINDER_DAYS){
+    dot.style.display = 'block';
+  } else {
+    dot.style.display = 'none';
+  }
+}
+
+// Construir el objeto de backup desde las variables globales actuales
+function _bkpBuildPayload(){
+  return {
+    _meta: {
+      panelVersion: 'v86',
+      exportedAt: new Date().toISOString(),
+      userId: typeof userId !== 'undefined' ? userId : null,
+      nickname: (typeof APP_CONFIG !== 'undefined' && APP_CONFIG.STORE_NAME) ? APP_CONFIG.STORE_NAME : null,
+    },
+    tasks:        Array.isArray(_tasks) ? _tasks : [],
+    rpRules:      Array.isArray(rpRules) ? rpRules : [],
+    activeRules:  Array.isArray(activeRules) ? activeRules : [],
+    competitors:  Array.isArray(_savedCompetitors) ? _savedCompetitors : [],
+    quickReplies: typeof qGetQR === 'function' ? (qGetQR() || []) : [],
+    template:     typeof qGetTmpl === 'function' ? (qGetTmpl() || {}) : {},
+    calCustom:    (() => {
+      try { return JSON.parse(localStorage.getItem('impala_cal_custom') || '[]'); } catch { return []; }
+    })(),
+    bdays: (() => {
+      try { return JSON.parse(localStorage.getItem('impala_cal_birthdays') || '[]'); } catch { return []; }
+    })(),
+    pcHistory: (() => {
+      try { return JSON.parse(localStorage.getItem('impala_calc_history') || '[]'); } catch { return []; }
+    })(),
+    // No incluimos: AI rules, tokens, claves API, datos de cache de visitas/orders
+  };
+}
+
+// Descargar como archivo .json
+function bkpExport(){
+  try{
+    const payload = _bkpBuildPayload();
+    const json = JSON.stringify(payload, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+
+    const today = new Date();
+    const dateStr = today.toISOString().slice(0, 10);
+    const timeStr = today.toTimeString().slice(0, 5).replace(':', '');
+    const fname = 'panel-backup-' + (payload._meta.nickname || 'usuario') + '-' + dateStr + '-' + timeStr + '.json';
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fname.replace(/\s+/g, '_');
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    // Marcar el momento del export
+    localStorage.setItem(BKP_STORAGE_KEY, String(Date.now()));
+    _bkpUpdateWarnDot();
+
+    // Resumen para el usuario
+    const items = payload.tasks.length + ' tareas, ' +
+                  payload.competitors.length + ' competidores, ' +
+                  payload.activeRules.length + ' reglas, ' +
+                  payload.rpRules.length + ' reglas precio, ' +
+                  payload.quickReplies.length + ' respuestas rápidas, ' +
+                  payload.calCustom.length + ' calendario, ' +
+                  payload.bdays.length + ' cumpleaños, ' +
+                  payload.pcHistory.length + ' rentabilidad';
+    showToast('Backup descargado: ' + items, 'ok');
+    console.log('[Backup] Export OK →', fname, payload._meta);
+    return true;
+  }catch(e){
+    console.error('[Backup] Export falló:', e);
+    showToast('Error al exportar: ' + e.message, 'err');
+    return false;
+  }
+}
+
+// Importar desde archivo (con confirmación múltiple por seguridad)
+async function bkpImport(file){
+  if(!file){ return; }
+  try{
+    const text = await file.text();
+    const data = JSON.parse(text);
+
+    // Validar estructura mínima
+    if(!data || typeof data !== 'object' || !data._meta){
+      throw new Error('Archivo inválido — no parece un backup del panel');
+    }
+
+    // Mostrar resumen antes de aplicar
+    const summary = 'Backup del ' +
+      (data._meta.exportedAt ? new Date(data._meta.exportedAt).toLocaleString('es-AR') : 'sin fecha') +
+      '\nUsuario: ' + (data._meta.nickname || data._meta.userId || 'desconocido') +
+      '\nVersión panel: ' + (data._meta.panelVersion || '?') +
+      '\n\nContenido:' +
+      '\n  • Tareas: ' + (data.tasks || []).length +
+      '\n  • Competidores: ' + (data.competitors || []).length +
+      '\n  • Reglas alertas: ' + (data.activeRules || []).length +
+      '\n  • Reglas precio: ' + (data.rpRules || []).length +
+      '\n  • Respuestas rápidas: ' + (data.quickReplies || []).length +
+      '\n  • Calendario: ' + (data.calCustom || []).length +
+      '\n  • Cumpleaños: ' + (data.bdays || []).length +
+      '\n  • Rentabilidad: ' + (data.pcHistory || []).length;
+
+    const confirm1 = confirm(
+      'IMPORTAR BACKUP\n\n' + summary + '\n\n' +
+      '⚠️ Esto SOBRESCRIBE todos los datos actuales con los del archivo.\n' +
+      'Los datos actuales se perderán definitivamente.\n\n' +
+      '¿Querés continuar?'
+    );
+    if(!confirm1) return;
+
+    const confirm2 = confirm(
+      '⚠️ ÚLTIMA CONFIRMACIÓN\n\n' +
+      'Si tenés datos importantes sin exportar, cancelá y EXPORTÁ PRIMERO.\n\n' +
+      '¿Aplicar el backup ahora? (no se puede deshacer)'
+    );
+    if(!confirm2) return;
+
+    // Aplicar cada sección si está presente en el JSON
+    if(Array.isArray(data.tasks))        _tasks = data.tasks;
+    if(Array.isArray(data.rpRules))      rpRules = data.rpRules;
+    if(Array.isArray(data.activeRules))  activeRules = data.activeRules;
+    if(Array.isArray(data.competitors))  _savedCompetitors = data.competitors;
+    // Quick replies y template usan setters internos
+    if(Array.isArray(data.quickReplies) && typeof qSaveQR === 'function') qSaveQR(data.quickReplies);
+    if(data.template && typeof qWriteTmpl === 'function') qWriteTmpl(data.template);
+    // Calendario y cumpleaños van a localStorage directo
+    if(Array.isArray(data.calCustom)) localStorage.setItem('impala_cal_custom', JSON.stringify(data.calCustom));
+    if(Array.isArray(data.bdays))     localStorage.setItem('impala_cal_birthdays', JSON.stringify(data.bdays));
+    if(Array.isArray(data.pcHistory)) localStorage.setItem('impala_calc_history', JSON.stringify(data.pcHistory));
+
+    // v88: BUG FIX — el panel tiene 2 endpoints de KV separados:
+    //   /api/backup  → tasks, calendar, bdays, pcHistory, etc.
+    //   /api/settings → quickReplies, template, rpRules, activeRules, COMPETITORS
+    // Antes solo llamábamos pushFullBackup() que escribe en /api/backup, pero
+    // los competidores se leen desde /api/settings. Por eso al recargar el
+    // panel no aparecían los competidores importados — quedaban en memoria
+    // pero el endpoint que los lee tenía la versión vieja.
+    // Ahora persistimos en AMBOS endpoints.
+    if(typeof pushFullBackup === 'function') await pushFullBackup();
+    if(typeof saveRemoteSettings === 'function') await saveRemoteSettings();
+
+    // Re-render de las secciones afectadas
+    if(typeof _renderBoard === 'function') _renderBoard();
+    if(typeof renderRules === 'function') renderRules();
+    if(typeof rpRenderList === 'function') rpRenderList();
+
+    showToast('✓ Backup restaurado. Recargá la página para ver todos los cambios.', 'ok');
+    setTimeout(() => {
+      if(confirm('¿Recargar la página ahora para refrescar todas las secciones?')) location.reload();
+    }, 1500);
+
+  }catch(e){
+    console.error('[Backup] Import falló:', e);
+    alert('Error al importar el backup:\n\n' + e.message + '\n\n(Verificá que sea un archivo .json válido del panel)');
+  }
+}
+
+// Modal del Backup
+function bkpOpenModal(){
+  let modal = document.getElementById('bkp-modal');
+  if(modal){ modal.remove(); }
+  modal = document.createElement('div');
+  modal.id = 'bkp-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.onclick = (e) => { if(e.target === modal) modal.remove(); };
+
+  const days = _bkpDaysSinceLast();
+  const lastTs = parseInt(localStorage.getItem(BKP_STORAGE_KEY) || '0', 10);
+  const lastStr = lastTs ? new Date(lastTs).toLocaleString('es-AR') : 'Nunca';
+  const isWarn = days >= BKP_REMINDER_DAYS;
+  const warnBg = isWarn ? '#fef3c7' : '#dbeafe';
+  const warnBd = isWarn ? '#f59e0b' : '#3b82f6';
+  const warnTxt = isWarn ? '⚠️ Hace ' + days + ' días que no hacés un backup. Te recomiendo exportar AHORA.' :
+                           '✓ Último backup: ' + lastStr;
+
+  modal.innerHTML = `
+    <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;max-width:560px;width:100%;padding:22px;box-shadow:0 10px 40px rgba(0,0,0,.25);color:#111827">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px">
+        <div>
+          <div style="font-size:17px;font-weight:700;color:#111827">💼 Backup del Panel</div>
+          <div style="font-size:12.5px;color:#6b7280;margin-top:4px">Descargá un .json con tus datos para restaurar después si pasa algo.</div>
+        </div>
+        <button onclick="document.getElementById('bkp-modal').remove()" style="background:#fff;border:1px solid #d1d5db;color:#374151;cursor:pointer;font-size:13px;padding:6px 12px;border-radius:6px;font-weight:600">✕</button>
+      </div>
+
+      <div style="background:${warnBg};border:1px solid ${warnBd};border-radius:8px;padding:10px 12px;margin-bottom:16px;font-size:12.5px;color:#1f2937">
+        ${warnTxt}
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+        <button onclick="bkpExport();document.getElementById('bkp-modal').remove();" style="background:#16a34a;color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:5px">
+          <span style="font-size:24px">📥</span>
+          <span>Exportar backup</span>
+          <span style="font-size:10.5px;opacity:.85;font-weight:400">Descarga .json con tus datos</span>
+        </button>
+        <button onclick="document.getElementById('bkp-import-input').click()" style="background:#3b82f6;color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:5px">
+          <span style="font-size:24px">📤</span>
+          <span>Importar backup</span>
+          <span style="font-size:10.5px;opacity:.85;font-weight:400">Restaurar desde .json</span>
+        </button>
+      </div>
+
+      <input type="file" id="bkp-import-input" accept="application/json,.json" style="display:none" onchange="bkpImport(this.files[0]);document.getElementById('bkp-modal').remove();this.value='';" />
+
+      <details style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:8px 12px;font-size:12px">
+        <summary style="cursor:pointer;color:#374151;font-weight:600">¿Qué incluye el backup?</summary>
+        <div style="margin-top:8px;color:#4b5563;line-height:1.6">
+          ✓ Tareas / notas pendientes<br>
+          ✓ Competidores y links de seguimiento<br>
+          ✓ Reglas de alertas automáticas<br>
+          ✓ Reglas de precios automáticos (repricing)<br>
+          ✓ Respuestas rápidas + template de mensaje<br>
+          ✓ Calendario estratégico (eventos personalizados)<br>
+          ✓ Cumpleaños registrados<br>
+          ✓ Historial de calculadora de rentabilidad<br>
+          <br>
+          <span style="color:#6b7280;font-size:11px">No incluye: tokens, claves API, AI Rules, ni cache de visitas/órdenes (eso se reconstruye solo de ML).</span>
+        </div>
+      </details>
+    </div>`;
+  document.body.appendChild(modal);
+}
+
+// Inicializar el sistema de backup al cargar el panel
+function _bkpInit(){
+  _bkpUpdateWarnDot();
+  // Refrescar el dot cada 6h por si pasa el threshold mientras el panel está abierto
+  setInterval(_bkpUpdateWarnDot, 6 * 60 * 60 * 1000);
+}
+document.addEventListener('DOMContentLoaded', _bkpInit);
+
+// Atajo de teclado Ctrl+B / Cmd+B abre el modal
+document.addEventListener('keydown', function(e){
+  if((e.ctrlKey || e.metaKey) && e.key && e.key.toLowerCase() === 'b'){
+    e.preventDefault();
+    bkpOpenModal();
+  }
+});
 
 // ── addTask ───────────────────────────────────────────────────────────────────
 function addTask() {
@@ -17416,7 +18872,7 @@ function wseoSort(col){
   if(_wseoState.sortCol===col) _wseoState.sortDir *= -1;
   else{ _wseoState.sortCol=col; _wseoState.sortDir = (col==='seo') ? 1 : -1; }
   _wseoState.page = 1;
-  ['status','price','stock','sold','sku','seo'].forEach(c=>{
+  ['created','status','price','stock','sold','sku','seo'].forEach(c=>{
     const el = document.getElementById('wseo-sort-'+c);
     if(el) el.innerHTML = sortArrow(c, _wseoState.sortCol, _wseoState.sortDir);
   });
@@ -17537,6 +18993,10 @@ function wseoGetFilteredRows(){
   rows.sort((a,b)=>{
     let va, vb;
     switch(col){
+      case 'created': // v89 [P6]: ordenar por fecha de creación (timestamp)
+        va = a.date_created ? new Date(a.date_created).getTime() : 0;
+        vb = b.date_created ? new Date(b.date_created).getTime() : 0;
+        return (vb-va)*(dir>0?1:-1);
       case 'status': va=(a.status||''); vb=(b.status||''); return va.localeCompare(vb)*dir;
       case 'price':  va=parseFloat(a.price||0); vb=parseFloat(b.price||0); return (vb-va)*(dir>0?1:-1);
       case 'stock':  va=(a.stock_quantity??-1); vb=(b.stock_quantity??-1); return (vb-va)*(dir>0?1:-1);
@@ -17555,7 +19015,7 @@ function wseoRenderTable(){
   if(!tbody) return;
 
   // Sincronizar flechas en encabezados
-  ['status','price','stock','sold','sku','seo'].forEach(c=>{
+  ['created','status','price','stock','sold','sku','seo'].forEach(c=>{
     const el = document.getElementById('wseo-sort-'+c);
     if(el) el.innerHTML = sortArrow(c, _wseoState.sortCol, _wseoState.sortDir);
   });
@@ -17572,7 +19032,7 @@ function wseoRenderTable(){
   if(countEl) countEl.textContent = total ? total+' productos · página '+_wseoState.page+'/'+pages : 'Sin resultados';
 
   if(!rows.length){
-    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text3)">Sin productos para este filtro.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:24px;color:var(--text3)">Sin productos para este filtro.</td></tr>';
     wseoRenderPagination(pages, total);
     return;
   }
@@ -17621,6 +19081,20 @@ function wseoRenderTable(){
           </div>
         </div>
       </td>
+      <td style="white-space:nowrap;text-align:center">${(()=>{
+        // v89 [P6]: clon de la columna CREADA del Analizador SEO de ML
+        const dc = p.date_created;
+        if(!dc) return '<span style="font-size:10.5px;color:var(--text3)">—</span>';
+        const d = new Date(dc);
+        if(isNaN(d.getTime())) return '<span style="font-size:10.5px;color:var(--text3)">—</span>';
+        const dd = String(d.getDate()).padStart(2,'0');
+        const mm = String(d.getMonth()+1).padStart(2,'0');
+        const yy = d.getFullYear();
+        const ageDays = Math.floor((Date.now()-d.getTime())/(1000*60*60*24));
+        const ageColor = ageDays<30 ? 'var(--green)' : ageDays<180 ? 'var(--text)' : 'var(--text3)';
+        return '<div style="font-size:11px;font-weight:600;color:'+ageColor+'">'+dd+'/'+mm+'/'+yy+'</div>'
+          + '<div style="font-size:9.5px;color:var(--text3);margin-top:1px">'+ageDays+'d</div>';
+      })()}</td>
       <td style="text-align:center;white-space:nowrap;font-size:11px" id="wseo-status-cell-${p.id}">
         <span style="cursor:pointer" onclick="wseoCycleStatus(${p.id})" title="Clic para cambiar estado">${stLabel} ✎</span>
       </td>
@@ -17945,7 +19419,9 @@ var _qsState = {
   page: 1, perPage: 50,
   sortCol: 'dos', sortDir: 1,  // días de stock ASC (los más críticos primero)
   filter: null,                // quickFilter desde tarjetas o chips
-  statusFilter: null,          // null = todas (activas, pausadas, cerradas, inactivas)
+  // v97 [Tema 1]: por defecto filtramos solo publicaciones activas. Antes era null
+  // (Todas) y mostraba pausadas/cerradas/inactivas que casi siempre son ruido.
+  statusFilter: 'active',
 };
 
 // ── Init: al entrar a la sección, calcula a partir de allItems + allOrders ────
