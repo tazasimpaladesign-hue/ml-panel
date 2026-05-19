@@ -723,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v106 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v107 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -8101,61 +8101,70 @@ async function loadSEOMetrics(){
 async function analyzeSEOAll(){ renderSEOSection(); }
 
 // ═══════════════════════════════════════════════════════════
-// v106: Robust JSON extractor para respuestas de IA
+// v106/v107: Robust JSON extractor para respuestas de IA
 // ═══════════════════════════════════════════════════════════
 //
-// Los modelos free (DeepSeek, Llama, Gemini Flash) a veces devuelven JSON con
-// problemas comunes que rompen JSON.parse:
-//   - Saltos de línea reales dentro de strings (no \n escapado)
-//     → "descripcion_optimizada": "Resumen del producto.
-//        Beneficios clave..." ← \n real, no escape secuencia
-//   - Comillas dobles sin escapar dentro de strings ("apto para "microondas"")
-//   - Markdown fences ```json ... ``` alrededor
-//   - Texto antes/después del JSON
-//   - Trailing commas
+// Los modelos free (DeepSeek, Llama, Gemini Flash) a veces devuelven JSON con:
+//   1. Saltos de línea reales dentro de strings → "desc": "linea1
+//      linea2"  ← rompe JSON.parse
+//   2. Comillas dobles internas sin escapar → "Apta para "microondas""
+//   3. Markdown fences ```json ... ``` alrededor
+//   4. Texto antes/después del JSON
+//   5. Trailing commas
+//   6. JSON TRUNCADO por límite de tokens (el más jodido)
 //
-// Esta función intenta extraer JSON limpio con estrategia en cascada:
-//   1. JSON.parse directo (caso ideal, la IA lo devolvió bien)
-//   2. Quitar markdown fences y reintentar
-//   3. Aislar el bloque {...} más externo y reintentar
-//   4. Sanear: escapar saltos de línea reales dentro de strings y reintentar
-//   5. Si todo falla → throw con muestra de los primeros 300 chars para debug.
+// Estrategia en cascada (v107):
+//   1. Parse directo
+//   2. Quitar markdown fences + reintentar
+//   3. Aislar el {...} más externo + reintentar
+//   4. Sanitizer tolerante (escapa \n \r \t y heurística de "")
+//   5. Reconstrucción token-aware (campo a campo, tolerante a campos truncados)
+//   6. Si todo falla → throw con muestra para debug
 function _aiParseJSON(raw){
   if(!raw || typeof raw !== 'string') throw new Error('Respuesta vacía de la IA');
   let s = raw.trim();
-  // Quitar markdown fences si vienen
   s = s.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/,'').trim();
 
   // Strat 1: parse directo
   try { return JSON.parse(s); } catch(e1) { /* sigue */ }
 
-  // Strat 2: aislar el bloque {...} más externo (a veces la IA escribe texto antes/después)
+  // Strat 2: aislar el bloque {...} más externo
   const first = s.indexOf('{');
   const last  = s.lastIndexOf('}');
   if(first >= 0 && last > first){
     const inner = s.slice(first, last+1);
-    try { return JSON.parse(inner); } catch(e2) { s = inner; /* seguimos sanitizando este bloque */ }
+    try { return JSON.parse(inner); } catch(e2) { s = inner; }
   }
 
-  // Strat 3: sanear strings con saltos de línea reales sin escapar.
-  // Recorre el JSON tracking si estamos dentro de un string, y dentro de un
-  // string convierte \n, \r, \t literales a \\n, \\r, \\t (escapados).
-  // Las comillas dobles no escapadas dentro de strings también las escapamos
-  // si no preceden a una , : { } o terminan el JSON.
+  // Strat 3: sanitizer (escapa \n \r \t reales)
   const sanitized = _aiSanitizeJSON(s);
   try { return JSON.parse(sanitized); } catch(e3) {
-    // Strat 4: además limpiar trailing commas (",}" → "}" y ",]" → "]")
     const cleaner = sanitized.replace(/,(\s*[}\]])/g, '$1');
     try { return JSON.parse(cleaner); } catch(e4) {
-      console.error('[AIParse] JSON inválido, muestra:', s.slice(0, 400));
+      // Strat 4: reconstrucción tolerante — extraer cada campo con regex
+      const reconstructed = _aiReconstructJSON(s);
+      if(reconstructed && Object.keys(reconstructed).length > 0){
+        console.warn('[AIParse] JSON malformado — reconstruido tolerante con', Object.keys(reconstructed).length, 'campos');
+        return reconstructed;
+      }
+      console.error('[AIParse] JSON inválido. Raw completo:', raw);
+      console.error('[AIParse] Sanitized:', sanitized.slice(0, 500));
       throw new Error('La IA devolvió un JSON malformado (' + (e4.message||e3.message||'parse error') + '). Probá de nuevo — los modelos free a veces fallan en el formato.');
     }
   }
 }
 
-// Helper: dentro de un JSON string-by-string, escapa los \n \r \t reales que
-// rompen JSON.parse. Mantiene los strings, números, true/false/null, separadores.
+// Sanitizer v107: escapa \n \r \t REALES dentro de strings.
+// Cambio clave vs v106: cuando vemos un " dentro de un string, asumimos que
+// SIEMPRE cierra (no usamos heurística frágil). Si la IA puso comillas
+// internas sin escapar, lo arreglamos en una pasada previa antes de llegar acá.
 function _aiSanitizeJSON(s){
+  // Pre-pasada: escapar comillas dobles que claramente son internas a un string.
+  // Detección: un " que está precedido por una letra/espacio y seguido por una
+  // letra/espacio (no por separadores JSON como , : { } [ ]) es interno.
+  // Esta heurística es imperfecta pero ataca el caso típico: "Apta para "microondas""
+  s = s.replace(/([a-zA-Z0-9áéíóúñ ])"([a-zA-Z0-9áéíóúñ ])/g, '$1\\"$2');
+
   let out = '';
   let inStr = false;
   let esc = false;
@@ -8173,18 +8182,9 @@ function _aiSanitizeJSON(s){
         continue;
       }
       if(c === '"'){
-        // ¿Es realmente el cierre de string? Heurística: lo es si el próximo
-        // char no-whitespace es , } ] : o EOF. Si no, era una comilla mal escapada.
-        let j = i + 1;
-        while(j < s.length && /\s/.test(s[j])) j++;
-        const next = s[j] || '';
-        if(next === ',' || next === '}' || next === ']' || next === ':' || j >= s.length){
-          out += '"';
-          inStr = false;
-        } else {
-          // Comilla mal escapada en medio del string — escaparla
-          out += '\\"';
-        }
+        // Cierre de string (la pre-pasada ya escapó las comillas internas)
+        out += '"';
+        inStr = false;
         continue;
       }
       // Saltos reales dentro de string → escapar
@@ -8195,6 +8195,44 @@ function _aiSanitizeJSON(s){
     } else {
       if(c === '"'){ inStr = true; out += c; continue; }
       out += c;
+    }
+  }
+  return out;
+}
+
+// Reconstrucción tolerante v107: extrae campos uno a uno con regex.
+// Útil cuando el JSON está TRUNCADO (la IA cortó la respuesta a mitad de
+// un campo por límite de tokens) o tiene un campo individualmente roto.
+// Devuelve un objeto parcial con los campos que sí pudo extraer.
+function _aiReconstructJSON(s){
+  const out = {};
+  // Campos string: "key": "value..."
+  // Greedy hasta el próximo "key": o cierre. Usamos lookahead para no devorar el siguiente campo.
+  // Acepta saltos de línea dentro del valor (modo dotall via [\s\S])
+  const strFields = s.matchAll(/"([a-z_]+)"\s*:\s*"([\s\S]*?)"\s*(?=,\s*"[a-z_]+"\s*:|,\s*$|}\s*$|$)/gi);
+  for(const m of strFields){
+    if(!(m[1] in out)) out[m[1]] = m[2].replace(/\\n/g, '\n').replace(/\\"/g, '"');
+  }
+  // Campos número: "key": 123
+  const numFields = s.matchAll(/"([a-z_]+)"\s*:\s*(-?\d+(?:\.\d+)?)/gi);
+  for(const m of numFields){
+    if(!(m[1] in out)) out[m[1]] = parseFloat(m[2]);
+  }
+  // Campos array de strings: "key": ["a","b","c"]
+  const arrFields = s.matchAll(/"([a-z_]+)"\s*:\s*\[([\s\S]*?)\]/gi);
+  for(const m of arrFields){
+    if(m[1] in out) continue;
+    try {
+      // Intentar parsear el array aisladamente
+      const arr = JSON.parse('[' + m[2] + ']');
+      out[m[1]] = arr;
+    } catch(e){
+      // Fallback: extraer strings manualmente
+      const items = [];
+      const re = /"([^"\\]*(?:\\.[^"\\]*)*)"/g;
+      let mm;
+      while((mm = re.exec(m[2])) !== null) items.push(mm[1].replace(/\\"/g,'"').replace(/\\n/g,'\n'));
+      if(items.length) out[m[1]] = items;
     }
   }
   return out;
@@ -8288,7 +8326,7 @@ Respondé SOLO JSON válido (sin markdown, sin backticks):
   "mejoras_recomendadas": ["m1","m2","m3"],
   "enfoque_venta": "...",
   "score_seo": 0
-}`);
+}`, null, 2500);
     const result=_aiParseJSON(r);
     // Limpiar emoji del título optimizado
     const tOpt=stripLeadingEmoji(result.titulo_optimizado||title);
@@ -8761,7 +8799,7 @@ Estructura exacta:
   "mejoras_recomendadas": ["m1","m2","m3"],
   "enfoque_venta": "...",
   "score_seo": 0
-}`);
+}`, null, 2500);
 
     const result=_aiParseJSON(r);
     // De acá en adelante el flujo es idéntico a doOptimize — reusamos su lógica
@@ -15466,8 +15504,11 @@ function calInit(){
 // Ahora: si fallan todos los modelos, esperamos 3s y reintentamos UNA vez en
 // silencio (a esa altura algún modelo del cascade se liberó). Si vuelve a
 // fallar, ahí sí mostramos error con info útil.
-async function callClaude(prompt, history){
+async function callClaude(prompt, history, maxTokens){
   const messages = history || [{role:'user', content:prompt}];
+  // v107: maxTokens default 1000, pero callsites como doOptimize que piden
+  // descripciones de 800-2000 chars pueden pasar 2500+ para evitar truncado.
+  const _maxTokens = (typeof maxTokens === 'number' && maxTokens > 0) ? maxTokens : 1000;
 
   // Función interna que hace UN intento. Devuelve {ok, text, error}
   async function _attempt(){
@@ -15476,7 +15517,7 @@ async function callClaude(prompt, history){
       r = await fetch(WORKER+'/ai', {
         method:'POST',
         headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
-        body:JSON.stringify({max_tokens:1000, temperature:0.3, messages})
+        body:JSON.stringify({max_tokens:_maxTokens, temperature:0.3, messages})
       });
       rawText = await r.text();
     } catch(e){ return {ok:false, error:'Sin conexion: '+e.message, retriable:true}; }
