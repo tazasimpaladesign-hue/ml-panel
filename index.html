@@ -723,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v103 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v104 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1624,8 +1624,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <button class="btn btn-primary btn-sm" onclick="qrAddNew()">+ Agregar botón</button>
     </div>
     <div style="display:flex;gap:8px">
-      <button class="btn btn-primary" onclick="qSaveTmpl()" style="flex:1">💾 Guardar en este dispositivo</button>
-      <button class="btn btn-ghost" onclick="qSaveTmpl(true)" title="Guardar y subir a la nube" style="font-size:12px;padding:7px 12px">☁️ Guardar + Nube</button>
+      <button class="btn btn-primary" onclick="qSaveTmpl()" style="flex:1">💾 Guardar en la nube</button>
     </div>
     <div id="qtmpl-sync-msg" style="font-size:11px;text-align:center;color:var(--text3);min-height:16px"></div>
   </div>
@@ -12020,8 +12019,12 @@ async function qSyncNow(){
   setTimeout(()=>{ if(status) status.style.display='none'; }, 4000);
 }
 
-// ── Guardar plantilla (local + opcionalmente nube) ──────────
-async function qSaveTmpl(uploadToCloud){
+// ── Guardar plantilla (local + nube + backup) ──────────────
+// v104: Antes el botón "Guardar en este dispositivo" solo escribía a localStorage
+// y nunca subía a la nube → al recargar en otra PC, los QRs nuevos se perdían.
+// Ahora SIEMPRE sincroniza con /api/settings Y /api/backup (mismo patrón que
+// saveCompetidor, ver bug v88). El modal solo tiene un botón "Guardar".
+async function qSaveTmpl(){
   const sal = document.getElementById('qtmpl-saludo')?.value||'';
   const fir = document.getElementById('qtmpl-firma')?.value||'';
   const tmpl = {saludo:sal, firma:fir};
@@ -12038,21 +12041,23 @@ async function qSaveTmpl(uploadToCloud){
   qSaveQR(qrs);
 
   const msg = document.getElementById('qtmpl-sync-msg');
-  if(uploadToCloud){
-    if(msg){ msg.textContent='⏳ Subiendo a la nube...'; msg.style.color='var(--text3)'; }
-    const ok = await saveRemoteSettings(qrs, tmpl);
-    if(msg){
-      msg.textContent = ok ? '✓ Guardado localmente y en la nube' : '⚠ Guardado local — no se pudo conectar al Worker';
-      msg.style.color = ok ? 'var(--green)' : 'var(--amber)';
-    }
-    setTimeout(()=>{ if(msg) msg.textContent=''; }, 3500);
-  } else {
-    if(msg){ msg.textContent='✓ Guardado en este dispositivo'; msg.style.color='var(--green)'; }
-    setTimeout(()=>{ if(msg) msg.textContent=''; }, 2000);
+  if(msg){ msg.textContent='⏳ Guardando en la nube...'; msg.style.color='var(--text3)'; }
+
+  // 1) /api/settings (endpoint principal de QRs)
+  const ok = await saveRemoteSettings(qrs, tmpl);
+  // 2) /api/backup también, para evitar el bug v88 donde un endpoint quedaba con
+  //    versión vieja y al recargar la sobrescribía. Mismo patrón que competidores.
+  if(typeof pushFullBackup === 'function') { try{ await pushFullBackup(); }catch(e){} }
+
+  if(msg){
+    msg.textContent = ok ? '✓ Guardado en la nube' : '⚠ Guardado local — sin conexión al Worker';
+    msg.style.color = ok ? 'var(--green)' : 'var(--amber)';
   }
+  setTimeout(()=>{ if(msg) msg.textContent=''; }, 3000);
 
   closeModal('q-tmpl-modal');
   renderQuestions();
+  if(typeof qRenderTemplatesPanel === 'function') qRenderTemplatesPanel(qGetQR());
 }
 
 function qOpenTmpl(){
@@ -12078,6 +12083,13 @@ function qrDeleteRow(i){
   const qrs = qGetQR(); qrs.splice(i,1); qSaveQR(qrs); qRenderTmplList();
   // v92 [P4]: refrescar panel lateral fijo
   if(typeof qRenderTemplatesPanel === 'function') qRenderTemplatesPanel(qGetQR());
+  // v104: sync inmediato a la nube (igual que deleteCompetidor), por si el
+  // usuario cierra el modal con la X sin tocar "Guardar".
+  _cloudStatus('saving');
+  saveRemoteSettings(qrs, qGetTmpl()).then(ok=>{
+    _cloudStatus(ok ? 'ok' : 'error');
+    if(ok && typeof pushFullBackup === 'function') pushFullBackup();
+  }).catch(()=>_cloudStatus('error'));
 }
 function qrAddNew(){
   const label = document.getElementById('qr-new-label')?.value?.trim();
@@ -12091,6 +12103,14 @@ function qrAddNew(){
   qRenderTmplList();
   // v92 [P4]: refrescar panel lateral fijo
   if(typeof qRenderTemplatesPanel === 'function') qRenderTemplatesPanel(qGetQR());
+  // v104: sync inmediato a la nube (igual que saveCompetidor). Antes el QR
+  // recién agregado solo quedaba en localStorage hasta que el usuario tocara
+  // "Guardar"; si cerraba el modal con la X, se perdía al cambiar de PC.
+  _cloudStatus('saving');
+  saveRemoteSettings(qrs, qGetTmpl()).then(ok=>{
+    _cloudStatus(ok ? 'ok' : 'error');
+    if(ok && typeof pushFullBackup === 'function') pushFullBackup();
+  }).catch(()=>_cloudStatus('error'));
 }
 function qInsertAtCursor(taId, text){
   const ta = document.getElementById(taId);
