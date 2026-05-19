@@ -723,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v105 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v106 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -8101,6 +8101,106 @@ async function loadSEOMetrics(){
 async function analyzeSEOAll(){ renderSEOSection(); }
 
 // ═══════════════════════════════════════════════════════════
+// v106: Robust JSON extractor para respuestas de IA
+// ═══════════════════════════════════════════════════════════
+//
+// Los modelos free (DeepSeek, Llama, Gemini Flash) a veces devuelven JSON con
+// problemas comunes que rompen JSON.parse:
+//   - Saltos de línea reales dentro de strings (no \n escapado)
+//     → "descripcion_optimizada": "Resumen del producto.
+//        Beneficios clave..." ← \n real, no escape secuencia
+//   - Comillas dobles sin escapar dentro de strings ("apto para "microondas"")
+//   - Markdown fences ```json ... ``` alrededor
+//   - Texto antes/después del JSON
+//   - Trailing commas
+//
+// Esta función intenta extraer JSON limpio con estrategia en cascada:
+//   1. JSON.parse directo (caso ideal, la IA lo devolvió bien)
+//   2. Quitar markdown fences y reintentar
+//   3. Aislar el bloque {...} más externo y reintentar
+//   4. Sanear: escapar saltos de línea reales dentro de strings y reintentar
+//   5. Si todo falla → throw con muestra de los primeros 300 chars para debug.
+function _aiParseJSON(raw){
+  if(!raw || typeof raw !== 'string') throw new Error('Respuesta vacía de la IA');
+  let s = raw.trim();
+  // Quitar markdown fences si vienen
+  s = s.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/,'').trim();
+
+  // Strat 1: parse directo
+  try { return JSON.parse(s); } catch(e1) { /* sigue */ }
+
+  // Strat 2: aislar el bloque {...} más externo (a veces la IA escribe texto antes/después)
+  const first = s.indexOf('{');
+  const last  = s.lastIndexOf('}');
+  if(first >= 0 && last > first){
+    const inner = s.slice(first, last+1);
+    try { return JSON.parse(inner); } catch(e2) { s = inner; /* seguimos sanitizando este bloque */ }
+  }
+
+  // Strat 3: sanear strings con saltos de línea reales sin escapar.
+  // Recorre el JSON tracking si estamos dentro de un string, y dentro de un
+  // string convierte \n, \r, \t literales a \\n, \\r, \\t (escapados).
+  // Las comillas dobles no escapadas dentro de strings también las escapamos
+  // si no preceden a una , : { } o terminan el JSON.
+  const sanitized = _aiSanitizeJSON(s);
+  try { return JSON.parse(sanitized); } catch(e3) {
+    // Strat 4: además limpiar trailing commas (",}" → "}" y ",]" → "]")
+    const cleaner = sanitized.replace(/,(\s*[}\]])/g, '$1');
+    try { return JSON.parse(cleaner); } catch(e4) {
+      console.error('[AIParse] JSON inválido, muestra:', s.slice(0, 400));
+      throw new Error('La IA devolvió un JSON malformado (' + (e4.message||e3.message||'parse error') + '). Probá de nuevo — los modelos free a veces fallan en el formato.');
+    }
+  }
+}
+
+// Helper: dentro de un JSON string-by-string, escapa los \n \r \t reales que
+// rompen JSON.parse. Mantiene los strings, números, true/false/null, separadores.
+function _aiSanitizeJSON(s){
+  let out = '';
+  let inStr = false;
+  let esc = false;
+  for(let i = 0; i < s.length; i++){
+    const c = s[i];
+    if(inStr){
+      if(esc){
+        out += c;
+        esc = false;
+        continue;
+      }
+      if(c === '\\'){
+        out += c;
+        esc = true;
+        continue;
+      }
+      if(c === '"'){
+        // ¿Es realmente el cierre de string? Heurística: lo es si el próximo
+        // char no-whitespace es , } ] : o EOF. Si no, era una comilla mal escapada.
+        let j = i + 1;
+        while(j < s.length && /\s/.test(s[j])) j++;
+        const next = s[j] || '';
+        if(next === ',' || next === '}' || next === ']' || next === ':' || j >= s.length){
+          out += '"';
+          inStr = false;
+        } else {
+          // Comilla mal escapada en medio del string — escaparla
+          out += '\\"';
+        }
+        continue;
+      }
+      // Saltos reales dentro de string → escapar
+      if(c === '\n'){ out += '\\n'; continue; }
+      if(c === '\r'){ out += '\\r'; continue; }
+      if(c === '\t'){ out += '\\t'; continue; }
+      out += c;
+    } else {
+      if(c === '"'){ inStr = true; out += c; continue; }
+      out += c;
+    }
+  }
+  return out;
+}
+
+// ═══════════════════════════════════════════════════════════
 // OPTIMIZAR
 // ═══════════════════════════════════════════════════════════
 async function doOptimize(){
@@ -8189,7 +8289,7 @@ Respondé SOLO JSON válido (sin markdown, sin backticks):
   "enfoque_venta": "...",
   "score_seo": 0
 }`);
-    const result=JSON.parse(r.replace(/```json|```/g,'').trim());
+    const result=_aiParseJSON(r);
     // Limpiar emoji del título optimizado
     const tOpt=stripLeadingEmoji(result.titulo_optimizado||title);
     const dOpt=result.descripcion_optimizada||'';
@@ -8642,7 +8742,14 @@ https://listado.mercadolibre.com.ar/_DisplayType_G_eshop_IMPALA+DESIGN
 - No inventar datos ni agregar claims falsos
 - No incluir precios, envíos, promociones ni condiciones comerciales${googleBlock}
 
-Respondé SOLO JSON válido (sin markdown, sin backticks):
+═══ FORMATO DE RESPUESTA — CRÍTICO ═══
+Devolvé SOLO JSON válido — sin markdown, sin backticks, sin texto antes ni después.
+DENTRO DE STRINGS DEL JSON:
+- Usá \\n (escape sequence de DOS caracteres) para saltos de línea, NUNCA pegues saltos reales.
+- Si necesitás comillas, usá comillas simples ' o NO uses comillas.
+- NUNCA dejes la palabra "microondas" entre comillas dobles.
+
+Estructura exacta:
 {
   "titulo_optimizado": "...",
   "titulo_alternativo": "...",
@@ -8656,7 +8763,7 @@ Respondé SOLO JSON válido (sin markdown, sin backticks):
   "score_seo": 0
 }`);
 
-    const result=JSON.parse(r.replace(/```json|```/g,'').trim());
+    const result=_aiParseJSON(r);
     // De acá en adelante el flujo es idéntico a doOptimize — reusamos su lógica
     // copiando solo el render. La forma menos invasiva es delegarlo: setear los
     // campos y llamar al mismo bloque de render con un pre-pendido visual que
@@ -9092,7 +9199,7 @@ Producto: "${item.title}" — diseño ya definido (compra impulsiva, regalo, ide
 Analizá el potencial y dá 3 sugerencias MUY concretas para mejorar (título, fotos, descripción, precio, keywords).
 Respondé SOLO JSON:
 {"potencial":"alto|medio","problema_principal":"...","sugerencias":["s1","s2","s3"],"titulo_mejorado":"...","enfoque_venta":"..."}`);
-      const d=JSON.parse(r.replace(/```json|```/g,'').trim());
+      const d=_aiParseJSON(r);
       el.innerHTML+=`<div class="pot-card">
         <div class="pot-hd">
           <div class="item-thumb">${item.thumbnail?`<img src="${item.thumbnail}" onerror="this.parentElement.textContent='☕'">`:'☕'}</div>
