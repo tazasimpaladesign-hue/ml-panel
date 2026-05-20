@@ -723,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v108 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v109 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -828,6 +828,26 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
   <!-- ── Score de negocio ── -->
   <div id="dash-biz-score" class="card mb" style="cursor:default"></div>
+
+  <!-- v109: Estado Telegram 24/7 (webhook + cron) ─────────────────────────────
+       Muestra el estado del sistema dual de notificaciones:
+        · Webhook ML → dispara Telegram en tiempo real (depende de que ML envíe push)
+        · Cron Worker cada 5min → red de seguridad que recupera lo que el webhook perdió.
+       Se carga al abrir el dashboard. Click para detalles. -->
+  <div id="dash-tg247-status" class="card mb" style="cursor:pointer;display:flex;align-items:center;gap:12px;padding:11px 14px;background:linear-gradient(135deg,#f0f9ff 0%,#e0f2fe 100%);border:1px solid #bae6fd" onclick="tg247OpenDetails()">
+    <div style="font-size:24px;flex-shrink:0">📡</div>
+    <div style="flex:1;min-width:0">
+      <div style="font-size:12.5px;font-weight:600;color:#0c4a6e;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        Sistema Telegram 24/7
+        <span id="tg247-badge-webhook" class="tg247-badge" style="font-size:10px;padding:1px 7px;border-radius:9px;background:#e0e7ff;color:#3730a3;font-weight:600">Webhook: —</span>
+        <span id="tg247-badge-cron" class="tg247-badge" style="font-size:10px;padding:1px 7px;border-radius:9px;background:#e0e7ff;color:#3730a3;font-weight:600">Cron: —</span>
+      </div>
+      <div style="font-size:10.5px;color:#0c4a6e;opacity:.85;margin-top:2px" id="tg247-summary">
+        Webhook para tiempo real + cron cada 5min de red de seguridad. <strong>Click para ver detalles</strong>
+      </div>
+    </div>
+    <div style="font-size:11px;color:#0369a1;opacity:.6">▸</div>
+  </div>
 
   <!-- ── KPI Cards (5 métricas con delta) ── -->
   <div class="mgt mgt-5" id="dash-metrics" style="margin-bottom:14px">
@@ -1320,14 +1340,14 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <!-- Buscador de mis publicaciones -->
       <div class="ff" style="position:relative">
         <label>Buscar en mis publicaciones</label>
-        <input type="text" id="opt-search" placeholder="Escribí parte del título..." oninput="filterOptItems()" autocomplete="off">
+        <input type="text" id="opt-search" placeholder="Escribí parte del título..." oninput="filterOptItems()" autocomplete="off" style="font-size:12.5px">
         <div id="opt-search-results" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:50;background:#fff;border:1px solid #d1d5db;border-radius:0 0 8px 8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);max-height:220px;overflow-y:auto"></div>
       </div>
 
       <!-- Asistente EAN/GTIN — visible solo cuando llega desde SEO/Publicaciones con problema detectado -->
       <div id="opt-ean-block" style="display:none;margin-bottom:10px"></div>
 
-      <div class="ff"><label>Título actual</label><input type="text" id="opt-in" placeholder="O pegá un título manualmente..." oninput="liveScore(this.value)"></div>
+      <div class="ff"><label>Título actual</label><input type="text" id="opt-in" placeholder="O pegá un título manualmente..." oninput="liveScore(this.value)" style="font-size:12.5px"></div>
 
       <div class="ff">
         <label style="display:flex;justify-content:space-between">
@@ -4191,7 +4211,7 @@ async function _pollPendingShipments(){
 // v93 [P5]: detector de versión del Worker. Si el Worker está desactualizado (no v55+),
 // significa que el header `x-format-new: true` no está siendo aplicado y el bug de
 // envíos sigue activo. Mostramos un banner amarillo al usuario.
-const _MIN_WORKER_VERSION = 66; // v108: requerido para slugs IA actualizados
+const _MIN_WORKER_VERSION = 67; // v109: cron scheduled + /cron/status
 async function _checkWorkerVersion(){
   try {
     const r = await fetch(WORKER + '/');
@@ -4218,7 +4238,7 @@ function _showWorkerOutdatedBanner(currentVer){
   b.style.cssText = 'position:fixed;top:8px;right:8px;left:8px;z-index:9999;background:#fbbf24;color:#78350f;padding:11px 14px;border-radius:8px;border:1px solid #f59e0b;box-shadow:0 4px 12px rgba(0,0,0,.15);font-size:12.5px;line-height:1.4;display:flex;align-items:center;gap:10px;max-width:900px;margin:0 auto';
   b.innerHTML = '<span style="font-size:20px">⚠️</span>'
     + '<div style="flex:1"><strong>Worker desactualizado (v'+currentVer+').</strong> '
-    + 'Subí <code style="background:#fde68a;padding:1px 5px;border-radius:3px;font-size:11px">worker-master-v66.js</code> a Cloudflare Workers — los slugs anteriores de modelos IA están obsoletos (404). Sin esto el optimizador IA seguirá fallando con "todos los modelos fallaron".</div>'
+    + 'Subí <code style="background:#fde68a;padding:1px 5px;border-radius:3px;font-size:11px">worker-master-v67.js</code> a Cloudflare Workers. Sin esto el cron de Telegram 24/7 no funcionará (las notifs siguen dependiendo solo del panel abierto).</div>'
     + '<button onclick="this.parentElement.remove()" style="background:transparent;border:1px solid #92400e;color:#78350f;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:11.5px;font-weight:600">Cerrar</button>';
   document.body.appendChild(b);
 }
@@ -6195,7 +6215,151 @@ function renderDashboard(){
   loadDashVisits().then(()=>renderMainChart()).catch(()=>renderMainChart());
   renderCatChart(); renderDashTopPubs(); renderDashInsights(); renderDashStock(); renderDashConv(); renderDashRepMini();
   renderCalWidget();
+  // v109: refrescar estado Telegram 24/7
+  if(typeof tg247Refresh === 'function') tg247Refresh();
   // Los más visitados se cargan solo en initApp (single-run, 24h cache)
+}
+
+// ═══════════════════════════════════════════════════════════
+// v109: Sistema Telegram 24/7 — estado webhook + cron
+// ═══════════════════════════════════════════════════════════
+async function tg247Refresh(){
+  const wEl = document.getElementById('tg247-badge-webhook');
+  const cEl = document.getElementById('tg247-badge-cron');
+  const sEl = document.getElementById('tg247-summary');
+  if(!wEl || !cEl) return;
+  // Estado webhook
+  try {
+    const r = await fetch(WORKER+'/webhook/stats', { headers:{'Authorization':'Bearer '+token}});
+    if(r.ok){
+      const d = await r.json();
+      const total = d.stats?._total || 0;
+      const lastSeen = d.stats?._lastSeen;
+      if(total > 0 && lastSeen){
+        const ageHrs = (Date.now() - new Date(lastSeen).getTime()) / 3600000;
+        if(ageHrs < 24){
+          wEl.textContent = '✓ Webhook activo'; wEl.style.background='#dcfce7'; wEl.style.color='#166534';
+        } else {
+          wEl.textContent = '⚠ Webhook >24h sin pings'; wEl.style.background='#fef3c7'; wEl.style.color='#92400e';
+        }
+      } else {
+        wEl.textContent = '⚠ Webhook sin pings'; wEl.style.background='#fef3c7'; wEl.style.color='#92400e';
+      }
+    } else {
+      wEl.textContent = 'Webhook: error'; wEl.style.background='#fee2e2'; wEl.style.color='#991b1b';
+    }
+  } catch(e){
+    wEl.textContent = 'Webhook: error'; wEl.style.background='#fee2e2'; wEl.style.color='#991b1b';
+  }
+  // Estado cron
+  try {
+    const r = await fetch(WORKER+'/cron/status');
+    if(r.ok){
+      const d = await r.json();
+      if(d.last_run && d.last_run.finished){
+        const ageMin = (Date.now() - new Date(d.last_run.finished).getTime()) / 60000;
+        if(ageMin < 10){
+          cEl.textContent = '✓ Cron OK (hace '+Math.round(ageMin)+'min)'; cEl.style.background='#dcfce7'; cEl.style.color='#166534';
+        } else if(ageMin < 60){
+          cEl.textContent = '⚠ Cron lento ('+Math.round(ageMin)+'min)'; cEl.style.background='#fef3c7'; cEl.style.color='#92400e';
+        } else {
+          cEl.textContent = '✗ Cron sin correr ('+Math.round(ageMin/60)+'h)'; cEl.style.background='#fee2e2'; cEl.style.color='#991b1b';
+        }
+      } else {
+        cEl.textContent = '⚠ Cron sin configurar'; cEl.style.background='#fef3c7'; cEl.style.color='#92400e';
+      }
+    }
+  } catch(e){
+    cEl.textContent = 'Cron: error'; cEl.style.background='#fee2e2'; cEl.style.color='#991b1b';
+  }
+}
+
+async function tg247OpenDetails(){
+  // Cargar datos frescos de ambos endpoints
+  let webhookData = null, cronData = null;
+  try {
+    const r = await fetch(WORKER+'/webhook/stats', { headers:{'Authorization':'Bearer '+token}});
+    if(r.ok) webhookData = await r.json();
+  } catch(e){}
+  try {
+    const r = await fetch(WORKER+'/cron/status');
+    if(r.ok) cronData = await r.json();
+  } catch(e){}
+
+  // Build modal content
+  const wStats = webhookData?.stats || {};
+  const cLast = cronData?.last_run || {};
+
+  let html = '<div style="padding:14px;max-width:540px">';
+  html += '<h3 style="margin:0 0 10px;font-size:15px">📡 Sistema Telegram 24/7</h3>';
+
+  // Webhook
+  html += '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:11px 13px;margin-bottom:10px">';
+  html += '<div style="font-size:12.5px;font-weight:700;margin-bottom:7px">🔔 Webhook ML → Telegram (tiempo real)</div>';
+  if(wStats._total){
+    html += '<div style="font-size:11.5px;line-height:1.7">';
+    html += '<div>Total pings recibidos: <strong>'+wStats._total+'</strong></div>';
+    html += '<div>Último ping: <strong>'+(wStats._lastSeen ? new Date(wStats._lastSeen).toLocaleString('es-AR') : '—')+'</strong></div>';
+    html += '<div>Ventas: '+(wStats.orders_v2||wStats.orders||0)+' · Preguntas: '+(wStats.questions||0)+'</div>';
+    html += '</div>';
+  } else {
+    html += '<div style="font-size:11.5px;color:#92400e;line-height:1.6">⚠️ El webhook nunca recibió pings. Andá a <a href="https://developers.mercadolibre.com.ar/" target="_blank" style="color:#1d4ed8">developers.mercadolibre.com.ar</a> → tu app → Notificaciones → URL: <code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;font-size:10.5px">'+WORKER+'/webhook</code> → Suscribite a <strong>orders_v2</strong> y <strong>questions</strong>.</div>';
+  }
+  html += '</div>';
+
+  // Cron
+  html += '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:11px 13px;margin-bottom:10px">';
+  html += '<div style="font-size:12.5px;font-weight:700;margin-bottom:7px">⏱️ Cron Worker → Telegram (red de seguridad cada 5min)</div>';
+  if(cLast.finished){
+    html += '<div style="font-size:11.5px;line-height:1.7">';
+    html += '<div>Última corrida: <strong>'+new Date(cLast.finished).toLocaleString('es-AR')+'</strong> · '+(cLast.duration_ms||0)+'ms</div>';
+    html += '<div>Cuentas chequeadas: <strong>'+(cLast.users||0)+'</strong></div>';
+    html += '<div>Órdenes scaneadas: '+(cLast.orders_checked||0)+' · Preguntas: '+(cLast.questions_checked||0)+'</div>';
+    html += '<div>Telegrams enviados por cron: <strong>'+(cLast.tg_sent||0)+'</strong></div>';
+    if(cLast.errors && cLast.errors.length){
+      html += '<div style="margin-top:5px;color:#991b1b;font-size:10.5px">Errores: '+cLast.errors.join(' · ')+'</div>';
+    }
+    html += '</div>';
+  } else {
+    html += '<div style="font-size:11.5px;color:#92400e;line-height:1.6">⚠️ El cron aún no corrió. Andá a tu <a href="https://dash.cloudflare.com" target="_blank" style="color:#1d4ed8">Cloudflare dashboard</a> → Workers → tu worker → <strong>Settings → Triggers → Cron Triggers</strong> → Add Cron Trigger con expresión <code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;font-size:10.5px">*/5 * * * *</code></div>';
+  }
+  html += '</div>';
+
+  // Acciones
+  html += '<div style="display:flex;gap:6px;margin-top:14px;flex-wrap:wrap">';
+  html += '<button class="btn btn-primary btn-sm" onclick="tg247TestWebhook()">🧪 Probar webhook + Telegram</button>';
+  html += '<button class="btn btn-ghost btn-sm" onclick="tg247Refresh();closeModal(\'tg247-modal\')">🔄 Refrescar</button>';
+  html += '<button class="btn btn-ghost btn-sm" onclick="closeModal(\'tg247-modal\')" style="margin-left:auto">Cerrar</button>';
+  html += '</div>';
+  html += '</div>';
+
+  // Modal genérico
+  let modal = document.getElementById('tg247-modal');
+  if(!modal){
+    modal = document.createElement('div');
+    modal.id = 'tg247-modal';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML = '<div class="modal" style="max-width:580px"><div class="modal-bd">'+html+'</div></div>';
+  modal.style.display = 'flex';
+}
+
+async function tg247TestWebhook(){
+  try {
+    const r = await fetch(WORKER+'/webhook/test', {
+      method:'POST',
+      headers:{'Authorization':'Bearer '+token, 'Content-Type':'application/json'},
+    });
+    const d = await r.json();
+    if(d.ok){
+      alert('✅ Test enviado. Revisá Telegram (puede tardar 1-3 segundos).');
+    } else {
+      alert('❌ Error: ' + (d.error || 'desconocido'));
+    }
+  } catch(e){
+    alert('❌ Error de red: ' + e.message);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -8350,11 +8514,12 @@ Simulá cómo busca un comprador dentro de un marketplace. El título ES una bú
 - Si el input es "Taza Interior De Color Pantera Rosa" -> Output ideal: "Taza Cerámica Pantera Rosa Retro Dibujo Animado 325 ml"
 - Si el input es "Taza Mágica Joaquín Sabina" -> Output ideal: "Taza Mágica Cerámica Joaquín Sabina Cantante Español 325 ml"
 
-PALABRAS ABSOLUTAMENTE PROHIBIDAS EN TÍTULO Y VARIANTES (nunca usarlas, ni siquiera como sugerencia):
-- Nombres de tienda/marca propia: "Impala", "Design", "Tienda", "Oficial", "Taza Impala"
-- Palabras de venta genéricas: "Regalo", "Oferta", "Promo", "Gratis", "Envío gratis", "Stock", "Garantía", "Original", "Nuevo"
+PALABRAS ABSOLUTAMENTE PROHIBIDAS EN TÍTULO, VARIANTES Y DESCRIPCIÓN (nunca usarlas, ni siquiera como sugerencia, ni en ninguna combinación):
+- Nombres de tienda/marca propia: "Impala", "Design", "Tienda", "Taza Impala"
+- Palabras de venta genéricas: "Regalo", "Oferta", "Promo", "Gratis", "Envío gratis", "Stock", "Garantía", "Nuevo"
 - Cualquier variación de: "Personalizado", "Personalizada", "Personalizable", "Custom"
-- Claims vacíos: "Alta calidad", "El mejor", "Único", "Exclusivo", "Original"
+- Claims vacíos: "Alta calidad", "El mejor", "Único", "Exclusivo"
+- v109: Palabras "Oficial", "Original" y cualquier combinación: "Diseño oficial", "Producto original", "Producto oficial", "Modelo original", "Versión oficial", "Versión original", "Auténtico" — PROHIBIDAS EN TÍTULO Y EN DESCRIPCIÓN. Si necesitás transmitir calidad, hacelo describiendo materiales y proceso, no con estos adjetivos.
 - Frases tipo slogan o publicidad de cualquier tipo
 - La palabra "lavavajillas" bajo NINGÚN contexto ni siquiera como sugerencia
 
@@ -8373,6 +8538,7 @@ REGLA DE MICROONDAS (SOLO EN DESCRIPCIÓN):
   4) Casos de uso y ocasiones
 - Evitar relleno innecesario, repeticiones ni frases de venta genéricas
 - Sin "Personalizado/a/able" ni nombres de tienda
+- Sin "Oficial", "Original" ni sus combinaciones (ver lista de palabras prohibidas arriba)
 - Saltos de línea para escanear rápido
 - AL FINAL agregar exactamente este párrafo separado:
 Accedé a todas nuestras publicaciones acá:
@@ -8819,11 +8985,12 @@ Simulá cómo busca un comprador dentro de un marketplace. El título ES una bú
 - Si el input es "Taza Interior De Color Pantera Rosa" -> Output ideal: "Taza Cerámica Pantera Rosa Retro Dibujo Animado 325 ml"
 - Si el input es "Taza Mágica Joaquín Sabina" -> Output ideal: "Taza Mágica Cerámica Joaquín Sabina Cantante Español 325 ml"
 
-PALABRAS ABSOLUTAMENTE PROHIBIDAS EN TÍTULO Y VARIANTES (nunca usarlas, ni siquiera como sugerencia):
-- Nombres de tienda/marca propia: "Impala", "Design", "Tienda", "Oficial", "Taza Impala"
-- Palabras de venta genéricas: "Regalo", "Oferta", "Promo", "Gratis", "Envío gratis", "Stock", "Garantía", "Original", "Nuevo"
+PALABRAS ABSOLUTAMENTE PROHIBIDAS EN TÍTULO, VARIANTES Y DESCRIPCIÓN (nunca usarlas, ni siquiera como sugerencia, ni en ninguna combinación):
+- Nombres de tienda/marca propia: "Impala", "Design", "Tienda", "Taza Impala"
+- Palabras de venta genéricas: "Regalo", "Oferta", "Promo", "Gratis", "Envío gratis", "Stock", "Garantía", "Nuevo"
 - Cualquier variación de: "Personalizado", "Personalizada", "Personalizable", "Custom"
-- Claims vacíos: "Alta calidad", "El mejor", "Único", "Exclusivo", "Original"
+- Claims vacíos: "Alta calidad", "El mejor", "Único", "Exclusivo"
+- v109: Palabras "Oficial", "Original" y cualquier combinación: "Diseño oficial", "Producto original", "Producto oficial", "Modelo original", "Versión oficial", "Versión original", "Auténtico" — PROHIBIDAS EN TÍTULO Y EN DESCRIPCIÓN.
 - Frases tipo slogan o publicidad de cualquier tipo
 - La palabra "lavavajillas" bajo NINGÚN contexto ni siquiera como sugerencia
 
@@ -8841,6 +9008,7 @@ REGLA DE MICROONDAS (SOLO EN DESCRIPCIÓN):
   3) Especificaciones técnicas breves
 - Saltos de línea para escanear rápido
 - Sin "Personalizado/a/able" ni nombres de tienda
+- Sin "Oficial", "Original" ni sus combinaciones (ver lista de palabras prohibidas arriba)
 - AL FINAL agregar este párrafo:
 Accedé a todas nuestras publicaciones acá:
 https://listado.mercadolibre.com.ar/_DisplayType_G_eshop_IMPALA+DESIGN
@@ -12952,7 +13120,7 @@ ALGORITMO ML - FACTORES EN ORDEN:
 1) Keywords exactas en titulo 2) CTR 3) Conversion 4) Precio competitivo 5) Velocidad de despacho 6) Calidad de ficha (atributos + imagenes) 7) Historial de ventas
 
 REGLAS DE TITULO ML: Maximo 60 caracteres - Sin puntuacion ni emojis - Keyword fuerte al inicio - Sin articulos ni preposiciones innecesarias
-PALABRAS PROHIBIDAS EN TITULO ML: Regalo Original, Diseno Exclusivo, Fan, Personalizada, Personalizable, Alta calidad, Imperdible, El mejor, Envio gratis, cualquier frase tipo slogan o promesa publicitaria.
+PALABRAS PROHIBIDAS EN TITULO Y DESCRIPCION ML: Regalo Original, Diseno Oficial, Diseno Exclusivo, Producto Original, Producto Oficial, Modelo Original, Version Oficial, Version Original, Autentico, Fan, Personalizada, Personalizable, Alta calidad, Imperdible, El mejor, Envio gratis, Oficial, Original, cualquier frase tipo slogan o promesa publicitaria.
 
 SEO PARA WOOCOMMERCE: Usa keywords long-tail (3-5 palabras con intencion de busqueda), como regalo para medico mujer. Pensa en featured snippets de Google, estructura con H1/H2, evita duplicate content con las publicaciones de ML.
 
@@ -17291,7 +17459,7 @@ function filterOptItems(){
       div.onclick = function(){ selectOptItem(item.id, item.title); };
       var name = document.createElement('div');
       name.style.fontWeight = '500';
-      name.textContent = item.title.slice(0, 60);
+      name.textContent = item.title.slice(0, 80);
       var meta = document.createElement('div');
       meta.style.cssText = 'font-size:10px;color:#6b7280';
       meta.textContent = '$' + (item.price||0).toLocaleString('es-AR') + ' · SKU: ' + (item.seller_custom_field||'—');
@@ -17332,7 +17500,7 @@ function selectOptItem(id,title){
   // ── Ahora cargar el nuevo ítem ─────────────────────────────
   optCurrentItemId = id;
   const s = document.getElementById('opt-search');
-  if(s) s.value = title.slice(0, 50);
+  if(s) s.value = title.slice(0, 80);
 
   // Poner título limpio en el campo de edición
   const titleClean = stripLeadingEmoji(title);
