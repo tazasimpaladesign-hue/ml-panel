@@ -723,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v103 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v109 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -828,6 +828,26 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
   <!-- ── Score de negocio ── -->
   <div id="dash-biz-score" class="card mb" style="cursor:default"></div>
+
+  <!-- v109: Estado Telegram 24/7 (webhook + cron) ─────────────────────────────
+       Muestra el estado del sistema dual de notificaciones:
+        · Webhook ML → dispara Telegram en tiempo real (depende de que ML envíe push)
+        · Cron Worker cada 5min → red de seguridad que recupera lo que el webhook perdió.
+       Se carga al abrir el dashboard. Click para detalles. -->
+  <div id="dash-tg247-status" class="card mb" style="cursor:pointer;display:flex;align-items:center;gap:12px;padding:11px 14px;background:linear-gradient(135deg,#f0f9ff 0%,#e0f2fe 100%);border:1px solid #bae6fd" onclick="tg247OpenDetails()">
+    <div style="font-size:24px;flex-shrink:0">📡</div>
+    <div style="flex:1;min-width:0">
+      <div style="font-size:12.5px;font-weight:600;color:#0c4a6e;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        Sistema Telegram 24/7
+        <span id="tg247-badge-webhook" class="tg247-badge" style="font-size:10px;padding:1px 7px;border-radius:9px;background:#e0e7ff;color:#3730a3;font-weight:600">Webhook: —</span>
+        <span id="tg247-badge-cron" class="tg247-badge" style="font-size:10px;padding:1px 7px;border-radius:9px;background:#e0e7ff;color:#3730a3;font-weight:600">Cron: —</span>
+      </div>
+      <div style="font-size:10.5px;color:#0c4a6e;opacity:.85;margin-top:2px" id="tg247-summary">
+        Webhook para tiempo real + cron cada 5min de red de seguridad. <strong>Click para ver detalles</strong>
+      </div>
+    </div>
+    <div style="font-size:11px;color:#0369a1;opacity:.6">▸</div>
+  </div>
 
   <!-- ── KPI Cards (5 métricas con delta) ── -->
   <div class="mgt mgt-5" id="dash-metrics" style="margin-bottom:14px">
@@ -1290,17 +1310,44 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <div class="card">
       <div class="card-hd"><div class="card-title">✨ Optimizador de título y descripción</div></div>
 
+      <!-- v105: Buscador libre de keywords (Google Suggest Argentina) ───────────
+           Independiente del optimizador. Pegás cualquier palabra/frase y te
+           muestra lo que la gente realmente busca en Google AR. Tocá un chip
+           para agregarlo al campo "Keywords extra" del optimizador de abajo. -->
+      <div style="background:linear-gradient(135deg,#eff6ff 0%,#dbeafe 100%);border:1px solid #93c5fd;border-radius:10px;padding:13px 14px;margin-bottom:14px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <span style="font-size:18px">🔍</span>
+          <div style="flex:1">
+            <div style="font-size:12.5px;font-weight:700;color:#1e40af">Buscador libre · Google Suggest Argentina</div>
+            <div style="font-size:11px;color:#1e40af;opacity:.75">Tipea una palabra o frase y mirá qué busca realmente la gente · Gratis · Tiempo real</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:6px">
+          <input type="text" id="gs-query" placeholder="Ej: taza personalizada, jarro térmico, mate camionero..."
+            style="flex:1;font-size:13px;padding:8px 11px;border:1px solid #93c5fd;border-radius:6px;background:#fff"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();gsSearch()}">
+          <button class="btn btn-primary btn-sm" onclick="gsSearch()" id="gs-search-btn" style="white-space:nowrap">🔎 Buscar</button>
+        </div>
+        <div id="gs-results" style="margin-top:10px;display:none">
+          <div style="font-size:10.5px;color:#1e40af;text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-bottom:6px">
+            💡 Tocá un chip para agregarlo a Keywords extra del optimizador
+          </div>
+          <div id="gs-chips" style="display:flex;flex-wrap:wrap;gap:5px"></div>
+          <div id="gs-meta" style="font-size:10.5px;color:#1e40af;opacity:.7;margin-top:7px"></div>
+        </div>
+      </div>
+
       <!-- Buscador de mis publicaciones -->
       <div class="ff" style="position:relative">
         <label>Buscar en mis publicaciones</label>
-        <input type="text" id="opt-search" placeholder="Escribí parte del título..." oninput="filterOptItems()" autocomplete="off">
+        <input type="text" id="opt-search" placeholder="Escribí parte del título..." oninput="filterOptItems()" autocomplete="off" style="font-size:12.5px">
         <div id="opt-search-results" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:50;background:#fff;border:1px solid #d1d5db;border-radius:0 0 8px 8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);max-height:220px;overflow-y:auto"></div>
       </div>
 
       <!-- Asistente EAN/GTIN — visible solo cuando llega desde SEO/Publicaciones con problema detectado -->
       <div id="opt-ean-block" style="display:none;margin-bottom:10px"></div>
 
-      <div class="ff"><label>Título actual</label><input type="text" id="opt-in" placeholder="O pegá un título manualmente..." oninput="liveScore(this.value)"></div>
+      <div class="ff"><label>Título actual</label><input type="text" id="opt-in" placeholder="O pegá un título manualmente..." oninput="liveScore(this.value)" style="font-size:12.5px"></div>
 
       <div class="ff">
         <label style="display:flex;justify-content:space-between">
@@ -1314,7 +1361,11 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <div><label>Categoría</label><input type="text" id="opt-cat" placeholder="Ej: Tazas, Hogar..."></div>
         <div><label>Keywords extra</label><input type="text" id="opt-kws" placeholder="Ej: regalo, sublimada"></div>
       </div>
-      <button class="btn btn-primary" style="width:100%;margin-bottom:8px" onclick="doOptimize()">🤖 Optimizar con IA</button>
+      <!-- v105: Dos botones — IA pura (el actual) e IA + Google Suggest (nuevo) -->
+      <div style="display:flex;gap:6px;margin-bottom:8px">
+        <button class="btn btn-primary" style="flex:1" onclick="doOptimize()" title="Optimiza usando solo IA, sin contexto de búsquedas reales">🤖 Optimizar con IA</button>
+        <button class="btn btn-primary" style="flex:1;background:linear-gradient(135deg,#2563eb,#1e40af)" onclick="doOptimizeWithGoogle()" title="Trae búsquedas reales de Google AR y se las pasa a la IA como contexto antes de optimizar">🔍 Optimizar con IA + Google</button>
+      </div>
       <div id="opt-out" style="margin-top:14px"></div>
     </div>
 
@@ -1624,8 +1675,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <button class="btn btn-primary btn-sm" onclick="qrAddNew()">+ Agregar botón</button>
     </div>
     <div style="display:flex;gap:8px">
-      <button class="btn btn-primary" onclick="qSaveTmpl()" style="flex:1">💾 Guardar en este dispositivo</button>
-      <button class="btn btn-ghost" onclick="qSaveTmpl(true)" title="Guardar y subir a la nube" style="font-size:12px;padding:7px 12px">☁️ Guardar + Nube</button>
+      <button class="btn btn-primary" onclick="qSaveTmpl()" style="flex:1">💾 Guardar en la nube</button>
     </div>
     <div id="qtmpl-sync-msg" style="font-size:11px;text-align:center;color:var(--text3);min-height:16px"></div>
   </div>
@@ -4161,7 +4211,7 @@ async function _pollPendingShipments(){
 // v93 [P5]: detector de versión del Worker. Si el Worker está desactualizado (no v55+),
 // significa que el header `x-format-new: true` no está siendo aplicado y el bug de
 // envíos sigue activo. Mostramos un banner amarillo al usuario.
-const _MIN_WORKER_VERSION = 64; // v103: requerido para productId persistido en notif
+const _MIN_WORKER_VERSION = 67; // v109: cron scheduled + /cron/status
 async function _checkWorkerVersion(){
   try {
     const r = await fetch(WORKER + '/');
@@ -4188,8 +4238,7 @@ function _showWorkerOutdatedBanner(currentVer){
   b.style.cssText = 'position:fixed;top:8px;right:8px;left:8px;z-index:9999;background:#fbbf24;color:#78350f;padding:11px 14px;border-radius:8px;border:1px solid #f59e0b;box-shadow:0 4px 12px rgba(0,0,0,.15);font-size:12.5px;line-height:1.4;display:flex;align-items:center;gap:10px;max-width:900px;margin:0 auto';
   b.innerHTML = '<span style="font-size:20px">⚠️</span>'
     + '<div style="flex:1"><strong>Worker desactualizado (v'+currentVer+').</strong> '
-    + 'El bug de "estado de envíos" no se va a resolver hasta que subas <code style="background:#fde68a;padding:1px 5px;border-radius:3px;font-size:11px">worker-master-v55.js</code> a Cloudflare Workers. '
-    + 'Mientras tanto, los estados se siguen viendo desactualizados.</div>'
+    + 'Subí <code style="background:#fde68a;padding:1px 5px;border-radius:3px;font-size:11px">worker-master-v67.js</code> a Cloudflare Workers. Sin esto el cron de Telegram 24/7 no funcionará (las notifs siguen dependiendo solo del panel abierto).</div>'
     + '<button onclick="this.parentElement.remove()" style="background:transparent;border:1px solid #92400e;color:#78350f;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:11.5px;font-weight:600">Cerrar</button>';
   document.body.appendChild(b);
 }
@@ -6166,7 +6215,151 @@ function renderDashboard(){
   loadDashVisits().then(()=>renderMainChart()).catch(()=>renderMainChart());
   renderCatChart(); renderDashTopPubs(); renderDashInsights(); renderDashStock(); renderDashConv(); renderDashRepMini();
   renderCalWidget();
+  // v109: refrescar estado Telegram 24/7
+  if(typeof tg247Refresh === 'function') tg247Refresh();
   // Los más visitados se cargan solo en initApp (single-run, 24h cache)
+}
+
+// ═══════════════════════════════════════════════════════════
+// v109: Sistema Telegram 24/7 — estado webhook + cron
+// ═══════════════════════════════════════════════════════════
+async function tg247Refresh(){
+  const wEl = document.getElementById('tg247-badge-webhook');
+  const cEl = document.getElementById('tg247-badge-cron');
+  const sEl = document.getElementById('tg247-summary');
+  if(!wEl || !cEl) return;
+  // Estado webhook
+  try {
+    const r = await fetch(WORKER+'/webhook/stats', { headers:{'Authorization':'Bearer '+token}});
+    if(r.ok){
+      const d = await r.json();
+      const total = d.stats?._total || 0;
+      const lastSeen = d.stats?._lastSeen;
+      if(total > 0 && lastSeen){
+        const ageHrs = (Date.now() - new Date(lastSeen).getTime()) / 3600000;
+        if(ageHrs < 24){
+          wEl.textContent = '✓ Webhook activo'; wEl.style.background='#dcfce7'; wEl.style.color='#166534';
+        } else {
+          wEl.textContent = '⚠ Webhook >24h sin pings'; wEl.style.background='#fef3c7'; wEl.style.color='#92400e';
+        }
+      } else {
+        wEl.textContent = '⚠ Webhook sin pings'; wEl.style.background='#fef3c7'; wEl.style.color='#92400e';
+      }
+    } else {
+      wEl.textContent = 'Webhook: error'; wEl.style.background='#fee2e2'; wEl.style.color='#991b1b';
+    }
+  } catch(e){
+    wEl.textContent = 'Webhook: error'; wEl.style.background='#fee2e2'; wEl.style.color='#991b1b';
+  }
+  // Estado cron
+  try {
+    const r = await fetch(WORKER+'/cron/status');
+    if(r.ok){
+      const d = await r.json();
+      if(d.last_run && d.last_run.finished){
+        const ageMin = (Date.now() - new Date(d.last_run.finished).getTime()) / 60000;
+        if(ageMin < 10){
+          cEl.textContent = '✓ Cron OK (hace '+Math.round(ageMin)+'min)'; cEl.style.background='#dcfce7'; cEl.style.color='#166534';
+        } else if(ageMin < 60){
+          cEl.textContent = '⚠ Cron lento ('+Math.round(ageMin)+'min)'; cEl.style.background='#fef3c7'; cEl.style.color='#92400e';
+        } else {
+          cEl.textContent = '✗ Cron sin correr ('+Math.round(ageMin/60)+'h)'; cEl.style.background='#fee2e2'; cEl.style.color='#991b1b';
+        }
+      } else {
+        cEl.textContent = '⚠ Cron sin configurar'; cEl.style.background='#fef3c7'; cEl.style.color='#92400e';
+      }
+    }
+  } catch(e){
+    cEl.textContent = 'Cron: error'; cEl.style.background='#fee2e2'; cEl.style.color='#991b1b';
+  }
+}
+
+async function tg247OpenDetails(){
+  // Cargar datos frescos de ambos endpoints
+  let webhookData = null, cronData = null;
+  try {
+    const r = await fetch(WORKER+'/webhook/stats', { headers:{'Authorization':'Bearer '+token}});
+    if(r.ok) webhookData = await r.json();
+  } catch(e){}
+  try {
+    const r = await fetch(WORKER+'/cron/status');
+    if(r.ok) cronData = await r.json();
+  } catch(e){}
+
+  // Build modal content
+  const wStats = webhookData?.stats || {};
+  const cLast = cronData?.last_run || {};
+
+  let html = '<div style="padding:14px;max-width:540px">';
+  html += '<h3 style="margin:0 0 10px;font-size:15px">📡 Sistema Telegram 24/7</h3>';
+
+  // Webhook
+  html += '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:11px 13px;margin-bottom:10px">';
+  html += '<div style="font-size:12.5px;font-weight:700;margin-bottom:7px">🔔 Webhook ML → Telegram (tiempo real)</div>';
+  if(wStats._total){
+    html += '<div style="font-size:11.5px;line-height:1.7">';
+    html += '<div>Total pings recibidos: <strong>'+wStats._total+'</strong></div>';
+    html += '<div>Último ping: <strong>'+(wStats._lastSeen ? new Date(wStats._lastSeen).toLocaleString('es-AR') : '—')+'</strong></div>';
+    html += '<div>Ventas: '+(wStats.orders_v2||wStats.orders||0)+' · Preguntas: '+(wStats.questions||0)+'</div>';
+    html += '</div>';
+  } else {
+    html += '<div style="font-size:11.5px;color:#92400e;line-height:1.6">⚠️ El webhook nunca recibió pings. Andá a <a href="https://developers.mercadolibre.com.ar/" target="_blank" style="color:#1d4ed8">developers.mercadolibre.com.ar</a> → tu app → Notificaciones → URL: <code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;font-size:10.5px">'+WORKER+'/webhook</code> → Suscribite a <strong>orders_v2</strong> y <strong>questions</strong>.</div>';
+  }
+  html += '</div>';
+
+  // Cron
+  html += '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:11px 13px;margin-bottom:10px">';
+  html += '<div style="font-size:12.5px;font-weight:700;margin-bottom:7px">⏱️ Cron Worker → Telegram (red de seguridad cada 5min)</div>';
+  if(cLast.finished){
+    html += '<div style="font-size:11.5px;line-height:1.7">';
+    html += '<div>Última corrida: <strong>'+new Date(cLast.finished).toLocaleString('es-AR')+'</strong> · '+(cLast.duration_ms||0)+'ms</div>';
+    html += '<div>Cuentas chequeadas: <strong>'+(cLast.users||0)+'</strong></div>';
+    html += '<div>Órdenes scaneadas: '+(cLast.orders_checked||0)+' · Preguntas: '+(cLast.questions_checked||0)+'</div>';
+    html += '<div>Telegrams enviados por cron: <strong>'+(cLast.tg_sent||0)+'</strong></div>';
+    if(cLast.errors && cLast.errors.length){
+      html += '<div style="margin-top:5px;color:#991b1b;font-size:10.5px">Errores: '+cLast.errors.join(' · ')+'</div>';
+    }
+    html += '</div>';
+  } else {
+    html += '<div style="font-size:11.5px;color:#92400e;line-height:1.6">⚠️ El cron aún no corrió. Andá a tu <a href="https://dash.cloudflare.com" target="_blank" style="color:#1d4ed8">Cloudflare dashboard</a> → Workers → tu worker → <strong>Settings → Triggers → Cron Triggers</strong> → Add Cron Trigger con expresión <code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;font-size:10.5px">*/5 * * * *</code></div>';
+  }
+  html += '</div>';
+
+  // Acciones
+  html += '<div style="display:flex;gap:6px;margin-top:14px;flex-wrap:wrap">';
+  html += '<button class="btn btn-primary btn-sm" onclick="tg247TestWebhook()">🧪 Probar webhook + Telegram</button>';
+  html += '<button class="btn btn-ghost btn-sm" onclick="tg247Refresh();closeModal(\'tg247-modal\')">🔄 Refrescar</button>';
+  html += '<button class="btn btn-ghost btn-sm" onclick="closeModal(\'tg247-modal\')" style="margin-left:auto">Cerrar</button>';
+  html += '</div>';
+  html += '</div>';
+
+  // Modal genérico
+  let modal = document.getElementById('tg247-modal');
+  if(!modal){
+    modal = document.createElement('div');
+    modal.id = 'tg247-modal';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML = '<div class="modal" style="max-width:580px"><div class="modal-bd">'+html+'</div></div>';
+  modal.style.display = 'flex';
+}
+
+async function tg247TestWebhook(){
+  try {
+    const r = await fetch(WORKER+'/webhook/test', {
+      method:'POST',
+      headers:{'Authorization':'Bearer '+token, 'Content-Type':'application/json'},
+    });
+    const d = await r.json();
+    if(d.ok){
+      alert('✅ Test enviado. Revisá Telegram (puede tardar 1-3 segundos).');
+    } else {
+      alert('❌ Error: ' + (d.error || 'desconocido'));
+    }
+  } catch(e){
+    alert('❌ Error de red: ' + e.message);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -8072,6 +8265,215 @@ async function loadSEOMetrics(){
 async function analyzeSEOAll(){ renderSEOSection(); }
 
 // ═══════════════════════════════════════════════════════════
+// v106/v107: Robust JSON extractor para respuestas de IA
+// ═══════════════════════════════════════════════════════════
+//
+// Los modelos free (DeepSeek, Llama, Gemini Flash) a veces devuelven JSON con:
+//   1. Saltos de línea reales dentro de strings → "desc": "linea1
+//      linea2"  ← rompe JSON.parse
+//   2. Comillas dobles internas sin escapar → "Apta para "microondas""
+//   3. Markdown fences ```json ... ``` alrededor
+//   4. Texto antes/después del JSON
+//   5. Trailing commas
+//   6. JSON TRUNCADO por límite de tokens (el más jodido)
+//
+// Estrategia en cascada (v107):
+//   1. Parse directo
+//   2. Quitar markdown fences + reintentar
+//   3. Aislar el {...} más externo + reintentar
+//   4. Sanitizer tolerante (escapa \n \r \t y heurística de "")
+//   5. Reconstrucción token-aware (campo a campo, tolerante a campos truncados)
+//   6. Si todo falla → throw con muestra para debug
+function _aiParseJSON(raw){
+  if(!raw || typeof raw !== 'string') throw new Error('Respuesta vacía de la IA');
+  let s = raw.trim();
+  s = s.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/,'').trim();
+
+  // v108: Detección temprana de "prosa libre" (la IA ignoró el formato JSON).
+  // Caso típico: openrouter/free elige un modelo chico que devuelve párrafos.
+  // Si los primeros 40 chars no contienen ningún `{` o `"`, no es JSON.
+  if(!/[{\"]/.test(s.slice(0, 80))){
+    throw new Error('La IA respondió texto plano en vez de JSON. Probá de nuevo — los modelos free a veces ignoran el formato pedido.');
+  }
+
+  // Strat 1: parse directo
+  try { return JSON.parse(s); } catch(e1) { /* sigue */ }
+
+  // Strat 2: aislar el bloque {...} más externo
+  const first = s.indexOf('{');
+  const last  = s.lastIndexOf('}');
+  if(first >= 0 && last > first){
+    const inner = s.slice(first, last+1);
+    try { return JSON.parse(inner); } catch(e2) { s = inner; }
+  }
+
+  // Strat 3: sanitizer (escapa \n \r \t reales)
+  const sanitized = _aiSanitizeJSON(s);
+  try { return JSON.parse(sanitized); } catch(e3) {
+    const cleaner = sanitized.replace(/,(\s*[}\]])/g, '$1');
+    try { return JSON.parse(cleaner); } catch(e4) {
+      // Strat 4: reconstrucción tolerante — extraer cada campo con regex
+      const reconstructed = _aiReconstructJSON(s);
+      if(reconstructed && Object.keys(reconstructed).length > 0){
+        console.warn('[AIParse] JSON malformado — reconstruido tolerante con', Object.keys(reconstructed).length, 'campos');
+        return reconstructed;
+      }
+      console.error('[AIParse] JSON inválido. Raw completo:', raw);
+      console.error('[AIParse] Sanitized:', sanitized.slice(0, 500));
+      throw new Error('La IA devolvió un JSON malformado (' + (e4.message||e3.message||'parse error') + '). Probá de nuevo — los modelos free a veces fallan en el formato.');
+    }
+  }
+}
+
+// Sanitizer v107: escapa \n \r \t REALES dentro de strings.
+// Cambio clave vs v106: cuando vemos un " dentro de un string, asumimos que
+// SIEMPRE cierra (no usamos heurística frágil). Si la IA puso comillas
+// internas sin escapar, lo arreglamos en una pasada previa antes de llegar acá.
+function _aiSanitizeJSON(s){
+  // Pre-pasada: escapar comillas dobles que claramente son internas a un string.
+  // Detección: un " que está precedido por una letra/espacio y seguido por una
+  // letra/espacio (no por separadores JSON como , : { } [ ]) es interno.
+  // Esta heurística es imperfecta pero ataca el caso típico: "Apta para "microondas""
+  s = s.replace(/([a-zA-Z0-9áéíóúñ ])"([a-zA-Z0-9áéíóúñ ])/g, '$1\\"$2');
+
+  let out = '';
+  let inStr = false;
+  let esc = false;
+  for(let i = 0; i < s.length; i++){
+    const c = s[i];
+    if(inStr){
+      if(esc){
+        out += c;
+        esc = false;
+        continue;
+      }
+      if(c === '\\'){
+        out += c;
+        esc = true;
+        continue;
+      }
+      if(c === '"'){
+        // Cierre de string (la pre-pasada ya escapó las comillas internas)
+        out += '"';
+        inStr = false;
+        continue;
+      }
+      // Saltos reales dentro de string → escapar
+      if(c === '\n'){ out += '\\n'; continue; }
+      if(c === '\r'){ out += '\\r'; continue; }
+      if(c === '\t'){ out += '\\t'; continue; }
+      out += c;
+    } else {
+      if(c === '"'){ inStr = true; out += c; continue; }
+      out += c;
+    }
+  }
+  return out;
+}
+
+// Reconstrucción tolerante v108: extrae campos uno a uno con regex.
+// Útil cuando el JSON está TRUNCADO o tiene un campo individualmente roto.
+//
+// v108 mejora: además de campos completos, también rescata el último campo
+// string si quedó truncado SIN comilla de cierre — el caso típico de la IA
+// agotando max_tokens a mitad de descripcion_optimizada.
+//
+// Devuelve un objeto parcial con los campos que sí pudo extraer.
+function _aiReconstructJSON(s){
+  const out = {};
+  // 1) Campos string CON cierre: "key": "value..." (modo dotall via [\s\S])
+  //    Lookahead para no devorar el siguiente campo.
+  const strFields = s.matchAll(/"([a-z_]+)"\s*:\s*"([\s\S]*?)"\s*(?=,\s*"[a-z_]+"\s*:|,\s*$|}\s*$|$)/gi);
+  for(const m of strFields){
+    if(!(m[1] in out)) out[m[1]] = m[2].replace(/\\n/g, '\n').replace(/\\"/g, '"');
+  }
+  // 2) Campos número: "key": 123
+  const numFields = s.matchAll(/"([a-z_]+)"\s*:\s*(-?\d+(?:\.\d+)?)/gi);
+  for(const m of numFields){
+    if(!(m[1] in out)) out[m[1]] = parseFloat(m[2]);
+  }
+  // 3) Campos array de strings: "key": ["a","b","c"]
+  const arrFields = s.matchAll(/"([a-z_]+)"\s*:\s*\[([\s\S]*?)\]/gi);
+  for(const m of arrFields){
+    if(m[1] in out) continue;
+    try {
+      const arr = JSON.parse('[' + m[2] + ']');
+      out[m[1]] = arr;
+    } catch(e){
+      const items = [];
+      const re = /"([^"\\]*(?:\\.[^"\\]*)*)"/g;
+      let mm;
+      while((mm = re.exec(m[2])) !== null) items.push(mm[1].replace(/\\"/g,'"').replace(/\\n/g,'\n'));
+      if(items.length) out[m[1]] = items;
+    }
+  }
+  // 4) v108: Rescatar el ÚLTIMO campo string si quedó truncado.
+  //    Caso típico: la IA puso "descripcion_optimizada": "texto texto texto
+  //    sin cerrar comilla. Buscamos ese patrón al final del input.
+  //    Regex: "key": "valor que NO se cierra hasta el final del input
+  const truncated = s.match(/"([a-z_]+)"\s*:\s*"([\s\S]*)$/i);
+  if(truncated && !(truncated[1] in out)){
+    let value = truncated[2];
+    // Si justo el "valor" llegó a contener un cierre legítimo, descartar este
+    // rescate (ya debería haber sido capturado por el patrón #1)
+    // Heurística: si el valor termina con "} o con ", lo descartamos.
+    const trimmed = value.replace(/\s+$/, '');
+    if(!trimmed.endsWith('"') && !trimmed.endsWith('"}')){
+      // Limpiar saltos escapados + cortar en el último char válido
+      value = value.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+      // Recortar suavemente al final si quedó cortado a mitad de palabra
+      value = value.replace(/\s*[a-záéíóúñ]*\s*$/i, '').trim();
+      if(value.length > 10){
+        out[truncated[1]] = value + '...';
+        console.warn('[AIParse] Campo truncado rescatado:', truncated[1], '(' + value.length + ' chars)');
+      }
+    }
+  }
+  return out;
+}
+
+// v108: Normalización del result del optimizador.
+// La IA a veces devuelve campos en tipo incorrecto (un string en vez de array,
+// o un número como string). Esta función fuerza los tipos esperados para que
+// el render no truene con "X.map is not a function".
+function _aiNormalizeResult(result){
+  if(!result || typeof result !== 'object') return;
+  // Campos que esperamos como array de strings
+  const arrayFields = ['variantes','keywords','keywords_secundarias','sinonimos','mejoras_recomendadas'];
+  for(const f of arrayFields){
+    if(result[f] == null){ continue; }
+    if(Array.isArray(result[f])) continue;
+    if(typeof result[f] === 'string'){
+      // Heurística: si parece lista separada por comas o "·", splitear; si no, envolver
+      const s = result[f].trim();
+      if(/[,·•\n]/.test(s)){
+        result[f] = s.split(/[,·•\n]/).map(x => x.trim()).filter(Boolean);
+      } else {
+        result[f] = [s];
+      }
+    } else {
+      // Tipo raro → vaciar para que el render lo omita
+      result[f] = [];
+    }
+  }
+  // Campos string
+  if(result.descripcion_optimizada != null && typeof result.descripcion_optimizada !== 'string'){
+    result.descripcion_optimizada = String(result.descripcion_optimizada);
+  }
+  if(result.titulo_optimizado != null && typeof result.titulo_optimizado !== 'string'){
+    result.titulo_optimizado = String(result.titulo_optimizado);
+  }
+  if(result.titulo_alternativo != null && typeof result.titulo_alternativo !== 'string'){
+    result.titulo_alternativo = String(result.titulo_alternativo);
+  }
+  // Número
+  if(result.score_seo != null && typeof result.score_seo !== 'number'){
+    const n = parseFloat(result.score_seo);
+    result.score_seo = isNaN(n) ? 0 : n;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 // OPTIMIZAR
 // ═══════════════════════════════════════════════════════════
 async function doOptimize(){
@@ -8112,11 +8514,12 @@ Simulá cómo busca un comprador dentro de un marketplace. El título ES una bú
 - Si el input es "Taza Interior De Color Pantera Rosa" -> Output ideal: "Taza Cerámica Pantera Rosa Retro Dibujo Animado 325 ml"
 - Si el input es "Taza Mágica Joaquín Sabina" -> Output ideal: "Taza Mágica Cerámica Joaquín Sabina Cantante Español 325 ml"
 
-PALABRAS ABSOLUTAMENTE PROHIBIDAS EN TÍTULO Y VARIANTES (nunca usarlas, ni siquiera como sugerencia):
-- Nombres de tienda/marca propia: "Impala", "Design", "Tienda", "Oficial", "Taza Impala"
-- Palabras de venta genéricas: "Regalo", "Oferta", "Promo", "Gratis", "Envío gratis", "Stock", "Garantía", "Original", "Nuevo"
+PALABRAS ABSOLUTAMENTE PROHIBIDAS EN TÍTULO, VARIANTES Y DESCRIPCIÓN (nunca usarlas, ni siquiera como sugerencia, ni en ninguna combinación):
+- Nombres de tienda/marca propia: "Impala", "Design", "Tienda", "Taza Impala"
+- Palabras de venta genéricas: "Regalo", "Oferta", "Promo", "Gratis", "Envío gratis", "Stock", "Garantía", "Nuevo"
 - Cualquier variación de: "Personalizado", "Personalizada", "Personalizable", "Custom"
-- Claims vacíos: "Alta calidad", "El mejor", "Único", "Exclusivo", "Original"
+- Claims vacíos: "Alta calidad", "El mejor", "Único", "Exclusivo"
+- v109: Palabras "Oficial", "Original" y cualquier combinación: "Diseño oficial", "Producto original", "Producto oficial", "Modelo original", "Versión oficial", "Versión original", "Auténtico" — PROHIBIDAS EN TÍTULO Y EN DESCRIPCIÓN. Si necesitás transmitir calidad, hacelo describiendo materiales y proceso, no con estos adjetivos.
 - Frases tipo slogan o publicidad de cualquier tipo
 - La palabra "lavavajillas" bajo NINGÚN contexto ni siquiera como sugerencia
 
@@ -8135,6 +8538,7 @@ REGLA DE MICROONDAS (SOLO EN DESCRIPCIÓN):
   4) Casos de uso y ocasiones
 - Evitar relleno innecesario, repeticiones ni frases de venta genéricas
 - Sin "Personalizado/a/able" ni nombres de tienda
+- Sin "Oficial", "Original" ni sus combinaciones (ver lista de palabras prohibidas arriba)
 - Saltos de línea para escanear rápido
 - AL FINAL agregar exactamente este párrafo separado:
 Accedé a todas nuestras publicaciones acá:
@@ -8159,8 +8563,11 @@ Respondé SOLO JSON válido (sin markdown, sin backticks):
   "mejoras_recomendadas": ["m1","m2","m3"],
   "enfoque_venta": "...",
   "score_seo": 0
-}`);
-    const result=JSON.parse(r.replace(/```json|```/g,'').trim());
+}`, null, 2500);
+    const result=_aiParseJSON(r);
+    // v108: Normalizar campos para que el render no truene si la IA devolvió
+    // un campo como string en vez de array (caso común con modelos free).
+    _aiNormalizeResult(result);
     // Limpiar emoji del título optimizado
     const tOpt=stripLeadingEmoji(result.titulo_optimizado||title);
     const dOpt=result.descripcion_optimizada||'';
@@ -8305,7 +8712,389 @@ Respondé SOLO JSON válido (sin markdown, sin backticks):
     // Guardar título y descripción en variables globales — NO en atributos onclick
     window._optTituloSugerido = tOpt;
     window._optDescSugerida = dOpt;
-  }catch(e){console.error(e);el.innerHTML='<div class="alert a-red">⚠️ Error al procesar. Revisá la conexión.</div>';}
+  }catch(e){
+    console.error('[doOptimize] error:', e);
+    // v105: Mensaje específico — antes era genérico "revisá la conexión"
+    const msg = e.message && e.message.toLowerCase().includes('saturad')
+      ? '⚠️ ' + e.message + ' Probá de nuevo en unos segundos.'
+      : '⚠️ Error al procesar: ' + (e.message || 'desconocido');
+    el.innerHTML='<div class="alert a-red">'+msg+'</div>';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v105: Google Suggest Argentina — Buscador libre de keywords
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Google Suggest devuelve las frases que la gente realmente tipea en Google AR.
+// Es 100% gratis, sin API key, sin cuotas. Lo llamamos desde el navegador (no
+// del Worker) porque Google bloquea las IPs de datacenter de Cloudflare.
+//
+// Patrón: JSONP nativo de Google Suggest (más confiable que CORS proxy).
+// Si JSONP falla → fallback a corsproxy.io (mismo patrón que COMPETENCIA v52).
+//
+// Cache: localStorage 24h por keyword para no spamear Google.
+
+const GS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const GS_CACHE_PREFIX = 'gsuggest:';
+
+// Lee del cache si está vigente, devuelve null si no
+function _gsCacheGet(query){
+  try{
+    const raw = localStorage.getItem(GS_CACHE_PREFIX + query.toLowerCase().trim());
+    if(!raw) return null;
+    const d = JSON.parse(raw);
+    if(!d || !d.ts || !Array.isArray(d.suggestions)) return null;
+    if(Date.now() - d.ts > GS_CACHE_TTL_MS) return null;
+    return d.suggestions;
+  }catch(e){ return null; }
+}
+function _gsCacheSet(query, suggestions){
+  try{
+    localStorage.setItem(GS_CACHE_PREFIX + query.toLowerCase().trim(),
+      JSON.stringify({ ts: Date.now(), suggestions }));
+  }catch(e){}
+}
+
+// Llamada JSONP a Google Suggest. Más confiable que fetch+CORS porque Google
+// soporta JSONP nativamente. Timeout 4s.
+function _gsSuggestJSONP(query){
+  return new Promise((resolve) => {
+    const cbName = '__gsuggest_cb_' + Date.now() + '_' + Math.floor(Math.random()*1e6);
+    const url = 'https://suggestqueries.google.com/complete/search?client=chrome&hl=es-AR&gl=ar&q='
+      + encodeURIComponent(query) + '&jsonp=' + cbName;
+    let timer;
+    const cleanup = () => {
+      try{ delete window[cbName]; }catch(e){ window[cbName] = undefined; }
+      const s = document.getElementById(cbName);
+      if(s) s.remove();
+      if(timer) clearTimeout(timer);
+    };
+    window[cbName] = function(data){
+      cleanup();
+      // Google devuelve [query, [suggestions], ...]
+      const suggestions = Array.isArray(data) && Array.isArray(data[1]) ? data[1] : [];
+      resolve(suggestions);
+    };
+    const script = document.createElement('script');
+    script.id = cbName;
+    script.src = url;
+    script.onerror = () => { cleanup(); resolve(null); };
+    document.head.appendChild(script);
+    timer = setTimeout(() => { cleanup(); resolve(null); }, 4000);
+  });
+}
+
+// Fallback con corsproxy.io (cuando JSONP no funciona por bloqueo de Google
+// a clients no-Chrome o políticas regionales). Devuelve null si falla.
+async function _gsSuggestCorsProxy(query){
+  try{
+    const url = 'https://corsproxy.io/?' + encodeURIComponent(
+      'https://suggestqueries.google.com/complete/search?client=firefox&hl=es-AR&gl=ar&q=' + encodeURIComponent(query)
+    );
+    const ctrl = new AbortController();
+    const tid = setTimeout(()=>ctrl.abort(), 5000);
+    const r = await fetch(url, { signal: ctrl.signal });
+    clearTimeout(tid);
+    if(!r.ok) return null;
+    const data = await r.json();
+    return Array.isArray(data) && Array.isArray(data[1]) ? data[1] : null;
+  }catch(e){ return null; }
+}
+
+// Pipeline público: cache → JSONP → corsproxy.io
+async function gsSuggest(query){
+  query = (query||'').trim();
+  if(!query) return [];
+  const cached = _gsCacheGet(query);
+  if(cached) return cached;
+  let suggestions = await _gsSuggestJSONP(query);
+  if(!suggestions || !suggestions.length){
+    suggestions = await _gsSuggestCorsProxy(query);
+  }
+  suggestions = suggestions || [];
+  if(suggestions.length) _gsCacheSet(query, suggestions);
+  return suggestions;
+}
+
+// UI: buscador libre arriba del optimizador
+async function gsSearch(){
+  const inp = document.getElementById('gs-query');
+  const btn = document.getElementById('gs-search-btn');
+  const out = document.getElementById('gs-results');
+  const chipsEl = document.getElementById('gs-chips');
+  const metaEl = document.getElementById('gs-meta');
+  const query = (inp?.value||'').trim();
+  if(!query){ inp?.focus(); return; }
+
+  if(btn){ btn.disabled = true; btn.textContent = '⏳ Buscando...'; }
+  if(out) out.style.display = '';
+  if(chipsEl) chipsEl.innerHTML = '<div style="font-size:11.5px;color:#1e40af;opacity:.7">Consultando Google Argentina...</div>';
+  if(metaEl) metaEl.textContent = '';
+
+  try{
+    // 3 queries paralelas: la cruda + "como usar" + "precio" — patrón Gemini
+    const t0 = Date.now();
+    const variants = await Promise.all([
+      gsSuggest(query),
+      gsSuggest(query + ' como usar'),
+      gsSuggest(query + ' precio'),
+    ]);
+    const dt = Date.now() - t0;
+    // Dedup preservando orden + filtrar la query exacta y duplicados parciales
+    const seen = new Set();
+    const all = [];
+    for(const arr of variants){
+      for(const s of (arr||[])){
+        const k = (s||'').toLowerCase().trim();
+        if(!k || k === query.toLowerCase() || seen.has(k)) continue;
+        seen.add(k);
+        all.push(s);
+      }
+    }
+
+    if(!all.length){
+      if(chipsEl) chipsEl.innerHTML = '<div style="font-size:11.5px;color:#92400e">⚠️ Google no devolvió sugerencias para esta búsqueda. Probá con menos palabras.</div>';
+      if(metaEl) metaEl.textContent = '';
+      return;
+    }
+
+    // Renderizar como chips clicables
+    if(chipsEl){
+      chipsEl.innerHTML = all.slice(0, 24).map((s,i)=>{
+        const safe = s.replace(/"/g,'&quot;');
+        return '<button onclick="gsApplyChip('+i+')" data-gs-kw="'+safe+'" '
+          + 'style="background:#fff;border:1px solid #93c5fd;color:#1e40af;font-size:11.5px;'
+          + 'padding:5px 10px;border-radius:14px;cursor:pointer;font-family:inherit;line-height:1.3" '
+          + 'title="Tocá para agregar a Keywords extra del optimizador">'
+          + s + ' <span style="opacity:.5;font-size:10px">+</span></button>';
+      }).join('');
+    }
+    if(metaEl) metaEl.textContent = '✓ ' + all.length + ' sugerencias reales de Google AR · ' + dt + 'ms · cacheadas 24h';
+  }catch(e){
+    console.error('[gsSearch] error:', e);
+    if(chipsEl) chipsEl.innerHTML = '<div style="font-size:11.5px;color:#991b1b">⚠️ No se pudo conectar con Google Suggest. Revisá tu conexión a internet.</div>';
+  }finally{
+    if(btn){ btn.disabled = false; btn.textContent = '🔎 Buscar'; }
+  }
+}
+
+// Click en chip → agregar al campo "Keywords extra"
+function gsApplyChip(idx){
+  const btn = document.querySelectorAll('#gs-chips [data-gs-kw]')[idx];
+  if(!btn) return;
+  const kw = btn.getAttribute('data-gs-kw') || '';
+  const inp = document.getElementById('opt-kws');
+  if(!inp) return;
+  const current = (inp.value||'').trim();
+  // Evitar duplicados
+  const existing = current ? current.split(',').map(s=>s.trim().toLowerCase()) : [];
+  if(existing.includes(kw.toLowerCase())) {
+    showToast('Esa keyword ya está cargada', 'warn');
+    return;
+  }
+  inp.value = current ? current + ', ' + kw : kw;
+  // Feedback visual
+  btn.style.background = '#dcfce7';
+  btn.style.borderColor = '#86efac';
+  btn.style.color = '#166534';
+  btn.innerHTML = kw + ' <span style="font-size:10px">✓</span>';
+  if(typeof showToast === 'function') showToast('🔍 "' + kw + '" agregada a Keywords extra', 'ok');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v105: doOptimizeWithGoogle — Optimizar con IA usando Google Suggest como contexto
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Igual que doOptimize() pero antes de llamar a la IA, trae sugerencias reales
+// de Google Argentina y se las inyecta como contexto en el prompt.
+// MENTALIDAD BASE y TODAS las reglas estrictas se mantienen idénticas.
+async function doOptimizeWithGoogle(){
+  const title=document.getElementById('opt-in').value.trim();
+  const desc =document.getElementById('opt-desc').value.trim();
+  const cat=document.getElementById('opt-cat').value.trim();
+  const kws=document.getElementById('opt-kws').value.trim();
+  if(!title){alert('Ingresá o seleccioná un título');return;}
+
+  // RESET local (igual que doOptimize)
+  const renderItemId = (typeof optCurrentItemId !== 'undefined' ? optCurrentItemId : null) || null;
+  window._optTituloSugerido = null;
+  window._optDescSugerida   = null;
+
+  const el=document.getElementById('opt-out');
+  el.innerHTML='<div class="loading"><div class="spin"></div>🔍 Consultando Google Argentina (3 queries paralelas)...</div>';
+
+  // 1) Obtener sugerencias reales de Google AR
+  let googleKws = [];
+  try{
+    // Usar las primeras 6-7 palabras del título como query base (no toda la cadena)
+    const baseQuery = title.split(/\s+/).slice(0, 6).join(' ').toLowerCase();
+    const variants = await Promise.all([
+      gsSuggest(baseQuery),
+      gsSuggest(baseQuery + ' como usar'),
+      gsSuggest(baseQuery + ' precio'),
+    ]);
+    const seen = new Set();
+    for(const arr of variants){
+      for(const s of (arr||[])){
+        const k = (s||'').toLowerCase().trim();
+        if(!k || seen.has(k)) continue;
+        seen.add(k);
+        googleKws.push(s);
+      }
+    }
+    googleKws = googleKws.slice(0, 20); // Cap a 20 para no inflar el prompt
+    console.log('[GoogleSuggest] '+googleKws.length+' sugerencias para "'+baseQuery+'"');
+  }catch(e){
+    console.warn('[GoogleSuggest] falló, sigo sin contexto:', e.message);
+  }
+
+  // 2) Construir prompt: MISMO prompt que doOptimize + sección con keywords reales
+  const googleBlock = googleKws.length
+    ? '\n\n═══ INTENCIONES DE BÚSQUEDA REALES (Google Argentina) ═══\n'
+      + 'Estas son frases que la gente realmente tipea en Google Argentina buscando este tipo\n'
+      + 'de producto. Usalas como referencia de qué keywords tienen demanda real,\n'
+      + 'pero respetá ESTRICTAMENTE las reglas de arriba (especialmente PALABRAS PROHIBIDAS):\n'
+      + googleKws.map(k => '- ' + k).join('\n')
+      + '\n'
+    : '';
+
+  el.innerHTML='<div class="loading"><div class="spin"></div>🤖 IA optimizando con contexto de '+googleKws.length+' búsquedas reales de Google AR...</div>';
+
+  try{
+    const r=await callClaude(`Sos un experto en SEO para MercadoLibre Argentina 2026. Tu objetivo es optimizar títulos y descripciones basándote en INTENCIÓN DE BÚSQUEDA REAL del comprador.
+
+TÍTULO ACTUAL: "${title}"
+${cat?'CATEGORÍA: '+cat:''}
+${desc?'DESCRIPCIÓN ACTUAL:\n'+desc.slice(0,500):''}
+${kws?'KEYWORDS EXTRA A INCLUIR: '+kws:''}
+
+═══ MENTALIDAD BASE ═══
+Simulá cómo busca un comprador dentro de un marketplace. El título ES una búsqueda, NO publicidad. Preguntate: ¿Qué tipearía un comprador real en ML para encontrar este producto?
+
+═══ REGLAS TÍTULO (ESTRICTAS) ═══
+1. Estructura Exacta: [Producto] + [Material] + [Modelo/Temática] + [KEYWORDS DEL MODELO] + [Capacidad/Medida]
+2. Naturaleza de las Keywords: Las [KEYWORDS DEL MODELO] deben derivar EXCLUSIVAMENTE del modelo o temática (ej. época del personaje, género del cantante, deporte del equipo). PROHIBIDO usar keywords genéricas relacionadas al producto, material o capacidad.
+3. Keyword principal AL INICIO — la palabra con mayor intención de compra primero.
+4. Máximo 60 caracteres ESTRICTO — contá antes de responder. Tratá de acercarte lo máximo posible al límite de 60 para no desperdiciar espacio de indexación.
+5. Sin puntuación ni emojis — prohibido: , . ( ) : ; ! ? / - + & @ # * % $ " ' =
+6. Sin mayúsculas excesivas — solo primera letra de palabras clave si corresponde.
+7. Sin palabras repetidas innecesariamente.
+
+═══ EJEMPLOS DE APLICACIÓN DE ESTRUCTURA ═══
+- Si el input es "Taza Interior De Color Pantera Rosa" -> Output ideal: "Taza Cerámica Pantera Rosa Retro Dibujo Animado 325 ml"
+- Si el input es "Taza Mágica Joaquín Sabina" -> Output ideal: "Taza Mágica Cerámica Joaquín Sabina Cantante Español 325 ml"
+
+PALABRAS ABSOLUTAMENTE PROHIBIDAS EN TÍTULO, VARIANTES Y DESCRIPCIÓN (nunca usarlas, ni siquiera como sugerencia, ni en ninguna combinación):
+- Nombres de tienda/marca propia: "Impala", "Design", "Tienda", "Taza Impala"
+- Palabras de venta genéricas: "Regalo", "Oferta", "Promo", "Gratis", "Envío gratis", "Stock", "Garantía", "Nuevo"
+- Cualquier variación de: "Personalizado", "Personalizada", "Personalizable", "Custom"
+- Claims vacíos: "Alta calidad", "El mejor", "Único", "Exclusivo"
+- v109: Palabras "Oficial", "Original" y cualquier combinación: "Diseño oficial", "Producto original", "Producto oficial", "Modelo original", "Versión oficial", "Versión original", "Auténtico" — PROHIBIDAS EN TÍTULO Y EN DESCRIPCIÓN.
+- Frases tipo slogan o publicidad de cualquier tipo
+- La palabra "lavavajillas" bajo NINGÚN contexto ni siquiera como sugerencia
+
+REGLA DE MICROONDAS (SOLO EN DESCRIPCIÓN):
+- Si el producto es taza plástica, taza cerámica, taza mágica o jarro térmico
+  -> usar la frase exacta "Apto para microondas" o "Apta para microondas" según el género del sustantivo
+  -> NO mencionar "lavavajillas" bajo ninguna circunstancia
+
+═══ REGLAS DESCRIPCIÓN ═══
+- Longitud: entre 500 y 900 caracteres (objetivo SEO óptimo, evita truncado).
+- Priorizar info clave en los primeros 200-300 caracteres
+- Estructura:
+  1) Resumen inicial (qué es, para quién)
+  2) Beneficios y casos de uso (3-4 puntos)
+  3) Especificaciones técnicas breves
+- Saltos de línea para escanear rápido
+- Sin "Personalizado/a/able" ni nombres de tienda
+- Sin "Oficial", "Original" ni sus combinaciones (ver lista de palabras prohibidas arriba)
+- AL FINAL agregar este párrafo:
+Accedé a todas nuestras publicaciones acá:
+https://listado.mercadolibre.com.ar/_DisplayType_G_eshop_IMPALA+DESIGN
+
+═══ BUENAS PRÁCTICAS SEO ═══
+- No repetir palabras para forzar SEO
+- Lenguaje natural alineado a búsquedas reales
+- No inventar datos, no claims falsos
+- No incluir precios, envíos ni promociones${googleBlock}
+
+═══ FORMATO DE RESPUESTA — CRÍTICO ═══
+Devolvé SOLO JSON válido — sin markdown, sin backticks, sin texto extra.
+- Usá \\n (DOS caracteres) para saltos de línea dentro de strings
+- Si necesitás comillas, usá comillas simples ' o ninguna
+- Mantené la descripción CORTA (500-900 chars) para no truncar la respuesta
+
+Estructura exacta (TODOS los campos obligatorios):
+{
+  "titulo_optimizado": "...",
+  "titulo_alternativo": "...",
+  "variantes": ["variante A", "variante B"],
+  "descripcion_optimizada": "...",
+  "keywords": ["kw1","kw2","kw3","kw4","kw5","kw6"],
+  "mejoras_recomendadas": ["m1","m2"],
+  "score_seo": 75
+}`, null, 2500);
+
+    const result=_aiParseJSON(r);
+    _aiNormalizeResult(result);
+    // De acá en adelante el flujo es idéntico a doOptimize — reusamos su lógica
+    // copiando solo el render. La forma menos invasiva es delegarlo: setear los
+    // campos y llamar al mismo bloque de render con un pre-pendido visual que
+    // indica que se usó Google Suggest.
+    const tOpt=(typeof stripLeadingEmoji==='function'?stripLeadingEmoji(result.titulo_optimizado||title):(result.titulo_optimizado||title));
+    const dOpt=result.descripcion_optimizada||'';
+    document.getElementById('opt-in').value=tOpt;
+    liveScore(tOpt);
+    const sc=result.score_seo||seoScore(tOpt);
+    const scColor=sc>=70?'#16a34a':sc>=40?'#92400e':'#dc2626';
+    const scBg=sc>=70?'#f0fdf4':sc>=40?'#fffbeb':'#fef2f2';
+    const mlEditUrl = (typeof mlEditLink==='function')?mlEditLink(renderItemId):'#';
+    const hasItem=!!renderItemId;
+    const itemName=hasItem?((allItems.find(i=>i.id===renderItemId)?.title||'publicación seleccionada')).slice(0,50):'';
+
+    // Banner "con Google" arriba del resultado para que se vea que se usó
+    const googleBanner = googleKws.length
+      ? '<div style="background:linear-gradient(135deg,#eff6ff,#dbeafe);border:1px solid #93c5fd;border-radius:8px;padding:8px 11px;margin-bottom:10px;font-size:11.5px;color:#1e40af">'
+        + '🔍 <strong>Optimizado con '+googleKws.length+' búsquedas reales de Google Argentina</strong> como contexto. '
+        + 'Las keywords sugeridas abajo derivan de intención de compra real.'
+        + '</div>'
+      : '<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:8px 11px;margin-bottom:10px;font-size:11.5px;color:#78350f">'
+        + '⚠️ Google Suggest no devolvió resultados — IA optimizó sin contexto extra.'
+        + '</div>';
+
+    el.innerHTML = googleBanner + `
+      <span id="opt-session-id" data-id="${renderItemId||''}" style="display:none"></span>
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:14px;margin-bottom:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:6px">
+          <div style="font-size:10px;color:#166534;text-transform:uppercase;font-weight:700;letter-spacing:.05em">✅ TÍTULO OPTIMIZADO — editá si querés</div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span id="opt-title-chars" style="font-size:10px;padding:2px 7px;border-radius:4px;background:#e5e7eb;color:#374151">${tOpt.length} chars</span>
+            <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;background:${scBg};color:${scColor}">Score SEO: ${sc}/100</span>
+            <button id="opt-copy-btn" class="btn btn-ghost btn-xs"
+              onclick="var tb=document.getElementById('opt-title-editable');var t=tb?tb.value:window._optTituloSugerido||'';navigator.clipboard.writeText(t).then(()=>{var b=document.getElementById('opt-copy-btn');b.textContent='✔ Copiado';b.style.background='#dcfce7';b.style.color='#166534';setTimeout(()=>{b.textContent='📋 Copiar título';b.style.background='';b.style.color='';},2000);}).catch(()=>{});"
+              style="font-size:11px;border-color:#bbf7d0">📋 Copiar título</button>
+          </div>
+        </div>
+        <input type="text" id="opt-title-editable" value="${tOpt.replace(/"/g,'&quot;')}" maxlength="60"
+          style="width:100%;font-size:15px;font-weight:700;border:1px solid #bbf7d0;border-radius:6px;padding:8px 11px;background:#fff;color:#0f172a;font-family:inherit"
+          oninput="window._optTituloSugerido=this.value;var l=this.value.length;document.getElementById('opt-title-chars').textContent=l+' chars';document.getElementById('opt-title-chars').style.background=l>60?'#fee2e2':l<20?'#fef3c7':'#dcfce7';document.getElementById('opt-title-chars').style.color=l>60?'#991b1b':l<20?'#78350f':'#166534';liveScore(this.value)">
+        ${hasItem?'<div style="font-size:11px;color:#166534;opacity:.8;margin-top:7px">📦 Se aplicará a: <strong>'+itemName+'...</strong></div>':''}
+        ${hasItem?'<div style="display:flex;gap:6px;margin-top:9px;flex-wrap:wrap"><button class="btn btn-primary btn-sm" onclick="applyOptTitle()" style="flex:1">✅ Aplicar a ML</button><a href="'+mlEditUrl+'" target="_blank" class="btn btn-ghost btn-sm" style="text-decoration:none">✏️ Editar manual</a></div>':''}
+      </div>
+      ${dOpt?'<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:12px;margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div style="font-size:10px;color:#92400e;text-transform:uppercase;font-weight:700">📝 Descripción optimizada ('+dOpt.length+' chars)</div>'+(hasItem?'<button class="btn btn-primary btn-sm" onclick="applyOptDesc()">✅ Aplicar descripción</button>':'')+'</div><textarea id="opt-desc-out" rows="8" style="width:100%;font-size:12px;border:1px solid #fde68a;border-radius:6px;padding:8px;font-family:inherit;background:#fff" oninput="window._optDescSugerida=this.value">'+dOpt.replace(/</g,'&lt;')+'</textarea></div>':''}
+      ${Array.isArray(result.keywords) && result.keywords.length ? '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px;margin-bottom:8px"><div style="font-size:10px;color:#1e40af;text-transform:uppercase;font-weight:700;margin-bottom:6px">🎯 Keywords sugeridas</div><div style="display:flex;flex-wrap:wrap;gap:4px">'+result.keywords.map(k=>'<span style="background:#fff;border:1px solid #bfdbfe;color:#1e40af;font-size:11px;padding:3px 8px;border-radius:11px">'+k+'</span>').join('')+'</div></div>' : ''}
+      ${Array.isArray(result.mejoras_recomendadas) && result.mejoras_recomendadas.length ? '<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px"><div style="font-size:10px;color:#78350f;text-transform:uppercase;font-weight:700;margin-bottom:5px">💡 Mejoras recomendadas</div>'+result.mejoras_recomendadas.map(m=>'<div style="font-size:11.5px;color:#78350f;margin-bottom:3px">• '+m+'</div>').join('')+'</div>' : ''}
+    `;
+    window._optTituloSugerido = tOpt;
+    window._optDescSugerida = dOpt;
+  }catch(e){
+    console.error('[doOptimizeWithGoogle] error:', e);
+    const msg = e.message && e.message.toLowerCase().includes('saturad')
+      ? '⚠️ ' + e.message + ' Probá de nuevo en unos segundos.'
+      : '⚠️ Error al procesar: ' + (e.message || 'desconocido');
+    el.innerHTML='<div class="alert a-red">'+msg+'</div>';
+  }
 }
 
 // Aplicar solo título — lee de window._optTituloSugerido (evita problemas de encoding en onclick)
@@ -8684,7 +9473,7 @@ Producto: "${item.title}" — diseño ya definido (compra impulsiva, regalo, ide
 Analizá el potencial y dá 3 sugerencias MUY concretas para mejorar (título, fotos, descripción, precio, keywords).
 Respondé SOLO JSON:
 {"potencial":"alto|medio","problema_principal":"...","sugerencias":["s1","s2","s3"],"titulo_mejorado":"...","enfoque_venta":"..."}`);
-      const d=JSON.parse(r.replace(/```json|```/g,'').trim());
+      const d=_aiParseJSON(r);
       el.innerHTML+=`<div class="pot-card">
         <div class="pot-hd">
           <div class="item-thumb">${item.thumbnail?`<img src="${item.thumbnail}" onerror="this.parentElement.textContent='☕'">`:'☕'}</div>
@@ -12020,8 +12809,12 @@ async function qSyncNow(){
   setTimeout(()=>{ if(status) status.style.display='none'; }, 4000);
 }
 
-// ── Guardar plantilla (local + opcionalmente nube) ──────────
-async function qSaveTmpl(uploadToCloud){
+// ── Guardar plantilla (local + nube + backup) ──────────────
+// v104: Antes el botón "Guardar en este dispositivo" solo escribía a localStorage
+// y nunca subía a la nube → al recargar en otra PC, los QRs nuevos se perdían.
+// Ahora SIEMPRE sincroniza con /api/settings Y /api/backup (mismo patrón que
+// saveCompetidor, ver bug v88). El modal solo tiene un botón "Guardar".
+async function qSaveTmpl(){
   const sal = document.getElementById('qtmpl-saludo')?.value||'';
   const fir = document.getElementById('qtmpl-firma')?.value||'';
   const tmpl = {saludo:sal, firma:fir};
@@ -12038,21 +12831,23 @@ async function qSaveTmpl(uploadToCloud){
   qSaveQR(qrs);
 
   const msg = document.getElementById('qtmpl-sync-msg');
-  if(uploadToCloud){
-    if(msg){ msg.textContent='⏳ Subiendo a la nube...'; msg.style.color='var(--text3)'; }
-    const ok = await saveRemoteSettings(qrs, tmpl);
-    if(msg){
-      msg.textContent = ok ? '✓ Guardado localmente y en la nube' : '⚠ Guardado local — no se pudo conectar al Worker';
-      msg.style.color = ok ? 'var(--green)' : 'var(--amber)';
-    }
-    setTimeout(()=>{ if(msg) msg.textContent=''; }, 3500);
-  } else {
-    if(msg){ msg.textContent='✓ Guardado en este dispositivo'; msg.style.color='var(--green)'; }
-    setTimeout(()=>{ if(msg) msg.textContent=''; }, 2000);
+  if(msg){ msg.textContent='⏳ Guardando en la nube...'; msg.style.color='var(--text3)'; }
+
+  // 1) /api/settings (endpoint principal de QRs)
+  const ok = await saveRemoteSettings(qrs, tmpl);
+  // 2) /api/backup también, para evitar el bug v88 donde un endpoint quedaba con
+  //    versión vieja y al recargar la sobrescribía. Mismo patrón que competidores.
+  if(typeof pushFullBackup === 'function') { try{ await pushFullBackup(); }catch(e){} }
+
+  if(msg){
+    msg.textContent = ok ? '✓ Guardado en la nube' : '⚠ Guardado local — sin conexión al Worker';
+    msg.style.color = ok ? 'var(--green)' : 'var(--amber)';
   }
+  setTimeout(()=>{ if(msg) msg.textContent=''; }, 3000);
 
   closeModal('q-tmpl-modal');
   renderQuestions();
+  if(typeof qRenderTemplatesPanel === 'function') qRenderTemplatesPanel(qGetQR());
 }
 
 function qOpenTmpl(){
@@ -12078,6 +12873,13 @@ function qrDeleteRow(i){
   const qrs = qGetQR(); qrs.splice(i,1); qSaveQR(qrs); qRenderTmplList();
   // v92 [P4]: refrescar panel lateral fijo
   if(typeof qRenderTemplatesPanel === 'function') qRenderTemplatesPanel(qGetQR());
+  // v104: sync inmediato a la nube (igual que deleteCompetidor), por si el
+  // usuario cierra el modal con la X sin tocar "Guardar".
+  _cloudStatus('saving');
+  saveRemoteSettings(qrs, qGetTmpl()).then(ok=>{
+    _cloudStatus(ok ? 'ok' : 'error');
+    if(ok && typeof pushFullBackup === 'function') pushFullBackup();
+  }).catch(()=>_cloudStatus('error'));
 }
 function qrAddNew(){
   const label = document.getElementById('qr-new-label')?.value?.trim();
@@ -12091,6 +12893,14 @@ function qrAddNew(){
   qRenderTmplList();
   // v92 [P4]: refrescar panel lateral fijo
   if(typeof qRenderTemplatesPanel === 'function') qRenderTemplatesPanel(qGetQR());
+  // v104: sync inmediato a la nube (igual que saveCompetidor). Antes el QR
+  // recién agregado solo quedaba en localStorage hasta que el usuario tocara
+  // "Guardar"; si cerraba el modal con la X, se perdía al cambiar de PC.
+  _cloudStatus('saving');
+  saveRemoteSettings(qrs, qGetTmpl()).then(ok=>{
+    _cloudStatus(ok ? 'ok' : 'error');
+    if(ok && typeof pushFullBackup === 'function') pushFullBackup();
+  }).catch(()=>_cloudStatus('error'));
 }
 function qInsertAtCursor(taId, text){
   const ta = document.getElementById(taId);
@@ -12310,7 +13120,7 @@ ALGORITMO ML - FACTORES EN ORDEN:
 1) Keywords exactas en titulo 2) CTR 3) Conversion 4) Precio competitivo 5) Velocidad de despacho 6) Calidad de ficha (atributos + imagenes) 7) Historial de ventas
 
 REGLAS DE TITULO ML: Maximo 60 caracteres - Sin puntuacion ni emojis - Keyword fuerte al inicio - Sin articulos ni preposiciones innecesarias
-PALABRAS PROHIBIDAS EN TITULO ML: Regalo Original, Diseno Exclusivo, Fan, Personalizada, Personalizable, Alta calidad, Imperdible, El mejor, Envio gratis, cualquier frase tipo slogan o promesa publicitaria.
+PALABRAS PROHIBIDAS EN TITULO Y DESCRIPCION ML: Regalo Original, Diseno Oficial, Diseno Exclusivo, Producto Original, Producto Oficial, Modelo Original, Version Oficial, Version Original, Autentico, Fan, Personalizada, Personalizable, Alta calidad, Imperdible, El mejor, Envio gratis, Oficial, Original, cualquier frase tipo slogan o promesa publicitaria.
 
 SEO PARA WOOCOMMERCE: Usa keywords long-tail (3-5 palabras con intencion de busqueda), como regalo para medico mujer. Pensa en featured snippets de Google, estructura con H1/H2, evita duplicate content con las publicaciones de ML.
 
@@ -14924,35 +15734,74 @@ function calInit(){
 
 
 
-async function callClaude(prompt, history){
+// v105: Mejora del mensaje y retry automático.
+// Antes: si /ai devolvía 503 (todos los modelos saturados), el usuario veía
+// "Error al procesar. Revisá la conexión" y tenía que reintentar manualmente.
+// Ahora: si fallan todos los modelos, esperamos 3s y reintentamos UNA vez en
+// silencio (a esa altura algún modelo del cascade se liberó). Si vuelve a
+// fallar, ahí sí mostramos error con info útil.
+async function callClaude(prompt, history, maxTokens){
   const messages = history || [{role:'user', content:prompt}];
-  let r, rawText;
-  try {
-    r = await fetch(WORKER+'/ai', {method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({max_tokens:1000, temperature:0.3, messages})});
-    rawText = await r.text();
-  } catch(e){ throw new Error('Sin conexion: '+e.message); }
-  let d;
-  try { d = JSON.parse(rawText); } catch(e){ throw new Error('Respuesta invalida: '+rawText.slice(0,80)); }
-  if(!r.ok||d.error){
-    // v96: log detallado en consola + error compacto en UI
-    if(d.details && Array.isArray(d.details)){
-      console.warn('[AI] Falla con detalle por proveedor:');
-      d.details.forEach(line => console.warn('  ·', line));
+  // v107: maxTokens default 1000, pero callsites como doOptimize que piden
+  // descripciones de 800-2000 chars pueden pasar 2500+ para evitar truncado.
+  const _maxTokens = (typeof maxTokens === 'number' && maxTokens > 0) ? maxTokens : 1000;
+
+  // Función interna que hace UN intento. Devuelve {ok, text, error}
+  async function _attempt(){
+    let r, rawText;
+    try {
+      r = await fetch(WORKER+'/ai', {
+        method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+        body:JSON.stringify({max_tokens:_maxTokens, temperature:0.3, messages})
+      });
+      rawText = await r.text();
+    } catch(e){ return {ok:false, error:'Sin conexion: '+e.message, retriable:true}; }
+    let d;
+    try { d = JSON.parse(rawText); } catch(e){ return {ok:false, error:'Respuesta invalida: '+rawText.slice(0,80), retriable:false}; }
+    if(!r.ok||d.error){
+      if(d.details && Array.isArray(d.details)){
+        console.warn('[AI] Falla con detalle por proveedor:');
+        d.details.forEach(line => console.warn('  ·', line));
+      }
+      const errMsg = typeof d.error==='string'
+        ? d.error + (d.details?.length ? ' (detalle en consola)' : '')
+        : (d.error?.message || 'Error '+r.status);
+      // 503 = cascade IA fallido. Retriable porque al reintentar suele agarrar
+      // otro modelo del cascade que ya se liberó.
+      const retriable = (r.status === 503) || (r.status >= 500 && r.status < 600);
+      return {ok:false, error:errMsg, retriable};
     }
-    const errMsg = typeof d.error==='string'
-      ? d.error + (d.details?.length ? ' (detalle en consola)' : '')
-      : (d.error?.message || 'Error '+r.status);
-    throw new Error(errMsg);
+    let text = d.content?.map(x=>x.text||'').join('').trim()||'';
+    // Limpieza de muletillas de cortesia
+    var cpats=[
+      new RegExp('[\¿?]En qu[\é] (m[\á]s )?puedo (ayudarte|asistirte|colaborar)[^.?!]*[.?!]?','gi'),
+      new RegExp('Si (necesit[\á]s|ten[\é]s|quer[\é]s)[^.!?]*[.!?]','gi'),
+      new RegExp('[\¡!]?(Hola|Buenas)[^!.]*[!.]','gi'),
+    ];
+    cpats.forEach(function(p){text=text.replace(p,'').trim();});
+    if(d.model) console.log('[AI] modelo usado:', d.model);
+    return {ok:true, text};
   }
-  let text = d.content?.map(x=>x.text||'').join('').trim()||'';
-  // Limpieza de muletillas de cortesia
-  var cpats=[
-    new RegExp('[\¿?]En qu[\é] (m[\á]s )?puedo (ayudarte|asistirte|colaborar)[^.?!]*[.?!]?','gi'),
-    new RegExp('Si (necesit[\á]s|ten[\é]s|quer[\é]s)[^.!?]*[.!?]','gi'),
-    new RegExp('[\¡!]?(Hola|Buenas)[^!.]*[!.]','gi'),
-  ];
-  cpats.forEach(function(p){text=text.replace(p,'').trim();});
-  return text;
+
+  // Primer intento
+  let res = await _attempt();
+  if(res.ok) return res.text;
+
+  // Si falló y es retriable → esperar 3s y reintentar UNA vez. Suele bastar
+  // para que el cascade IA agarre algún modelo libre.
+  if(res.retriable){
+    console.warn('[AI] Primer intento falló (retriable):', res.error, '— reintentando en 3s...');
+    await new Promise(r => setTimeout(r, 3000));
+    res = await _attempt();
+    if(res.ok) return res.text;
+  }
+
+  // Mensaje final más informativo
+  if(res.error && res.error.toLowerCase().includes('todos los modelos fallaron')){
+    throw new Error('Servicio IA saturado momentáneamente. Probá de nuevo en unos segundos.');
+  }
+  throw new Error(res.error || 'Error desconocido en IA');
 }
 
 
@@ -16610,7 +17459,7 @@ function filterOptItems(){
       div.onclick = function(){ selectOptItem(item.id, item.title); };
       var name = document.createElement('div');
       name.style.fontWeight = '500';
-      name.textContent = item.title.slice(0, 60);
+      name.textContent = item.title.slice(0, 80);
       var meta = document.createElement('div');
       meta.style.cssText = 'font-size:10px;color:#6b7280';
       meta.textContent = '$' + (item.price||0).toLocaleString('es-AR') + ' · SKU: ' + (item.seller_custom_field||'—');
@@ -16651,7 +17500,7 @@ function selectOptItem(id,title){
   // ── Ahora cargar el nuevo ítem ─────────────────────────────
   optCurrentItemId = id;
   const s = document.getElementById('opt-search');
-  if(s) s.value = title.slice(0, 50);
+  if(s) s.value = title.slice(0, 80);
 
   // Poner título limpio en el campo de edición
   const titleClean = stripLeadingEmoji(title);
