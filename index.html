@@ -723,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v107 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v108 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4191,7 +4191,7 @@ async function _pollPendingShipments(){
 // v93 [P5]: detector de versión del Worker. Si el Worker está desactualizado (no v55+),
 // significa que el header `x-format-new: true` no está siendo aplicado y el bug de
 // envíos sigue activo. Mostramos un banner amarillo al usuario.
-const _MIN_WORKER_VERSION = 65; // v105: requerido para timeout en cascade IA
+const _MIN_WORKER_VERSION = 66; // v108: requerido para slugs IA actualizados
 async function _checkWorkerVersion(){
   try {
     const r = await fetch(WORKER + '/');
@@ -4218,7 +4218,7 @@ function _showWorkerOutdatedBanner(currentVer){
   b.style.cssText = 'position:fixed;top:8px;right:8px;left:8px;z-index:9999;background:#fbbf24;color:#78350f;padding:11px 14px;border-radius:8px;border:1px solid #f59e0b;box-shadow:0 4px 12px rgba(0,0,0,.15);font-size:12.5px;line-height:1.4;display:flex;align-items:center;gap:10px;max-width:900px;margin:0 auto';
   b.innerHTML = '<span style="font-size:20px">⚠️</span>'
     + '<div style="flex:1"><strong>Worker desactualizado (v'+currentVer+').</strong> '
-    + 'Subí <code style="background:#fde68a;padding:1px 5px;border-radius:3px;font-size:11px">worker-master-v65.js</code> a Cloudflare Workers para que las llamadas IA tengan timeout y reintento automático (sin esto seguís viendo "Error al procesar" cuando los modelos free están saturados).</div>'
+    + 'Subí <code style="background:#fde68a;padding:1px 5px;border-radius:3px;font-size:11px">worker-master-v66.js</code> a Cloudflare Workers — los slugs anteriores de modelos IA están obsoletos (404). Sin esto el optimizador IA seguirá fallando con "todos los modelos fallaron".</div>'
     + '<button onclick="this.parentElement.remove()" style="background:transparent;border:1px solid #92400e;color:#78350f;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:11.5px;font-weight:600">Cerrar</button>';
   document.body.appendChild(b);
 }
@@ -8125,6 +8125,13 @@ function _aiParseJSON(raw){
   let s = raw.trim();
   s = s.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/,'').trim();
 
+  // v108: Detección temprana de "prosa libre" (la IA ignoró el formato JSON).
+  // Caso típico: openrouter/free elige un modelo chico que devuelve párrafos.
+  // Si los primeros 40 chars no contienen ningún `{` o `"`, no es JSON.
+  if(!/[{\"]/.test(s.slice(0, 80))){
+    throw new Error('La IA respondió texto plano en vez de JSON. Probá de nuevo — los modelos free a veces ignoran el formato pedido.');
+  }
+
   // Strat 1: parse directo
   try { return JSON.parse(s); } catch(e1) { /* sigue */ }
 
@@ -8200,34 +8207,35 @@ function _aiSanitizeJSON(s){
   return out;
 }
 
-// Reconstrucción tolerante v107: extrae campos uno a uno con regex.
-// Útil cuando el JSON está TRUNCADO (la IA cortó la respuesta a mitad de
-// un campo por límite de tokens) o tiene un campo individualmente roto.
+// Reconstrucción tolerante v108: extrae campos uno a uno con regex.
+// Útil cuando el JSON está TRUNCADO o tiene un campo individualmente roto.
+//
+// v108 mejora: además de campos completos, también rescata el último campo
+// string si quedó truncado SIN comilla de cierre — el caso típico de la IA
+// agotando max_tokens a mitad de descripcion_optimizada.
+//
 // Devuelve un objeto parcial con los campos que sí pudo extraer.
 function _aiReconstructJSON(s){
   const out = {};
-  // Campos string: "key": "value..."
-  // Greedy hasta el próximo "key": o cierre. Usamos lookahead para no devorar el siguiente campo.
-  // Acepta saltos de línea dentro del valor (modo dotall via [\s\S])
+  // 1) Campos string CON cierre: "key": "value..." (modo dotall via [\s\S])
+  //    Lookahead para no devorar el siguiente campo.
   const strFields = s.matchAll(/"([a-z_]+)"\s*:\s*"([\s\S]*?)"\s*(?=,\s*"[a-z_]+"\s*:|,\s*$|}\s*$|$)/gi);
   for(const m of strFields){
     if(!(m[1] in out)) out[m[1]] = m[2].replace(/\\n/g, '\n').replace(/\\"/g, '"');
   }
-  // Campos número: "key": 123
+  // 2) Campos número: "key": 123
   const numFields = s.matchAll(/"([a-z_]+)"\s*:\s*(-?\d+(?:\.\d+)?)/gi);
   for(const m of numFields){
     if(!(m[1] in out)) out[m[1]] = parseFloat(m[2]);
   }
-  // Campos array de strings: "key": ["a","b","c"]
+  // 3) Campos array de strings: "key": ["a","b","c"]
   const arrFields = s.matchAll(/"([a-z_]+)"\s*:\s*\[([\s\S]*?)\]/gi);
   for(const m of arrFields){
     if(m[1] in out) continue;
     try {
-      // Intentar parsear el array aisladamente
       const arr = JSON.parse('[' + m[2] + ']');
       out[m[1]] = arr;
     } catch(e){
-      // Fallback: extraer strings manualmente
       const items = [];
       const re = /"([^"\\]*(?:\\.[^"\\]*)*)"/g;
       let mm;
@@ -8235,7 +8243,70 @@ function _aiReconstructJSON(s){
       if(items.length) out[m[1]] = items;
     }
   }
+  // 4) v108: Rescatar el ÚLTIMO campo string si quedó truncado.
+  //    Caso típico: la IA puso "descripcion_optimizada": "texto texto texto
+  //    sin cerrar comilla. Buscamos ese patrón al final del input.
+  //    Regex: "key": "valor que NO se cierra hasta el final del input
+  const truncated = s.match(/"([a-z_]+)"\s*:\s*"([\s\S]*)$/i);
+  if(truncated && !(truncated[1] in out)){
+    let value = truncated[2];
+    // Si justo el "valor" llegó a contener un cierre legítimo, descartar este
+    // rescate (ya debería haber sido capturado por el patrón #1)
+    // Heurística: si el valor termina con "} o con ", lo descartamos.
+    const trimmed = value.replace(/\s+$/, '');
+    if(!trimmed.endsWith('"') && !trimmed.endsWith('"}')){
+      // Limpiar saltos escapados + cortar en el último char válido
+      value = value.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+      // Recortar suavemente al final si quedó cortado a mitad de palabra
+      value = value.replace(/\s*[a-záéíóúñ]*\s*$/i, '').trim();
+      if(value.length > 10){
+        out[truncated[1]] = value + '...';
+        console.warn('[AIParse] Campo truncado rescatado:', truncated[1], '(' + value.length + ' chars)');
+      }
+    }
+  }
   return out;
+}
+
+// v108: Normalización del result del optimizador.
+// La IA a veces devuelve campos en tipo incorrecto (un string en vez de array,
+// o un número como string). Esta función fuerza los tipos esperados para que
+// el render no truene con "X.map is not a function".
+function _aiNormalizeResult(result){
+  if(!result || typeof result !== 'object') return;
+  // Campos que esperamos como array de strings
+  const arrayFields = ['variantes','keywords','keywords_secundarias','sinonimos','mejoras_recomendadas'];
+  for(const f of arrayFields){
+    if(result[f] == null){ continue; }
+    if(Array.isArray(result[f])) continue;
+    if(typeof result[f] === 'string'){
+      // Heurística: si parece lista separada por comas o "·", splitear; si no, envolver
+      const s = result[f].trim();
+      if(/[,·•\n]/.test(s)){
+        result[f] = s.split(/[,·•\n]/).map(x => x.trim()).filter(Boolean);
+      } else {
+        result[f] = [s];
+      }
+    } else {
+      // Tipo raro → vaciar para que el render lo omita
+      result[f] = [];
+    }
+  }
+  // Campos string
+  if(result.descripcion_optimizada != null && typeof result.descripcion_optimizada !== 'string'){
+    result.descripcion_optimizada = String(result.descripcion_optimizada);
+  }
+  if(result.titulo_optimizado != null && typeof result.titulo_optimizado !== 'string'){
+    result.titulo_optimizado = String(result.titulo_optimizado);
+  }
+  if(result.titulo_alternativo != null && typeof result.titulo_alternativo !== 'string'){
+    result.titulo_alternativo = String(result.titulo_alternativo);
+  }
+  // Número
+  if(result.score_seo != null && typeof result.score_seo !== 'number'){
+    const n = parseFloat(result.score_seo);
+    result.score_seo = isNaN(n) ? 0 : n;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -8328,6 +8399,9 @@ Respondé SOLO JSON válido (sin markdown, sin backticks):
   "score_seo": 0
 }`, null, 2500);
     const result=_aiParseJSON(r);
+    // v108: Normalizar campos para que el render no truene si la IA devolvió
+    // un campo como string en vez de array (caso común con modelos free).
+    _aiNormalizeResult(result);
     // Limpiar emoji del título optimizado
     const tOpt=stripLeadingEmoji(result.titulo_optimizado||title);
     const dOpt=result.descripcion_optimizada||'';
@@ -8759,49 +8833,43 @@ REGLA DE MICROONDAS (SOLO EN DESCRIPCIÓN):
   -> NO mencionar "lavavajillas" bajo ninguna circunstancia
 
 ═══ REGLAS DESCRIPCIÓN ═══
-- Longitud: entre 800 y 2000 caracteres (OBLIGATORIO)
-- Priorizar la información más importante en los primeros 300-500 caracteres
-- Estructura obligatoria:
-  1) Resumen inicial del producto (qué es, para quién, por qué comprarlo)
-  2) Beneficios clave (no solo características)
-  3) Especificaciones técnicas en formato ordenado
-  4) Casos de uso y ocasiones
-- Evitar relleno innecesario, repeticiones ni frases de venta genéricas
-- Sin "Personalizado/a/able" ni nombres de tienda
+- Longitud: entre 500 y 900 caracteres (objetivo SEO óptimo, evita truncado).
+- Priorizar info clave en los primeros 200-300 caracteres
+- Estructura:
+  1) Resumen inicial (qué es, para quién)
+  2) Beneficios y casos de uso (3-4 puntos)
+  3) Especificaciones técnicas breves
 - Saltos de línea para escanear rápido
-- AL FINAL agregar exactamente este párrafo separado:
+- Sin "Personalizado/a/able" ni nombres de tienda
+- AL FINAL agregar este párrafo:
 Accedé a todas nuestras publicaciones acá:
 https://listado.mercadolibre.com.ar/_DisplayType_G_eshop_IMPALA+DESIGN
 
 ═══ BUENAS PRÁCTICAS SEO ═══
 - No repetir palabras para forzar SEO
-- Priorizar claridad y legibilidad
-- Lenguaje natural alineado a cómo buscan los usuarios
-- No inventar datos ni agregar claims falsos
-- No incluir precios, envíos, promociones ni condiciones comerciales${googleBlock}
+- Lenguaje natural alineado a búsquedas reales
+- No inventar datos, no claims falsos
+- No incluir precios, envíos ni promociones${googleBlock}
 
 ═══ FORMATO DE RESPUESTA — CRÍTICO ═══
-Devolvé SOLO JSON válido — sin markdown, sin backticks, sin texto antes ni después.
-DENTRO DE STRINGS DEL JSON:
-- Usá \\n (escape sequence de DOS caracteres) para saltos de línea, NUNCA pegues saltos reales.
-- Si necesitás comillas, usá comillas simples ' o NO uses comillas.
-- NUNCA dejes la palabra "microondas" entre comillas dobles.
+Devolvé SOLO JSON válido — sin markdown, sin backticks, sin texto extra.
+- Usá \\n (DOS caracteres) para saltos de línea dentro de strings
+- Si necesitás comillas, usá comillas simples ' o ninguna
+- Mantené la descripción CORTA (500-900 chars) para no truncar la respuesta
 
-Estructura exacta:
+Estructura exacta (TODOS los campos obligatorios):
 {
   "titulo_optimizado": "...",
   "titulo_alternativo": "...",
-  "variantes": ["variante A para testing", "variante B para testing", "variante C para testing"],
+  "variantes": ["variante A", "variante B"],
   "descripcion_optimizada": "...",
   "keywords": ["kw1","kw2","kw3","kw4","kw5","kw6"],
-  "keywords_secundarias": ["ks1","ks2","ks3"],
-  "sinonimos": ["sin1","sin2","sin3"],
-  "mejoras_recomendadas": ["m1","m2","m3"],
-  "enfoque_venta": "...",
-  "score_seo": 0
+  "mejoras_recomendadas": ["m1","m2"],
+  "score_seo": 75
 }`, null, 2500);
 
     const result=_aiParseJSON(r);
+    _aiNormalizeResult(result);
     // De acá en adelante el flujo es idéntico a doOptimize — reusamos su lógica
     // copiando solo el render. La forma menos invasiva es delegarlo: setear los
     // campos y llamar al mismo bloque de render con un pre-pendido visual que
@@ -8847,8 +8915,8 @@ Estructura exacta:
         ${hasItem?'<div style="display:flex;gap:6px;margin-top:9px;flex-wrap:wrap"><button class="btn btn-primary btn-sm" onclick="applyOptTitle()" style="flex:1">✅ Aplicar a ML</button><a href="'+mlEditUrl+'" target="_blank" class="btn btn-ghost btn-sm" style="text-decoration:none">✏️ Editar manual</a></div>':''}
       </div>
       ${dOpt?'<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:12px;margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div style="font-size:10px;color:#92400e;text-transform:uppercase;font-weight:700">📝 Descripción optimizada ('+dOpt.length+' chars)</div>'+(hasItem?'<button class="btn btn-primary btn-sm" onclick="applyOptDesc()">✅ Aplicar descripción</button>':'')+'</div><textarea id="opt-desc-out" rows="8" style="width:100%;font-size:12px;border:1px solid #fde68a;border-radius:6px;padding:8px;font-family:inherit;background:#fff" oninput="window._optDescSugerida=this.value">'+dOpt.replace(/</g,'&lt;')+'</textarea></div>':''}
-      ${result.keywords && result.keywords.length ? '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px;margin-bottom:8px"><div style="font-size:10px;color:#1e40af;text-transform:uppercase;font-weight:700;margin-bottom:6px">🎯 Keywords sugeridas</div><div style="display:flex;flex-wrap:wrap;gap:4px">'+result.keywords.map(k=>'<span style="background:#fff;border:1px solid #bfdbfe;color:#1e40af;font-size:11px;padding:3px 8px;border-radius:11px">'+k+'</span>').join('')+'</div></div>' : ''}
-      ${result.mejoras_recomendadas && result.mejoras_recomendadas.length ? '<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px"><div style="font-size:10px;color:#78350f;text-transform:uppercase;font-weight:700;margin-bottom:5px">💡 Mejoras recomendadas</div>'+result.mejoras_recomendadas.map(m=>'<div style="font-size:11.5px;color:#78350f;margin-bottom:3px">• '+m+'</div>').join('')+'</div>' : ''}
+      ${Array.isArray(result.keywords) && result.keywords.length ? '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px;margin-bottom:8px"><div style="font-size:10px;color:#1e40af;text-transform:uppercase;font-weight:700;margin-bottom:6px">🎯 Keywords sugeridas</div><div style="display:flex;flex-wrap:wrap;gap:4px">'+result.keywords.map(k=>'<span style="background:#fff;border:1px solid #bfdbfe;color:#1e40af;font-size:11px;padding:3px 8px;border-radius:11px">'+k+'</span>').join('')+'</div></div>' : ''}
+      ${Array.isArray(result.mejoras_recomendadas) && result.mejoras_recomendadas.length ? '<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px"><div style="font-size:10px;color:#78350f;text-transform:uppercase;font-weight:700;margin-bottom:5px">💡 Mejoras recomendadas</div>'+result.mejoras_recomendadas.map(m=>'<div style="font-size:11.5px;color:#78350f;margin-bottom:3px">• '+m+'</div>').join('')+'</div>' : ''}
     `;
     window._optTituloSugerido = tOpt;
     window._optDescSugerida = dOpt;
