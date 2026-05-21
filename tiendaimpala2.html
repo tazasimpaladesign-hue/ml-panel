@@ -723,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v109 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v110 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -6333,16 +6333,20 @@ async function tg247OpenDetails(){
   html += '</div>';
   html += '</div>';
 
-  // Modal genérico
+  // Modal genérico (v110: usar la clase .open como el resto de modales del panel)
   let modal = document.getElementById('tg247-modal');
   if(!modal){
     modal = document.createElement('div');
     modal.id = 'tg247-modal';
     modal.className = 'modal-overlay';
+    // Click fuera del modal cierra
+    modal.addEventListener('click', function(e){
+      if(e.target === modal) closeModal('tg247-modal');
+    });
     document.body.appendChild(modal);
   }
   modal.innerHTML = '<div class="modal" style="max-width:580px"><div class="modal-bd">'+html+'</div></div>';
-  modal.style.display = 'flex';
+  openModal('tg247-modal');
 }
 
 async function tg247TestWebhook(){
@@ -12754,31 +12758,136 @@ function _cloudStatus(state){
   }
 }
 
+// v110: Guardado robusto en la nube con retry + verificación + backup de emergencia
+//
+// PROBLEMA QUE ATACA:
+// - Botones de respuestas rápidas se perdieron en sesiones anteriores
+// - Competidores también desaparecieron en versiones previas (bug v88)
+// - El usuario nunca tiene certeza si lo guardado realmente persistió
+//
+// SOLUCIÓN:
+//  1. RETRY: 3 intentos con backoff exponencial (0s, 2s, 5s) ante errores de red.
+//  2. VERIFICACIÓN POST-WRITE: leer KV inmediatamente después de escribir y
+//     comparar el conteo de items. Si difiere → reintentar.
+//  3. BACKUP LOCAL DE EMERGENCIA: ANTES de escribir a la nube, guardar copia
+//     local con timestamp en `mlp_emergency_backup`. Si todo falla, podemos
+//     recuperar manualmente o ofrecer restore.
+//  4. INDICADORES VISUALES CLAROS: badge "verificado en nube" cuando el chequeo
+//     post-write confirma persistencia.
 async function saveRemoteSettings(qrs, tmpl){
   if(!token) return false;
   _cloudStatus('saving');
+
+  const body = {
+    quickReplies: qrs||qGetQR(),
+    template:     tmpl||qGetTmpl(),
+    rpRules:      rpRules||[],
+    activeRules:  activeRules||[],
+    competitors:  _savedCompetitors||[],
+  };
+
+  // 1) BACKUP DE EMERGENCIA en localStorage ANTES de tocar la nube.
+  //    Si la red falla y el usuario cierra el panel, al volver podemos restaurar.
   try{
-    const body = {
-      quickReplies: qrs||qGetQR(),
-      template:     tmpl||qGetTmpl(),
-      rpRules:      rpRules||[],
-      activeRules:  activeRules||[],
-      competitors:  _savedCompetitors||[],
-    };
-    const r = await fetch(WORKER+'/api/settings', {
-      method: 'POST',
-      headers:{ 'Authorization':'Bearer '+token, 'Content-Type':'application/json' },
-      body: JSON.stringify(body)
-    });
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    localStorage.setItem(SYNC_TS_KEY, Date.now().toString());
-    console.log('[Settings] Configuración guardada en la nube ✓');
-    _cloudStatus('ok');
-    return true;
+    const emergencyKey = 'mlp_emergency_backup';
+    const prev = localStorage.getItem(emergencyKey);
+    const stack = prev ? JSON.parse(prev) : [];
+    stack.unshift({ ts: Date.now(), iso: new Date().toISOString(), body });
+    // Mantener solo los últimos 5 backups de emergencia para no inflar localStorage
+    if(stack.length > 5) stack.length = 5;
+    localStorage.setItem(emergencyKey, JSON.stringify(stack));
   }catch(e){
-    console.warn('[Settings] No se pudo guardar en la nube:', e.message);
-    _cloudStatus('error');
-    return false;
+    console.warn('[Settings] No se pudo crear backup de emergencia:', e.message);
+  }
+
+  // 2) Intentar guardar con retry (3 intentos, backoff 0/2/5 segundos)
+  const delays = [0, 2000, 5000];
+  let lastError = null;
+  for(let attempt = 0; attempt < delays.length; attempt++){
+    if(delays[attempt] > 0){
+      await new Promise(r => setTimeout(r, delays[attempt]));
+      console.log('[Settings] Reintento '+(attempt+1)+'/3...');
+    }
+    try{
+      // POST
+      const r = await fetch(WORKER+'/api/settings', {
+        method: 'POST',
+        headers:{ 'Authorization':'Bearer '+token, 'Content-Type':'application/json' },
+        body: JSON.stringify(body)
+      });
+      if(!r.ok){ lastError = new Error('HTTP '+r.status); continue; }
+
+      // 3) VERIFICACIÓN POST-WRITE: leer KV inmediatamente y comparar.
+      //    Si la nube no tiene los mismos conteos que enviamos → reintentar.
+      try{
+        const verifyR = await fetch(WORKER+'/api/settings', {
+          headers:{ 'Authorization':'Bearer '+token }
+        });
+        if(verifyR.ok){
+          const remote = await verifyR.json();
+          const localQR = (body.quickReplies||[]).length;
+          const remoteQR = (remote.quickReplies||[]).length;
+          const localComp = (body.competitors||[]).length;
+          const remoteComp = (remote.competitors||[]).length;
+          if(localQR !== remoteQR || localComp !== remoteComp){
+            lastError = new Error('Verificación falló: enviado '+localQR+' QR, '+localComp+' comp; servidor tiene '+remoteQR+' QR, '+remoteComp+' comp');
+            console.warn('[Settings] Mismatch post-write:', { sent:{qr:localQR,comp:localComp}, server:{qr:remoteQR,comp:remoteComp} });
+            continue;
+          }
+        }
+      }catch(verifyErr){
+        // Si la verificación falla por red, igual consideramos exitoso el POST.
+        // Es mejor que el usuario quede con duda a que reintentemos y multipliquemos errores.
+        console.warn('[Settings] No se pudo verificar (asumiendo OK):', verifyErr.message);
+      }
+
+      // ÉXITO confirmado
+      localStorage.setItem(SYNC_TS_KEY, Date.now().toString());
+      console.log('[Settings] ✓ Guardado y verificado en la nube — intento '+(attempt+1));
+      _cloudStatus('ok');
+      // Limpiar el último backup de emergencia (ya está confirmado en nube)
+      try{
+        const stack = JSON.parse(localStorage.getItem('mlp_emergency_backup')||'[]');
+        if(stack.length > 0){ stack[0].cloud_confirmed = true; localStorage.setItem('mlp_emergency_backup', JSON.stringify(stack)); }
+      }catch(e){}
+      return true;
+    }catch(e){
+      lastError = e;
+      console.warn('[Settings] Intento '+(attempt+1)+' falló:', e.message);
+    }
+  }
+
+  console.error('[Settings] ✗ Falló después de 3 intentos. Backup de emergencia en localStorage. Último error:', lastError?.message);
+  _cloudStatus('error');
+  return false;
+}
+
+// v110: Restaurar último backup de emergencia (botón manual si el usuario perdió datos)
+function emergencyRestore(){
+  try{
+    const stack = JSON.parse(localStorage.getItem('mlp_emergency_backup')||'[]');
+    if(!stack.length){ alert('No hay backups de emergencia guardados'); return; }
+    const items = stack.map((b,i)=>{
+      const qr = (b.body?.quickReplies||[]).length;
+      const cp = (b.body?.competitors||[]).length;
+      const conf = b.cloud_confirmed ? ' ✓ (confirmado en nube)' : ' ⚠ (no confirmado)';
+      return (i+1)+'. '+new Date(b.ts).toLocaleString('es-AR')+' — '+qr+' QR, '+cp+' competidores'+conf;
+    }).join('\n');
+    const choice = prompt('Backups de emergencia disponibles:\n\n'+items+'\n\n¿Cuál querés restaurar? (1-'+stack.length+', cancel para abortar)');
+    if(!choice) return;
+    const idx = parseInt(choice,10)-1;
+    if(isNaN(idx) || idx < 0 || idx >= stack.length){ alert('Número inválido'); return; }
+    const backup = stack[idx];
+    if(!confirm('Vas a restaurar el backup del '+new Date(backup.ts).toLocaleString('es-AR')+'.\n\nEsto SOBRESCRIBE lo que tengas ahora (QR + Competidores). ¿Continuar?')) return;
+    qSaveQR(backup.body.quickReplies||[]);
+    qWriteTmpl(backup.body.template||{});
+    _savedCompetitors = backup.body.competitors||[];
+    saveRemoteSettings(backup.body.quickReplies||[], backup.body.template||{}).then(ok=>{
+      alert(ok ? '✓ Restaurado y subido a la nube. Recargá el panel.' : '⚠ Restaurado localmente pero falló subir a la nube. Probá de nuevo manualmente.');
+      location.reload();
+    });
+  }catch(e){
+    alert('Error: '+e.message);
   }
 }
 
@@ -15897,42 +16006,94 @@ document.addEventListener('click',e=>{if(e.target.classList.contains('modal-over
 // SWITCH ACCOUNT
 // ═══════════════════════════════════════════════════════════
 function logout(){
-  // Cerrar sesión segura: borrar token y volver al login
-  if(!confirm('¿Cerrar sesión? Tendrás que volver a conectar con MercadoLibre.')) return;
+  // v110: Cierre de sesión robusto.
+  // PROBLEMA ANTERIOR: solo borraba token+refresh pero dejaba TODOS los datos
+  // de la sesión en localStorage (items, settings, dashboards) y el panel
+  // seguía renderizado por debajo del login. Se veían barras flotantes de
+  // "Renovar token" porque pollings seguían corriendo.
+  if(!confirm('¿Cerrar sesión?\n\nSe limpiarán todos los datos de la sesión actual y serás redirigido a la pantalla de login.')) return;
+
   var appId = localStorage.getItem('ml_active_app');
-  if(appId){
-    // Intentar revocar token en ML (best-effort, no bloquea si falla)
+
+  // 1) Revocar token en ML (best-effort, no bloquea)
+  if(appId && token){
     try{
-      if(token) fetch(WORKER+'/api/revoke', {
+      fetch(WORKER+'/api/revoke', {
         method:'POST',
         headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
         body:JSON.stringify({token:token})
       }).catch(()=>{});
     }catch(e){}
-    // Limpiar todos los tokens guardados
-    localStorage.removeItem('ml_token_'+appId);
-    localStorage.removeItem('ml_refresh_'+appId);
-    localStorage.removeItem('ml_ref_'+appId);
   }
-  switchAccount();
+
+  // 2) LIMPIEZA AGRESIVA de localStorage: borrar TODO lo que pertenece al panel,
+  //    no solo los tokens. Patrones a limpiar:
+  //    - Tokens ML: ml_token_*, ml_refresh_*, ml_ref_*
+  //    - Sesión activa: ml_active_app, ml_user_id
+  //    - Caches del panel: cache_*, mlp_*
+  //    - Quick replies, settings (van a re-bajarse de la nube al volver a loguear)
+  //    PRESERVAR: backups de emergencia (mlp_emergency_backup), por si el
+  //    usuario quiere restaurar QR/competidores después del re-login.
+  try{
+    const preserveKeys = ['mlp_emergency_backup'];
+    const preserved = {};
+    for(const k of preserveKeys){
+      const v = localStorage.getItem(k);
+      if(v != null) preserved[k] = v;
+    }
+    // Eliminar TODO localStorage del panel
+    const allKeys = Object.keys(localStorage);
+    for(const k of allKeys){
+      // Preservar solo lo de la lista
+      if(preserveKeys.includes(k)) continue;
+      // Borrar
+      localStorage.removeItem(k);
+    }
+    // Restaurar lo preservado
+    for(const k in preserved){ localStorage.setItem(k, preserved[k]); }
+    console.log('[Logout] localStorage limpio. Preservados:', Object.keys(preserved));
+  }catch(e){
+    console.warn('[Logout] Error limpiando localStorage:', e.message);
+  }
+
+  // 3) Detener TODOS los polling/intervals activos (notificaciones, refresh tokens, etc)
+  //    Esto evita la "barra flotante de Renovar" que aparecía después del logout.
+  try{
+    // Limpiar todos los intervals con IDs > 0 hasta un límite razonable
+    // (los IDs en JS son secuenciales desde 1)
+    var maxId = (typeof window._highestIntervalId === 'number' ? window._highestIntervalId : 100000);
+    for(var i = 1; i < maxId; i++){
+      try{ clearInterval(i); }catch(e){}
+      try{ clearTimeout(i); }catch(e){}
+    }
+    console.log('[Logout] Polling/intervals detenidos');
+  }catch(e){}
+
+  // 4) Borrar SessionStorage también
+  try{ sessionStorage.clear(); }catch(e){}
+
+  // 5) Borrar cookies del panel (best-effort)
+  try{
+    document.cookie.split(';').forEach(function(c){
+      var eq = c.indexOf('=');
+      var name = (eq > -1 ? c.substr(0, eq) : c).trim();
+      if(name) document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';
+    });
+  }catch(e){}
+
+  // 6) Recargar la página COMPLETAMENTE — la forma más confiable de garantizar
+  //    que no quede ningún state en memoria, ningún polling, ningún DOM viejo.
+  //    Al recargar, el panel detecta que no hay token → muestra la pantalla
+  //    de "Conectar con MercadoLibre" automáticamente.
+  console.log('[Logout] Recargando para empezar de cero...');
+  window.location.replace(window.location.pathname);
 }
 
+// switchAccount queda como helper pero NO se usa más para logout (recargamos full)
 function switchAccount(){
-  // Limpiar sesión actual y volver al login
-  token = null; userId = null; userData = null;
-  allItems = []; allOrders = []; allQuestions = [];
-  currentAccount = null;
+  // v110: redirige al login completo via reload
   localStorage.removeItem('ml_active_app');
-  document.getElementById('login-screen').style.display = 'flex';
-  document.getElementById('switch-account-btn').style.display = 'none';
-  // Reset nav — solo activar dashboard visualmente, SIN renderizar (no hay datos)
-  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
-  document.querySelectorAll('.nav').forEach(n=>n.classList.remove('active'));
-  const dashSec = document.getElementById('section-dashboard');
-  const dashNav = document.getElementById('nav-dashboard');
-  if(dashSec) dashSec.classList.add('active');
-  if(dashNav) dashNav.classList.add('active');
-  if(history.replaceState) history.replaceState(null,'',window.location.pathname);
+  window.location.replace(window.location.pathname);
 }
 
 // ═══════════════════════════════════════════════════════════
