@@ -723,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v110 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v111 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -833,20 +833,36 @@ input::placeholder,textarea::placeholder{color:#6b7280}
        Muestra el estado del sistema dual de notificaciones:
         · Webhook ML → dispara Telegram en tiempo real (depende de que ML envíe push)
         · Cron Worker cada 5min → red de seguridad que recupera lo que el webhook perdió.
-       Se carga al abrir el dashboard. Click para detalles. -->
-  <div id="dash-tg247-status" class="card mb" style="cursor:pointer;display:flex;align-items:center;gap:12px;padding:11px 14px;background:linear-gradient(135deg,#f0f9ff 0%,#e0f2fe 100%);border:1px solid #bae6fd" onclick="tg247OpenDetails()">
-    <div style="font-size:24px;flex-shrink:0">📡</div>
-    <div style="flex:1;min-width:0">
-      <div style="font-size:12.5px;font-weight:600;color:#0c4a6e;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        Sistema Telegram 24/7
-        <span id="tg247-badge-webhook" class="tg247-badge" style="font-size:10px;padding:1px 7px;border-radius:9px;background:#e0e7ff;color:#3730a3;font-weight:600">Webhook: —</span>
-        <span id="tg247-badge-cron" class="tg247-badge" style="font-size:10px;padding:1px 7px;border-radius:9px;background:#e0e7ff;color:#3730a3;font-weight:600">Cron: —</span>
+       Se carga al abrir el dashboard. Click para detalles.
+       v111: Ahora hay 2 widgets lado a lado: Telegram 24/7 y Consumo KV. -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px" id="dash-system-widgets">
+    <div id="dash-tg247-status" class="card" style="cursor:pointer;display:flex;align-items:center;gap:10px;padding:11px 13px;background:linear-gradient(135deg,#f0f9ff 0%,#e0f2fe 100%);border:1px solid #bae6fd;margin:0" onclick="tg247OpenDetails()">
+      <div style="font-size:22px;flex-shrink:0">📡</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:600;color:#0c4a6e;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          Sistema Telegram 24/7
+        </div>
+        <div style="font-size:10.5px;color:#0c4a6e;opacity:.85;margin-top:3px;display:flex;gap:5px;flex-wrap:wrap">
+          <span id="tg247-badge-webhook" class="tg247-badge" style="font-size:10px;padding:1px 7px;border-radius:9px;background:#e0e7ff;color:#3730a3;font-weight:600">Webhook: —</span>
+          <span id="tg247-badge-cron" class="tg247-badge" style="font-size:10px;padding:1px 7px;border-radius:9px;background:#e0e7ff;color:#3730a3;font-weight:600">Cron: —</span>
+        </div>
       </div>
-      <div style="font-size:10.5px;color:#0c4a6e;opacity:.85;margin-top:2px" id="tg247-summary">
-        Webhook para tiempo real + cron cada 5min de red de seguridad. <strong>Click para ver detalles</strong>
-      </div>
+      <div style="font-size:10px;color:#0369a1;opacity:.6">▸</div>
     </div>
-    <div style="font-size:11px;color:#0369a1;opacity:.6">▸</div>
+    <!-- v111: Widget de consumo KV. Click muestra detalle + recomendaciones. -->
+    <div id="dash-kv-usage" class="card" style="cursor:pointer;display:flex;align-items:center;gap:10px;padding:11px 13px;background:linear-gradient(135deg,#fafaf9 0%,#f5f5f4 100%);border:1px solid #d6d3d1;margin:0" onclick="kvUsageOpenDetails()">
+      <div style="font-size:22px;flex-shrink:0">💾</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:600;color:#1c1917;display:flex;align-items:center;gap:6px">
+          Consumo KV (Cloudflare)
+        </div>
+        <div style="font-size:10.5px;color:#57534e;margin-top:3px;display:flex;gap:5px;flex-wrap:wrap">
+          <span id="kv-badge-today" class="kv-badge" style="font-size:10px;padding:1px 7px;border-radius:9px;background:#e7e5e4;color:#1c1917;font-weight:600">Hoy: —</span>
+          <span id="kv-badge-projection" class="kv-badge" style="font-size:10px;padding:1px 7px;border-radius:9px;background:#e7e5e4;color:#1c1917;font-weight:600">Proyección: —</span>
+        </div>
+      </div>
+      <div style="font-size:10px;color:#78716c;opacity:.6">▸</div>
+    </div>
   </div>
 
   <!-- ── KPI Cards (5 métricas con delta) ── -->
@@ -4211,7 +4227,7 @@ async function _pollPendingShipments(){
 // v93 [P5]: detector de versión del Worker. Si el Worker está desactualizado (no v55+),
 // significa que el header `x-format-new: true` no está siendo aplicado y el bug de
 // envíos sigue activo. Mostramos un banner amarillo al usuario.
-const _MIN_WORKER_VERSION = 67; // v109: cron scheduled + /cron/status
+const _MIN_WORKER_VERSION = 68; // v111: optimizaciones KV + /kv/usage endpoint
 async function _checkWorkerVersion(){
   try {
     const r = await fetch(WORKER + '/');
@@ -4238,7 +4254,7 @@ function _showWorkerOutdatedBanner(currentVer){
   b.style.cssText = 'position:fixed;top:8px;right:8px;left:8px;z-index:9999;background:#fbbf24;color:#78350f;padding:11px 14px;border-radius:8px;border:1px solid #f59e0b;box-shadow:0 4px 12px rgba(0,0,0,.15);font-size:12.5px;line-height:1.4;display:flex;align-items:center;gap:10px;max-width:900px;margin:0 auto';
   b.innerHTML = '<span style="font-size:20px">⚠️</span>'
     + '<div style="flex:1"><strong>Worker desactualizado (v'+currentVer+').</strong> '
-    + 'Subí <code style="background:#fde68a;padding:1px 5px;border-radius:3px;font-size:11px">worker-master-v67.js</code> a Cloudflare Workers. Sin esto el cron de Telegram 24/7 no funcionará (las notifs siguen dependiendo solo del panel abierto).</div>'
+    + 'Subí <code style="background:#fde68a;padding:1px 5px;border-radius:3px;font-size:11px">worker-master-v68.js</code> a Cloudflare Workers para activar las optimizaciones de consumo KV (~80% de ahorro en escrituras) y el widget de consumo en el dashboard.</div>'
     + '<button onclick="this.parentElement.remove()" style="background:transparent;border:1px solid #92400e;color:#78350f;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:11.5px;font-weight:600">Cerrar</button>';
   document.body.appendChild(b);
 }
@@ -6217,6 +6233,8 @@ function renderDashboard(){
   renderCalWidget();
   // v109: refrescar estado Telegram 24/7
   if(typeof tg247Refresh === 'function') tg247Refresh();
+  // v111: refrescar widget de consumo KV
+  if(typeof kvUsageRefresh === 'function') kvUsageRefresh();
   // Los más visitados se cargan solo en initApp (single-run, 24h cache)
 }
 
@@ -6364,6 +6382,112 @@ async function tg247TestWebhook(){
   } catch(e){
     alert('❌ Error de red: ' + e.message);
   }
+}
+
+// ═══════════════════════════════════════════════════════════
+// v111: Widget de consumo KV (Cloudflare Workers KV usage tracker)
+// ═══════════════════════════════════════════════════════════
+async function kvUsageRefresh(){
+  const tEl = document.getElementById('kv-badge-today');
+  const pEl = document.getElementById('kv-badge-projection');
+  if(!tEl || !pEl) return;
+  try {
+    const r = await fetch(WORKER+'/kv/usage');
+    if(!r.ok){
+      tEl.textContent = 'Hoy: error'; tEl.style.background='#fee2e2'; tEl.style.color='#991b1b';
+      pEl.textContent = '—';
+      return;
+    }
+    const d = await r.json();
+    const pct = d.pct?.writes || 0;
+    const projPct = d.projection?.pct || 0;
+    const writes = d.counter?.writes || 0;
+    tEl.textContent = 'Hoy: '+writes+' writes ('+pct+'%)';
+    pEl.textContent = 'Proyección: ~'+(d.projection?.writes||0)+' ('+projPct+'%)';
+    // Colorear según status
+    const status = d.status || 'safe';
+    const colors = {
+      safe:   { bg:'#dcfce7', text:'#166534' },
+      warn:   { bg:'#fef3c7', text:'#92400e' },
+      danger: { bg:'#fee2e2', text:'#991b1b' },
+    };
+    const c = colors[status] || colors.safe;
+    tEl.style.background = c.bg; tEl.style.color = c.text;
+    pEl.style.background = c.bg; pEl.style.color = c.text;
+  } catch(e){
+    tEl.textContent = 'Hoy: error'; tEl.style.background='#fee2e2'; tEl.style.color='#991b1b';
+  }
+}
+
+async function kvUsageOpenDetails(){
+  let usage = null;
+  try {
+    const r = await fetch(WORKER+'/kv/usage');
+    if(r.ok) usage = await r.json();
+  } catch(e){}
+
+  let html = '<div style="padding:14px;max-width:560px">';
+  html += '<h3 style="margin:0 0 10px;font-size:15px">💾 Consumo Cloudflare KV</h3>';
+
+  if(usage && usage.counter){
+    const pct = usage.pct?.writes || 0;
+    const projPct = usage.projection?.pct || 0;
+    const status = usage.status || 'safe';
+    const statusColor = status==='danger' ? '#991b1b' : status==='warn' ? '#92400e' : '#166534';
+    const statusBg = status==='danger' ? '#fee2e2' : status==='warn' ? '#fef3c7' : '#dcfce7';
+    const statusLabel = status==='danger' ? '⚠️ Riesgo de superar el límite hoy' : status==='warn' ? '⚠ Atención: consumo elevado' : '✓ Consumo dentro del rango seguro';
+
+    html += '<div style="background:'+statusBg+';color:'+statusColor+';padding:10px 13px;border-radius:8px;margin-bottom:12px;font-size:12.5px;font-weight:600">'+statusLabel+'</div>';
+
+    html += '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:11px 13px;margin-bottom:10px">';
+    html += '<div style="font-size:12.5px;font-weight:700;margin-bottom:7px">📊 Hoy ('+usage.today+' UTC)</div>';
+    html += '<div style="font-size:11.5px;line-height:1.7">';
+    html += '<div>Escrituras realizadas: <strong>'+(usage.counter.writes||0)+' / '+(usage.limits?.writes||1000)+'</strong> ('+pct+'%)</div>';
+    // Barra de progreso writes
+    const barColor = pct>80?'#dc2626':pct>50?'#f59e0b':'#10b981';
+    html += '<div style="background:#e5e7eb;height:6px;border-radius:3px;overflow:hidden;margin:5px 0">';
+    html += '<div style="background:'+barColor+';height:100%;width:'+Math.min(pct,100)+'%"></div>';
+    html += '</div>';
+    html += '<div>Proyección a fin de día: <strong>~'+(usage.projection?.writes||0)+' writes</strong> ('+projPct+'%)</div>';
+    html += '</div></div>';
+  } else {
+    html += '<div style="background:#fef3c7;color:#78350f;padding:10px 13px;border-radius:8px;margin-bottom:12px;font-size:12px">No se pudo obtener el contador. Verificá que el Worker esté en versión v68+.</div>';
+  }
+
+  // Tips de optimización
+  html += '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:11px 13px;margin-bottom:10px">';
+  html += '<div style="font-size:12.5px;font-weight:700;margin-bottom:7px;color:#1e40af">💡 Optimizaciones aplicadas en v68</div>';
+  html += '<ul style="margin:0;padding-left:18px;font-size:11.5px;line-height:1.7;color:#1e3a8a">';
+  html += '<li>Cron: solo escribe CRON_LAST_RUN si hubo cambios (ahorro ~250 writes/día)</li>';
+  html += '<li>Webhook stats: write coalescing cada 10 min (ahorro ~150 writes/día)</li>';
+  html += '<li>Refresh_token: solo escribe si rotó (ahorro ~400 writes/día)</li>';
+  html += '<li>Eliminado <code>ml_refresh_ts:</code> redundante (ahorro ~50 writes/día)</li>';
+  html += '<li>Verificación post-write del panel solo si hay QR/competidores</li>';
+  html += '</ul></div>';
+
+  html += '<div style="font-size:11px;color:#64748b;line-height:1.5;margin-bottom:10px">';
+  html += '<strong>Free tier Cloudflare KV:</strong> 1.000 writes / 100.000 reads / 1.000 lists por día. ';
+  html += 'El contador se resetea diariamente a las 00:00 UTC (21:00 ARG).';
+  html += '</div>';
+
+  html += '<div style="display:flex;gap:6px;margin-top:14px;flex-wrap:wrap">';
+  html += '<button class="btn btn-ghost btn-sm" onclick="kvUsageRefresh();closeModal(\'kv-usage-modal\')">🔄 Refrescar</button>';
+  html += '<button class="btn btn-ghost btn-sm" onclick="closeModal(\'kv-usage-modal\')" style="margin-left:auto">Cerrar</button>';
+  html += '</div>';
+  html += '</div>';
+
+  let modal = document.getElementById('kv-usage-modal');
+  if(!modal){
+    modal = document.createElement('div');
+    modal.id = 'kv-usage-modal';
+    modal.className = 'modal-overlay';
+    modal.addEventListener('click', function(e){
+      if(e.target === modal) closeModal('kv-usage-modal');
+    });
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML = '<div class="modal" style="max-width:600px"><div class="modal-bd">'+html+'</div></div>';
+  openModal('kv-usage-modal');
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -12819,26 +12943,32 @@ async function saveRemoteSettings(qrs, tmpl){
 
       // 3) VERIFICACIÓN POST-WRITE: leer KV inmediatamente y comparar.
       //    Si la nube no tiene los mismos conteos que enviamos → reintentar.
-      try{
-        const verifyR = await fetch(WORKER+'/api/settings', {
-          headers:{ 'Authorization':'Bearer '+token }
-        });
-        if(verifyR.ok){
-          const remote = await verifyR.json();
-          const localQR = (body.quickReplies||[]).length;
-          const remoteQR = (remote.quickReplies||[]).length;
-          const localComp = (body.competitors||[]).length;
-          const remoteComp = (remote.competitors||[]).length;
-          if(localQR !== remoteQR || localComp !== remoteComp){
-            lastError = new Error('Verificación falló: enviado '+localQR+' QR, '+localComp+' comp; servidor tiene '+remoteQR+' QR, '+remoteComp+' comp');
-            console.warn('[Settings] Mismatch post-write:', { sent:{qr:localQR,comp:localComp}, server:{qr:remoteQR,comp:remoteComp} });
-            continue;
+      //
+      //    v111: Solo verificamos si hay QR o competidores guardados. Los saves
+      //    "vacíos" (sin estructura sensible) no necesitan verificación
+      //    — eso evita 1 read extra por save trivial y reduce el spam al KV.
+      const shouldVerify = (body.quickReplies||[]).length > 0 || (body.competitors||[]).length > 0;
+      if(shouldVerify){
+        try{
+          const verifyR = await fetch(WORKER+'/api/settings', {
+            headers:{ 'Authorization':'Bearer '+token }
+          });
+          if(verifyR.ok){
+            const remote = await verifyR.json();
+            const localQR = (body.quickReplies||[]).length;
+            const remoteQR = (remote.quickReplies||[]).length;
+            const localComp = (body.competitors||[]).length;
+            const remoteComp = (remote.competitors||[]).length;
+            if(localQR !== remoteQR || localComp !== remoteComp){
+              lastError = new Error('Verificación falló: enviado '+localQR+' QR, '+localComp+' comp; servidor tiene '+remoteQR+' QR, '+remoteComp+' comp');
+              console.warn('[Settings] Mismatch post-write:', { sent:{qr:localQR,comp:localComp}, server:{qr:remoteQR,comp:remoteComp} });
+              continue;
+            }
           }
+        }catch(verifyErr){
+          // Si la verificación falla por red, igual consideramos exitoso el POST.
+          console.warn('[Settings] No se pudo verificar (asumiendo OK):', verifyErr.message);
         }
-      }catch(verifyErr){
-        // Si la verificación falla por red, igual consideramos exitoso el POST.
-        // Es mejor que el usuario quede con duda a que reintentemos y multipliquemos errores.
-        console.warn('[Settings] No se pudo verificar (asumiendo OK):', verifyErr.message);
       }
 
       // ÉXITO confirmado
