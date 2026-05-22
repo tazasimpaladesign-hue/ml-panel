@@ -723,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v112 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v113 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -19184,38 +19184,96 @@ function _bkpUpdateWarnDot(){
   }
 }
 
-// Construir el objeto de backup desde las variables globales actuales
-function _bkpBuildPayload(){
-  return {
+// v113: Catálogo de secciones del backup. Define qué se exporta/importa.
+// Cada sección tiene un label visible, un getter del estado actual y un
+// counter para mostrar "(N items)" en el modal.
+const BKP_SECTIONS = {
+  tasks: {
+    label: 'Tareas / Notas pendientes',
+    icon: '📋',
+    get: () => Array.isArray(_tasks) ? _tasks : [],
+  },
+  competitors: {
+    label: 'Competidores y links de seguimiento',
+    icon: '🎯',
+    get: () => Array.isArray(_savedCompetitors) ? _savedCompetitors : [],
+  },
+  activeRules: {
+    label: 'Reglas de alertas automáticas',
+    icon: '🔔',
+    get: () => Array.isArray(activeRules) ? activeRules : [],
+  },
+  rpRules: {
+    label: 'Reglas de precios (repricing)',
+    icon: '💰',
+    get: () => Array.isArray(rpRules) ? rpRules : [],
+  },
+  quickReplies: {
+    label: 'Respuestas rápidas + Template',
+    icon: '💬',
+    get: () => typeof qGetQR === 'function' ? (qGetQR() || []) : [],
+  },
+  calCustom: {
+    label: 'Calendario estratégico',
+    icon: '📅',
+    get: () => { try { return JSON.parse(localStorage.getItem('impala_cal_custom') || '[]'); } catch { return []; } },
+  },
+  bdays: {
+    label: 'Cumpleaños registrados',
+    icon: '🎂',
+    get: () => { try { return JSON.parse(localStorage.getItem('impala_cal_birthdays') || '[]'); } catch { return []; } },
+  },
+  pcHistory: {
+    label: 'Historial calculadora rentabilidad',
+    icon: '📊',
+    get: () => { try { return JSON.parse(localStorage.getItem('impala_calc_history') || '[]'); } catch { return []; } },
+  },
+  // v113: nueva sección — Keywords del SEO Tracker.
+  // NO incluimos posiciones (today/yesterday) porque son regenerables con un
+  // click en 🎯 Trackear SEO, no tiene sentido pesarlas en el archivo.
+  seoKeywords: {
+    label: 'Keywords del SEO Tracker',
+    icon: '🎯',
+    get: () => window._seoKeywords || {},
+  },
+};
+
+// Construir el objeto de backup desde las variables globales actuales.
+// v113: acepta opcional `selection` (objeto con claves true/false por sección).
+// Si no se pasa, incluye TODAS las secciones (retrocompatible con v86-v112).
+function _bkpBuildPayload(selection){
+  const includeAll = !selection;
+  const includedSections = [];
+  const payload = {
     _meta: {
-      panelVersion: 'v86',
+      panelVersion: 'v113',
       exportedAt: new Date().toISOString(),
       userId: typeof userId !== 'undefined' ? userId : null,
       nickname: (typeof APP_CONFIG !== 'undefined' && APP_CONFIG.STORE_NAME) ? APP_CONFIG.STORE_NAME : null,
+      // v113: lista de secciones incluidas — el importer la usa para mostrar
+      // exactamente qué viene en el archivo
+      included: [],
     },
-    tasks:        Array.isArray(_tasks) ? _tasks : [],
-    rpRules:      Array.isArray(rpRules) ? rpRules : [],
-    activeRules:  Array.isArray(activeRules) ? activeRules : [],
-    competitors:  Array.isArray(_savedCompetitors) ? _savedCompetitors : [],
-    quickReplies: typeof qGetQR === 'function' ? (qGetQR() || []) : [],
-    template:     typeof qGetTmpl === 'function' ? (qGetTmpl() || {}) : {},
-    calCustom:    (() => {
-      try { return JSON.parse(localStorage.getItem('impala_cal_custom') || '[]'); } catch { return []; }
-    })(),
-    bdays: (() => {
-      try { return JSON.parse(localStorage.getItem('impala_cal_birthdays') || '[]'); } catch { return []; }
-    })(),
-    pcHistory: (() => {
-      try { return JSON.parse(localStorage.getItem('impala_calc_history') || '[]'); } catch { return []; }
-    })(),
-    // No incluimos: AI rules, tokens, claves API, datos de cache de visitas/orders
   };
+  // Template siempre va junto con quickReplies si se selecciona quickReplies
+  for(const [key, sec] of Object.entries(BKP_SECTIONS)){
+    if(includeAll || selection[key]){
+      payload[key] = sec.get();
+      includedSections.push(key);
+    }
+  }
+  // Caso especial: template (forma parte de quickReplies pero es campo aparte)
+  if(includeAll || selection.quickReplies){
+    payload.template = typeof qGetTmpl === 'function' ? (qGetTmpl() || {}) : {};
+  }
+  payload._meta.included = includedSections;
+  return payload;
 }
 
-// Descargar como archivo .json
-function bkpExport(){
+// Descargar como archivo .json. v113: acepta selection opcional.
+function bkpExport(selection){
   try{
-    const payload = _bkpBuildPayload();
+    const payload = _bkpBuildPayload(selection);
     const json = JSON.stringify(payload, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -19223,7 +19281,10 @@ function bkpExport(){
     const today = new Date();
     const dateStr = today.toISOString().slice(0, 10);
     const timeStr = today.toTimeString().slice(0, 5).replace(':', '');
-    const fname = 'panel-backup-' + (payload._meta.nickname || 'usuario') + '-' + dateStr + '-' + timeStr + '.json';
+    // v113: si es backup parcial, el nombre del archivo lo indica
+    const isPartial = selection && payload._meta.included.length < Object.keys(BKP_SECTIONS).length;
+    const partialTag = isPartial ? '-parcial' : '';
+    const fname = 'panel-backup' + partialTag + '-' + (payload._meta.nickname || 'usuario') + '-' + dateStr + '-' + timeStr + '.json';
 
     const a = document.createElement('a');
     a.href = url;
@@ -19233,21 +19294,23 @@ function bkpExport(){
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
 
-    // Marcar el momento del export
-    localStorage.setItem(BKP_STORAGE_KEY, String(Date.now()));
-    _bkpUpdateWarnDot();
+    // Marcar el momento del export (solo si fue backup completo)
+    if(!isPartial){
+      localStorage.setItem(BKP_STORAGE_KEY, String(Date.now()));
+      _bkpUpdateWarnDot();
+    }
 
-    // Resumen para el usuario
-    const items = payload.tasks.length + ' tareas, ' +
-                  payload.competitors.length + ' competidores, ' +
-                  payload.activeRules.length + ' reglas, ' +
-                  payload.rpRules.length + ' reglas precio, ' +
-                  payload.quickReplies.length + ' respuestas rápidas, ' +
-                  payload.calCustom.length + ' calendario, ' +
-                  payload.bdays.length + ' cumpleaños, ' +
-                  payload.pcHistory.length + ' rentabilidad';
-    showToast('Backup descargado: ' + items, 'ok');
-    console.log('[Backup] Export OK →', fname, payload._meta);
+    // Resumen: contar lo realmente exportado
+    const parts = [];
+    for(const sec of payload._meta.included){
+      const val = payload[sec];
+      const count = Array.isArray(val) ? val.length : (val && typeof val === 'object' ? Object.keys(val).length : 0);
+      const label = BKP_SECTIONS[sec]?.label || sec;
+      parts.push(count + ' ' + label.toLowerCase());
+    }
+    const summary = parts.length ? parts.join(', ') : 'sin secciones seleccionadas';
+    showToast('Backup descargado: ' + summary, 'ok');
+    console.log('[Backup] Export OK →', fname, '| incluidas:', payload._meta.included);
     return true;
   }catch(e){
     console.error('[Backup] Export falló:', e);
@@ -19256,7 +19319,9 @@ function bkpExport(){
   }
 }
 
-// Importar desde archivo (con confirmación múltiple por seguridad)
+// v113: Importar — paso 1: leer el archivo y abrir modal de selección.
+// Antes aplicaba todo de golpe. Ahora abre un modal donde el usuario elige
+// qué secciones del JSON aplicar.
 async function bkpImport(file){
   if(!file){ return; }
   try{
@@ -19268,84 +19333,105 @@ async function bkpImport(file){
       throw new Error('Archivo inválido — no parece un backup del panel');
     }
 
-    // Mostrar resumen antes de aplicar
-    const summary = 'Backup del ' +
-      (data._meta.exportedAt ? new Date(data._meta.exportedAt).toLocaleString('es-AR') : 'sin fecha') +
-      '\nUsuario: ' + (data._meta.nickname || data._meta.userId || 'desconocido') +
-      '\nVersión panel: ' + (data._meta.panelVersion || '?') +
-      '\n\nContenido:' +
-      '\n  • Tareas: ' + (data.tasks || []).length +
-      '\n  • Competidores: ' + (data.competitors || []).length +
-      '\n  • Reglas alertas: ' + (data.activeRules || []).length +
-      '\n  • Reglas precio: ' + (data.rpRules || []).length +
-      '\n  • Respuestas rápidas: ' + (data.quickReplies || []).length +
-      '\n  • Calendario: ' + (data.calCustom || []).length +
-      '\n  • Cumpleaños: ' + (data.bdays || []).length +
-      '\n  • Rentabilidad: ' + (data.pcHistory || []).length;
+    // Cerrar el modal actual de backup si está abierto
+    const oldModal = document.getElementById('bkp-modal');
+    if(oldModal) oldModal.remove();
 
-    const confirm1 = confirm(
-      'IMPORTAR BACKUP\n\n' + summary + '\n\n' +
-      '⚠️ Esto SOBRESCRIBE todos los datos actuales con los del archivo.\n' +
-      'Los datos actuales se perderán definitivamente.\n\n' +
-      '¿Querés continuar?'
-    );
-    if(!confirm1) return;
-
-    const confirm2 = confirm(
-      '⚠️ ÚLTIMA CONFIRMACIÓN\n\n' +
-      'Si tenés datos importantes sin exportar, cancelá y EXPORTÁ PRIMERO.\n\n' +
-      '¿Aplicar el backup ahora? (no se puede deshacer)'
-    );
-    if(!confirm2) return;
-
-    // Aplicar cada sección si está presente en el JSON
-    if(Array.isArray(data.tasks))        _tasks = data.tasks;
-    if(Array.isArray(data.rpRules))      rpRules = data.rpRules;
-    if(Array.isArray(data.activeRules))  activeRules = data.activeRules;
-    if(Array.isArray(data.competitors))  _savedCompetitors = data.competitors;
-    // Quick replies y template usan setters internos
-    if(Array.isArray(data.quickReplies) && typeof qSaveQR === 'function') qSaveQR(data.quickReplies);
-    if(data.template && typeof qWriteTmpl === 'function') qWriteTmpl(data.template);
-    // Calendario y cumpleaños van a localStorage directo
-    if(Array.isArray(data.calCustom)) localStorage.setItem('impala_cal_custom', JSON.stringify(data.calCustom));
-    if(Array.isArray(data.bdays))     localStorage.setItem('impala_cal_birthdays', JSON.stringify(data.bdays));
-    if(Array.isArray(data.pcHistory)) localStorage.setItem('impala_calc_history', JSON.stringify(data.pcHistory));
-
-    // v88: BUG FIX — el panel tiene 2 endpoints de KV separados:
-    //   /api/backup  → tasks, calendar, bdays, pcHistory, etc.
-    //   /api/settings → quickReplies, template, rpRules, activeRules, COMPETITORS
-    // Antes solo llamábamos pushFullBackup() que escribe en /api/backup, pero
-    // los competidores se leen desde /api/settings. Por eso al recargar el
-    // panel no aparecían los competidores importados — quedaban en memoria
-    // pero el endpoint que los lee tenía la versión vieja.
-    // Ahora persistimos en AMBOS endpoints.
-    if(typeof pushFullBackup === 'function') await pushFullBackup();
-    if(typeof saveRemoteSettings === 'function') await saveRemoteSettings();
-
-    // Re-render de las secciones afectadas
-    if(typeof _renderBoard === 'function') _renderBoard();
-    if(typeof renderRules === 'function') renderRules();
-    if(typeof rpRenderList === 'function') rpRenderList();
-
-    showToast('✓ Backup restaurado. Recargá la página para ver todos los cambios.', 'ok');
-    setTimeout(() => {
-      if(confirm('¿Recargar la página ahora para refrescar todas las secciones?')) location.reload();
-    }, 1500);
-
+    // Abrir modal de selección de import
+    bkpOpenImportModal(data);
   }catch(e){
-    console.error('[Backup] Import falló:', e);
-    alert('Error al importar el backup:\n\n' + e.message + '\n\n(Verificá que sea un archivo .json válido del panel)');
+    console.error('[Backup] Import lectura falló:', e);
+    alert('Error al leer el backup:\n\n' + e.message + '\n\n(Verificá que sea un archivo .json válido del panel)');
   }
 }
 
-// Modal del Backup
+// v113: Aplicar el backup importado SEGÚN la selección que hizo el usuario
+// en el modal de import. selection = { tasks: true, competitors: false, ... }
+async function bkpApplyImport(data, selection){
+  // Calcular qué secciones se van a tocar
+  const applying = Object.keys(selection).filter(k => selection[k]);
+  if(applying.length === 0){
+    alert('No seleccionaste ninguna sección para importar. Cancelado.');
+    return;
+  }
+
+  // v113: confirmación adaptada a la cantidad de secciones
+  // - 1 sección  → 1 confirm liviano
+  // - 2+         → 1 confirm normal
+  // - Todas (8+) → 2 confirms (igual que antes, máxima seguridad)
+  const allKeys = Object.keys(BKP_SECTIONS);
+  const isFull = applying.length === allKeys.length;
+  const sectionsLabels = applying.map(k => BKP_SECTIONS[k]?.label || k).join(', ');
+
+  if(isFull){
+    // Backup completo → doble confirm (igual al comportamiento histórico)
+    if(!confirm('IMPORTAR BACKUP COMPLETO\n\n⚠️ Esto SOBRESCRIBE TODOS tus datos actuales con los del archivo.\nLos datos actuales se perderán definitivamente.\n\n¿Continuar?')) return;
+    if(!confirm('⚠️ ÚLTIMA CONFIRMACIÓN\n\nSi tenés datos importantes sin exportar, cancelá y EXPORTÁ PRIMERO.\n\n¿Aplicar el backup ahora? (no se puede deshacer)')) return;
+  } else {
+    // Parcial → 1 confirm explícito que dice qué se va a sobrescribir
+    if(!confirm('IMPORTAR PARCIAL\n\nVas a sobrescribir SOLO estas secciones:\n• ' + applying.map(k => BKP_SECTIONS[k]?.label || k).join('\n• ') + '\n\nEl resto de tus datos NO se toca.\n\n¿Continuar?')) return;
+  }
+
+  // Aplicar cada sección seleccionada
+  try{
+    if(selection.tasks && Array.isArray(data.tasks))               _tasks = data.tasks;
+    if(selection.rpRules && Array.isArray(data.rpRules))           rpRules = data.rpRules;
+    if(selection.activeRules && Array.isArray(data.activeRules))   activeRules = data.activeRules;
+    if(selection.competitors && Array.isArray(data.competitors))   _savedCompetitors = data.competitors;
+    if(selection.quickReplies){
+      if(Array.isArray(data.quickReplies) && typeof qSaveQR === 'function') qSaveQR(data.quickReplies);
+      if(data.template && typeof qWriteTmpl === 'function') qWriteTmpl(data.template);
+    }
+    if(selection.calCustom && Array.isArray(data.calCustom))       localStorage.setItem('impala_cal_custom', JSON.stringify(data.calCustom));
+    if(selection.bdays && Array.isArray(data.bdays))               localStorage.setItem('impala_cal_birthdays', JSON.stringify(data.bdays));
+    if(selection.pcHistory && Array.isArray(data.pcHistory))       localStorage.setItem('impala_calc_history', JSON.stringify(data.pcHistory));
+    // v113: SEO keywords
+    if(selection.seoKeywords && data.seoKeywords && typeof data.seoKeywords === 'object'){
+      window._seoKeywords = data.seoKeywords;
+      try{ localStorage.setItem(SEO_TRACKER_KW_STORAGE, JSON.stringify(window._seoKeywords)); }catch{}
+      // Subir al Worker
+      try{
+        await fetch(WORKER+'/api/seo-tracker/keywords', {
+          method:'POST',
+          headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
+          body: JSON.stringify({ keywords: window._seoKeywords }),
+        });
+      }catch(e){ console.warn('[Backup] No se pudo subir SEO keywords al Worker:', e.message); }
+    }
+
+    // Persistir al Worker SOLO los endpoints afectados (evita writes innecesarios)
+    // /api/backup → tasks, calendar, bdays, pcHistory
+    const needsBackup = selection.tasks || selection.calCustom || selection.bdays || selection.pcHistory;
+    // /api/settings → quickReplies, template, rpRules, activeRules, competitors
+    const needsSettings = selection.quickReplies || selection.rpRules || selection.activeRules || selection.competitors;
+    if(needsBackup && typeof pushFullBackup === 'function') await pushFullBackup();
+    if(needsSettings && typeof saveRemoteSettings === 'function') await saveRemoteSettings();
+
+    // Re-render de las secciones afectadas
+    if(selection.tasks && typeof _renderBoard === 'function') _renderBoard();
+    if(selection.activeRules && typeof renderRules === 'function') renderRules();
+    if(selection.rpRules && typeof rpRenderList === 'function') rpRenderList();
+    if(selection.seoKeywords && typeof renderSEOTable === 'function' && document.getElementById('section-seo')?.classList.contains('active')) renderSEOTable();
+
+    showToast('✓ Backup restaurado (' + applying.length + ' ' + (applying.length === 1 ? 'sección' : 'secciones') + '). Recargá para refrescar todo.', 'ok');
+    setTimeout(() => {
+      if(confirm('¿Recargar la página ahora para refrescar todas las secciones?')) location.reload();
+    }, 1500);
+  }catch(e){
+    console.error('[Backup] Apply falló:', e);
+    alert('Error al aplicar el backup:\n\n' + e.message);
+  }
+}
+
+// Modal del Backup — v113: rediseñado con checkboxes por sección
 function bkpOpenModal(){
   let modal = document.getElementById('bkp-modal');
   if(modal){ modal.remove(); }
   modal = document.createElement('div');
   modal.id = 'bkp-modal';
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px';
-  modal.onclick = (e) => { if(e.target === modal) modal.remove(); };
+  modal.className = 'modal-overlay open';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px';
+  modal.addEventListener('click', e => { if(e.target === modal) modal.remove(); });
 
   const days = _bkpDaysSinceLast();
   const lastTs = parseInt(localStorage.getItem(BKP_STORAGE_KEY) || '0', 10);
@@ -19356,52 +19442,194 @@ function bkpOpenModal(){
   const warnTxt = isWarn ? '⚠️ Hace ' + days + ' días que no hacés un backup. Te recomiendo exportar AHORA.' :
                            '✓ Último backup: ' + lastStr;
 
+  // Construir filas de checkboxes con counter de cada sección
+  let rowsHtml = '';
+  for(const [key, sec] of Object.entries(BKP_SECTIONS)){
+    let count = 0;
+    try {
+      const v = sec.get();
+      count = Array.isArray(v) ? v.length : (v && typeof v === 'object' ? Object.keys(v).length : 0);
+    } catch(e){}
+    const countLabel = count + (count === 1 ? ' item' : ' items');
+    rowsHtml += '<label style="display:flex;align-items:center;gap:9px;padding:8px 11px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:7px;cursor:pointer;font-size:12.5px;color:#1f2937" onmouseover="this.style.background=\'#f3f4f6\'" onmouseout="this.style.background=\'#f9fafb\'">';
+    rowsHtml += '<input type="checkbox" class="bkp-export-check" data-section="'+key+'" checked style="margin:0;cursor:pointer">';
+    rowsHtml += '<span style="font-size:14px">'+sec.icon+'</span>';
+    rowsHtml += '<span style="flex:1">'+sec.label+'</span>';
+    rowsHtml += '<span style="font-size:11px;color:#6b7280;font-weight:600">'+countLabel+'</span>';
+    rowsHtml += '</label>';
+  }
+
   modal.innerHTML = `
-    <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;max-width:560px;width:100%;padding:22px;box-shadow:0 10px 40px rgba(0,0,0,.25);color:#111827">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px">
+    <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;max-width:560px;width:100%;padding:22px;box-shadow:0 10px 40px rgba(0,0,0,.25);color:#111827;max-height:90vh;overflow-y:auto">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px">
         <div>
           <div style="font-size:17px;font-weight:700;color:#111827">💼 Backup del Panel</div>
-          <div style="font-size:12.5px;color:#6b7280;margin-top:4px">Descargá un .json con tus datos para restaurar después si pasa algo.</div>
+          <div style="font-size:12.5px;color:#6b7280;margin-top:4px">Elegí qué secciones querés guardar o restaurar.</div>
         </div>
         <button onclick="document.getElementById('bkp-modal').remove()" style="background:#fff;border:1px solid #d1d5db;color:#374151;cursor:pointer;font-size:13px;padding:6px 12px;border-radius:6px;font-weight:600">✕</button>
       </div>
 
-      <div style="background:${warnBg};border:1px solid ${warnBd};border-radius:8px;padding:10px 12px;margin-bottom:16px;font-size:12.5px;color:#1f2937">
+      <div style="background:${warnBg};border:1px solid ${warnBd};border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12.5px;color:#1f2937">
         ${warnTxt}
       </div>
 
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
-        <button onclick="bkpExport();document.getElementById('bkp-modal').remove();" style="background:#16a34a;color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:5px">
-          <span style="font-size:24px">📥</span>
-          <span>Exportar backup</span>
-          <span style="font-size:10.5px;opacity:.85;font-weight:400">Descarga .json con tus datos</span>
+      <!-- v113: header de la lista con botones marcar/desmarcar todo -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px">
+        <div style="font-size:12px;font-weight:600;color:#374151;text-transform:uppercase;letter-spacing:.04em">Secciones del backup</div>
+        <div style="display:flex;gap:5px">
+          <button onclick="document.querySelectorAll('.bkp-export-check').forEach(c=>c.checked=true)" style="background:#fff;border:1px solid #d1d5db;color:#374151;font-size:10.5px;padding:3px 9px;border-radius:5px;cursor:pointer;font-weight:600">✓ Todo</button>
+          <button onclick="document.querySelectorAll('.bkp-export-check').forEach(c=>c.checked=false)" style="background:#fff;border:1px solid #d1d5db;color:#374151;font-size:10.5px;padding:3px 9px;border-radius:5px;cursor:pointer;font-weight:600">✗ Nada</button>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:16px">
+        ${rowsHtml}
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+        <button onclick="_bkpExportFromModal()" style="background:#16a34a;color:#fff;border:none;padding:13px;border-radius:8px;cursor:pointer;font-size:13.5px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:4px">
+          <span style="font-size:22px">📥</span>
+          <span>Exportar selección</span>
+          <span style="font-size:10px;opacity:.85;font-weight:400">Descarga .json</span>
         </button>
-        <button onclick="document.getElementById('bkp-import-input').click()" style="background:#3b82f6;color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:5px">
-          <span style="font-size:24px">📤</span>
-          <span>Importar backup</span>
-          <span style="font-size:10.5px;opacity:.85;font-weight:400">Restaurar desde .json</span>
+        <button onclick="document.getElementById('bkp-import-input').click()" style="background:#3b82f6;color:#fff;border:none;padding:13px;border-radius:8px;cursor:pointer;font-size:13.5px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:4px">
+          <span style="font-size:22px">📤</span>
+          <span>Importar archivo</span>
+          <span style="font-size:10px;opacity:.85;font-weight:400">Vas a elegir qué aplicar</span>
         </button>
       </div>
 
-      <input type="file" id="bkp-import-input" accept="application/json,.json" style="display:none" onchange="bkpImport(this.files[0]);document.getElementById('bkp-modal').remove();this.value='';" />
+      <input type="file" id="bkp-import-input" accept="application/json,.json" style="display:none" onchange="bkpImport(this.files[0]);this.value='';" />
 
-      <details style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:8px 12px;font-size:12px">
-        <summary style="cursor:pointer;color:#374151;font-weight:600">¿Qué incluye el backup?</summary>
-        <div style="margin-top:8px;color:#4b5563;line-height:1.6">
-          ✓ Tareas / notas pendientes<br>
-          ✓ Competidores y links de seguimiento<br>
-          ✓ Reglas de alertas automáticas<br>
-          ✓ Reglas de precios automáticos (repricing)<br>
-          ✓ Respuestas rápidas + template de mensaje<br>
-          ✓ Calendario estratégico (eventos personalizados)<br>
-          ✓ Cumpleaños registrados<br>
-          ✓ Historial de calculadora de rentabilidad<br>
-          <br>
-          <span style="color:#6b7280;font-size:11px">No incluye: tokens, claves API, AI Rules, ni cache de visitas/órdenes (eso se reconstruye solo de ML).</span>
-        </div>
-      </details>
+      <div style="font-size:11px;color:#6b7280;line-height:1.5;text-align:center;margin-top:8px">
+        No incluye: tokens, claves API, AI Rules ni cache de visitas/órdenes (eso se reconstruye solo de ML).
+      </div>
     </div>`;
   document.body.appendChild(modal);
+}
+
+// v113: helper para llamar bkpExport con la selección del modal actual
+function _bkpExportFromModal(){
+  const selection = {};
+  let count = 0;
+  document.querySelectorAll('.bkp-export-check').forEach(c => {
+    selection[c.dataset.section] = c.checked;
+    if(c.checked) count++;
+  });
+  if(count === 0){
+    alert('No marcaste ninguna sección. Marcá al menos una para exportar.');
+    return;
+  }
+  bkpExport(selection);
+  // Cerrar modal solo si exportó OK
+  setTimeout(() => {
+    const m = document.getElementById('bkp-modal');
+    if(m) m.remove();
+  }, 100);
+}
+
+// v113: Modal de import — muestra qué tiene el archivo y permite elegir
+// qué secciones aplicar al panel.
+function bkpOpenImportModal(data){
+  let modal = document.getElementById('bkp-import-modal');
+  if(modal){ modal.remove(); }
+  modal = document.createElement('div');
+  modal.id = 'bkp-import-modal';
+  modal.className = 'modal-overlay open';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px';
+  modal.addEventListener('click', e => { if(e.target === modal) modal.remove(); });
+
+  // Meta del archivo
+  const exportedAt = data._meta.exportedAt ? new Date(data._meta.exportedAt).toLocaleString('es-AR') : 'sin fecha';
+  const fromUser = data._meta.nickname || data._meta.userId || 'desconocido';
+  const fromVer = data._meta.panelVersion || '?';
+
+  // Construir filas — pero solo de las secciones que TIENE el archivo
+  let rowsHtml = '';
+  let availableCount = 0;
+  for(const [key, sec] of Object.entries(BKP_SECTIONS)){
+    const present = key in data;
+    if(!present) continue;
+    availableCount++;
+    let count = 0;
+    const v = data[key];
+    count = Array.isArray(v) ? v.length : (v && typeof v === 'object' ? Object.keys(v).length : 0);
+    const countLabel = count + (count === 1 ? ' item' : ' items');
+    rowsHtml += '<label style="display:flex;align-items:center;gap:9px;padding:8px 11px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:7px;cursor:pointer;font-size:12.5px;color:#1f2937" onmouseover="this.style.background=\'#f3f4f6\'" onmouseout="this.style.background=\'#f9fafb\'">';
+    rowsHtml += '<input type="checkbox" class="bkp-import-check" data-section="'+key+'" checked style="margin:0;cursor:pointer">';
+    rowsHtml += '<span style="font-size:14px">'+sec.icon+'</span>';
+    rowsHtml += '<span style="flex:1">'+sec.label+'</span>';
+    rowsHtml += '<span style="font-size:11px;color:#6b7280;font-weight:600">'+countLabel+'</span>';
+    rowsHtml += '</label>';
+  }
+  if(availableCount === 0){
+    rowsHtml = '<div style="background:#fef3c7;color:#78350f;padding:12px;border-radius:8px;font-size:12.5px">⚠ El archivo no contiene ninguna sección reconocida. ¿Estás seguro de que es un backup del panel?</div>';
+  }
+
+  modal.innerHTML = `
+    <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;max-width:560px;width:100%;padding:22px;box-shadow:0 10px 40px rgba(0,0,0,.25);color:#111827;max-height:90vh;overflow-y:auto">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px">
+        <div>
+          <div style="font-size:17px;font-weight:700;color:#111827">📤 Importar backup</div>
+          <div style="font-size:12.5px;color:#6b7280;margin-top:4px">Elegí qué secciones del archivo querés restaurar.</div>
+        </div>
+        <button onclick="document.getElementById('bkp-import-modal').remove()" style="background:#fff;border:1px solid #d1d5db;color:#374151;cursor:pointer;font-size:13px;padding:6px 12px;border-radius:6px;font-weight:600">✕</button>
+      </div>
+
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:#1e3a8a;line-height:1.5">
+        <strong>📄 Archivo:</strong> ${exportedAt}<br>
+        <strong>👤 Usuario:</strong> ${fromUser} · <strong>Versión panel:</strong> ${fromVer}
+      </div>
+
+      ${availableCount > 0 ? `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px">
+          <div style="font-size:12px;font-weight:600;color:#374151;text-transform:uppercase;letter-spacing:.04em">Secciones a restaurar</div>
+          <div style="display:flex;gap:5px">
+            <button onclick="document.querySelectorAll('.bkp-import-check').forEach(c=>c.checked=true)" style="background:#fff;border:1px solid #d1d5db;color:#374151;font-size:10.5px;padding:3px 9px;border-radius:5px;cursor:pointer;font-weight:600">✓ Todo</button>
+            <button onclick="document.querySelectorAll('.bkp-import-check').forEach(c=>c.checked=false)" style="background:#fff;border:1px solid #d1d5db;color:#374151;font-size:10.5px;padding:3px 9px;border-radius:5px;cursor:pointer;font-weight:600">✗ Nada</button>
+          </div>
+        </div>
+      ` : ''}
+
+      <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:14px">
+        ${rowsHtml}
+      </div>
+
+      ${availableCount > 0 ? `
+        <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:9px 12px;margin-bottom:14px;font-size:11.5px;color:#991b1b;line-height:1.5">
+          ⚠ Las secciones marcadas SOBRESCRIBEN tus datos actuales de esas mismas secciones. El resto no se toca.
+        </div>
+
+        <div style="display:flex;gap:8px">
+          <button onclick="_bkpApplyFromModal()" style="background:#16a34a;color:#fff;border:none;padding:11px 18px;border-radius:7px;cursor:pointer;font-size:13.5px;font-weight:600;flex:1">✅ Aplicar selección</button>
+          <button onclick="document.getElementById('bkp-import-modal').remove()" style="background:#fff;border:1px solid #d1d5db;color:#374151;padding:11px 18px;border-radius:7px;cursor:pointer;font-size:13.5px;font-weight:600">Cancelar</button>
+        </div>
+      ` : `
+        <div style="text-align:center">
+          <button onclick="document.getElementById('bkp-import-modal').remove()" style="background:#fff;border:1px solid #d1d5db;color:#374151;padding:11px 18px;border-radius:7px;cursor:pointer;font-size:13.5px;font-weight:600">Cerrar</button>
+        </div>
+      `}
+    </div>`;
+  document.body.appendChild(modal);
+
+  // Guardar data en una variable global temporal para que _bkpApplyFromModal la lea
+  window._bkpPendingImport = data;
+}
+
+// v113: helper para llamar bkpApplyImport con la selección del modal
+function _bkpApplyFromModal(){
+  const data = window._bkpPendingImport;
+  if(!data){ alert('Error: no hay datos pendientes de import'); return; }
+  const selection = {};
+  document.querySelectorAll('.bkp-import-check').forEach(c => {
+    selection[c.dataset.section] = c.checked;
+  });
+  // Cerrar modal antes de mostrar confirm
+  const m = document.getElementById('bkp-import-modal');
+  if(m) m.remove();
+  bkpApplyImport(data, selection);
+  // Limpiar
+  delete window._bkpPendingImport;
 }
 
 // Inicializar el sistema de backup al cargar el panel
