@@ -723,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v115 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v116 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4229,7 +4229,7 @@ async function _pollPendingShipments(){
 // v93 [P5]: detector de versión del Worker. Si el Worker está desactualizado (no v55+),
 // significa que el header `x-format-new: true` no está siendo aplicado y el bug de
 // envíos sigue activo. Mostramos un banner amarillo al usuario.
-const _MIN_WORKER_VERSION = 71; // v115: fix /api/questions/search proxy bug
+const _MIN_WORKER_VERSION = 72; // v116: WEBHOOK_STATS coalesce 30min + SEO write debouncing
 async function _checkWorkerVersion(){
   try {
     const r = await fetch(WORKER + '/');
@@ -8455,7 +8455,7 @@ const SEO_TRACKER_KW_STORAGE  = 'mlp_seo_kw';                 // mapping local-c
 const SEO_TRACKER_LAST_RUN    = 'mlp_seo_last_run';           // timestamp última corrida
 const SEO_TRACKER_AUTO_HOURS  = 20;                           // auto-tracking si >20h
 const SEO_TRACKER_MAX_PAGES   = 10;                           // hasta página 10
-const SEO_TRACKER_THROTTLE_MS = 800;                          // delay entre requests
+const SEO_TRACKER_THROTTLE_MS = 1500;                         // v116: subido de 800ms para evitar bans de corsproxy.io
 const SEO_POSITIONS_LOCAL     = 'mlp_seo_positions';          // cache local de positions
 
 // Estado global del módulo
@@ -8628,6 +8628,41 @@ function seoTrackerOpenKwModal(itemId){
 }
 
 // ── 4) Persistir keyword en Worker ─────────────────────────────────────────
+// v116: SaveKw con DEBOUNCING para reducir writes KV.
+// Antes: cada vez que tocabas "Guardar" en el modal = 1 write inmediato.
+// Si configurabas 10 keywords seguidas = 10 writes.
+// Ahora: el guardado se hace en memoria + cache local INMEDIATAMENTE
+// (feedback instantáneo al usuario), y la persistencia al Worker se
+// difiere 5 segundos. Si cambiás otra keyword en ese intervalo, se
+// consolida en 1 solo write.
+// Resultado: 10 cambios consecutivos = 1 write en vez de 10.
+let _seoKwSaveTimer = null;
+async function _seoKwFlush(){
+  if(!window._seoKeywords) return false;
+  try {
+    const r = await fetch(WORKER+'/api/seo-tracker/keywords', {
+      method:'POST',
+      headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
+      body: JSON.stringify({ keywords: window._seoKeywords }),
+    });
+    if(!r.ok){
+      let errBody = null;
+      try { errBody = await r.json(); } catch(e){}
+      const errMsg = errBody?.message || errBody?.error || ('HTTP '+r.status);
+      if(errBody?.message && errBody.message.includes('developers.mercadolibre.com')){
+        throw new Error('❌ Worker en versión vieja. Subí v71+ a Cloudflare.');
+      }
+      throw new Error('HTTP '+r.status+': '+errMsg);
+    }
+    console.log('[SEOTracker] ✓ Keywords sync OK ('+Object.keys(window._seoKeywords).length+' items)');
+    return true;
+  } catch(e){
+    console.error('[SEOTracker] flush error:', e.message);
+    if(typeof showToast === 'function') showToast('⚠ Sync de keywords falló: '+e.message, 'warn');
+    return false;
+  }
+}
+
 async function seoTrackerSaveKw(itemId, skipClose){
   const inp = document.getElementById('seo-kw-input');
   if(!inp) return false;
@@ -8636,41 +8671,47 @@ async function seoTrackerSaveKw(itemId, skipClose){
   if(kw){ window._seoKeywords[itemId] = kw; }
   else { delete window._seoKeywords[itemId]; }
 
-  // Persistir en Worker (1 write)
-  try {
-    const r = await fetch(WORKER+'/api/seo-tracker/keywords', {
-      method:'POST',
-      headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
-      body: JSON.stringify({ keywords: window._seoKeywords }),
-    });
-    // v114: diagnóstico granular según código de error
-    if(!r.ok){
-      let errBody = null;
-      try { errBody = await r.json(); } catch(e){}
-      const errMsg = errBody?.message || errBody?.error || ('HTTP '+r.status);
-      // Detección específica del bug v70: ML proxy interceptando el endpoint
-      if(errBody?.message && errBody.message.includes('developers.mercadolibre.com')){
-        throw new Error('❌ El Worker en Cloudflare está en una versión vieja (anterior a v70). El endpoint /api/seo-tracker/keywords está siendo redirigido a MercadoLibre por error.\n\nSOLUCIÓN: Subí worker-master-v70.js a Cloudflare Workers Dashboard → tu worker → Deploy.\n\nVerificá en https://worker-impaladesign-1.tazasimpaladesign.workers.dev/ que diga v70 en el campo msg.');
-      }
-      // Otro error 404 sin proxy a ML
-      if(r.status === 404){
-        throw new Error('❌ Endpoint no encontrado (404). Verificá que el Worker esté en versión v70 o superior.');
-      }
-      throw new Error('HTTP '+r.status+': '+errMsg);
+  // Cache local INMEDIATA (no pierde el cambio si el browser cierra)
+  try { localStorage.setItem(SEO_TRACKER_KW_STORAGE, JSON.stringify(window._seoKeywords)); } catch{}
+
+  // Re-render INMEDIATO (feedback visual)
+  const cell = document.getElementById('seo-pos-cell-'+itemId);
+  if(cell) cell.innerHTML = _seoPosCellHTML(itemId);
+  if(!skipClose) closeModal('seo-kw-modal');
+  if(typeof showToast === 'function') showToast(kw ? '✓ Keyword guardada' : '✓ Keyword eliminada', 'ok');
+
+  // Debounce: si hay un timer pendiente, lo reinicia. Solo persiste cuando
+  // pasan 5 segundos sin nuevos cambios. Si el usuario cierra el panel antes,
+  // beforeunload abajo dispara un flush inmediato.
+  if(_seoKwSaveTimer) clearTimeout(_seoKwSaveTimer);
+  _seoKwSaveTimer = setTimeout(() => {
+    _seoKwSaveTimer = null;
+    _seoKwFlush();
+  }, 5000);
+
+  return true;
+}
+
+// v116: si el usuario cierra el panel/pestaña con cambios pendientes,
+// flush inmediato para no perder cambios. beforeunload no permite await,
+// usamos sendBeacon como fallback (es síncrono).
+if(typeof window !== 'undefined' && !window._seoBeforeUnloadHooked){
+  window._seoBeforeUnloadHooked = true;
+  window.addEventListener('beforeunload', () => {
+    if(_seoKwSaveTimer){
+      clearTimeout(_seoKwSaveTimer);
+      // sendBeacon NO acepta headers personalizados, no podemos usarlo con Bearer auth.
+      // Lo más confiable es un fetch keepalive — el browser lo deja terminar igual.
+      try {
+        fetch(WORKER+'/api/seo-tracker/keywords', {
+          method: 'POST',
+          headers: {'Authorization':'Bearer '+token, 'Content-Type':'application/json'},
+          body: JSON.stringify({ keywords: window._seoKeywords||{} }),
+          keepalive: true,
+        });
+      } catch(e){}
     }
-    // Cache local
-    localStorage.setItem(SEO_TRACKER_KW_STORAGE, JSON.stringify(window._seoKeywords));
-    // Re-render solo la celda afectada
-    const cell = document.getElementById('seo-pos-cell-'+itemId);
-    if(cell) cell.innerHTML = _seoPosCellHTML(itemId);
-    if(!skipClose) closeModal('seo-kw-modal');
-    if(typeof showToast === 'function') showToast(kw ? '✓ Keyword guardada' : '✓ Keyword eliminada', 'ok');
-    return true;
-  } catch(e){
-    console.error('[SEOTracker] saveKw error:', e);
-    alert(e.message);
-    return false;
-  }
+  });
 }
 
 async function seoTrackerDeleteKw(itemId){
@@ -8687,24 +8728,67 @@ async function seoTrackerSaveAndTrack(itemId){
   await seoTrackerRunOne(itemId);
 }
 
-// ── 5) Llamada a ML Search (vía corsproxy.io desde el browser) ─────────────
+// ── 5) Llamada a ML Search (cascade de 4 proxies CORS desde browser) ──────
+// v116: Antes usábamos solo corsproxy.io, que bloquea con 403 cuando hacés
+// muchas requests seguidas (rate limit propio del proxy gratuito). Ahora
+// rotamos entre 4 proxies y reintentamos con el siguiente si uno falla.
+const _SEO_PROXIES = [
+  { name: 'corsproxy.io',      build: u => 'https://corsproxy.io/?' + encodeURIComponent(u) },
+  { name: 'allorigins.win',    build: u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u) },
+  { name: 'cors.lol',          build: u => 'https://api.cors.lol/?url=' + encodeURIComponent(u) },
+  { name: 'codetabs.com',      build: u => 'https://api.codetabs.com/v1/proxy/?quest=' + encodeURIComponent(u) },
+];
+// Stats persistentes para preferir el más confiable cada sesión (memoria en window)
+window._seoProxyStats = window._seoProxyStats || {};
+
 async function _seoTrackerSearch(keyword, offset){
-  const url = 'https://corsproxy.io/?' + encodeURIComponent(
-    'https://api.mercadolibre.com/sites/MLA/search?q=' + encodeURIComponent(keyword) + '&limit=50&offset=' + offset
-  );
-  const ctrl = new AbortController();
-  const tid = setTimeout(()=>ctrl.abort(), 12000);
-  try {
-    const r = await fetch(url, { signal: ctrl.signal });
-    clearTimeout(tid);
-    if(!r.ok) return null;
-    const data = await r.json();
-    return Array.isArray(data.results) ? data.results : null;
-  } catch(e){
-    clearTimeout(tid);
-    console.warn('[SEOTracker] Search error for "'+keyword+'" offset '+offset+':', e.message);
-    return null;
+  const targetUrl = 'https://api.mercadolibre.com/sites/MLA/search?q=' + encodeURIComponent(keyword) + '&limit=50&offset=' + offset;
+
+  // Ordenar proxies por tasa de éxito en esta sesión (descendente).
+  // Proxies sin stats (recién agregados o reset) van primero para "probarlos".
+  const sortedProxies = [..._SEO_PROXIES].sort((a, b) => {
+    const sa = window._seoProxyStats[a.name] || { ok: 0, fail: 0 };
+    const sb = window._seoProxyStats[b.name] || { ok: 0, fail: 0 };
+    const ra = (sa.ok + sa.fail === 0) ? 1 : sa.ok / (sa.ok + sa.fail);
+    const rb = (sb.ok + sb.fail === 0) ? 1 : sb.ok / (sb.ok + sb.fail);
+    return rb - ra;
+  });
+
+  for(const proxy of sortedProxies){
+    const proxyUrl = proxy.build(targetUrl);
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), 12000);
+    try {
+      const r = await fetch(proxyUrl, { signal: ctrl.signal });
+      clearTimeout(tid);
+      // Si el proxy mismo responde 403/429/5xx, probamos el siguiente
+      if(!r.ok){
+        const stat = window._seoProxyStats[proxy.name] || (window._seoProxyStats[proxy.name] = { ok:0, fail:0 });
+        stat.fail++;
+        console.warn('[SEOTracker] '+proxy.name+' devolvió HTTP '+r.status+' — probando siguiente proxy');
+        continue;
+      }
+      const data = await r.json();
+      // Verificar que la respuesta tenga forma esperada (ML devuelve {results:[...]})
+      if(!data || typeof data !== 'object'){
+        console.warn('[SEOTracker] '+proxy.name+': respuesta no-JSON');
+        continue;
+      }
+      const stat = window._seoProxyStats[proxy.name] || (window._seoProxyStats[proxy.name] = { ok:0, fail:0 });
+      stat.ok++;
+      return Array.isArray(data.results) ? data.results : null;
+    } catch(e){
+      clearTimeout(tid);
+      const stat = window._seoProxyStats[proxy.name] || (window._seoProxyStats[proxy.name] = { ok:0, fail:0 });
+      stat.fail++;
+      console.warn('[SEOTracker] '+proxy.name+' falló: '+e.message);
+      // Continuar con el siguiente proxy
+    }
   }
+  // Si TODOS los proxies fallaron, devolvemos null para que la lógica
+  // upstream preserve el snapshot anterior y muestre warning.
+  console.error('[SEOTracker] TODOS los proxies fallaron para keyword:', keyword);
+  return null;
 }
 
 // Busca un item específico en los resultados hasta página SEO_TRACKER_MAX_PAGES
@@ -8731,6 +8815,25 @@ async function _seoTrackerFindItem(keyword, itemId){
 }
 
 // ── 6) Trackear UNA publicación específica (botón ⚡) ───────────────────────
+// v116: helper para diferir el save del snapshot de posiciones (debounce 5s).
+// Si trackeás 5 items individuales en rápida sucesión = 1 write en vez de 5.
+let _seoPosSaveTimer = null;
+function _seoPosScheduleSave(){
+  if(_seoPosSaveTimer) clearTimeout(_seoPosSaveTimer);
+  _seoPosSaveTimer = setTimeout(async () => {
+    _seoPosSaveTimer = null;
+    if(!window._seoToday) return;
+    try {
+      await fetch(WORKER+'/api/seo-positions/save', {
+        method:'POST',
+        headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
+        body: JSON.stringify({ items: window._seoToday.items }),
+      });
+      console.log('[SEOTracker] ✓ Snapshot sync OK');
+    } catch(e){ console.warn('[SEOTracker] snapshot save falló:', e.message); }
+  }, 5000);
+}
+
 async function seoTrackerRunOne(itemId){
   const kw = (window._seoKeywords||{})[itemId];
   if(!kw){ alert('Este item no tiene keyword asignada'); return; }
@@ -8746,14 +8849,9 @@ async function seoTrackerRunOne(itemId){
   // Merge en window._seoToday (sin tocar otros items)
   if(!window._seoToday){ window._seoToday = { date: new Date().toISOString(), items: {} }; }
   window._seoToday.items[itemId] = { kw, page: result.page, position: result.position, found: result.found };
-  // Guardar snapshot en Worker (1 write)
-  try {
-    await fetch(WORKER+'/api/seo-positions/save', {
-      method:'POST',
-      headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
-      body: JSON.stringify({ items: window._seoToday.items }),
-    });
-  } catch(e){ console.warn('[SEOTracker] save snapshot falló:', e.message); }
+  // v116: snapshot DIFERIDO (5s debounce) en vez de write inmediato.
+  // Ahorro: si trackeás 5 items individuales seguidos = 1 write en vez de 5.
+  _seoPosScheduleSave();
   if(cell) cell.innerHTML = _seoPosCellHTML(itemId);
   if(typeof showToast === 'function') showToast('✓ Rastreado: '+(result.found ? 'Pág. '+result.page : '+'+SEO_TRACKER_MAX_PAGES), 'ok');
 }
