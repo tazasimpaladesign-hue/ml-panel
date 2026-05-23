@@ -723,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v111 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v119 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1268,6 +1268,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <th onclick="seoSort('lastSale')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:90px;max-width:90px" title="Fecha de la última venta. Si no hubo ventas en 360 días muestra 'Sin Ventas 1 año'">Última<br>venta<br><span style="font-size:10px">↕</span><span id="seo-sort-lastSale" style="font-size:10px"></span></th>
           <th onclick="seoSort('daysNoSale')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:80px;max-width:80px" title="Días transcurridos desde la última venta">Días sin<br>ventas<br><span style="font-size:10px">↕</span><span id="seo-sort-daysNoSale" style="font-size:10px"></span></th>
           <th onclick="seoSort('quality')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:140px;max-width:140px">Calidad<br>pub.<br><span style="font-size:10px">↕</span><span id="seo-sort-quality" style="font-size:10px"></span></th>
+          <th onclick="seoSort('seoPos')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:92px;max-width:92px;background:#fef3c7" title="Termómetro SEO (score 0-100) + indicador 🔥 si el item tiene alta probabilidad de venta. Click en header para ordenar, click en celda para diagnóstico completo.">🌡️<br>SEO<br><span style="font-size:10px">↕</span><span id="seo-sort-seoPos" style="font-size:10px"></span></th>
           <th onclick="seoSort('price')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:90px;max-width:90px">Precio<br><span style="font-size:10px">↕</span></th>
           <th onclick="seoSort('stock')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:65px;max-width:65px">Stock<br><span style="font-size:10px">↕</span></th>
           <th onclick="seoSort('visits30')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:75px;max-width:75px;background:#dbeafe" title="Visitas últimos 30 días">Visitas<br>30d<br><span style="font-size:10px">↕</span><span id="seo-sort-visits30" style="font-size:10px"></span></th>
@@ -1278,7 +1279,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <th onclick="seoSort('conv')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:70px;max-width:70px;background:#fefce8" title="Tasa de conversión = Ventas/Visitas">Conv%<br><span style="font-size:10px">↕</span><span id="seo-sort-conv" style="font-size:10px"></span></th>
           <th style="text-align:center;line-height:1.2;width:140px;max-width:140px;background:#f5f3ff">Estrategia</th>
           <th style="line-height:1.2;width:140px;max-width:140px">Problemas</th>
-          <th style="line-height:1.2;width:110px;max-width:110px">Acciones</th>
+          <th style="line-height:1.2;width:78px;max-width:78px;text-align:center">Acciones</th>
         </tr></thead>
         <tbody id="seo-tbody"></tbody>
       </table>
@@ -3602,7 +3603,6 @@ const APP_CONFIG = {
 
   // ── Color del nombre en sidebar (#hex) ──────────────────
   STORE_COLOR: '#4f8ef7',
-
   // ── Categorías WooCommerce ──────────────────────────────
   // id: ID de la categoría en tu WordPress
   // name: nombre interno
@@ -3985,14 +3985,41 @@ async function initApp(){
 }
 
 let _pollingInterval=null;
+let _heartbeatInterval=null; // v119: heartbeat al Worker para skip del cron
+
 function startPolling(){
   if(_pollingInterval)clearInterval(_pollingInterval);
   _pollingInterval=setInterval(pollNewData,60000);
   // v89 [P2]: arrancar polling ligero de envíos pendientes (cada 30s)
   if(typeof startPendingShipPoll === 'function') startPendingShipPoll();
+  // v119: heartbeat al Worker cada 10 min para que el cron skipee este usuario
+  // (las notifs ya están llegando por el polling en tiempo real del panel).
+  if(_heartbeatInterval) clearInterval(_heartbeatInterval);
+  _heartbeatPing(); // primer ping inmediato al abrir
+  _heartbeatInterval = setInterval(_heartbeatPing, 10 * 60 * 1000);
 }
-function stopPolling(){if(_pollingInterval){clearInterval(_pollingInterval);_pollingInterval=null;}
+
+function stopPolling(){
+  if(_pollingInterval){clearInterval(_pollingInterval);_pollingInterval=null;}
   if(typeof stopPendingShipPoll === 'function') stopPendingShipPoll();
+  if(_heartbeatInterval){clearInterval(_heartbeatInterval);_heartbeatInterval=null;}
+}
+
+// v119: ping al Worker indicando "panel abierto y activo".
+// El Worker tiene coalescing (1 write KV cada 15min), así que aunque mandemos
+// pings cada 10 min, el costo real es ~1 write/15min = ~64 writes/día con uso
+// constante de 16hs. A cambio el cron de 15min skipea al usuario activo →
+// ahorra ~40-60 writes/día.
+async function _heartbeatPing(){
+  if(!token) return;
+  try {
+    await fetch(WORKER+'/api/heartbeat', {
+      method: 'POST',
+      headers: {'Authorization': 'Bearer '+token},
+      // keepalive permite que el ping termine aunque la página se navegue
+      keepalive: true,
+    });
+  } catch(e){ /* sin token o sin red — no es crítico */ }
 }
 
 async function pollNewData(){
@@ -4227,7 +4254,7 @@ async function _pollPendingShipments(){
 // v93 [P5]: detector de versión del Worker. Si el Worker está desactualizado (no v55+),
 // significa que el header `x-format-new: true` no está siendo aplicado y el bug de
 // envíos sigue activo. Mostramos un banner amarillo al usuario.
-const _MIN_WORKER_VERSION = 68; // v111: optimizaciones KV + /kv/usage endpoint
+const _MIN_WORKER_VERSION = 76; // v119: cron 15min + heartbeat skip + /api/heartbeat
 async function _checkWorkerVersion(){
   try {
     const r = await fetch(WORKER + '/');
@@ -4254,7 +4281,7 @@ function _showWorkerOutdatedBanner(currentVer){
   b.style.cssText = 'position:fixed;top:8px;right:8px;left:8px;z-index:9999;background:#fbbf24;color:#78350f;padding:11px 14px;border-radius:8px;border:1px solid #f59e0b;box-shadow:0 4px 12px rgba(0,0,0,.15);font-size:12.5px;line-height:1.4;display:flex;align-items:center;gap:10px;max-width:900px;margin:0 auto';
   b.innerHTML = '<span style="font-size:20px">⚠️</span>'
     + '<div style="flex:1"><strong>Worker desactualizado (v'+currentVer+').</strong> '
-    + 'Subí <code style="background:#fde68a;padding:1px 5px;border-radius:3px;font-size:11px">worker-master-v68.js</code> a Cloudflare Workers para activar las optimizaciones de consumo KV (~80% de ahorro en escrituras) y el widget de consumo en el dashboard.</div>'
+    + 'Sub\xed <code style="background:#fde68a;padding:1px 5px;border-radius:3px;font-size:11px">worker-master-v75.js</code> a Cloudflare \u2014 v75 limpia los endpoints obsoletos del SEO Tracker y libera cuota KV.</div>'
     + '<button onclick="this.parentElement.remove()" style="background:transparent;border:1px solid #92400e;color:#78350f;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:11.5px;font-weight:600">Cerrar</button>';
   document.body.appendChild(b);
 }
@@ -4403,6 +4430,10 @@ async function loadItemsFull(){
     // Actualizar health scores con datos recién bajados de ML
     refreshHealthScores();
     console.log('[loadItemsFull]',allItems.length);
+    // v118: Cargar cache del Termómetro SEO (sincrono, instantáneo).
+    // El cálculo completo se hace cuando el usuario toca "📊 Cargar métricas"
+    // en la sección SEO. El cache trae los valores de hasta 4h atrás.
+    if(typeof seoThermoLoadCache === 'function') seoThermoLoadCache();
   }catch(e){console.error('[loadItemsFull]',e);}
 }
 
@@ -7314,10 +7345,31 @@ const SEO_SCENARIOS = {
       { col: 'sold',       dir: 'asc' },
     ],
   },
+  // v118: Escenario "Termómetro SEO bajo" (reemplaza el viejo sin_keyword_seo)
+  'termo_bajo_seo': {
+    emoji: '🌡️', label: 'Termómetro Bajo', color: '#991b1b',
+    description: 'Publicaciones con Termómetro SEO ≤ 45/100 — bajo posicionamiento o caída de tráfico significativa.',
+    actionMain:      'Click en la celda "Pos. SEO" para ver el diagnóstico detallado y las acciones recomendadas.',
+    actionSecondary: 'Si la conversión es buena, invertir en publicidad. Si es baja, optimizar título/fotos.',
+    filter: i => {
+      const t = (window._seoThermo||{})[String(i.id)];
+      return t && t.score <= 45;
+    },
+  },
+  // v119: Escenario "Alta Probabilidad de Venta" — Hot Items predictivos
+  'alta_probabilidad': {
+    emoji: '🔥', label: 'Alta Probabilidad', color: '#dc2626',
+    description: 'Publicaciones con alta probabilidad de venta en las próximas 48-72h: momentum acelerado, conversión validada, stock disponible.',
+    actionMain:      'NO les toques el precio. Asegurate de que tengan stock suficiente y respondé preguntas rápido.',
+    actionSecondary: 'Son las publicaciones con más chance de capitalizar — cuidalas en vez de optimizarlas (riesgo de matar momentum).',
+    filter: i => (typeof seoIsHotItem === 'function') && seoIsHotItem(i),
+  },
 };
 
 // Orden de los chips en la UI (de izquierda a derecha)
 const SEO_SCENARIO_ORDER = [
+  // v119: Hot Items predictivos (lo más urgente de atender)
+  'alta_probabilidad',
   // Críticos / urgentes (rojos/naranjas)
   'peligro_quiebre', 'alta_conv_bajo_stock', 'trafico_esteril', 'falla_cierre',
   // Crecimiento / oportunidad (verdes/azules)
@@ -7331,6 +7383,8 @@ const SEO_SCENARIO_ORDER = [
   // v83: 'seo_desactualizado' eliminado — la calidad del título ya no se mide
   // Calidad de ficha
   'sin_fotos', 'sin_ean',
+  // v118: SEO Termómetro
+  'termo_bajo_seo',
 ];
 
 // v80: ¿Califica un ítem para un escenario? Esta función es la fuente de verdad
@@ -8043,6 +8097,15 @@ function renderSEOTable(){
         va = (da === Infinity) ? 999999 : da;
         vb = (db === Infinity) ? 999999 : db;
       }
+      else if(seoState.sortCol==='seoPos'){
+        // v118: Sort por Termómetro SEO (0-100, mayor = mejor posicionamiento).
+        // Items sin métricas cargadas → score 999 (al final en DESC, al inicio en ASC).
+        // Para que sea intuitivo (mejor → peor en ASC), invertimos:
+        const ta = (window._seoThermo||{})[String(a.id)];
+        const tb = (window._seoThermo||{})[String(b.id)];
+        va = ta ? (100 - ta.score) : 999; // sin datos al final
+        vb = tb ? (100 - tb.score) : 999;
+      }
       else                               { va=qualityScore(a);             vb=qualityScore(b); }
       return seoState.sortDir*(vb-va);
     });
@@ -8152,6 +8215,7 @@ function renderSEOTable(){
           </div>
         </div>
       </td>
+      <td style="text-align:center;padding:6px 4px" id="seo-pos-cell-${item.id}">${_seoThermoCellHTML(item.id)}</td>
       <td style="text-align:right;white-space:nowrap" id="seo-price-cell-${item.id}">
         <span style="font-size:12px;font-weight:600;color:var(--text);cursor:pointer" 
           onclick="seoStartPriceEdit('${item.id}',${item.price||0})" 
@@ -8218,9 +8282,9 @@ function renderSEOTable(){
         ${ch.map(p=>`<span class="badge ${p.sev===2?'bg-red':'bg-amber'}" style="font-size:9px">${p.label}</span>`).join('')}
         ${(!tI.length&&!ch.length)?'<span class="badge bg-green" style="font-size:9px">✓ Sin problemas</span>':''}
       </div></td>
-      <td><div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start">
-        <a href="#optimizar" class="btn btn-ghost btn-xs" style="font-size:10px;white-space:nowrap;text-decoration:none;width:100%" onclick="goToOptimizerWith('${item.id}','${sT}',${eanArg});return false;">✨ Optimizar</a>
-        ${editUrl?`<a href="${editUrl}" target="_blank" rel="noopener" class="btn btn-ghost btn-xs" style="text-decoration:none;background:#fffbeb;color:#78350f;border-color:#fde68a;font-size:10px;white-space:nowrap;width:100%" title="Editar en MercadoLibre">✏️ Editar ML</a>`:''}
+      <td><div style="display:flex;gap:4px;align-items:center;justify-content:center;flex-wrap:wrap">
+        <a href="#optimizar" class="btn btn-ghost btn-xs" style="font-size:13px;width:30px;height:28px;padding:0;display:inline-flex;align-items:center;justify-content:center;text-decoration:none" onclick="goToOptimizerWith('${item.id}','${sT}',${eanArg});return false;" title="Optimizar título y descripción con IA">✨</a>
+        ${editUrl?`<a href="${editUrl}" target="_blank" rel="noopener" class="btn btn-ghost btn-xs" style="font-size:13px;width:30px;height:28px;padding:0;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;background:#fffbeb;color:#78350f;border-color:#fde68a" title="Editar en MercadoLibre">✏️</a>`:''}
       </div></td>
     </tr>`;
   }).join('');
@@ -8381,6 +8445,9 @@ async function loadSEOMetrics(){
     if(btn){ btn.disabled=false; btn.textContent='📊 Métricas ✓'; }
     console.log('[SEO] Métricas completas para', ids.length, 'ítems');
 
+    // v118: recalcular Termómetro SEO ahora que tenemos todas las visitas
+    if(typeof seoThermoRecalcAll === 'function') seoThermoRecalcAll();
+
     // Actualizar timestamp y notificar otras pestañas (cross-tab sync)
     updateMetricsTimestamp();
     try{ _syncChannel && _syncChannel.postMessage({ type:'metrics-updated' }); }catch{}
@@ -8391,6 +8458,441 @@ async function loadSEOMetrics(){
 }
 
 async function analyzeSEOAll(){ renderSEOSection(); }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v118: Termómetro SEO — Reemplaza el SEO Position Tracker viejo
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// CONTEXTO: ML deprecó oficialmente /sites/MLA/search en 2025. El Position
+// Tracker original ya no es viable. En su lugar calculamos un Score 0-100
+// usando datos PRIVADOS autenticados (endpoint /items/{id}/visits/time_window)
+// que SÍ funciona con tu token Bearer.
+//
+// FÓRMULA (sin reputación porque es global; sin stock porque es ruidoso):
+//   35% Momentum visitas (7d vs 7d previos)  ← predictor principal de SEO
+//   25% Conversion rate (ventas/visitas 30d)
+//   15% Health Score (calidad publicación)
+//   15% Velocidad venta (días desde última venta, invertido)
+//   10% Antigüedad efectiva (>90 días pesan más, ML premia listings establecidos)
+//
+// COSTO: 0 writes KV. Todo se calcula client-side con datos que ya pedimos
+// cuando tocás "📊 Cargar métricas". Se cachea 4h en localStorage.
+
+const SEO_THERMO_CACHE_KEY = 'mlp_seo_thermo_v1';
+const SEO_THERMO_CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 horas
+
+// Estado: { itemId: { score, level, momentum, ... } }
+window._seoThermo = null;
+
+// ── Carga del cache local (al abrir el panel) ──
+function seoThermoLoadCache(){
+  try {
+    const raw = localStorage.getItem(SEO_THERMO_CACHE_KEY);
+    if(!raw) return;
+    const d = JSON.parse(raw);
+    if(!d || !d.ts || !d.items) return;
+    if(Date.now() - d.ts > SEO_THERMO_CACHE_TTL_MS) return;
+    window._seoThermo = d.items;
+    console.log('[SEOThermo] Cache cargado:', Object.keys(d.items).length, 'items');
+  } catch(e){ /* ignore */ }
+}
+
+// ── Calcular el Score de UN item — devuelve { score, level, momentum, factors } ──
+// v118: usa itemMetrics[id] que ya tiene visits/visitsPrev/sales/conv calculados
+// por loadPubMetricsBatch. No hace requests adicionales a ML.
+function seoThermoCalc(item){
+  const id = String(item.id);
+  const m = (typeof itemMetrics !== 'undefined' && itemMetrics[id]) ? itemMetrics[id] : null;
+  if(!m){ return null; } // sin métricas cargadas
+
+  const factors = {};
+
+  // ── Factor 1: Momentum (35%) — visitas últimos 7d vs días 8-14 ──
+  const recent   = m.visits || 0;
+  const previous = m.visitsPrev || 0;
+  let momentum = 0;       // % cambio
+  let momentumScore = 0;  // 0-35
+  if(previous > 0){
+    momentum = ((recent - previous) / previous) * 100;
+    // Normalizar momentum a 0-35:
+    //   +50% o más → 35 (máximo), +25% → 30, 0% (estable) → 20
+    //   -25% → 10,  -50% o peor → 0
+    momentumScore = Math.max(0, Math.min(35, 20 + (momentum * 0.3)));
+  } else if(recent > 0){
+    momentum = 100;
+    momentumScore = 30; // mejora desde 0
+  } else {
+    momentumScore = 5; // sin tráfico
+  }
+  factors.momentum = { value: Math.round(momentum), score: Math.round(momentumScore), max: 35, recent, previous };
+
+  // ── Factor 2: Conversion rate (25%) ──
+  const visits30 = m.visits30 || 0;
+  const sales30 = (m.sales60 || 0) / 2; // estimación a 30d desde 60d
+  const convRate = visits30 > 0 ? (sales30 / visits30) * 100 : (m.conv || 0);
+  let convScore;
+  if(convRate >= 5)      convScore = 25;
+  else if(convRate >= 3) convScore = 22;
+  else if(convRate >= 2) convScore = 16;
+  else if(convRate >= 1) convScore = 10;
+  else if(convRate > 0)  convScore = 5;
+  else                   convScore = 0;
+  factors.conversion = { value: convRate.toFixed(2), score: convScore, max: 25 };
+
+  // ── Factor 3: Health Score (15%) ──
+  const health = (typeof healthScore === 'function') ? healthScore(item) : 70;
+  const healthSc = Math.round((health / 100) * 15);
+  factors.health = { value: health, score: healthSc, max: 15 };
+
+  // ── Factor 4: Velocidad de venta (15%) — días desde última venta ──
+  let daysNoSale = Infinity;
+  if(typeof getDaysSinceLastSale === 'function'){
+    daysNoSale = getDaysSinceLastSale(item.id);
+  }
+  let velScore;
+  if(daysNoSale <= 3)        velScore = 15;
+  else if(daysNoSale <= 7)   velScore = 13;
+  else if(daysNoSale <= 14)  velScore = 10;
+  else if(daysNoSale <= 30)  velScore = 6;
+  else if(daysNoSale <= 60)  velScore = 3;
+  else                       velScore = 0;
+  factors.velocity = { value: daysNoSale === Infinity ? 'Sin ventas' : daysNoSale + ' días', score: velScore, max: 15 };
+
+  // ── Factor 5: Antigüedad (10%) ──
+  let ageDays = 0;
+  if(item.date_created){
+    ageDays = Math.floor((Date.now() - new Date(item.date_created).getTime()) / 86400000);
+  }
+  let ageScore;
+  if(ageDays >= 180)     ageScore = 10;
+  else if(ageDays >= 90) ageScore = 8;
+  else if(ageDays >= 30) ageScore = 5;
+  else if(ageDays >= 7)  ageScore = 3;
+  else                   ageScore = 1;
+  factors.age = { value: ageDays + ' días', score: ageScore, max: 10 };
+
+  // ── Total ──
+  const score = Math.round(momentumScore + convScore + healthSc + velScore + ageScore);
+  const level = score >= 70 ? 'high' : score >= 45 ? 'mid' : 'low';
+
+  return { score, level, momentum: Math.round(momentum), factors };
+}
+
+// ── Recalcular Termómetro para TODOS los items ──
+// Se invoca desde loadSEOMetrics() después de bajar visitas.
+// ═══════════════════════════════════════════════════════════════════════════
+// v119: Probabilidad de Venta — Score predictivo "🔥 Hot Items"
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Mientras el Termómetro SEO mide el estado actual del posicionamiento,
+// el Hotness Score predice qué publicaciones tienen alta probabilidad
+// de generar una venta en las próximas 48-72h.
+//
+// FÓRMULA (0-100):
+//   40% Momentum acelerado (visits/visitsPrev > 1.3 = señal MUY fuerte)
+//   25% Conversión histórica validada (sales60 + conv >= 1.5%)
+//   15% Preguntas recientes 7d sin responder (gente interesada AHORA)
+//   10% Stock disponible (>0)
+//   10% Velocidad reciente (sales 7d > 0)
+//
+// THRESHOLD para 🔥:
+//   - Score >= 60 → "Alta probabilidad" (mostrar emoji 🔥)
+//   - Trigger especial: si visits7d >= 40 Y conversion histórica >= 2% Y
+//     sales7d == 0 → "Venta inminente por estadística" (🔥🔥)
+//
+// COSTO KV: cero. Cálculo client-side desde itemMetrics + allQuestions.
+
+function seoHotnessScore(item){
+  const id = String(item.id);
+  const m = (typeof itemMetrics !== 'undefined' && itemMetrics[id]) ? itemMetrics[id] : null;
+  if(!m) return null;
+
+  // Datos base
+  const recent   = m.visits || 0;
+  const previous = m.visitsPrev || 0;
+  const sales60  = m.sales60 || 0;
+  const sales7   = m.sales || 0;
+  const visits30 = m.visits30 || 0;
+  const stock    = (typeof item.available_quantity === 'number') ? item.available_quantity : 0;
+
+  // ── Factor 1: Momentum acelerado (40%) ──
+  // No basta con "subió", premio especial si subió >30%
+  let momentumScore = 0;
+  let momentumRatio = 0;
+  if(previous > 0){
+    momentumRatio = recent / previous;
+    if(momentumRatio >= 1.5)      momentumScore = 40;  // explotó (+50%)
+    else if(momentumRatio >= 1.3) momentumScore = 35;  // acelerando (+30%)
+    else if(momentumRatio >= 1.1) momentumScore = 25;  // subiendo (+10%)
+    else if(momentumRatio >= 0.9) momentumScore = 15;  // estable
+    else if(momentumRatio >= 0.7) momentumScore = 5;   // bajando
+    else                          momentumScore = 0;   // crash
+  } else if(recent > 5){
+    momentumScore = 30; // arrancó de cero
+    momentumRatio = 2;
+  }
+
+  // ── Factor 2: Conversión histórica validada (25%) ──
+  // Solo cuenta si tiene historial real: sales60 >= 2
+  let convScore = 0;
+  let convHist = 0;
+  if(visits30 > 0 && sales60 >= 2){
+    // Estimación de conv con sales60/2 (≈30d) sobre visits30
+    convHist = ((sales60/2) / visits30) * 100;
+    if(convHist >= 4)      convScore = 25;
+    else if(convHist >= 2.5) convScore = 22;
+    else if(convHist >= 1.5) convScore = 18;
+    else if(convHist >= 1)   convScore = 12;
+    else if(convHist >= 0.5) convScore = 5;
+  } else if(sales60 >= 5){
+    // Buenas ventas históricas pero sin visits30 → asumir conv ok
+    convScore = 15;
+  }
+
+  // ── Factor 3: Preguntas recientes 7d (15%) ──
+  // Cada pregunta no respondida = señal MUY fuerte de interés activo
+  let questionsScore = 0;
+  let recentQs = 0;
+  try {
+    if(typeof allQuestions !== 'undefined' && Array.isArray(allQuestions)){
+      const cutoff = Date.now() - 7*86400000;
+      recentQs = allQuestions.filter(q =>
+        String(q.item_id) === id &&
+        q.date_created && new Date(q.date_created).getTime() > cutoff
+      ).length;
+      if(recentQs >= 3)      questionsScore = 15;
+      else if(recentQs >= 2) questionsScore = 12;
+      else if(recentQs >= 1) questionsScore = 8;
+    }
+  } catch(e){}
+
+  // ── Factor 4: Stock disponible (10%) ──
+  let stockScore = 0;
+  if(stock >= 10)     stockScore = 10;
+  else if(stock >= 3) stockScore = 8;
+  else if(stock >= 1) stockScore = 5;
+  // stock 0 → 0 puntos (no se puede vender)
+
+  // ── Factor 5: Velocidad reciente (10%) ──
+  let velScore = 0;
+  if(sales7 >= 2)      velScore = 10;
+  else if(sales7 >= 1) velScore = 7;
+  else if(sales60 >= 2 && recent > previous) velScore = 5; // sin venta esta semana PERO con tracción
+
+  const totalScore = momentumScore + convScore + questionsScore + stockScore + velScore;
+
+  // Trigger especial: "Venta inminente por estadística"
+  // Mucho tráfico ESTA semana, conversión histórica buena, pero 0 ventas aún
+  // = probabilidad muy alta de que caiga una venta en próximas 48h.
+  const isImminent = (
+    recent >= 40 &&
+    convHist >= 1.8 &&
+    sales7 === 0 &&
+    stock > 0
+  );
+
+  // Nivel
+  const isHot = totalScore >= 60;
+  const level = isImminent ? 'imminent' : isHot ? 'hot' : 'normal';
+
+  return {
+    score: Math.round(totalScore),
+    level,           // 'imminent' | 'hot' | 'normal'
+    isHot,
+    isImminent,
+    factors: {
+      momentum:   { score: momentumScore, ratio: momentumRatio.toFixed(2), max: 40 },
+      conversion: { score: convScore,     value: convHist.toFixed(2),       max: 25 },
+      questions:  { score: questionsScore, count: recentQs,                  max: 15 },
+      stock:      { score: stockScore,    value: stock,                      max: 10 },
+      velocity:   { score: velScore,      sales7,                            max: 10 },
+    },
+  };
+}
+
+// Filtro: items con alta probabilidad de venta
+function seoIsHotItem(item){
+  const h = seoHotnessScore(item);
+  return h && h.isHot;
+}
+
+// ── Recalcular Termómetro para TODOS los items ──
+function seoThermoRecalcAll(){
+  if(!Array.isArray(allItems)) return;
+  const out = {};
+  for(const item of allItems){
+    const r = seoThermoCalc(item);
+    if(r) out[String(item.id)] = r;
+  }
+  window._seoThermo = out;
+  // Cachear
+  try {
+    localStorage.setItem(SEO_THERMO_CACHE_KEY, JSON.stringify({ ts: Date.now(), items: out }));
+  } catch(e){}
+  console.log('[SEOThermo] Recalculado para', Object.keys(out).length, 'items');
+  // Re-renderizar la tabla SEO si está visible
+  if(document.getElementById('section-seo')?.classList.contains('active') && typeof renderSEOTable === 'function'){
+    renderSEOTable();
+  }
+}
+
+// ── HTML de la celda del Termómetro ──
+function _seoThermoCellHTML(itemId){
+  const data = (window._seoThermo||{})[String(itemId)];
+  if(!data){
+    // Sin datos aún: invitar a cargar métricas
+    return '<button onclick="loadSEOMetrics()" style="background:transparent;border:1px dashed #d4d4d8;color:#71717a;font-size:10px;padding:5px 8px;border-radius:6px;cursor:pointer;line-height:1.2;font-family:inherit" title="Cargar visitas reales últimos 30 días para calcular el Termómetro SEO">📊 Cargar<br>métricas</button>';
+  }
+  const { score, level, momentum } = data;
+  const emoji = level === 'high' ? '🟢' : level === 'mid' ? '🟡' : '🔴';
+  const scoreColor = level === 'high' ? '#166534' : level === 'mid' ? '#92400e' : '#991b1b';
+
+  // Flecha tendencia
+  let arrow, arrowLabel, arrowColor;
+  if(momentum >= 10){
+    arrow = '⬆️'; arrowLabel = '+'+momentum+'%'; arrowColor = '#16a34a';
+  } else if(momentum <= -10){
+    arrow = '⬇️'; arrowLabel = momentum+'%'; arrowColor = '#dc2626';
+  } else {
+    arrow = '➖'; arrowLabel = 'Estable'; arrowColor = '#71717a';
+  }
+
+  // v119: Probabilidad de Venta — 🔥 inline si es Hot Item
+  let hotBadge = '';
+  let hotTooltip = '';
+  try {
+    const item = (allItems||[]).find(i => String(i.id) === String(itemId));
+    if(item){
+      const h = seoHotnessScore(item);
+      if(h && h.isImminent){
+        hotBadge = '<span style="font-size:13px" title="Venta inminente por estadística">🔥🔥</span> ';
+        hotTooltip = ' | 🔥🔥 Venta inminente — '+h.score+'/100';
+      } else if(h && h.isHot){
+        hotBadge = '<span style="font-size:13px" title="Alta probabilidad de venta">🔥</span> ';
+        hotTooltip = ' | 🔥 Hot Item — '+h.score+'/100';
+      }
+    }
+  } catch(e){}
+
+  return '<button onclick="seoThermoOpenModal(\''+itemId+'\')" style="background:transparent;border:none;cursor:pointer;font-family:inherit;padding:2px 4px;line-height:1.2;width:100%" title="Click para ver diagnóstico SEO completo'+hotTooltip+'">'
+    + '<div style="font-size:13px;font-weight:700;color:'+scoreColor+'">'+hotBadge+emoji+' '+score+'</div>'
+    + '<div style="font-size:10px;color:'+arrowColor+';margin-top:1px;font-weight:600">'+arrow+' '+arrowLabel+'</div>'
+    + '</button>';
+}
+
+// ── Modal de diagnóstico completo ──
+function seoThermoOpenModal(itemId){
+  const data = (window._seoThermo||{})[String(itemId)];
+  const item = (allItems||[]).find(i => String(i.id) === String(itemId));
+  if(!data || !item){ alert('Datos no disponibles. Cargá métricas primero (📊 Cargar métricas).'); return; }
+  const { score, level, momentum, factors } = data;
+
+  const emoji = level === 'high' ? '🟢' : level === 'mid' ? '🟡' : '🔴';
+  const levelLabel = level === 'high' ? 'Alta — buen posicionamiento' : level === 'mid' ? 'Media — hay margen' : 'Baja — atención urgente';
+  const scoreColor = level === 'high' ? '#166534' : level === 'mid' ? '#92400e' : '#991b1b';
+
+  // Construir desglose visual
+  function _bar(score, max){
+    const pct = (score/max)*100;
+    const color = pct >= 70 ? '#16a34a' : pct >= 40 ? '#f59e0b' : '#dc2626';
+    return '<div style="background:#e5e7eb;height:6px;border-radius:3px;overflow:hidden;width:100px;flex-shrink:0"><div style="background:'+color+';height:100%;width:'+pct+'%"></div></div>';
+  }
+  function _row(label, factor, hint){
+    return '<div style="display:flex;align-items:center;gap:10px;padding:5px 0;font-size:12px">'
+      + '<div style="flex:1"><strong>'+label+':</strong> '+factor.value+' <span style="color:#6b7280">'+hint+'</span></div>'
+      + _bar(factor.score, factor.max)
+      + '<div style="font-weight:700;color:'+scoreColor+';min-width:42px;text-align:right">'+factor.score+'/'+factor.max+'</div>'
+      + '</div>';
+  }
+
+  // Acciones recomendadas
+  const actions = [];
+  if(factors.momentum.value <= -15) actions.push('⚠ <strong>Tendencia negativa fuerte</strong> — probablemente perdiste posiciones en búsqueda. Probá Mercado Ads o ajustá precio vs competencia.');
+  if(parseFloat(factors.conversion.value) < 1 && factors.conversion.score < 10) actions.push('📸 Tu <strong>conversión es baja</strong> — el problema suele estar en fotos, título o precio. Pasá por el Optimizador IA.');
+  if(parseFloat(factors.conversion.value) >= 3 && factors.momentum.value <= -10) actions.push('✅ Tu conversión es buena ('+factors.conversion.value+'%), entonces el problema NO es el listing. Es <strong>falta de tráfico</strong> — invertí en publicidad.');
+  if(factors.health.score < 10) actions.push('⚙ <strong>Health Score bajo</strong> — revisá EAN/GTIN, fotos, ficha técnica. Optimizá desde la sección Optimizar.');
+  if(factors.velocity.score === 0) actions.push('🚨 <strong>Más de 60 días sin ventas</strong> — considerá pausar y republicar (refresh del listing).');
+  if(factors.age.score <= 3) actions.push('🌱 <strong>Listing reciente</strong> — ML te va a dar más peso después de 1-3 meses. Mantenelo activo.');
+  if(actions.length === 0) actions.push('✓ Todos los factores están en orden. Mantenelo así.');
+
+  let html = '<div style="padding:14px;max-width:580px">';
+  html += '<h3 style="margin:0 0 6px;font-size:15px">🌡️ Termómetro SEO</h3>';
+  html += '<div style="font-size:12px;color:#6b7280;margin-bottom:14px">'+(item.title||'').slice(0,90)+(item.title.length>90?'…':'')+'</div>';
+
+  // Score grande
+  html += '<div style="background:linear-gradient(135deg,#f8fafc,#f1f5f9);border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:14px;text-align:center">';
+  html += '<div style="font-size:34px;font-weight:800;color:'+scoreColor+'">'+emoji+' '+score+'<span style="font-size:18px;color:#94a3b8;font-weight:500">/100</span></div>';
+  html += '<div style="font-size:12.5px;color:'+scoreColor+';font-weight:600;margin-top:3px">'+levelLabel+'</div>';
+  html += '</div>';
+
+  // Desglose
+  html += '<div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:11px 13px;margin-bottom:12px">';
+  html += '<div style="font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:.04em;font-weight:700;margin-bottom:7px">DESGLOSE</div>';
+  html += _row('Momentum visitas (35%)', factors.momentum, factors.momentum.value >= 0 ? 'creciendo' : 'cayendo');
+  html += _row('Conversion rate (25%)', factors.conversion, '%');
+  html += _row('Health Score (15%)', factors.health, '/100');
+  html += _row('Velocidad venta (15%)', factors.velocity, '');
+  html += _row('Antigüedad (10%)', factors.age, '');
+  html += '</div>';
+
+  // v119: Sección Probabilidad de Venta (Hot Item)
+  try {
+    const h = seoHotnessScore(item);
+    if(h){
+      const hotEmoji = h.isImminent ? '🔥🔥' : h.isHot ? '🔥' : '📊';
+      const hotLabel = h.isImminent ? 'VENTA INMINENTE' : h.isHot ? 'ALTA PROBABILIDAD' : 'Probabilidad estándar';
+      const hotColor = h.isImminent ? '#7f1d1d' : h.isHot ? '#dc2626' : '#6b7280';
+      const hotBg    = h.isImminent ? '#fef2f2' : h.isHot ? '#fff7ed' : '#f9fafb';
+      const hotBd    = h.isImminent ? '#fecaca' : h.isHot ? '#fed7aa' : '#e5e7eb';
+
+      html += '<div style="background:'+hotBg+';border:1px solid '+hotBd+';border-radius:8px;padding:11px 13px;margin-bottom:12px">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
+      html += '<div style="font-size:11px;color:'+hotColor+';text-transform:uppercase;letter-spacing:.04em;font-weight:700">'+hotEmoji+' Probabilidad de venta</div>';
+      html += '<div style="font-size:13px;font-weight:700;color:'+hotColor+'">'+h.score+'/100 — '+hotLabel+'</div>';
+      html += '</div>';
+      html += '<div style="font-size:11.5px;color:#374151;line-height:1.7">';
+      html += '<div>Momentum: <strong>'+h.factors.momentum.score+'/40</strong> (ratio '+h.factors.momentum.ratio+'×)</div>';
+      html += '<div>Conversión histórica: <strong>'+h.factors.conversion.score+'/25</strong> ('+h.factors.conversion.value+'%)</div>';
+      html += '<div>Preguntas recientes (7d): <strong>'+h.factors.questions.score+'/15</strong> ('+h.factors.questions.count+' preguntas)</div>';
+      html += '<div>Stock: <strong>'+h.factors.stock.score+'/10</strong> ('+h.factors.stock.value+' unidades)</div>';
+      html += '<div>Velocidad reciente: <strong>'+h.factors.velocity.score+'/10</strong> ('+h.factors.velocity.sales7+' ventas 7d)</div>';
+      html += '</div>';
+      if(h.isImminent){
+        html += '<div style="margin-top:9px;font-size:11.5px;color:#7f1d1d;background:#fff;padding:7px 9px;border-radius:6px;border-left:3px solid #dc2626"><strong>Acción:</strong> tenés mucho tráfico hot y la conversión histórica indica que la venta debería caer en próximas 48h. <em>NO bajes el precio, no toques el listing</em>. Asegurate de tener stock y responder preguntas rápido.</div>';
+      } else if(h.isHot){
+        html += '<div style="margin-top:9px;font-size:11.5px;color:#9a3412;background:#fff;padding:7px 9px;border-radius:6px;border-left:3px solid #f59e0b"><strong>Acción:</strong> momentum positivo. Cuidá el listing como está, mantené precio competitivo y respondé preguntas rápido.</div>';
+      }
+      html += '</div>';
+    }
+  } catch(e){}
+
+  // Acciones
+  html += '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:11px 13px;margin-bottom:12px">';
+  html += '<div style="font-size:11px;color:#1e40af;text-transform:uppercase;letter-spacing:.04em;font-weight:700;margin-bottom:7px">💡 ACCIONES RECOMENDADAS</div>';
+  for(const a of actions){
+    html += '<div style="font-size:12px;color:#1e3a8a;margin-bottom:6px;line-height:1.5">'+a+'</div>';
+  }
+  html += '</div>';
+
+  // Footer
+  html += '<div style="display:flex;gap:6px;flex-wrap:wrap">';
+  html += '<button class="btn btn-primary btn-sm" onclick="goToOptimizerWith(\''+itemId+'\',\''+(item.title||'').replace(/\'/g,"&#39;").slice(0,80)+'\',null);closeModal(\'seo-thermo-modal\')">✨ Optimizar con IA</button>';
+  const editUrl = (typeof mlEditLink === 'function') ? mlEditLink(itemId) : null;
+  if(editUrl) html += '<a href="'+editUrl+'" target="_blank" class="btn btn-ghost btn-sm" style="text-decoration:none">✏️ Editar en ML</a>';
+  html += '<button class="btn btn-ghost btn-sm" onclick="closeModal(\'seo-thermo-modal\')" style="margin-left:auto">Cerrar</button>';
+  html += '</div></div>';
+
+  let modal = document.getElementById('seo-thermo-modal');
+  if(!modal){
+    modal = document.createElement('div');
+    modal.id = 'seo-thermo-modal';
+    modal.className = 'modal-overlay';
+    modal.addEventListener('click', e => { if(e.target === modal) closeModal('seo-thermo-modal'); });
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML = '<div class="modal" style="max-width:600px"><div class="modal-bd">'+html+'</div></div>';
+  openModal('seo-thermo-modal');
+}
 
 // ═══════════════════════════════════════════════════════════
 // v106/v107: Robust JSON extractor para respuestas de IA
@@ -18754,38 +19256,91 @@ function _bkpUpdateWarnDot(){
   }
 }
 
-// Construir el objeto de backup desde las variables globales actuales
-function _bkpBuildPayload(){
-  return {
+// v113: Catálogo de secciones del backup. Define qué se exporta/importa.
+// Cada sección tiene un label visible, un getter del estado actual y un
+// counter para mostrar "(N items)" en el modal.
+const BKP_SECTIONS = {
+  tasks: {
+    label: 'Tareas / Notas pendientes',
+    icon: '📋',
+    get: () => Array.isArray(_tasks) ? _tasks : [],
+  },
+  competitors: {
+    label: 'Competidores y links de seguimiento',
+    icon: '🎯',
+    get: () => Array.isArray(_savedCompetitors) ? _savedCompetitors : [],
+  },
+  activeRules: {
+    label: 'Reglas de alertas automáticas',
+    icon: '🔔',
+    get: () => Array.isArray(activeRules) ? activeRules : [],
+  },
+  rpRules: {
+    label: 'Reglas de precios (repricing)',
+    icon: '💰',
+    get: () => Array.isArray(rpRules) ? rpRules : [],
+  },
+  quickReplies: {
+    label: 'Respuestas rápidas + Template',
+    icon: '💬',
+    get: () => typeof qGetQR === 'function' ? (qGetQR() || []) : [],
+  },
+  calCustom: {
+    label: 'Calendario estratégico',
+    icon: '📅',
+    get: () => { try { return JSON.parse(localStorage.getItem('impala_cal_custom') || '[]'); } catch { return []; } },
+  },
+  bdays: {
+    label: 'Cumpleaños registrados',
+    icon: '🎂',
+    get: () => { try { return JSON.parse(localStorage.getItem('impala_cal_birthdays') || '[]'); } catch { return []; } },
+  },
+  pcHistory: {
+    label: 'Historial calculadora rentabilidad',
+    icon: '📊',
+    get: () => { try { return JSON.parse(localStorage.getItem('impala_calc_history') || '[]'); } catch { return []; } },
+  },
+  // v118: 'seoKeywords' eliminado del backup — el SEO Tracker viejo fue descontinuado
+  // por bloqueo de ML a /sites/MLA/search. Reemplazado por Termómetro SEO que
+  // calcula todo client-side desde visitas (sin estado persistido).
+};
+
+// Construir el objeto de backup desde las variables globales actuales.
+// v113: acepta opcional `selection` (objeto con claves true/false por sección).
+// Si no se pasa, incluye TODAS las secciones (retrocompatible con v86-v112).
+function _bkpBuildPayload(selection){
+  const includeAll = !selection;
+  const includedSections = [];
+  const payload = {
     _meta: {
-      panelVersion: 'v86',
+      panelVersion: 'v118',
       exportedAt: new Date().toISOString(),
       userId: typeof userId !== 'undefined' ? userId : null,
       nickname: (typeof APP_CONFIG !== 'undefined' && APP_CONFIG.STORE_NAME) ? APP_CONFIG.STORE_NAME : null,
+      // v113: lista de secciones incluidas — el importer la usa para mostrar
+      // exactamente qué viene en el archivo
+      included: [],
     },
-    tasks:        Array.isArray(_tasks) ? _tasks : [],
-    rpRules:      Array.isArray(rpRules) ? rpRules : [],
-    activeRules:  Array.isArray(activeRules) ? activeRules : [],
-    competitors:  Array.isArray(_savedCompetitors) ? _savedCompetitors : [],
-    quickReplies: typeof qGetQR === 'function' ? (qGetQR() || []) : [],
-    template:     typeof qGetTmpl === 'function' ? (qGetTmpl() || {}) : {},
-    calCustom:    (() => {
-      try { return JSON.parse(localStorage.getItem('impala_cal_custom') || '[]'); } catch { return []; }
-    })(),
-    bdays: (() => {
-      try { return JSON.parse(localStorage.getItem('impala_cal_birthdays') || '[]'); } catch { return []; }
-    })(),
-    pcHistory: (() => {
-      try { return JSON.parse(localStorage.getItem('impala_calc_history') || '[]'); } catch { return []; }
-    })(),
-    // No incluimos: AI rules, tokens, claves API, datos de cache de visitas/orders
   };
+  // Template siempre va junto con quickReplies si se selecciona quickReplies
+  for(const [key, sec] of Object.entries(BKP_SECTIONS)){
+    if(includeAll || selection[key]){
+      payload[key] = sec.get();
+      includedSections.push(key);
+    }
+  }
+  // Caso especial: template (forma parte de quickReplies pero es campo aparte)
+  if(includeAll || selection.quickReplies){
+    payload.template = typeof qGetTmpl === 'function' ? (qGetTmpl() || {}) : {};
+  }
+  payload._meta.included = includedSections;
+  return payload;
 }
 
-// Descargar como archivo .json
-function bkpExport(){
+// Descargar como archivo .json. v113: acepta selection opcional.
+function bkpExport(selection){
   try{
-    const payload = _bkpBuildPayload();
+    const payload = _bkpBuildPayload(selection);
     const json = JSON.stringify(payload, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -18793,7 +19348,10 @@ function bkpExport(){
     const today = new Date();
     const dateStr = today.toISOString().slice(0, 10);
     const timeStr = today.toTimeString().slice(0, 5).replace(':', '');
-    const fname = 'panel-backup-' + (payload._meta.nickname || 'usuario') + '-' + dateStr + '-' + timeStr + '.json';
+    // v113: si es backup parcial, el nombre del archivo lo indica
+    const isPartial = selection && payload._meta.included.length < Object.keys(BKP_SECTIONS).length;
+    const partialTag = isPartial ? '-parcial' : '';
+    const fname = 'panel-backup' + partialTag + '-' + (payload._meta.nickname || 'usuario') + '-' + dateStr + '-' + timeStr + '.json';
 
     const a = document.createElement('a');
     a.href = url;
@@ -18803,21 +19361,23 @@ function bkpExport(){
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
 
-    // Marcar el momento del export
-    localStorage.setItem(BKP_STORAGE_KEY, String(Date.now()));
-    _bkpUpdateWarnDot();
+    // Marcar el momento del export (solo si fue backup completo)
+    if(!isPartial){
+      localStorage.setItem(BKP_STORAGE_KEY, String(Date.now()));
+      _bkpUpdateWarnDot();
+    }
 
-    // Resumen para el usuario
-    const items = payload.tasks.length + ' tareas, ' +
-                  payload.competitors.length + ' competidores, ' +
-                  payload.activeRules.length + ' reglas, ' +
-                  payload.rpRules.length + ' reglas precio, ' +
-                  payload.quickReplies.length + ' respuestas rápidas, ' +
-                  payload.calCustom.length + ' calendario, ' +
-                  payload.bdays.length + ' cumpleaños, ' +
-                  payload.pcHistory.length + ' rentabilidad';
-    showToast('Backup descargado: ' + items, 'ok');
-    console.log('[Backup] Export OK →', fname, payload._meta);
+    // Resumen: contar lo realmente exportado
+    const parts = [];
+    for(const sec of payload._meta.included){
+      const val = payload[sec];
+      const count = Array.isArray(val) ? val.length : (val && typeof val === 'object' ? Object.keys(val).length : 0);
+      const label = BKP_SECTIONS[sec]?.label || sec;
+      parts.push(count + ' ' + label.toLowerCase());
+    }
+    const summary = parts.length ? parts.join(', ') : 'sin secciones seleccionadas';
+    showToast('Backup descargado: ' + summary, 'ok');
+    console.log('[Backup] Export OK →', fname, '| incluidas:', payload._meta.included);
     return true;
   }catch(e){
     console.error('[Backup] Export falló:', e);
@@ -18826,7 +19386,9 @@ function bkpExport(){
   }
 }
 
-// Importar desde archivo (con confirmación múltiple por seguridad)
+// v113: Importar — paso 1: leer el archivo y abrir modal de selección.
+// Antes aplicaba todo de golpe. Ahora abre un modal donde el usuario elige
+// qué secciones del JSON aplicar.
 async function bkpImport(file){
   if(!file){ return; }
   try{
@@ -18838,84 +19400,93 @@ async function bkpImport(file){
       throw new Error('Archivo inválido — no parece un backup del panel');
     }
 
-    // Mostrar resumen antes de aplicar
-    const summary = 'Backup del ' +
-      (data._meta.exportedAt ? new Date(data._meta.exportedAt).toLocaleString('es-AR') : 'sin fecha') +
-      '\nUsuario: ' + (data._meta.nickname || data._meta.userId || 'desconocido') +
-      '\nVersión panel: ' + (data._meta.panelVersion || '?') +
-      '\n\nContenido:' +
-      '\n  • Tareas: ' + (data.tasks || []).length +
-      '\n  • Competidores: ' + (data.competitors || []).length +
-      '\n  • Reglas alertas: ' + (data.activeRules || []).length +
-      '\n  • Reglas precio: ' + (data.rpRules || []).length +
-      '\n  • Respuestas rápidas: ' + (data.quickReplies || []).length +
-      '\n  • Calendario: ' + (data.calCustom || []).length +
-      '\n  • Cumpleaños: ' + (data.bdays || []).length +
-      '\n  • Rentabilidad: ' + (data.pcHistory || []).length;
+    // Cerrar el modal actual de backup si está abierto
+    const oldModal = document.getElementById('bkp-modal');
+    if(oldModal) oldModal.remove();
 
-    const confirm1 = confirm(
-      'IMPORTAR BACKUP\n\n' + summary + '\n\n' +
-      '⚠️ Esto SOBRESCRIBE todos los datos actuales con los del archivo.\n' +
-      'Los datos actuales se perderán definitivamente.\n\n' +
-      '¿Querés continuar?'
-    );
-    if(!confirm1) return;
-
-    const confirm2 = confirm(
-      '⚠️ ÚLTIMA CONFIRMACIÓN\n\n' +
-      'Si tenés datos importantes sin exportar, cancelá y EXPORTÁ PRIMERO.\n\n' +
-      '¿Aplicar el backup ahora? (no se puede deshacer)'
-    );
-    if(!confirm2) return;
-
-    // Aplicar cada sección si está presente en el JSON
-    if(Array.isArray(data.tasks))        _tasks = data.tasks;
-    if(Array.isArray(data.rpRules))      rpRules = data.rpRules;
-    if(Array.isArray(data.activeRules))  activeRules = data.activeRules;
-    if(Array.isArray(data.competitors))  _savedCompetitors = data.competitors;
-    // Quick replies y template usan setters internos
-    if(Array.isArray(data.quickReplies) && typeof qSaveQR === 'function') qSaveQR(data.quickReplies);
-    if(data.template && typeof qWriteTmpl === 'function') qWriteTmpl(data.template);
-    // Calendario y cumpleaños van a localStorage directo
-    if(Array.isArray(data.calCustom)) localStorage.setItem('impala_cal_custom', JSON.stringify(data.calCustom));
-    if(Array.isArray(data.bdays))     localStorage.setItem('impala_cal_birthdays', JSON.stringify(data.bdays));
-    if(Array.isArray(data.pcHistory)) localStorage.setItem('impala_calc_history', JSON.stringify(data.pcHistory));
-
-    // v88: BUG FIX — el panel tiene 2 endpoints de KV separados:
-    //   /api/backup  → tasks, calendar, bdays, pcHistory, etc.
-    //   /api/settings → quickReplies, template, rpRules, activeRules, COMPETITORS
-    // Antes solo llamábamos pushFullBackup() que escribe en /api/backup, pero
-    // los competidores se leen desde /api/settings. Por eso al recargar el
-    // panel no aparecían los competidores importados — quedaban en memoria
-    // pero el endpoint que los lee tenía la versión vieja.
-    // Ahora persistimos en AMBOS endpoints.
-    if(typeof pushFullBackup === 'function') await pushFullBackup();
-    if(typeof saveRemoteSettings === 'function') await saveRemoteSettings();
-
-    // Re-render de las secciones afectadas
-    if(typeof _renderBoard === 'function') _renderBoard();
-    if(typeof renderRules === 'function') renderRules();
-    if(typeof rpRenderList === 'function') rpRenderList();
-
-    showToast('✓ Backup restaurado. Recargá la página para ver todos los cambios.', 'ok');
-    setTimeout(() => {
-      if(confirm('¿Recargar la página ahora para refrescar todas las secciones?')) location.reload();
-    }, 1500);
-
+    // Abrir modal de selección de import
+    bkpOpenImportModal(data);
   }catch(e){
-    console.error('[Backup] Import falló:', e);
-    alert('Error al importar el backup:\n\n' + e.message + '\n\n(Verificá que sea un archivo .json válido del panel)');
+    console.error('[Backup] Import lectura falló:', e);
+    alert('Error al leer el backup:\n\n' + e.message + '\n\n(Verificá que sea un archivo .json válido del panel)');
   }
 }
 
-// Modal del Backup
+// v113: Aplicar el backup importado SEGÚN la selección que hizo el usuario
+// en el modal de import. selection = { tasks: true, competitors: false, ... }
+async function bkpApplyImport(data, selection){
+  // Calcular qué secciones se van a tocar
+  const applying = Object.keys(selection).filter(k => selection[k]);
+  if(applying.length === 0){
+    alert('No seleccionaste ninguna sección para importar. Cancelado.');
+    return;
+  }
+
+  // v113: confirmación adaptada a la cantidad de secciones
+  // - 1 sección  → 1 confirm liviano
+  // - 2+         → 1 confirm normal
+  // - Todas (8+) → 2 confirms (igual que antes, máxima seguridad)
+  const allKeys = Object.keys(BKP_SECTIONS);
+  const isFull = applying.length === allKeys.length;
+  const sectionsLabels = applying.map(k => BKP_SECTIONS[k]?.label || k).join(', ');
+
+  if(isFull){
+    // Backup completo → doble confirm (igual al comportamiento histórico)
+    if(!confirm('IMPORTAR BACKUP COMPLETO\n\n⚠️ Esto SOBRESCRIBE TODOS tus datos actuales con los del archivo.\nLos datos actuales se perderán definitivamente.\n\n¿Continuar?')) return;
+    if(!confirm('⚠️ ÚLTIMA CONFIRMACIÓN\n\nSi tenés datos importantes sin exportar, cancelá y EXPORTÁ PRIMERO.\n\n¿Aplicar el backup ahora? (no se puede deshacer)')) return;
+  } else {
+    // Parcial → 1 confirm explícito que dice qué se va a sobrescribir
+    if(!confirm('IMPORTAR PARCIAL\n\nVas a sobrescribir SOLO estas secciones:\n• ' + applying.map(k => BKP_SECTIONS[k]?.label || k).join('\n• ') + '\n\nEl resto de tus datos NO se toca.\n\n¿Continuar?')) return;
+  }
+
+  // Aplicar cada sección seleccionada
+  try{
+    if(selection.tasks && Array.isArray(data.tasks))               _tasks = data.tasks;
+    if(selection.rpRules && Array.isArray(data.rpRules))           rpRules = data.rpRules;
+    if(selection.activeRules && Array.isArray(data.activeRules))   activeRules = data.activeRules;
+    if(selection.competitors && Array.isArray(data.competitors))   _savedCompetitors = data.competitors;
+    if(selection.quickReplies){
+      if(Array.isArray(data.quickReplies) && typeof qSaveQR === 'function') qSaveQR(data.quickReplies);
+      if(data.template && typeof qWriteTmpl === 'function') qWriteTmpl(data.template);
+    }
+    if(selection.calCustom && Array.isArray(data.calCustom))       localStorage.setItem('impala_cal_custom', JSON.stringify(data.calCustom));
+    if(selection.bdays && Array.isArray(data.bdays))               localStorage.setItem('impala_cal_birthdays', JSON.stringify(data.bdays));
+    if(selection.pcHistory && Array.isArray(data.pcHistory))       localStorage.setItem('impala_calc_history', JSON.stringify(data.pcHistory));
+    // v118: bloque de seoKeywords removido — el SEO Tracker viejo fue descontinuado.
+    // Backups antiguos con seoKeywords se ignoran silenciosamente.
+
+    // Persistir al Worker SOLO los endpoints afectados (evita writes innecesarios)
+    // /api/backup → tasks, calendar, bdays, pcHistory
+    const needsBackup = selection.tasks || selection.calCustom || selection.bdays || selection.pcHistory;
+    // /api/settings → quickReplies, template, rpRules, activeRules, competitors
+    const needsSettings = selection.quickReplies || selection.rpRules || selection.activeRules || selection.competitors;
+    if(needsBackup && typeof pushFullBackup === 'function') await pushFullBackup();
+    if(needsSettings && typeof saveRemoteSettings === 'function') await saveRemoteSettings();
+
+    // Re-render de las secciones afectadas
+    if(selection.tasks && typeof _renderBoard === 'function') _renderBoard();
+    if(selection.activeRules && typeof renderRules === 'function') renderRules();
+    if(selection.rpRules && typeof rpRenderList === 'function') rpRenderList();
+
+    showToast('✓ Backup restaurado (' + applying.length + ' ' + (applying.length === 1 ? 'sección' : 'secciones') + '). Recargá para refrescar todo.', 'ok');
+    setTimeout(() => {
+      if(confirm('¿Recargar la página ahora para refrescar todas las secciones?')) location.reload();
+    }, 1500);
+  }catch(e){
+    console.error('[Backup] Apply falló:', e);
+    alert('Error al aplicar el backup:\n\n' + e.message);
+  }
+}
+
+// Modal del Backup — v113: rediseñado con checkboxes por sección
 function bkpOpenModal(){
   let modal = document.getElementById('bkp-modal');
   if(modal){ modal.remove(); }
   modal = document.createElement('div');
   modal.id = 'bkp-modal';
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px';
-  modal.onclick = (e) => { if(e.target === modal) modal.remove(); };
+  modal.className = 'modal-overlay open';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px';
+  modal.addEventListener('click', e => { if(e.target === modal) modal.remove(); });
 
   const days = _bkpDaysSinceLast();
   const lastTs = parseInt(localStorage.getItem(BKP_STORAGE_KEY) || '0', 10);
@@ -18926,52 +19497,194 @@ function bkpOpenModal(){
   const warnTxt = isWarn ? '⚠️ Hace ' + days + ' días que no hacés un backup. Te recomiendo exportar AHORA.' :
                            '✓ Último backup: ' + lastStr;
 
+  // Construir filas de checkboxes con counter de cada sección
+  let rowsHtml = '';
+  for(const [key, sec] of Object.entries(BKP_SECTIONS)){
+    let count = 0;
+    try {
+      const v = sec.get();
+      count = Array.isArray(v) ? v.length : (v && typeof v === 'object' ? Object.keys(v).length : 0);
+    } catch(e){}
+    const countLabel = count + (count === 1 ? ' item' : ' items');
+    rowsHtml += '<label style="display:flex;align-items:center;gap:9px;padding:8px 11px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:7px;cursor:pointer;font-size:12.5px;color:#1f2937" onmouseover="this.style.background=\'#f3f4f6\'" onmouseout="this.style.background=\'#f9fafb\'">';
+    rowsHtml += '<input type="checkbox" class="bkp-export-check" data-section="'+key+'" checked style="margin:0;cursor:pointer">';
+    rowsHtml += '<span style="font-size:14px">'+sec.icon+'</span>';
+    rowsHtml += '<span style="flex:1">'+sec.label+'</span>';
+    rowsHtml += '<span style="font-size:11px;color:#6b7280;font-weight:600">'+countLabel+'</span>';
+    rowsHtml += '</label>';
+  }
+
   modal.innerHTML = `
-    <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;max-width:560px;width:100%;padding:22px;box-shadow:0 10px 40px rgba(0,0,0,.25);color:#111827">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px">
+    <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;max-width:560px;width:100%;padding:22px;box-shadow:0 10px 40px rgba(0,0,0,.25);color:#111827;max-height:90vh;overflow-y:auto">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px">
         <div>
           <div style="font-size:17px;font-weight:700;color:#111827">💼 Backup del Panel</div>
-          <div style="font-size:12.5px;color:#6b7280;margin-top:4px">Descargá un .json con tus datos para restaurar después si pasa algo.</div>
+          <div style="font-size:12.5px;color:#6b7280;margin-top:4px">Elegí qué secciones querés guardar o restaurar.</div>
         </div>
         <button onclick="document.getElementById('bkp-modal').remove()" style="background:#fff;border:1px solid #d1d5db;color:#374151;cursor:pointer;font-size:13px;padding:6px 12px;border-radius:6px;font-weight:600">✕</button>
       </div>
 
-      <div style="background:${warnBg};border:1px solid ${warnBd};border-radius:8px;padding:10px 12px;margin-bottom:16px;font-size:12.5px;color:#1f2937">
+      <div style="background:${warnBg};border:1px solid ${warnBd};border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12.5px;color:#1f2937">
         ${warnTxt}
       </div>
 
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
-        <button onclick="bkpExport();document.getElementById('bkp-modal').remove();" style="background:#16a34a;color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:5px">
-          <span style="font-size:24px">📥</span>
-          <span>Exportar backup</span>
-          <span style="font-size:10.5px;opacity:.85;font-weight:400">Descarga .json con tus datos</span>
+      <!-- v113: header de la lista con botones marcar/desmarcar todo -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px">
+        <div style="font-size:12px;font-weight:600;color:#374151;text-transform:uppercase;letter-spacing:.04em">Secciones del backup</div>
+        <div style="display:flex;gap:5px">
+          <button onclick="document.querySelectorAll('.bkp-export-check').forEach(c=>c.checked=true)" style="background:#fff;border:1px solid #d1d5db;color:#374151;font-size:10.5px;padding:3px 9px;border-radius:5px;cursor:pointer;font-weight:600">✓ Todo</button>
+          <button onclick="document.querySelectorAll('.bkp-export-check').forEach(c=>c.checked=false)" style="background:#fff;border:1px solid #d1d5db;color:#374151;font-size:10.5px;padding:3px 9px;border-radius:5px;cursor:pointer;font-weight:600">✗ Nada</button>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:16px">
+        ${rowsHtml}
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+        <button onclick="_bkpExportFromModal()" style="background:#16a34a;color:#fff;border:none;padding:13px;border-radius:8px;cursor:pointer;font-size:13.5px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:4px">
+          <span style="font-size:22px">📥</span>
+          <span>Exportar selección</span>
+          <span style="font-size:10px;opacity:.85;font-weight:400">Descarga .json</span>
         </button>
-        <button onclick="document.getElementById('bkp-import-input').click()" style="background:#3b82f6;color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:5px">
-          <span style="font-size:24px">📤</span>
-          <span>Importar backup</span>
-          <span style="font-size:10.5px;opacity:.85;font-weight:400">Restaurar desde .json</span>
+        <button onclick="document.getElementById('bkp-import-input').click()" style="background:#3b82f6;color:#fff;border:none;padding:13px;border-radius:8px;cursor:pointer;font-size:13.5px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:4px">
+          <span style="font-size:22px">📤</span>
+          <span>Importar archivo</span>
+          <span style="font-size:10px;opacity:.85;font-weight:400">Vas a elegir qué aplicar</span>
         </button>
       </div>
 
-      <input type="file" id="bkp-import-input" accept="application/json,.json" style="display:none" onchange="bkpImport(this.files[0]);document.getElementById('bkp-modal').remove();this.value='';" />
+      <input type="file" id="bkp-import-input" accept="application/json,.json" style="display:none" onchange="bkpImport(this.files[0]);this.value='';" />
 
-      <details style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:8px 12px;font-size:12px">
-        <summary style="cursor:pointer;color:#374151;font-weight:600">¿Qué incluye el backup?</summary>
-        <div style="margin-top:8px;color:#4b5563;line-height:1.6">
-          ✓ Tareas / notas pendientes<br>
-          ✓ Competidores y links de seguimiento<br>
-          ✓ Reglas de alertas automáticas<br>
-          ✓ Reglas de precios automáticos (repricing)<br>
-          ✓ Respuestas rápidas + template de mensaje<br>
-          ✓ Calendario estratégico (eventos personalizados)<br>
-          ✓ Cumpleaños registrados<br>
-          ✓ Historial de calculadora de rentabilidad<br>
-          <br>
-          <span style="color:#6b7280;font-size:11px">No incluye: tokens, claves API, AI Rules, ni cache de visitas/órdenes (eso se reconstruye solo de ML).</span>
-        </div>
-      </details>
+      <div style="font-size:11px;color:#6b7280;line-height:1.5;text-align:center;margin-top:8px">
+        No incluye: tokens, claves API, AI Rules ni cache de visitas/órdenes (eso se reconstruye solo de ML).
+      </div>
     </div>`;
   document.body.appendChild(modal);
+}
+
+// v113: helper para llamar bkpExport con la selección del modal actual
+function _bkpExportFromModal(){
+  const selection = {};
+  let count = 0;
+  document.querySelectorAll('.bkp-export-check').forEach(c => {
+    selection[c.dataset.section] = c.checked;
+    if(c.checked) count++;
+  });
+  if(count === 0){
+    alert('No marcaste ninguna sección. Marcá al menos una para exportar.');
+    return;
+  }
+  bkpExport(selection);
+  // Cerrar modal solo si exportó OK
+  setTimeout(() => {
+    const m = document.getElementById('bkp-modal');
+    if(m) m.remove();
+  }, 100);
+}
+
+// v113: Modal de import — muestra qué tiene el archivo y permite elegir
+// qué secciones aplicar al panel.
+function bkpOpenImportModal(data){
+  let modal = document.getElementById('bkp-import-modal');
+  if(modal){ modal.remove(); }
+  modal = document.createElement('div');
+  modal.id = 'bkp-import-modal';
+  modal.className = 'modal-overlay open';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px';
+  modal.addEventListener('click', e => { if(e.target === modal) modal.remove(); });
+
+  // Meta del archivo
+  const exportedAt = data._meta.exportedAt ? new Date(data._meta.exportedAt).toLocaleString('es-AR') : 'sin fecha';
+  const fromUser = data._meta.nickname || data._meta.userId || 'desconocido';
+  const fromVer = data._meta.panelVersion || '?';
+
+  // Construir filas — pero solo de las secciones que TIENE el archivo
+  let rowsHtml = '';
+  let availableCount = 0;
+  for(const [key, sec] of Object.entries(BKP_SECTIONS)){
+    const present = key in data;
+    if(!present) continue;
+    availableCount++;
+    let count = 0;
+    const v = data[key];
+    count = Array.isArray(v) ? v.length : (v && typeof v === 'object' ? Object.keys(v).length : 0);
+    const countLabel = count + (count === 1 ? ' item' : ' items');
+    rowsHtml += '<label style="display:flex;align-items:center;gap:9px;padding:8px 11px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:7px;cursor:pointer;font-size:12.5px;color:#1f2937" onmouseover="this.style.background=\'#f3f4f6\'" onmouseout="this.style.background=\'#f9fafb\'">';
+    rowsHtml += '<input type="checkbox" class="bkp-import-check" data-section="'+key+'" checked style="margin:0;cursor:pointer">';
+    rowsHtml += '<span style="font-size:14px">'+sec.icon+'</span>';
+    rowsHtml += '<span style="flex:1">'+sec.label+'</span>';
+    rowsHtml += '<span style="font-size:11px;color:#6b7280;font-weight:600">'+countLabel+'</span>';
+    rowsHtml += '</label>';
+  }
+  if(availableCount === 0){
+    rowsHtml = '<div style="background:#fef3c7;color:#78350f;padding:12px;border-radius:8px;font-size:12.5px">⚠ El archivo no contiene ninguna sección reconocida. ¿Estás seguro de que es un backup del panel?</div>';
+  }
+
+  modal.innerHTML = `
+    <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;max-width:560px;width:100%;padding:22px;box-shadow:0 10px 40px rgba(0,0,0,.25);color:#111827;max-height:90vh;overflow-y:auto">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px">
+        <div>
+          <div style="font-size:17px;font-weight:700;color:#111827">📤 Importar backup</div>
+          <div style="font-size:12.5px;color:#6b7280;margin-top:4px">Elegí qué secciones del archivo querés restaurar.</div>
+        </div>
+        <button onclick="document.getElementById('bkp-import-modal').remove()" style="background:#fff;border:1px solid #d1d5db;color:#374151;cursor:pointer;font-size:13px;padding:6px 12px;border-radius:6px;font-weight:600">✕</button>
+      </div>
+
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:#1e3a8a;line-height:1.5">
+        <strong>📄 Archivo:</strong> ${exportedAt}<br>
+        <strong>👤 Usuario:</strong> ${fromUser} · <strong>Versión panel:</strong> ${fromVer}
+      </div>
+
+      ${availableCount > 0 ? `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px">
+          <div style="font-size:12px;font-weight:600;color:#374151;text-transform:uppercase;letter-spacing:.04em">Secciones a restaurar</div>
+          <div style="display:flex;gap:5px">
+            <button onclick="document.querySelectorAll('.bkp-import-check').forEach(c=>c.checked=true)" style="background:#fff;border:1px solid #d1d5db;color:#374151;font-size:10.5px;padding:3px 9px;border-radius:5px;cursor:pointer;font-weight:600">✓ Todo</button>
+            <button onclick="document.querySelectorAll('.bkp-import-check').forEach(c=>c.checked=false)" style="background:#fff;border:1px solid #d1d5db;color:#374151;font-size:10.5px;padding:3px 9px;border-radius:5px;cursor:pointer;font-weight:600">✗ Nada</button>
+          </div>
+        </div>
+      ` : ''}
+
+      <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:14px">
+        ${rowsHtml}
+      </div>
+
+      ${availableCount > 0 ? `
+        <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:9px 12px;margin-bottom:14px;font-size:11.5px;color:#991b1b;line-height:1.5">
+          ⚠ Las secciones marcadas SOBRESCRIBEN tus datos actuales de esas mismas secciones. El resto no se toca.
+        </div>
+
+        <div style="display:flex;gap:8px">
+          <button onclick="_bkpApplyFromModal()" style="background:#16a34a;color:#fff;border:none;padding:11px 18px;border-radius:7px;cursor:pointer;font-size:13.5px;font-weight:600;flex:1">✅ Aplicar selección</button>
+          <button onclick="document.getElementById('bkp-import-modal').remove()" style="background:#fff;border:1px solid #d1d5db;color:#374151;padding:11px 18px;border-radius:7px;cursor:pointer;font-size:13.5px;font-weight:600">Cancelar</button>
+        </div>
+      ` : `
+        <div style="text-align:center">
+          <button onclick="document.getElementById('bkp-import-modal').remove()" style="background:#fff;border:1px solid #d1d5db;color:#374151;padding:11px 18px;border-radius:7px;cursor:pointer;font-size:13.5px;font-weight:600">Cerrar</button>
+        </div>
+      `}
+    </div>`;
+  document.body.appendChild(modal);
+
+  // Guardar data en una variable global temporal para que _bkpApplyFromModal la lea
+  window._bkpPendingImport = data;
+}
+
+// v113: helper para llamar bkpApplyImport con la selección del modal
+function _bkpApplyFromModal(){
+  const data = window._bkpPendingImport;
+  if(!data){ alert('Error: no hay datos pendientes de import'); return; }
+  const selection = {};
+  document.querySelectorAll('.bkp-import-check').forEach(c => {
+    selection[c.dataset.section] = c.checked;
+  });
+  // Cerrar modal antes de mostrar confirm
+  const m = document.getElementById('bkp-import-modal');
+  if(m) m.remove();
+  bkpApplyImport(data, selection);
+  // Limpiar
+  delete window._bkpPendingImport;
 }
 
 // Inicializar el sistema de backup al cargar el panel
