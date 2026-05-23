@@ -723,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v121 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v122 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1611,7 +1611,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     </div>
     <div class="tw">
       <table>
-        <thead><tr><th>#Orden</th><th>Producto</th><th title="Termómetro SEO al momento de mostrar la tabla — útil para validar las predicciones del 🔥 contra las ventas reales. Si el item con 🔥 efectivamente vendió, la predicción acertó.">🌡️ SEO</th><th>Comprador</th><th>Monto</th><th>Envío</th><th>Estado pago</th><th>Fecha y hora</th><th>ML</th></tr></thead>
+        <thead><tr><th>#Orden</th><th>Producto</th><th title="Termómetro SEO al momento de mostrar la tabla — útil para validar las predicciones del 🔥 contra las ventas reales. Si el item con 🔥 efectivamente vendió, la predicción acertó.">🌡️ SEO</th><th>Comprador</th><th title="Provincia de envío extraída de los datos de la factura del comprador. Útil para análisis geográfico de ventas.">Provincia</th><th>Monto</th><th>Envío</th><th>Estado pago</th><th>Fecha y hora</th><th>ML</th></tr></thead>
         <tbody id="orders-tbody"></tbody>
       </table>
     </div>
@@ -4544,6 +4544,8 @@ async function loadShippingStatuses(orders){
     if(cached){
       o.shipping.status    = cached.status    || o.shipping.status;
       o.shipping.substatus = cached.substatus || o.shipping.substatus;
+      // v122: restaurar provincia desde cache si está disponible
+      if(cached.provincia) o.shipping.provincia = cached.provincia;
       o.shipping._statusLoaded = true;
       cachedHits++;
     } else {
@@ -4563,11 +4565,17 @@ async function loadShippingStatuses(orders){
         const s=await mlGet('/shipments/'+o.shipping.id);
         if(s?.status)o.shipping.status=s.status;
         if(s?.substatus)o.shipping.substatus=s.substatus;
+        // v122: capturar provincia del receiver_address (siempre que esté).
+        // ML expone esto en /shipments/{id} → receiver_address.state.name.
+        // Ej: "Mendoza", "Buenos Aires", "Capital Federal".
+        const provincia = s?.receiver_address?.state?.name || null;
+        if(provincia) o.shipping.provincia = provincia;
         o.shipping._statusLoaded=true;
-        // v97 [Opt D]: persistir en cache
+        // v97 [Opt D]: persistir en cache (v122: incluye provincia)
         cache[o.shipping.id] = {
           status: s?.status || null,
           substatus: s?.substatus || null,
+          provincia: provincia,
           ts: Date.now()
         };
         cacheUpdated = true;
@@ -4575,6 +4583,12 @@ async function loadShippingStatuses(orders){
     }));
   }
   if(cacheUpdated) _shipCacheSave(cache);
+  // v122: si la sección Ventas está visible, re-renderizar para que aparezca
+  // la provincia recién cargada (sino queda en "—" hasta que el usuario hace
+  // algún cambio que dispare renderVentasTable).
+  if(document.getElementById('section-ventas')?.classList.contains('active') && typeof renderVentasTable === 'function'){
+    renderVentasTable();
+  }
 }
 
 // v97 [Opt D]: invalidar cache cuando _pollPendingShipments detecte un cambio,
@@ -8911,30 +8925,26 @@ function _seoThermoCellHTML(itemId){
   const scoreColor = level === 'high' ? '#166534' : level === 'mid' ? '#92400e' : '#991b1b';
 
   // v121: Delta absoluto de visitas (no %).
-  // Más comprensible: "+14 visitas" > "+200%" cuando los números son chicos.
   const m = (typeof itemMetrics !== 'undefined' && itemMetrics[String(itemId)]) ? itemMetrics[String(itemId)] : null;
   const recent   = m?.visits || 0;
   const previous = m?.visitsPrev || 0;
   const deltaVisits = recent - previous;
 
-  // v121: Esquema de colores Verde/Rojo/Azul
-  //   Verde sube (positivo): #16a34a
-  //   Rojo  baja (negativo): #dc2626
-  //   Azul  neutral/estable: #2563eb (más vibrante que el gris anterior)
-  let arrow, arrowLabel, arrowColor;
+  // v122: Visitas en una sola línea SIN flecha (la flecha va abajo aparte).
+  // Esquema de colores Verde/Rojo/Azul.
+  let arrow, visitsLabel, arrowColor;
   if(deltaVisits >= 3){
     arrow = '⬆️';
-    arrowLabel = '+' + deltaVisits + ' visitas';
+    visitsLabel = '+' + deltaVisits + ' visitas';
     arrowColor = '#16a34a'; // verde
   } else if(deltaVisits <= -3){
     arrow = '⬇️';
-    arrowLabel = deltaVisits + ' visitas';
+    visitsLabel = deltaVisits + ' visitas';
     arrowColor = '#dc2626'; // rojo
   } else {
     arrow = '➖';
-    // En zona estable, mostrar igual el delta exacto
     const sign = deltaVisits >= 0 ? '+' : '';
-    arrowLabel = sign + deltaVisits + ' visitas';
+    visitsLabel = sign + deltaVisits + ' visitas';
     arrowColor = '#2563eb'; // azul
   }
 
@@ -8946,35 +8956,34 @@ function _seoThermoCellHTML(itemId){
     if(item){
       const h = seoHotnessScore(item);
       if(h && h.isImminent){
-        hotBadge = '<span style="font-size:13px" title="Venta inminente por estadística">🔥🔥</span> ';
+        hotBadge = '<span style="font-size:12px" title="Venta inminente por estadística">🔥🔥</span> ';
         hotTooltip = ' | 🔥🔥 Venta inminente — '+h.score+'/100';
       } else if(h && h.isHot){
-        hotBadge = '<span style="font-size:13px" title="Alta probabilidad de venta">🔥</span> ';
+        hotBadge = '<span style="font-size:12px" title="Alta probabilidad de venta">🔥</span> ';
         hotTooltip = ' | 🔥 Hot Item — '+h.score+'/100';
       }
     }
   } catch(e){}
 
-  // v121: Ranking interno arriba del score.
-  // Solo se muestra si el item está activo Y tiene ranking calculado.
-  // Items pausados o sin métricas no aparecen acá.
+  // v122: Ranking como elemento PRINCIPAL de la celda (más grande, azul, negrita).
+  // Sin medallas, sin "/total" para que sea más limpio. Sólo el número de posición.
   let rankRow = '';
   const rk = (window._seoRanking||{})[String(itemId)];
   if(rk){
-    const medalSpan = rk.medal ? '<span style="font-size:11px">'+rk.medal+'</span> ' : '';
-    // Color del rank según percentile
-    const rankColor = rk.percentile >= 95 ? '#b45309' :   // dorado top 5%
-                      rk.percentile >= 75 ? '#475569' :   // gris fuerte top 25%
-                      rk.percentile >= 50 ? '#7c2d12' :   // marrón top 50%
-                                            '#94a3b8';    // gris claro resto
-    rankRow = '<div style="font-size:9.5px;color:'+rankColor+';font-weight:700;margin-bottom:1px;line-height:1">'
-            + medalSpan + 'Pos. ' + rk.rank + '/' + rk.total + '</div>';
+    rankRow = '<div style="font-size:13.5px;color:#1d4ed8;font-weight:800;line-height:1.1;margin-bottom:2px">'
+            + 'Pos. ' + rk.rank + '</div>';
   }
 
-  return '<button onclick="seoThermoOpenModal(\''+itemId+'\')" style="background:transparent;border:none;cursor:pointer;font-family:inherit;padding:2px 4px;line-height:1.2;width:100%" title="Click para ver diagnóstico SEO completo'+hotTooltip+'">'
+  // v122: Layout de la celda (4 líneas):
+  //   1) Pos. 811        (grande, azul, negrita)  ← protagonista
+  //   2) 🟢 87           (chico)
+  //   3) +14 visitas    (chico, color por signo)
+  //   4) ⬆️              (flecha sola)
+  return '<button onclick="seoThermoOpenModal(\''+itemId+'\')" style="background:transparent;border:none;cursor:pointer;font-family:inherit;padding:3px 4px;line-height:1.15;width:100%" title="Click para ver diagnóstico SEO completo'+hotTooltip+'">'
     + rankRow
-    + '<div style="font-size:13px;font-weight:700;color:'+scoreColor+'">'+hotBadge+emoji+' '+score+'</div>'
-    + '<div style="font-size:10px;color:'+arrowColor+';margin-top:1px;font-weight:600">'+arrow+' '+arrowLabel+'</div>'
+    + '<div style="font-size:10.5px;font-weight:600;color:'+scoreColor+';line-height:1.2">'+hotBadge+emoji+' '+score+'</div>'
+    + '<div style="font-size:10px;color:'+arrowColor+';margin-top:1px;font-weight:600">'+visitsLabel+'</div>'
+    + '<div style="font-size:11px;color:'+arrowColor+';margin-top:1px;line-height:1">'+arrow+'</div>'
     + '</button>';
 }
 
@@ -9019,24 +9028,11 @@ function seoThermoOpenModal(itemId){
 
   // Score grande
   html += '<div style="background:linear-gradient(135deg,#f8fafc,#f1f5f9);border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:14px;text-align:center">';
-  // v121: Ranking arriba del score (si el item está rankeado)
+  // v122: Ranking simplificado (sin medalla ni Top%) — coherente con la celda
   const _rk = (window._seoRanking||{})[String(itemId)];
   if(_rk){
-    const _medal = _rk.medal ? _rk.medal + ' ' : '';
-    const _rankBg = _rk.percentile >= 95 ? '#fef3c7' :
-                    _rk.percentile >= 75 ? '#e2e8f0' :
-                    _rk.percentile >= 50 ? '#fed7aa' :
-                                           '#f1f5f9';
-    const _rankColor = _rk.percentile >= 95 ? '#b45309' :
-                       _rk.percentile >= 75 ? '#334155' :
-                       _rk.percentile >= 50 ? '#9a3412' :
-                                              '#64748b';
-    const _topLabel = _rk.percentile >= 95 ? 'Top 5%' :
-                      _rk.percentile >= 75 ? 'Top 25%' :
-                      _rk.percentile >= 50 ? 'Top 50%' :
-                                             'Bottom ' + (100 - _rk.percentile) + '%';
-    html += '<div style="display:inline-block;background:'+_rankBg+';color:'+_rankColor+';font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:12px;margin-bottom:9px">'
-         + _medal + 'Pos. ' + _rk.rank + '/' + _rk.total + ' (' + _topLabel + ')</div>';
+    html += '<div style="display:inline-block;background:#dbeafe;color:#1d4ed8;font-size:13px;font-weight:800;padding:4px 14px;border-radius:14px;margin-bottom:9px">'
+         + 'Pos. ' + _rk.rank + ' / ' + _rk.total + '</div>';
   }
   html += '<div style="font-size:34px;font-weight:800;color:'+scoreColor+'">'+emoji+' '+score+'<span style="font-size:18px;color:#94a3b8;font-weight:500">/100</span></div>';
   html += '<div style="font-size:12.5px;color:'+scoreColor+';font-weight:600;margin-top:3px">'+levelLabel+'</div>';
@@ -13471,7 +13467,7 @@ function renderVentasTable(){
 
   const tbody=document.getElementById('orders-tbody');
   if(!tbody)return;
-  if(!orders.length){tbody.innerHTML='<tr><td colspan="9" style="text-align:center;padding:22px;color:var(--text3)">Sin pedidos para mostrar</td></tr>';return;}
+  if(!orders.length){tbody.innerHTML='<tr><td colspan="10" style="text-align:center;padding:22px;color:var(--text3)">Sin pedidos para mostrar</td></tr>';return;}
   tbody.innerHTML=orders.map(o=>{
     const stateLabel=ORDER_STATES[o.status]||o.status||'—';
     const stateClass=o.status==='paid'||o.status==='delivered'||o.status==='confirmed'?'bg-green':o.status==='cancelled'?'bg-red':'bg-amber';
@@ -13489,6 +13485,9 @@ function renderVentasTable(){
     const thermoCell = (orderItemId && typeof _seoThermoCellHTML === 'function')
       ? _seoThermoCellHTML(orderItemId)
       : '<span style="font-size:10px;color:var(--text3)">—</span>';
+    // v122: Provincia extraída del shipment.receiver_address.state.name
+    // (cargado por loadShippingStatuses). Si no está cargado, mostramos —.
+    const provincia = o.shipping?.provincia || '—';
     return `<tr>
       <td style="font-family:var(--mono);font-size:10.5px;color:var(--text3)">#${o.id}</td>
       <td style="max-width:180px">
@@ -13499,6 +13498,7 @@ function renderVentasTable(){
       </td>
       <td style="text-align:center;padding:6px 4px;min-width:80px">${thermoCell}</td>
       <td style="font-size:12px">${o.buyer?.nickname||'—'}</td>
+      <td style="font-size:11.5px;color:var(--text2);white-space:nowrap">${provincia}</td>
       <td style="font-weight:600">$${total.toLocaleString('es-AR')}</td>
       <td><span class="badge ${ship.cls}" style="white-space:nowrap">${ship.label}</span></td>
       <td><span class="badge ${stateClass}">${stateLabel}</span></td>
