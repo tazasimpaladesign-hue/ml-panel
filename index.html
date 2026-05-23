@@ -723,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v118 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v119 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1268,7 +1268,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <th onclick="seoSort('lastSale')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:90px;max-width:90px" title="Fecha de la última venta. Si no hubo ventas en 360 días muestra 'Sin Ventas 1 año'">Última<br>venta<br><span style="font-size:10px">↕</span><span id="seo-sort-lastSale" style="font-size:10px"></span></th>
           <th onclick="seoSort('daysNoSale')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:80px;max-width:80px" title="Días transcurridos desde la última venta">Días sin<br>ventas<br><span style="font-size:10px">↕</span><span id="seo-sort-daysNoSale" style="font-size:10px"></span></th>
           <th onclick="seoSort('quality')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:140px;max-width:140px">Calidad<br>pub.<br><span style="font-size:10px">↕</span><span id="seo-sort-quality" style="font-size:10px"></span></th>
-          <th onclick="seoSort('seoPos')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:92px;max-width:92px;background:#fef3c7" title="Termómetro SEO — Score 0-100 calculado a partir de momentum de visitas, conversión, health score, velocidad de venta y antigüedad. Click en el header para ordenar; click en cada celda para ver el diagnóstico completo.">🌡️<br>SEO<br><span style="font-size:10px">↕</span><span id="seo-sort-seoPos" style="font-size:10px"></span></th>
+          <th onclick="seoSort('seoPos')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:92px;max-width:92px;background:#fef3c7" title="Termómetro SEO (score 0-100) + indicador 🔥 si el item tiene alta probabilidad de venta. Click en header para ordenar, click en celda para diagnóstico completo.">🌡️<br>SEO<br><span style="font-size:10px">↕</span><span id="seo-sort-seoPos" style="font-size:10px"></span></th>
           <th onclick="seoSort('price')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:90px;max-width:90px">Precio<br><span style="font-size:10px">↕</span></th>
           <th onclick="seoSort('stock')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:65px;max-width:65px">Stock<br><span style="font-size:10px">↕</span></th>
           <th onclick="seoSort('visits30')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:75px;max-width:75px;background:#dbeafe" title="Visitas últimos 30 días">Visitas<br>30d<br><span style="font-size:10px">↕</span><span id="seo-sort-visits30" style="font-size:10px"></span></th>
@@ -3986,14 +3986,41 @@ async function initApp(){
 }
 
 let _pollingInterval=null;
+let _heartbeatInterval=null; // v119: heartbeat al Worker para skip del cron
+
 function startPolling(){
   if(_pollingInterval)clearInterval(_pollingInterval);
   _pollingInterval=setInterval(pollNewData,60000);
   // v89 [P2]: arrancar polling ligero de envíos pendientes (cada 30s)
   if(typeof startPendingShipPoll === 'function') startPendingShipPoll();
+  // v119: heartbeat al Worker cada 10 min para que el cron skipee este usuario
+  // (las notifs ya están llegando por el polling en tiempo real del panel).
+  if(_heartbeatInterval) clearInterval(_heartbeatInterval);
+  _heartbeatPing(); // primer ping inmediato al abrir
+  _heartbeatInterval = setInterval(_heartbeatPing, 10 * 60 * 1000);
 }
-function stopPolling(){if(_pollingInterval){clearInterval(_pollingInterval);_pollingInterval=null;}
+
+function stopPolling(){
+  if(_pollingInterval){clearInterval(_pollingInterval);_pollingInterval=null;}
   if(typeof stopPendingShipPoll === 'function') stopPendingShipPoll();
+  if(_heartbeatInterval){clearInterval(_heartbeatInterval);_heartbeatInterval=null;}
+}
+
+// v119: ping al Worker indicando "panel abierto y activo".
+// El Worker tiene coalescing (1 write KV cada 15min), así que aunque mandemos
+// pings cada 10 min, el costo real es ~1 write/15min = ~64 writes/día con uso
+// constante de 16hs. A cambio el cron de 15min skipea al usuario activo →
+// ahorra ~40-60 writes/día.
+async function _heartbeatPing(){
+  if(!token) return;
+  try {
+    await fetch(WORKER+'/api/heartbeat', {
+      method: 'POST',
+      headers: {'Authorization': 'Bearer '+token},
+      // keepalive permite que el ping termine aunque la página se navegue
+      keepalive: true,
+    });
+  } catch(e){ /* sin token o sin red — no es crítico */ }
 }
 
 async function pollNewData(){
@@ -4228,7 +4255,7 @@ async function _pollPendingShipments(){
 // v93 [P5]: detector de versión del Worker. Si el Worker está desactualizado (no v55+),
 // significa que el header `x-format-new: true` no está siendo aplicado y el bug de
 // envíos sigue activo. Mostramos un banner amarillo al usuario.
-const _MIN_WORKER_VERSION = 75; // v118: Termómetro SEO (endpoints SEO obsoletos removidos)
+const _MIN_WORKER_VERSION = 76; // v119: cron 15min + heartbeat skip + /api/heartbeat
 async function _checkWorkerVersion(){
   try {
     const r = await fetch(WORKER + '/');
@@ -7330,10 +7357,20 @@ const SEO_SCENARIOS = {
       return t && t.score <= 45;
     },
   },
+  // v119: Escenario "Alta Probabilidad de Venta" — Hot Items predictivos
+  'alta_probabilidad': {
+    emoji: '🔥', label: 'Alta Probabilidad', color: '#dc2626',
+    description: 'Publicaciones con alta probabilidad de venta en las próximas 48-72h: momentum acelerado, conversión validada, stock disponible.',
+    actionMain:      'NO les toques el precio. Asegurate de que tengan stock suficiente y respondé preguntas rápido.',
+    actionSecondary: 'Son las publicaciones con más chance de capitalizar — cuidalas en vez de optimizarlas (riesgo de matar momentum).',
+    filter: i => (typeof seoIsHotItem === 'function') && seoIsHotItem(i),
+  },
 };
 
 // Orden de los chips en la UI (de izquierda a derecha)
 const SEO_SCENARIO_ORDER = [
+  // v119: Hot Items predictivos (lo más urgente de atender)
+  'alta_probabilidad',
   // Críticos / urgentes (rojos/naranjas)
   'peligro_quiebre', 'alta_conv_bajo_stock', 'trafico_esteril', 'falla_cierre',
   // Crecimiento / oportunidad (verdes/azules)
@@ -8544,6 +8581,143 @@ function seoThermoCalc(item){
 
 // ── Recalcular Termómetro para TODOS los items ──
 // Se invoca desde loadSEOMetrics() después de bajar visitas.
+// ═══════════════════════════════════════════════════════════════════════════
+// v119: Probabilidad de Venta — Score predictivo "🔥 Hot Items"
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Mientras el Termómetro SEO mide el estado actual del posicionamiento,
+// el Hotness Score predice qué publicaciones tienen alta probabilidad
+// de generar una venta en las próximas 48-72h.
+//
+// FÓRMULA (0-100):
+//   40% Momentum acelerado (visits/visitsPrev > 1.3 = señal MUY fuerte)
+//   25% Conversión histórica validada (sales60 + conv >= 1.5%)
+//   15% Preguntas recientes 7d sin responder (gente interesada AHORA)
+//   10% Stock disponible (>0)
+//   10% Velocidad reciente (sales 7d > 0)
+//
+// THRESHOLD para 🔥:
+//   - Score >= 60 → "Alta probabilidad" (mostrar emoji 🔥)
+//   - Trigger especial: si visits7d >= 40 Y conversion histórica >= 2% Y
+//     sales7d == 0 → "Venta inminente por estadística" (🔥🔥)
+//
+// COSTO KV: cero. Cálculo client-side desde itemMetrics + allQuestions.
+
+function seoHotnessScore(item){
+  const id = String(item.id);
+  const m = (typeof itemMetrics !== 'undefined' && itemMetrics[id]) ? itemMetrics[id] : null;
+  if(!m) return null;
+
+  // Datos base
+  const recent   = m.visits || 0;
+  const previous = m.visitsPrev || 0;
+  const sales60  = m.sales60 || 0;
+  const sales7   = m.sales || 0;
+  const visits30 = m.visits30 || 0;
+  const stock    = (typeof item.available_quantity === 'number') ? item.available_quantity : 0;
+
+  // ── Factor 1: Momentum acelerado (40%) ──
+  // No basta con "subió", premio especial si subió >30%
+  let momentumScore = 0;
+  let momentumRatio = 0;
+  if(previous > 0){
+    momentumRatio = recent / previous;
+    if(momentumRatio >= 1.5)      momentumScore = 40;  // explotó (+50%)
+    else if(momentumRatio >= 1.3) momentumScore = 35;  // acelerando (+30%)
+    else if(momentumRatio >= 1.1) momentumScore = 25;  // subiendo (+10%)
+    else if(momentumRatio >= 0.9) momentumScore = 15;  // estable
+    else if(momentumRatio >= 0.7) momentumScore = 5;   // bajando
+    else                          momentumScore = 0;   // crash
+  } else if(recent > 5){
+    momentumScore = 30; // arrancó de cero
+    momentumRatio = 2;
+  }
+
+  // ── Factor 2: Conversión histórica validada (25%) ──
+  // Solo cuenta si tiene historial real: sales60 >= 2
+  let convScore = 0;
+  let convHist = 0;
+  if(visits30 > 0 && sales60 >= 2){
+    // Estimación de conv con sales60/2 (≈30d) sobre visits30
+    convHist = ((sales60/2) / visits30) * 100;
+    if(convHist >= 4)      convScore = 25;
+    else if(convHist >= 2.5) convScore = 22;
+    else if(convHist >= 1.5) convScore = 18;
+    else if(convHist >= 1)   convScore = 12;
+    else if(convHist >= 0.5) convScore = 5;
+  } else if(sales60 >= 5){
+    // Buenas ventas históricas pero sin visits30 → asumir conv ok
+    convScore = 15;
+  }
+
+  // ── Factor 3: Preguntas recientes 7d (15%) ──
+  // Cada pregunta no respondida = señal MUY fuerte de interés activo
+  let questionsScore = 0;
+  let recentQs = 0;
+  try {
+    if(typeof allQuestions !== 'undefined' && Array.isArray(allQuestions)){
+      const cutoff = Date.now() - 7*86400000;
+      recentQs = allQuestions.filter(q =>
+        String(q.item_id) === id &&
+        q.date_created && new Date(q.date_created).getTime() > cutoff
+      ).length;
+      if(recentQs >= 3)      questionsScore = 15;
+      else if(recentQs >= 2) questionsScore = 12;
+      else if(recentQs >= 1) questionsScore = 8;
+    }
+  } catch(e){}
+
+  // ── Factor 4: Stock disponible (10%) ──
+  let stockScore = 0;
+  if(stock >= 10)     stockScore = 10;
+  else if(stock >= 3) stockScore = 8;
+  else if(stock >= 1) stockScore = 5;
+  // stock 0 → 0 puntos (no se puede vender)
+
+  // ── Factor 5: Velocidad reciente (10%) ──
+  let velScore = 0;
+  if(sales7 >= 2)      velScore = 10;
+  else if(sales7 >= 1) velScore = 7;
+  else if(sales60 >= 2 && recent > previous) velScore = 5; // sin venta esta semana PERO con tracción
+
+  const totalScore = momentumScore + convScore + questionsScore + stockScore + velScore;
+
+  // Trigger especial: "Venta inminente por estadística"
+  // Mucho tráfico ESTA semana, conversión histórica buena, pero 0 ventas aún
+  // = probabilidad muy alta de que caiga una venta en próximas 48h.
+  const isImminent = (
+    recent >= 40 &&
+    convHist >= 1.8 &&
+    sales7 === 0 &&
+    stock > 0
+  );
+
+  // Nivel
+  const isHot = totalScore >= 60;
+  const level = isImminent ? 'imminent' : isHot ? 'hot' : 'normal';
+
+  return {
+    score: Math.round(totalScore),
+    level,           // 'imminent' | 'hot' | 'normal'
+    isHot,
+    isImminent,
+    factors: {
+      momentum:   { score: momentumScore, ratio: momentumRatio.toFixed(2), max: 40 },
+      conversion: { score: convScore,     value: convHist.toFixed(2),       max: 25 },
+      questions:  { score: questionsScore, count: recentQs,                  max: 15 },
+      stock:      { score: stockScore,    value: stock,                      max: 10 },
+      velocity:   { score: velScore,      sales7,                            max: 10 },
+    },
+  };
+}
+
+// Filtro: items con alta probabilidad de venta
+function seoIsHotItem(item){
+  const h = seoHotnessScore(item);
+  return h && h.isHot;
+}
+
+// ── Recalcular Termómetro para TODOS los items ──
 function seoThermoRecalcAll(){
   if(!Array.isArray(allItems)) return;
   const out = {};
@@ -8584,8 +8758,25 @@ function _seoThermoCellHTML(itemId){
     arrow = '➖'; arrowLabel = 'Estable'; arrowColor = '#71717a';
   }
 
-  return '<button onclick="seoThermoOpenModal(\''+itemId+'\')" style="background:transparent;border:none;cursor:pointer;font-family:inherit;padding:2px 4px;line-height:1.2;width:100%" title="Click para ver diagnóstico SEO completo">'
-    + '<div style="font-size:13px;font-weight:700;color:'+scoreColor+'">'+emoji+' '+score+'</div>'
+  // v119: Probabilidad de Venta — 🔥 inline si es Hot Item
+  let hotBadge = '';
+  let hotTooltip = '';
+  try {
+    const item = (allItems||[]).find(i => String(i.id) === String(itemId));
+    if(item){
+      const h = seoHotnessScore(item);
+      if(h && h.isImminent){
+        hotBadge = '<span style="font-size:13px" title="Venta inminente por estadística">🔥🔥</span> ';
+        hotTooltip = ' | 🔥🔥 Venta inminente — '+h.score+'/100';
+      } else if(h && h.isHot){
+        hotBadge = '<span style="font-size:13px" title="Alta probabilidad de venta">🔥</span> ';
+        hotTooltip = ' | 🔥 Hot Item — '+h.score+'/100';
+      }
+    }
+  } catch(e){}
+
+  return '<button onclick="seoThermoOpenModal(\''+itemId+'\')" style="background:transparent;border:none;cursor:pointer;font-family:inherit;padding:2px 4px;line-height:1.2;width:100%" title="Click para ver diagnóstico SEO completo'+hotTooltip+'">'
+    + '<div style="font-size:13px;font-weight:700;color:'+scoreColor+'">'+hotBadge+emoji+' '+score+'</div>'
     + '<div style="font-size:10px;color:'+arrowColor+';margin-top:1px;font-weight:600">'+arrow+' '+arrowLabel+'</div>'
     + '</button>';
 }
@@ -8644,6 +8835,37 @@ function seoThermoOpenModal(itemId){
   html += _row('Velocidad venta (15%)', factors.velocity, '');
   html += _row('Antigüedad (10%)', factors.age, '');
   html += '</div>';
+
+  // v119: Sección Probabilidad de Venta (Hot Item)
+  try {
+    const h = seoHotnessScore(item);
+    if(h){
+      const hotEmoji = h.isImminent ? '🔥🔥' : h.isHot ? '🔥' : '📊';
+      const hotLabel = h.isImminent ? 'VENTA INMINENTE' : h.isHot ? 'ALTA PROBABILIDAD' : 'Probabilidad estándar';
+      const hotColor = h.isImminent ? '#7f1d1d' : h.isHot ? '#dc2626' : '#6b7280';
+      const hotBg    = h.isImminent ? '#fef2f2' : h.isHot ? '#fff7ed' : '#f9fafb';
+      const hotBd    = h.isImminent ? '#fecaca' : h.isHot ? '#fed7aa' : '#e5e7eb';
+
+      html += '<div style="background:'+hotBg+';border:1px solid '+hotBd+';border-radius:8px;padding:11px 13px;margin-bottom:12px">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
+      html += '<div style="font-size:11px;color:'+hotColor+';text-transform:uppercase;letter-spacing:.04em;font-weight:700">'+hotEmoji+' Probabilidad de venta</div>';
+      html += '<div style="font-size:13px;font-weight:700;color:'+hotColor+'">'+h.score+'/100 — '+hotLabel+'</div>';
+      html += '</div>';
+      html += '<div style="font-size:11.5px;color:#374151;line-height:1.7">';
+      html += '<div>Momentum: <strong>'+h.factors.momentum.score+'/40</strong> (ratio '+h.factors.momentum.ratio+'×)</div>';
+      html += '<div>Conversión histórica: <strong>'+h.factors.conversion.score+'/25</strong> ('+h.factors.conversion.value+'%)</div>';
+      html += '<div>Preguntas recientes (7d): <strong>'+h.factors.questions.score+'/15</strong> ('+h.factors.questions.count+' preguntas)</div>';
+      html += '<div>Stock: <strong>'+h.factors.stock.score+'/10</strong> ('+h.factors.stock.value+' unidades)</div>';
+      html += '<div>Velocidad reciente: <strong>'+h.factors.velocity.score+'/10</strong> ('+h.factors.velocity.sales7+' ventas 7d)</div>';
+      html += '</div>';
+      if(h.isImminent){
+        html += '<div style="margin-top:9px;font-size:11.5px;color:#7f1d1d;background:#fff;padding:7px 9px;border-radius:6px;border-left:3px solid #dc2626"><strong>Acción:</strong> tenés mucho tráfico hot y la conversión histórica indica que la venta debería caer en próximas 48h. <em>NO bajes el precio, no toques el listing</em>. Asegurate de tener stock y responder preguntas rápido.</div>';
+      } else if(h.isHot){
+        html += '<div style="margin-top:9px;font-size:11.5px;color:#9a3412;background:#fff;padding:7px 9px;border-radius:6px;border-left:3px solid #f59e0b"><strong>Acción:</strong> momentum positivo. Cuidá el listing como está, mantené precio competitivo y respondé preguntas rápido.</div>';
+      }
+      html += '</div>';
+    }
+  } catch(e){}
 
   // Acciones
   html += '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:11px 13px;margin-bottom:12px">';
