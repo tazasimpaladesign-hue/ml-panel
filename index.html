@@ -723,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v120 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v121 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1268,7 +1268,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <th onclick="seoSort('lastSale')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:90px;max-width:90px" title="Fecha de la última venta. Si no hubo ventas en 360 días muestra 'Sin Ventas 1 año'">Última<br>venta<br><span style="font-size:10px">↕</span><span id="seo-sort-lastSale" style="font-size:10px"></span></th>
           <th onclick="seoSort('daysNoSale')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:80px;max-width:80px" title="Días transcurridos desde la última venta">Días sin<br>ventas<br><span style="font-size:10px">↕</span><span id="seo-sort-daysNoSale" style="font-size:10px"></span></th>
           <th onclick="seoSort('quality')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:140px;max-width:140px">Calidad<br>pub.<br><span style="font-size:10px">↕</span><span id="seo-sort-quality" style="font-size:10px"></span></th>
-          <th onclick="seoSort('seoPos')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:92px;max-width:92px;background:#fef3c7" title="Termómetro SEO (score 0-100) + indicador 🔥 si el item tiene alta probabilidad de venta. Click en header para ordenar, click en celda para diagnóstico completo.">🌡️<br>SEO<br><span style="font-size:10px">↕</span><span id="seo-sort-seoPos" style="font-size:10px"></span></th>
+          <th onclick="seoSort('seoPos')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:96px;max-width:96px;background:#fef3c7" title="Termómetro SEO + Ranking interno (Pos. N°). El ranking combina 70% Termómetro + 30% Probabilidad de Venta. Solo se ranquean publicaciones ACTIVAS. Click en el header para ordenar por ranking (mejor → peor).">🌡️<br>SEO<br><span style="font-size:10px">↕</span><span id="seo-sort-seoPos" style="font-size:10px"></span></th>
           <th onclick="seoSort('price')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:90px;max-width:90px">Precio<br><span style="font-size:10px">↕</span></th>
           <th onclick="seoSort('stock')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:65px;max-width:65px">Stock<br><span style="font-size:10px">↕</span></th>
           <th onclick="seoSort('visits30')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:75px;max-width:75px;background:#dbeafe" title="Visitas últimos 30 días">Visitas<br>30d<br><span style="font-size:10px">↕</span><span id="seo-sort-visits30" style="font-size:10px"></span></th>
@@ -5446,14 +5446,13 @@ function renderSmartAlerts(){
   const pend     = allQuestions.filter(q=>q.status==='UNANSWERED');
   const alerts = [];
 
-  // v120: Insights de ventas SIEMPRE visibles para 7/30/90 días.
-  // Antes solo aparecía cuando había caída fuerte (-20%). Ahora también muestra
-  // subas, estables, e incluye los 3 horizontes temporales para tener vista
-  // panorámica de la tendencia.
+  // v120/v121: Insights de ventas SIEMPRE visibles para 7/30/90 días.
+  // v121: Ahora también muestran facturación + unidades vendidas con sus deltas.
+  // v121: Asignamos _orderKey para forzar orden: 7d → 30d → 90d → Hot Items → resto.
   const _salesWindows = [
-    { days: 7,  label: '7 días'  },
-    { days: 30, label: '30 días' },
-    { days: 90, label: '90 días' },
+    { days: 7,  label: '7 días',  orderKey: 1 },
+    { days: 30, label: '30 días', orderKey: 2 },
+    { days: 90, label: '90 días', orderKey: 3 },
   ];
   for(const w of _salesWindows){
     const cur  = dashOrders(w.days);
@@ -5464,52 +5463,77 @@ function renderSmartAlerts(){
     const curCount = curPaid.length;
     const prvCount = prvPaid.length;
 
+    // v121: Calcular también facturación + unidades vendidas
+    const curBilling = curPaid.reduce((s, o) => s + (o.total_amount || 0), 0);
+    const prvBilling = prvPaid.reduce((s, o) => s + (o.total_amount || 0), 0);
+    const _countUnits = (orders) => orders.reduce((s, o) =>
+      s + (o.order_items || []).reduce((u, i) => u + (i.quantity || 0), 0), 0);
+    const curUnits = _countUnits(curPaid);
+    const prvUnits = _countUnits(prvPaid);
+
+    // Formato compacto de moneda (ej: $1.2M, $850k, $12k)
+    const _fmtMoney = (n) => {
+      if(n >= 1e6) return '$' + (n/1e6).toFixed(1).replace('.0','') + 'M';
+      if(n >= 1e3) return '$' + Math.round(n/1e3) + 'k';
+      return '$' + Math.round(n);
+    };
+    const _fmtDelta = (delta) => {
+      if(delta === null) return '';
+      const sign = delta >= 0 ? '+' : '';
+      return ' (' + sign + delta + '%)';
+    };
+
     let icon, color, bg, bdr, title, desc, sev;
     if(prvCount === 0){
       // No había data anterior → solo informativo
       if(curCount > 0){
         icon = '📊'; color = '#1d4ed8'; bg = '#eff6ff'; bdr = '#bfdbfe';
         title = 'Período inicial ' + w.label + ': ' + curCount + ' ventas';
-        desc  = 'No hay datos del período comparable anterior para sacar tendencia.';
+        desc  = _fmtMoney(curBilling) + ' · ' + curUnits + ' unidades. Sin período anterior para comparar.';
         sev = 3;
       } else continue;
     } else {
-      const delta = dashDelta(curCount, prvCount);
-      // Categorizar la variación
-      if(delta >= 25){
+      const deltaCount   = dashDelta(curCount, prvCount);
+      const deltaBilling = dashDelta(curBilling, prvBilling);
+      const deltaUnits   = dashDelta(curUnits, prvUnits);
+      // Categorizar la variación en base a cantidad de órdenes (más estable que $)
+      if(deltaCount >= 25){
         icon = '🚀'; color = '#15803d'; bg = '#f0fdf4'; bdr = '#bbf7d0';
-        title = 'Suba fuerte en ventas ' + w.label + ' (+' + delta + '%)';
+        title = 'Suba fuerte en ventas ' + w.label + ' (+' + deltaCount + '%)';
         sev = 2;
-      } else if(delta >= 8){
+      } else if(deltaCount >= 8){
         icon = '📈'; color = '#16a34a'; bg = '#f0fdf4'; bdr = '#bbf7d0';
-        title = 'Suba en ventas ' + w.label + ' (+' + delta + '%)';
+        title = 'Suba en ventas ' + w.label + ' (+' + deltaCount + '%)';
         sev = 2;
-      } else if(delta >= -7){
+      } else if(deltaCount >= -7){
         icon = '➖'; color = '#475569'; bg = '#f8fafc'; bdr = '#cbd5e1';
-        const sign = delta >= 0 ? '+' : '';
-        title = 'Ventas ' + w.label + ': estables (' + sign + delta + '%)';
+        const sign = deltaCount >= 0 ? '+' : '';
+        title = 'Ventas ' + w.label + ': estables (' + sign + deltaCount + '%)';
         sev = 3;
-      } else if(delta >= -24){
+      } else if(deltaCount >= -24){
         icon = '📉'; color = '#b45309'; bg = '#fffbeb'; bdr = '#fde68a';
-        title = 'Caída moderada en ventas ' + w.label + ' (' + delta + '%)';
+        title = 'Caída moderada en ventas ' + w.label + ' (' + deltaCount + '%)';
         sev = 2;
       } else {
         icon = '🚨'; color = '#991b1b'; bg = '#fef2f2'; bdr = '#fecaca';
-        title = 'Caída fuerte en ventas ' + w.label + ' (' + delta + '%)';
+        title = 'Caída fuerte en ventas ' + w.label + ' (' + deltaCount + '%)';
         sev = 1;
       }
-      desc = curCount + ' ventas en este período vs ' + prvCount + ' en el anterior.';
+      // v121: Desc enriquecido con $ + unidades + sus deltas, todo en una línea
+      desc = _fmtMoney(curBilling) + _fmtDelta(deltaBilling)
+           + ' · ' + curCount + ' ventas' + _fmtDelta(deltaCount)
+           + ' · ' + curUnits + ' unidades' + _fmtDelta(deltaUnits);
     }
     alerts.push({
       icon, color, bg, bdr, title, desc,
       action: 'Ver ventas →', fn: "showSection('ventas')",
       sev,
+      _orderKey: w.orderKey, // v121: para orden custom
     });
   }
-  // (insight original de caída -20% removido — ya está incluido en el bloque de arriba)
-  // v120: Insight permanente de "🔥 Alta Probabilidad" — Hot Items predictivos.
-  // Aparece SOLO si hay items que cumplen el filtro (sino la card no es útil).
-  // Visual verde para que destaque como oportunidad, no como alerta negativa.
+  // v120/v121: Insight permanente de "🔥 Alta Probabilidad" — Hot Items predictivos.
+  // v121: Movido a aparecer DESPUÉS de las cards de 7/30/90 días.
+  // v121: Color VERDE (es una oportunidad, no una alerta negativa).
   try {
     if(typeof seoIsHotItem === 'function'){
       const hotItems = allItems.filter(i => i.status === 'active' && seoIsHotItem(i));
@@ -5523,14 +5547,15 @@ function renderSmartAlerts(){
           : hotItems.length + ' Hot Items con alta probabilidad de venta en próximas 72h';
         alerts.push({
           icon:  '🔥',
-          color: '#dc2626',
-          bg:    '#fff7ed',
-          bdr:   '#fed7aa',
+          color: '#15803d',  // v121: verde (era #dc2626 rojo)
+          bg:    '#f0fdf4',  // v121: verde claro
+          bdr:   '#bbf7d0',  // v121: verde claro
           title: hotItems.length + ' publicación' + (hotItems.length > 1 ? 'es' : '') + ' con alta probabilidad',
           desc:  subTitle + '. NO toques precio ni listado — protegé el momentum.',
           action: 'Ver publicaciones →',
           fn:    "showSection('seo');setTimeout(()=>seoSetScenario('alta_probabilidad'),250)",
-          sev:   1,
+          sev:   2,
+          _orderKey: 4, // v121: aparece después de los 3 períodos de ventas
         });
       }
     }
@@ -5584,8 +5609,12 @@ function renderSmartAlerts(){
     if(card) alerts.push(card);
   });
   if(!alerts.length){el.innerHTML='';return;}
-  // v120: límite subido de 8 → 12 para acomodar las nuevas tarjetas (3 ventas + Hot Items)
-  const sorted=[...alerts.filter(a=>a.sev===1),...alerts.filter(a=>a.sev===2),...alerts.filter(a=>a.sev===3)].slice(0,12);
+  // v121: Orden custom:
+  //   1) Cards con _orderKey en orden ascendente (7d → 30d → 90d → Hot Items)
+  //   2) Resto por severidad (sev 1 críticas, luego sev 2, luego sev 3)
+  const ordered = alerts.filter(a => a._orderKey !== undefined).sort((a,b) => a._orderKey - b._orderKey);
+  const rest = alerts.filter(a => a._orderKey === undefined);
+  const sorted = [...ordered, ...rest.filter(a=>a.sev===1), ...rest.filter(a=>a.sev===2), ...rest.filter(a=>a.sev===3)].slice(0,12);
   el.innerHTML=`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-bottom:14px">
     ${sorted.map(a=>`
       <div style="background:${a.bg};border:1px solid ${a.bdr};border-left:3px solid ${a.color};border-radius:var(--rs);padding:11px 13px;display:flex;flex-direction:column;gap:5px">
@@ -8183,13 +8212,16 @@ function renderSEOTable(){
         vb = (db === Infinity) ? 999999 : db;
       }
       else if(seoState.sortCol==='seoPos'){
-        // v118: Sort por Termómetro SEO (0-100, mayor = mejor posicionamiento).
-        // Items sin métricas cargadas → score 999 (al final en DESC, al inicio en ASC).
-        // Para que sea intuitivo (mejor → peor en ASC), invertimos:
-        const ta = (window._seoThermo||{})[String(a.id)];
-        const tb = (window._seoThermo||{})[String(b.id)];
-        va = ta ? (100 - ta.score) : 999; // sin datos al final
-        vb = tb ? (100 - tb.score) : 999;
+        // v121: Sort por Ranking interno (Pos. N°).
+        // El ranking es mejor que el score crudo porque:
+        //  - Combina Termómetro (70%) + Probabilidad de Venta (30%)
+        //  - Asigna posiciones únicas (no hay empates)
+        //  - Solo cuenta publicaciones activas
+        // Items sin ranking (pausadas o sin métricas) → 999 (al final).
+        const ra = (window._seoRanking||{})[String(a.id)];
+        const rb = (window._seoRanking||{})[String(b.id)];
+        va = ra ? ra.rank : 999;
+        vb = rb ? rb.rank : 999;
       }
       else                               { va=qualityScore(a);             vb=qualityScore(b); }
       return seoState.sortDir*(vb-va);
@@ -8815,10 +8847,56 @@ function seoThermoRecalcAll(){
     localStorage.setItem(SEO_THERMO_CACHE_KEY, JSON.stringify({ ts: Date.now(), items: out }));
   } catch(e){}
   console.log('[SEOThermo] Recalculado para', Object.keys(out).length, 'items');
+  // v121: Calcular el Ranking Interno (combo 70/30 Termómetro + Hotness)
+  // sobre publicaciones ACTIVAS solamente. Esto da una "posición" relativa
+  // entre todas tus publicaciones que ayuda a saber cuáles son tus mejores
+  // performers vs cuáles necesitan trabajo.
+  _calcSeoRanking();
   // Re-renderizar la tabla SEO si está visible
   if(document.getElementById('section-seo')?.classList.contains('active') && typeof renderSEOTable === 'function'){
     renderSEOTable();
   }
+}
+
+// ── v121: Ranking interno de publicaciones ─────────────────────────────────
+// Calcula un score combinado (70% Termómetro + 30% Probabilidad de Venta)
+// para cada publicación ACTIVA, las ordena descendente, y asigna posición.
+// Almacena en window._seoRanking[itemId] = { rank, total, percentile, medal }
+function _calcSeoRanking(){
+  if(!Array.isArray(allItems)){ window._seoRanking = {}; return; }
+  // Solo publicaciones activas (pausadas no compiten en el ranking)
+  const active = allItems.filter(i => i.status === 'active');
+  // Calcular score combinado para cada una
+  const scored = [];
+  for(const item of active){
+    const id = String(item.id);
+    const t = (window._seoThermo||{})[id];
+    if(!t) continue; // sin métricas → no entra al ranking
+    let hotScore = 0;
+    try {
+      const h = seoHotnessScore(item);
+      if(h) hotScore = h.score;
+    } catch(e){}
+    // Combo 70/30 favor Termómetro
+    const combined = (t.score * 0.7) + (hotScore * 0.3);
+    scored.push({ id, combined });
+  }
+  // Ordenar descendente: mejor primero
+  scored.sort((a, b) => b.combined - a.combined);
+  // Asignar rank + percentil + medalla
+  const total = scored.length;
+  const ranking = {};
+  scored.forEach((s, idx) => {
+    const rank = idx + 1;
+    const percentile = total > 1 ? Math.round((1 - (idx / (total - 1))) * 100) : 100;
+    let medal = '';
+    if(percentile >= 95)      medal = '🥇'; // top 5%
+    else if(percentile >= 75) medal = '🥈'; // top 25%
+    else if(percentile >= 50) medal = '🥉'; // top 50%
+    ranking[s.id] = { rank, total, percentile, medal, combined: Math.round(s.combined) };
+  });
+  window._seoRanking = ranking;
+  console.log('[SEORanking] Calculado para', total, 'publicaciones activas');
 }
 
 // ── HTML de la celda del Termómetro ──
@@ -8828,21 +8906,39 @@ function _seoThermoCellHTML(itemId){
     // Sin datos aún: invitar a cargar métricas
     return '<button onclick="loadSEOMetrics()" style="background:transparent;border:1px dashed #d4d4d8;color:#71717a;font-size:10px;padding:5px 8px;border-radius:6px;cursor:pointer;line-height:1.2;font-family:inherit" title="Cargar visitas reales últimos 30 días para calcular el Termómetro SEO">📊 Cargar<br>métricas</button>';
   }
-  const { score, level, momentum } = data;
+  const { score, level } = data;
   const emoji = level === 'high' ? '🟢' : level === 'mid' ? '🟡' : '🔴';
   const scoreColor = level === 'high' ? '#166534' : level === 'mid' ? '#92400e' : '#991b1b';
 
-  // Flecha tendencia
+  // v121: Delta absoluto de visitas (no %).
+  // Más comprensible: "+14 visitas" > "+200%" cuando los números son chicos.
+  const m = (typeof itemMetrics !== 'undefined' && itemMetrics[String(itemId)]) ? itemMetrics[String(itemId)] : null;
+  const recent   = m?.visits || 0;
+  const previous = m?.visitsPrev || 0;
+  const deltaVisits = recent - previous;
+
+  // v121: Esquema de colores Verde/Rojo/Azul
+  //   Verde sube (positivo): #16a34a
+  //   Rojo  baja (negativo): #dc2626
+  //   Azul  neutral/estable: #2563eb (más vibrante que el gris anterior)
   let arrow, arrowLabel, arrowColor;
-  if(momentum >= 10){
-    arrow = '⬆️'; arrowLabel = '+'+momentum+'%'; arrowColor = '#16a34a';
-  } else if(momentum <= -10){
-    arrow = '⬇️'; arrowLabel = momentum+'%'; arrowColor = '#dc2626';
+  if(deltaVisits >= 3){
+    arrow = '⬆️';
+    arrowLabel = '+' + deltaVisits + ' visitas';
+    arrowColor = '#16a34a'; // verde
+  } else if(deltaVisits <= -3){
+    arrow = '⬇️';
+    arrowLabel = deltaVisits + ' visitas';
+    arrowColor = '#dc2626'; // rojo
   } else {
-    arrow = '➖'; arrowLabel = 'Estable'; arrowColor = '#71717a';
+    arrow = '➖';
+    // En zona estable, mostrar igual el delta exacto
+    const sign = deltaVisits >= 0 ? '+' : '';
+    arrowLabel = sign + deltaVisits + ' visitas';
+    arrowColor = '#2563eb'; // azul
   }
 
-  // v119: Probabilidad de Venta — 🔥 inline si es Hot Item
+  // v121: Probabilidad de Venta — 🔥 inline si es Hot Item
   let hotBadge = '';
   let hotTooltip = '';
   try {
@@ -8859,7 +8955,24 @@ function _seoThermoCellHTML(itemId){
     }
   } catch(e){}
 
+  // v121: Ranking interno arriba del score.
+  // Solo se muestra si el item está activo Y tiene ranking calculado.
+  // Items pausados o sin métricas no aparecen acá.
+  let rankRow = '';
+  const rk = (window._seoRanking||{})[String(itemId)];
+  if(rk){
+    const medalSpan = rk.medal ? '<span style="font-size:11px">'+rk.medal+'</span> ' : '';
+    // Color del rank según percentile
+    const rankColor = rk.percentile >= 95 ? '#b45309' :   // dorado top 5%
+                      rk.percentile >= 75 ? '#475569' :   // gris fuerte top 25%
+                      rk.percentile >= 50 ? '#7c2d12' :   // marrón top 50%
+                                            '#94a3b8';    // gris claro resto
+    rankRow = '<div style="font-size:9.5px;color:'+rankColor+';font-weight:700;margin-bottom:1px;line-height:1">'
+            + medalSpan + 'Pos. ' + rk.rank + '/' + rk.total + '</div>';
+  }
+
   return '<button onclick="seoThermoOpenModal(\''+itemId+'\')" style="background:transparent;border:none;cursor:pointer;font-family:inherit;padding:2px 4px;line-height:1.2;width:100%" title="Click para ver diagnóstico SEO completo'+hotTooltip+'">'
+    + rankRow
     + '<div style="font-size:13px;font-weight:700;color:'+scoreColor+'">'+hotBadge+emoji+' '+score+'</div>'
     + '<div style="font-size:10px;color:'+arrowColor+';margin-top:1px;font-weight:600">'+arrow+' '+arrowLabel+'</div>'
     + '</button>';
@@ -8906,6 +9019,25 @@ function seoThermoOpenModal(itemId){
 
   // Score grande
   html += '<div style="background:linear-gradient(135deg,#f8fafc,#f1f5f9);border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:14px;text-align:center">';
+  // v121: Ranking arriba del score (si el item está rankeado)
+  const _rk = (window._seoRanking||{})[String(itemId)];
+  if(_rk){
+    const _medal = _rk.medal ? _rk.medal + ' ' : '';
+    const _rankBg = _rk.percentile >= 95 ? '#fef3c7' :
+                    _rk.percentile >= 75 ? '#e2e8f0' :
+                    _rk.percentile >= 50 ? '#fed7aa' :
+                                           '#f1f5f9';
+    const _rankColor = _rk.percentile >= 95 ? '#b45309' :
+                       _rk.percentile >= 75 ? '#334155' :
+                       _rk.percentile >= 50 ? '#9a3412' :
+                                              '#64748b';
+    const _topLabel = _rk.percentile >= 95 ? 'Top 5%' :
+                      _rk.percentile >= 75 ? 'Top 25%' :
+                      _rk.percentile >= 50 ? 'Top 50%' :
+                                             'Bottom ' + (100 - _rk.percentile) + '%';
+    html += '<div style="display:inline-block;background:'+_rankBg+';color:'+_rankColor+';font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:12px;margin-bottom:9px">'
+         + _medal + 'Pos. ' + _rk.rank + '/' + _rk.total + ' (' + _topLabel + ')</div>';
+  }
   html += '<div style="font-size:34px;font-weight:800;color:'+scoreColor+'">'+emoji+' '+score+'<span style="font-size:18px;color:#94a3b8;font-weight:500">/100</span></div>';
   html += '<div style="font-size:12.5px;color:'+scoreColor+';font-weight:600;margin-top:3px">'+levelLabel+'</div>';
   html += '</div>';
