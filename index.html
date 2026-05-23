@@ -723,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v119 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v120 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1611,7 +1611,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     </div>
     <div class="tw">
       <table>
-        <thead><tr><th>#Orden</th><th>Producto</th><th>Comprador</th><th>Monto</th><th>Envío</th><th>Estado pago</th><th>Fecha y hora</th><th>ML</th></tr></thead>
+        <thead><tr><th>#Orden</th><th>Producto</th><th title="Termómetro SEO al momento de mostrar la tabla — útil para validar las predicciones del 🔥 contra las ventas reales. Si el item con 🔥 efectivamente vendió, la predicción acertó.">🌡️ SEO</th><th>Comprador</th><th>Monto</th><th>Envío</th><th>Estado pago</th><th>Fecha y hora</th><th>ML</th></tr></thead>
         <tbody id="orders-tbody"></tbody>
       </table>
     </div>
@@ -5445,14 +5445,97 @@ function renderSmartAlerts(){
   const paidPrev = ordersPrev.filter(o=>['paid','confirmed','delivered','shipped'].includes(o.status));
   const pend     = allQuestions.filter(q=>q.status==='UNANSWERED');
   const alerts = [];
-  if(paidPrev.length>0){
-    const delta = dashDelta(paid.length, paidPrev.length);
-    if(delta !== null && delta < -20)
-      alerts.push({icon:'📉',color:'#991b1b',bg:'#fef2f2',bdr:'#fecaca',
-        title:`Caída fuerte en ventas (${delta}%)`,
-        desc:`Ventas: ${paid.length} en ${curr.label} vs ${paidPrev.length} en ${prev.label}.`,
-        action:'Ver ventas ->',fn:"showSection('ventas')",sev:1});
+
+  // v120: Insights de ventas SIEMPRE visibles para 7/30/90 días.
+  // Antes solo aparecía cuando había caída fuerte (-20%). Ahora también muestra
+  // subas, estables, e incluye los 3 horizontes temporales para tener vista
+  // panorámica de la tendencia.
+  const _salesWindows = [
+    { days: 7,  label: '7 días'  },
+    { days: 30, label: '30 días' },
+    { days: 90, label: '90 días' },
+  ];
+  for(const w of _salesWindows){
+    const cur  = dashOrders(w.days);
+    const prv  = dashOrdersPrev(w.days);
+    const curPaid = cur.filter(o => ['paid','confirmed','delivered','shipped'].includes(o.status));
+    const prvPaid = prv.filter(o => ['paid','confirmed','delivered','shipped'].includes(o.status));
+    if(curPaid.length === 0 && prvPaid.length === 0) continue; // sin data en ambos lados
+    const curCount = curPaid.length;
+    const prvCount = prvPaid.length;
+
+    let icon, color, bg, bdr, title, desc, sev;
+    if(prvCount === 0){
+      // No había data anterior → solo informativo
+      if(curCount > 0){
+        icon = '📊'; color = '#1d4ed8'; bg = '#eff6ff'; bdr = '#bfdbfe';
+        title = 'Período inicial ' + w.label + ': ' + curCount + ' ventas';
+        desc  = 'No hay datos del período comparable anterior para sacar tendencia.';
+        sev = 3;
+      } else continue;
+    } else {
+      const delta = dashDelta(curCount, prvCount);
+      // Categorizar la variación
+      if(delta >= 25){
+        icon = '🚀'; color = '#15803d'; bg = '#f0fdf4'; bdr = '#bbf7d0';
+        title = 'Suba fuerte en ventas ' + w.label + ' (+' + delta + '%)';
+        sev = 2;
+      } else if(delta >= 8){
+        icon = '📈'; color = '#16a34a'; bg = '#f0fdf4'; bdr = '#bbf7d0';
+        title = 'Suba en ventas ' + w.label + ' (+' + delta + '%)';
+        sev = 2;
+      } else if(delta >= -7){
+        icon = '➖'; color = '#475569'; bg = '#f8fafc'; bdr = '#cbd5e1';
+        const sign = delta >= 0 ? '+' : '';
+        title = 'Ventas ' + w.label + ': estables (' + sign + delta + '%)';
+        sev = 3;
+      } else if(delta >= -24){
+        icon = '📉'; color = '#b45309'; bg = '#fffbeb'; bdr = '#fde68a';
+        title = 'Caída moderada en ventas ' + w.label + ' (' + delta + '%)';
+        sev = 2;
+      } else {
+        icon = '🚨'; color = '#991b1b'; bg = '#fef2f2'; bdr = '#fecaca';
+        title = 'Caída fuerte en ventas ' + w.label + ' (' + delta + '%)';
+        sev = 1;
+      }
+      desc = curCount + ' ventas en este período vs ' + prvCount + ' en el anterior.';
+    }
+    alerts.push({
+      icon, color, bg, bdr, title, desc,
+      action: 'Ver ventas →', fn: "showSection('ventas')",
+      sev,
+    });
   }
+  // (insight original de caída -20% removido — ya está incluido en el bloque de arriba)
+  // v120: Insight permanente de "🔥 Alta Probabilidad" — Hot Items predictivos.
+  // Aparece SOLO si hay items que cumplen el filtro (sino la card no es útil).
+  // Visual verde para que destaque como oportunidad, no como alerta negativa.
+  try {
+    if(typeof seoIsHotItem === 'function'){
+      const hotItems = allItems.filter(i => i.status === 'active' && seoIsHotItem(i));
+      if(hotItems.length > 0){
+        const imminentCount = hotItems.filter(i => {
+          const h = seoHotnessScore(i);
+          return h && h.isImminent;
+        }).length;
+        const subTitle = imminentCount > 0
+          ? imminentCount + ' con venta inminente 🔥🔥, ' + (hotItems.length - imminentCount) + ' Hot Items 🔥'
+          : hotItems.length + ' Hot Items con alta probabilidad de venta en próximas 72h';
+        alerts.push({
+          icon:  '🔥',
+          color: '#dc2626',
+          bg:    '#fff7ed',
+          bdr:   '#fed7aa',
+          title: hotItems.length + ' publicación' + (hotItems.length > 1 ? 'es' : '') + ' con alta probabilidad',
+          desc:  subTitle + '. NO toques precio ni listado — protegé el momentum.',
+          action: 'Ver publicaciones →',
+          fn:    "showSection('seo');setTimeout(()=>seoSetScenario('alta_probabilidad'),250)",
+          sev:   1,
+        });
+      }
+    }
+  } catch(e){ console.warn('[SmartAlerts] hot items insight failed:', e.message); }
+
   if(pend.length>=3)
     alerts.push({icon:'💬',color:'#78350f',bg:'#fffbeb',bdr:'#fde68a',
       title:`${pend.length} preguntas sin responder`,
@@ -5501,7 +5584,8 @@ function renderSmartAlerts(){
     if(card) alerts.push(card);
   });
   if(!alerts.length){el.innerHTML='';return;}
-  const sorted=[...alerts.filter(a=>a.sev===1),...alerts.filter(a=>a.sev===2)].slice(0,8);
+  // v120: límite subido de 8 → 12 para acomodar las nuevas tarjetas (3 ventas + Hot Items)
+  const sorted=[...alerts.filter(a=>a.sev===1),...alerts.filter(a=>a.sev===2),...alerts.filter(a=>a.sev===3)].slice(0,12);
   el.innerHTML=`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-bottom:14px">
     ${sorted.map(a=>`
       <div style="background:${a.bg};border:1px solid ${a.bdr};border-left:3px solid ${a.color};border-radius:var(--rs);padding:11px 13px;display:flex;flex-direction:column;gap:5px">
@@ -13255,7 +13339,7 @@ function renderVentasTable(){
 
   const tbody=document.getElementById('orders-tbody');
   if(!tbody)return;
-  if(!orders.length){tbody.innerHTML='<tr><td colspan="8" style="text-align:center;padding:22px;color:var(--text3)">Sin pedidos para mostrar</td></tr>';return;}
+  if(!orders.length){tbody.innerHTML='<tr><td colspan="9" style="text-align:center;padding:22px;color:var(--text3)">Sin pedidos para mostrar</td></tr>';return;}
   tbody.innerHTML=orders.map(o=>{
     const stateLabel=ORDER_STATES[o.status]||o.status||'—';
     const stateClass=o.status==='paid'||o.status==='delivered'||o.status==='confirmed'?'bg-green':o.status==='cancelled'?'bg-red':'bg-amber';
@@ -13269,6 +13353,10 @@ function renderVentasTable(){
     const productThumb = (localItem && localItem.thumbnail) || (orderItemId && _thumbCache[orderItemId]) || o.order_items?.[0]?.item?.thumbnail || '';
     const mlUrl='https://www.mercadolibre.com.ar/ventas/'+o.id+'/detalle';
     const ship=getShippingLabel(o);
+    // v120: Termómetro SEO de la publicación correspondiente (si tenemos data)
+    const thermoCell = (orderItemId && typeof _seoThermoCellHTML === 'function')
+      ? _seoThermoCellHTML(orderItemId)
+      : '<span style="font-size:10px;color:var(--text3)">—</span>';
     return `<tr>
       <td style="font-family:var(--mono);font-size:10.5px;color:var(--text3)">#${o.id}</td>
       <td style="max-width:180px">
@@ -13277,6 +13365,7 @@ function renderVentasTable(){
           <div style="overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-size:12px;line-height:1.35">${productTitle.slice(0,50)}</div>
         </div>
       </td>
+      <td style="text-align:center;padding:6px 4px;min-width:80px">${thermoCell}</td>
       <td style="font-size:12px">${o.buyer?.nickname||'—'}</td>
       <td style="font-weight:600">$${total.toLocaleString('es-AR')}</td>
       <td><span class="badge ${ship.cls}" style="white-space:nowrap">${ship.label}</span></td>
