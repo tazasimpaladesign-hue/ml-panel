@@ -723,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v123 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v124 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -893,6 +893,9 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <div class="mc-sub" id="d-qsub">Del período</div>
     </div>
   </div>
+
+  <!-- v124: Badge de reporte predictivo semanal -->
+  <div id="seo-pred-badge" class="mb" style="display:none"></div>
 
   <!-- ── Alertas inteligentes ── -->
   <div id="dash-smart-alerts" class="mb"></div>
@@ -3968,6 +3971,8 @@ async function initApp(){
   startPolling();
   // POLLING MENSAJES: verificar mensajes post-venta sin leer cada 90s
   startMessagePolling();
+  // v124: inicializar sistema predictivo (chequea si hay reporte semanal listo)
+  if(typeof predInit === 'function') predInit();
   // v97 [Tema 2]: POLLING WOO: chequear ventas nuevas en tu tienda web cada 5 min
   if(typeof startWooPolling === 'function') startWooPolling();
   // v103 [Tema 2]: pre-cargar cache de productos Woo en segundo plano para que
@@ -4099,6 +4104,8 @@ async function pollNewData(){
       // Telegram sigue activo (tgNotify) porque lo usa para notificaciones internas.
       // waTrigger('venta', { producto, precio: monto, comprador });
       tgNotify('venta', { producto, monto, comprador, thumbnail }, 'venta_'+o.id);
+      // v124: matchear con snapshot predictivo
+      if(typeof predOnNewOrder === 'function') predOnNewOrder(o);
     });
     // v90 [P2]: actualizar shipping de las frescas (sin notificación WhatsApp)
     await loadShippingStatuses(fresh.filter(o=>o.shipping?.id));
@@ -4501,6 +4508,8 @@ async function loadOrdersHistory(){
     if(document.getElementById('section-ventas')?.classList.contains('active'))renderVentasTable();
     // Guardar caché completo (historial 12 meses) para nueva pestaña
     _saveDataCache();
+    // v124: Disparar el match de órdenes con snapshots predictivos
+    if(typeof predOnOrdersLoaded === 'function') predOnOrdersLoaded();
   }catch(e){console.error('[loadOrdersHistory]',e);}
 }
 
@@ -8918,6 +8927,9 @@ function seoThermoRecalcAll(){
   // entre todas tus publicaciones que ayuda a saber cuáles son tus mejores
   // performers vs cuáles necesitan trabajo.
   _calcSeoRanking();
+  // v124: Tomar snapshot predictivo para validación posterior. Se ejecuta
+  // después del ranking para que tenga la posición disponible.
+  if(typeof predTakeSnapshot === 'function') predTakeSnapshot();
   // Re-renderizar la tabla SEO si está visible
   if(document.getElementById('section-seo')?.classList.contains('active') && typeof renderSEOTable === 'function'){
     renderSEOTable();
@@ -8963,6 +8975,466 @@ function _calcSeoRanking(){
   });
   window._seoRanking = ranking;
   console.log('[SEORanking] Calculado para', total, 'publicaciones activas');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v124: Sistema de logging predictivo + reporte semanal exportable
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// PROPÓSITO:
+// Validar científicamente si el Termómetro SEO + Probabilidad de Venta están
+// prediciendo bien. Sin esto el algoritmo es un acto de fe; con esto sabemos
+// la tasa de acierto real y podemos pedirle a una IA externa (Claude/Gemini)
+// que sugiera ajustes a los pesos.
+//
+// CÓMO FUNCIONA:
+// 1. Cada vez que se cargan métricas (loadSEOMetrics), se toma un snapshot
+//    del estado completo de cada item (posición ranking, scores, visitas,
+//    preguntas, stock, etc.).
+// 2. Cuando llega una venta nueva, se busca el snapshot más reciente de ese
+//    item dentro de los últimos 14 días y se registra como evento de match.
+// 3. Cada 7 días desde el primer snapshot, aparece un recordatorio en el
+//    dashboard ofreciendo descargar el reporte.
+// 4. El reporte es un .txt para pegarle a una IA externa con instrucciones
+//    embebidas de qué hacer con esos datos.
+//
+// PRESUPUESTO localStorage:
+// - 1 snapshot por item por día (máx ~220 items × ~1.5KB = ~330KB/día)
+// - Retención: últimos 30 días (~10MB con todos los items)
+// - Rotación inteligente: conservar 100% de items que vendieron, sample 20%
+//   del resto para no exceder cuota.
+
+const SEO_PRED_STORAGE = 'mlp_seo_predictions_v1';
+const SEO_PRED_SNAPSHOTS_KEY  = 'snapshots';   // { itemId: [ {ts, ...data} ] }
+const SEO_PRED_MATCHES_KEY    = 'matches';     // [ {orderId, itemId, snapshot, soldAt, ...} ]
+const SEO_PRED_LAST_REPORT    = 'lastReportTs';// timestamp del último reporte descargado
+const SEO_PRED_FIRSTRUN_KEY   = 'firstRunTs';  // primer snapshot guardado (para sabar el "edad" del sistema)
+const SEO_PRED_RETENTION_DAYS = 30;
+const SEO_PRED_REPORT_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
+const SEO_PRED_MATCH_WINDOW_DAYS = 14; // ventana hacia atrás para buscar snapshot al matchear venta
+
+// ── Cargar/guardar el store completo ──
+function _predLoad(){
+  try {
+    const raw = localStorage.getItem(SEO_PRED_STORAGE);
+    if(!raw) return { snapshots:{}, matches:[], lastReportTs:0, firstRunTs:0 };
+    const d = JSON.parse(raw);
+    return {
+      snapshots: d.snapshots || {},
+      matches:   d.matches   || [],
+      lastReportTs: d.lastReportTs || 0,
+      firstRunTs:   d.firstRunTs   || 0,
+    };
+  } catch(e){ return { snapshots:{}, matches:[], lastReportTs:0, firstRunTs:0 }; }
+}
+function _predSave(store){
+  try {
+    localStorage.setItem(SEO_PRED_STORAGE, JSON.stringify(store));
+    return true;
+  } catch(e){
+    // Cuota llena: hacer rotación más agresiva y reintentar
+    console.warn('[SEOPred] Cuota localStorage llena, rotando...');
+    _predRotate(store, 0.5); // conservar solo 50% del sample
+    try { localStorage.setItem(SEO_PRED_STORAGE, JSON.stringify(store)); return true; }
+    catch(e2){ console.error('[SEOPred] No se pudo guardar tras rotar:', e2); return false; }
+  }
+}
+
+// ── Rotación: limpiar snapshots viejos (>30d) + sample inteligente ──
+function _predRotate(store, sampleRate){
+  if(sampleRate === undefined) sampleRate = 0.2; // por default conservar 20% del sample
+  const cutoffMs = Date.now() - (SEO_PRED_RETENTION_DAYS * 86400000);
+  // Items que tuvieron venta en últimos 30d → conservar TODOS sus snapshots
+  const soldItemIds = new Set(
+    store.matches
+      .filter(m => m.soldAt && new Date(m.soldAt).getTime() > cutoffMs)
+      .map(m => m.itemId)
+  );
+  for(const itemId of Object.keys(store.snapshots)){
+    let snaps = store.snapshots[itemId] || [];
+    // 1. Sacar viejos
+    snaps = snaps.filter(s => s.ts > cutoffMs);
+    // 2. Si el item NO vendió, aplicar sampling
+    if(!soldItemIds.has(itemId) && snaps.length > 3){
+      // Conservar primero, último, y sample del resto
+      const first = snaps[0];
+      const last  = snaps[snaps.length-1];
+      const middle = snaps.slice(1, -1).filter(() => Math.random() < sampleRate);
+      snaps = [first, ...middle, last];
+    }
+    if(snaps.length === 0){
+      delete store.snapshots[itemId];
+    } else {
+      store.snapshots[itemId] = snaps;
+    }
+  }
+  // Limpiar matches viejos también
+  store.matches = store.matches.filter(m => {
+    const ms = m.soldAt ? new Date(m.soldAt).getTime() : 0;
+    return ms > cutoffMs;
+  });
+}
+
+// ── Tomar snapshot de todos los items con métricas cargadas ──
+function predTakeSnapshot(){
+  if(!Array.isArray(allItems)) return;
+  if(!window._seoThermo){ console.log('[SEOPred] sin Termómetro calculado, skip snapshot'); return; }
+  const store = _predLoad();
+  if(!store.firstRunTs) store.firstRunTs = Date.now();
+  const ts = Date.now();
+  let recorded = 0;
+  for(const item of allItems){
+    if(item.status !== 'active') continue;
+    const id = String(item.id);
+    const thermo = window._seoThermo[id];
+    if(!thermo) continue;
+    const rank = (window._seoRanking||{})[id];
+    let hot = null;
+    try { hot = seoHotnessScore(item); } catch(e){}
+    const m = (typeof itemMetrics !== 'undefined') ? itemMetrics[id] : null;
+    // Contar preguntas recientes 7d
+    let questions7d = 0;
+    try {
+      if(Array.isArray(allQuestions)){
+        const cutoff = ts - 7*86400000;
+        questions7d = allQuestions.filter(q =>
+          String(q.item_id) === id && q.date_created &&
+          new Date(q.date_created).getTime() > cutoff).length;
+      }
+    } catch(e){}
+    // Snapshot compacto (solo lo predictivo + identificación)
+    const snap = {
+      ts,
+      // Identificación
+      title: (item.title||'').slice(0, 60),
+      price: item.price || 0,
+      stock: item.available_quantity || 0,
+      // Predicción / scoring
+      thermoScore: thermo.score,
+      thermoLevel: thermo.level,
+      thermoMomentum: thermo.momentum,
+      hotScore: hot ? hot.score : null,
+      hotLevel: hot ? hot.level : 'normal',
+      isHot: hot ? (hot.isHot ? 1 : 0) : 0,
+      isImminent: hot ? (hot.isImminent ? 1 : 0) : 0,
+      rank: rank ? rank.rank : null,
+      totalRanked: rank ? rank.total : null,
+      // Datos de tráfico
+      visits7d: m?.visits || 0,
+      visitsPrev: m?.visitsPrev || 0,
+      visits30d: m?.visits30 || 0,
+      sales7d: m?.sales || 0,
+      sales60d: m?.sales60 || 0,
+      conv: m?.conv || 0,
+      // Engagement
+      questions7d,
+      // Health
+      healthScore: (typeof healthScore === 'function') ? healthScore(item) : null,
+    };
+    if(!store.snapshots[id]) store.snapshots[id] = [];
+    // Evitar duplicados: si ya hay un snapshot en las últimas 12 horas, reemplazar (no agregar)
+    const lastSnap = store.snapshots[id][store.snapshots[id].length - 1];
+    if(lastSnap && (ts - lastSnap.ts) < 12*60*60*1000){
+      store.snapshots[id][store.snapshots[id].length - 1] = snap;
+    } else {
+      store.snapshots[id].push(snap);
+    }
+    recorded++;
+  }
+  // Rotar antes de guardar
+  _predRotate(store);
+  // Intentar matchear ventas pendientes ahora que tenemos snapshot fresco
+  _predMatchOrders(store);
+  _predSave(store);
+  console.log('[SEOPred] Snapshot tomado para', recorded, 'items. Total snapshots:',
+    Object.values(store.snapshots).reduce((s,a) => s+a.length, 0));
+  // Avisar al usuario si el reporte está listo
+  _predUpdateReportBadge();
+}
+
+// ── Matchear órdenes con sus snapshots correspondientes ──
+function _predMatchOrders(store){
+  if(!Array.isArray(allOrders)) return;
+  const cutoffMs = Date.now() - (SEO_PRED_MATCH_WINDOW_DAYS * 86400000);
+  const matchedOrderIds = new Set(store.matches.map(m => String(m.orderId)));
+  for(const o of allOrders){
+    if(matchedOrderIds.has(String(o.id))) continue;
+    // Solo órdenes pagas o completadas
+    if(!['paid','confirmed','delivered','shipped'].includes(o.status)) continue;
+    const itemId = String(o.order_items?.[0]?.item?.id || '');
+    if(!itemId) continue;
+    const soldAt = o.date_created || o.date_closed;
+    if(!soldAt) continue;
+    const soldMs = new Date(soldAt).getTime();
+    if(soldMs < cutoffMs) continue; // demasiado vieja para matchear
+    // Buscar el snapshot más cercano ANTES de la venta
+    const snaps = store.snapshots[itemId] || [];
+    const validSnaps = snaps.filter(s => s.ts < soldMs);
+    if(validSnaps.length === 0) continue;
+    const closest = validSnaps[validSnaps.length - 1];
+    // Días entre snapshot y venta
+    const daysBetween = (soldMs - closest.ts) / 86400000;
+    if(daysBetween > SEO_PRED_MATCH_WINDOW_DAYS) continue;
+    store.matches.push({
+      orderId: String(o.id),
+      itemId: itemId,
+      soldAt: soldAt,
+      snapshotTs: closest.ts,
+      daysBetween: Math.round(daysBetween * 10) / 10,
+      unitsSold: (o.order_items||[]).reduce((s,i) => s + (i.quantity||0), 0),
+      totalAmount: o.total_amount || 0,
+      buyerProvince: o.shipping?.provincia || null,
+      snapshot: closest, // snapshot completo embebido para análisis
+    });
+  }
+}
+
+// ── Hook al cargar ventas: también dispara match ──
+function predOnOrdersLoaded(){
+  const store = _predLoad();
+  _predMatchOrders(store);
+  _predSave(store);
+  _predUpdateReportBadge();
+}
+
+// ── Hook a la llegada de una venta nueva (pollNewData) ──
+function predOnNewOrder(/* order */){
+  // Diferido para que allOrders esté actualizado
+  setTimeout(predOnOrdersLoaded, 1500);
+}
+
+// ── ¿El reporte semanal está listo para descargarse? ──
+function predIsReportDue(){
+  const store = _predLoad();
+  if(!store.firstRunTs) return false;
+  // Necesitamos al menos 7 días de data
+  const ageMs = Date.now() - store.firstRunTs;
+  if(ageMs < SEO_PRED_REPORT_INTERVAL_MS) return false;
+  // Y que no se haya descargado hace menos de 7 días
+  if(store.lastReportTs && (Date.now() - store.lastReportTs) < SEO_PRED_REPORT_INTERVAL_MS) return false;
+  return true;
+}
+
+// ── Actualizar badge en dashboard ──
+function _predUpdateReportBadge(){
+  const el = document.getElementById('seo-pred-badge');
+  if(!el) return;
+  if(predIsReportDue()){
+    const store = _predLoad();
+    const snapCount = Object.values(store.snapshots).reduce((s,a) => s+a.length, 0);
+    const matchCount = store.matches.length;
+    el.style.display = '';
+    el.innerHTML = '<div style="background:#fef3c7;border:1px solid #fde68a;border-left:4px solid #f59e0b;border-radius:8px;padding:12px 14px;display:flex;align-items:center;gap:12px">'
+      + '<span style="font-size:22px">📊</span>'
+      + '<div style="flex:1">'
+      +   '<div style="font-size:13px;font-weight:700;color:#92400e">Reporte predictivo listo</div>'
+      +   '<div style="font-size:11.5px;color:#78350f;margin-top:2px">Acumulamos '+matchCount+' ventas matcheadas con '+snapCount+' snapshots. Descargá el .txt y pegáselo a Claude/Gemini para que sugiera ajustes a la fórmula.</div>'
+      + '</div>'
+      + '<button onclick="predDownloadReport()" class="btn btn-sm" style="background:#f59e0b;color:#fff;border:none;font-weight:600">📥 Descargar</button>'
+      + '</div>';
+  } else {
+    el.style.display = 'none';
+  }
+}
+
+// ── Descargar el reporte como .txt ──
+function predDownloadReport(){
+  const store = _predLoad();
+  const txt = predBuildReport(store);
+  const blob = new Blob([txt], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const dateStr = new Date().toISOString().slice(0, 10);
+  a.download = 'reporte-predictivo-impala-' + dateStr + '.txt';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  // Marcar como descargado
+  store.lastReportTs = Date.now();
+  _predSave(store);
+  _predUpdateReportBadge();
+  if(typeof showToast === 'function') showToast('✓ Reporte descargado. Pegáselo a Claude/Gemini para sugerencias.', 'ok');
+}
+
+// ── Construir el reporte de texto plano ──
+function predBuildReport(store){
+  const now = Date.now();
+  const cutoff7d = now - 7*86400000;
+  // Matches en últimos 7 días
+  const recentMatches = store.matches.filter(m => new Date(m.soldAt).getTime() > cutoff7d);
+  // Stats:
+  //   ¿De los items que estaban "🔥 hot" (isHot=1) en el snapshot, cuántos vendieron?
+  //   ¿De los que NO estaban hot, cuántos vendieron?
+  const hotMatches = recentMatches.filter(m => m.snapshot.isHot === 1);
+  const imminentMatches = recentMatches.filter(m => m.snapshot.isImminent === 1);
+  const nonHotMatches = recentMatches.filter(m => m.snapshot.isHot === 0);
+  // Estimar el universo de items "🔥" actuales para tasa
+  const allHotItems = (allItems||[]).filter(i => {
+    try { const h = seoHotnessScore(i); return h && h.isHot; } catch{ return false; }
+  });
+  const allActive = (allItems||[]).filter(i => i.status === 'active');
+  const totalHot = allHotItems.length;
+  const totalNonHot = allActive.length - totalHot;
+  // Conteo de items únicos en cada bucket (no de matches, porque un item puede vender varias veces)
+  const uniqueHotSold = new Set(hotMatches.map(m => m.itemId)).size;
+  const uniqueNonHotSold = new Set(nonHotMatches.map(m => m.itemId)).size;
+  const hotConversionRate = totalHot > 0 ? (uniqueHotSold / totalHot * 100).toFixed(1) : '0.0';
+  const nonHotConversionRate = totalNonHot > 0 ? (uniqueNonHotSold / totalNonHot * 100).toFixed(1) : '0.0';
+  const liftRatio = parseFloat(nonHotConversionRate) > 0
+    ? (parseFloat(hotConversionRate) / parseFloat(nonHotConversionRate)).toFixed(1)
+    : 'N/A';
+
+  // Top false positives: items hot que NO vendieron
+  const nonSoldItemIds = new Set();
+  for(const item of allHotItems){
+    const id = String(item.id);
+    const sold = recentMatches.some(m => m.itemId === id);
+    if(!sold) nonSoldItemIds.add(id);
+  }
+  const falsePositives = [];
+  for(const id of nonSoldItemIds){
+    const snaps = store.snapshots[id] || [];
+    if(snaps.length === 0) continue;
+    const lastSnap = snaps[snaps.length - 1];
+    if(!lastSnap.isHot) continue;
+    falsePositives.push({ id, snap: lastSnap });
+  }
+  falsePositives.sort((a,b) => (b.snap.hotScore||0) - (a.snap.hotScore||0));
+
+  // Top false negatives: items que vendieron SIN 🔥
+  const falseNegatives = nonHotMatches.slice().sort((a,b) =>
+    (b.unitsSold||0) - (a.unitsSold||0)
+  );
+
+  // Top aciertos: hot que vendieron mucho
+  const truePositives = hotMatches.slice().sort((a,b) =>
+    (b.unitsSold||0) - (a.unitsSold||0)
+  );
+
+  // Build output
+  let out = '';
+  out += '═══════════════════════════════════════════════════════════════════════════\n';
+  out += '  REPORTE PREDICTIVO — TIENDA IMPALA DESIGN\n';
+  out += '  Generado: ' + new Date().toLocaleString('es-AR') + '\n';
+  out += '  Ventana de análisis: últimos 7 días\n';
+  out += '═══════════════════════════════════════════════════════════════════════════\n\n';
+
+  out += 'INSTRUCCIONES PARA LA IA (Claude / Gemini / ChatGPT):\n';
+  out += '─────────────────────────────────────────────────────\n';
+  out += 'Sos un analista experto en e-commerce de MercadoLibre Argentina.\n';
+  out += 'Este reporte mide la performance del modelo predictivo "Probabilidad de\n';
+  out += 'Venta" del panel de gestión de la tienda. El modelo marca publicaciones\n';
+  out += 'con 🔥 cuando estima alta probabilidad de venta en próximas 48-72h.\n\n';
+  out += 'TU TAREA:\n';
+  out += '1. Analizá si el modelo está acertando (compará "tasa hot" vs "tasa no-hot").\n';
+  out += '2. Identificá patrones en los FALSE POSITIVES (items 🔥 que no vendieron):\n';
+  out += '   ¿qué tenían en común? ¿exceso de peso a algún factor?\n';
+  out += '3. Identificá patrones en los FALSE NEGATIVES (items que vendieron sin 🔥):\n';
+  out += '   ¿qué factor no estaba siendo considerado lo suficiente?\n';
+  out += '4. Sugerí ajustes concretos a la fórmula. Los pesos actuales son:\n';
+  out += '     40% Momentum acelerado (visits/visitsPrev > 1.3)\n';
+  out += '     25% Conversion histórica validada (sales60≥2, conv≥1.5%)\n';
+  out += '     15% Preguntas recientes 7d sin responder\n';
+  out += '     10% Stock disponible\n';
+  out += '     10% Velocidad reciente (sales 7d > 0)\n';
+  out += '   Threshold para 🔥: score ≥ 60. Para 🔥🔥 (inminente): visits≥40,\n';
+  out += '   conv hist≥1.8%, sales7=0, stock>0.\n';
+  out += '5. Devolveme una propuesta de pesos nuevos en formato JSON, sin código,\n';
+  out += '   con justificación breve de cada cambio.\n\n';
+
+  out += '═══════════════════════════════════════════════════════════════════════════\n';
+  out += '  RESUMEN ESTADÍSTICO\n';
+  out += '═══════════════════════════════════════════════════════════════════════════\n\n';
+  out += 'Publicaciones activas analizadas: ' + allActive.length + '\n';
+  out += 'Publicaciones marcadas 🔥 al momento del reporte: ' + totalHot + '\n';
+  out += 'Ventas registradas en los últimos 7 días: ' + recentMatches.length + '\n';
+  out += '  - Con 🔥 al momento del snapshot: ' + hotMatches.length + ' (de ' + uniqueHotSold + ' items únicos)\n';
+  out += '  - Con 🔥🔥 (inminente): ' + imminentMatches.length + '\n';
+  out += '  - SIN 🔥: ' + nonHotMatches.length + ' (de ' + uniqueNonHotSold + ' items únicos)\n\n';
+  out += 'TASA DE CONVERSIÓN POR GRUPO:\n';
+  out += '  - Items con 🔥: ' + hotConversionRate + '% vendió en 7d\n';
+  out += '  - Items sin 🔥: ' + nonHotConversionRate + '% vendió en 7d\n';
+  out += '  - Lift (acierto del modelo): ' + liftRatio + 'x mejor que el azar\n';
+  out += '    (un lift de 3x o más indica que el modelo funciona bien)\n\n';
+
+  // Top aciertos
+  out += '═══════════════════════════════════════════════════════════════════════════\n';
+  out += '  TOP 10 ACIERTOS (items con 🔥 que vendieron)\n';
+  out += '═══════════════════════════════════════════════════════════════════════════\n\n';
+  if(truePositives.length === 0){
+    out += '(sin aciertos en los últimos 7 días)\n\n';
+  } else {
+    truePositives.slice(0, 10).forEach((m, i) => {
+      out += (i+1) + '. ' + m.itemId + ' — ' + m.snapshot.title + '\n';
+      out += '   Vendió ' + m.unitsSold + ' unid (' + (m.daysBetween) + 'd después del snap)\n';
+      out += '   Snapshot: pos=' + m.snapshot.rank + '/' + m.snapshot.totalRanked
+          + ' termo=' + m.snapshot.thermoScore + ' hot=' + m.snapshot.hotScore
+          + (m.snapshot.isImminent ? ' 🔥🔥' : ' 🔥') + '\n';
+      out += '   Tráfico: visits7d=' + m.snapshot.visits7d + ' prev=' + m.snapshot.visitsPrev
+          + ' conv=' + m.snapshot.conv.toFixed(2) + '%'
+          + ' sales60d=' + m.snapshot.sales60d
+          + ' preguntas7d=' + m.snapshot.questions7d
+          + ' stock=' + m.snapshot.stock + '\n\n';
+    });
+  }
+
+  // False negatives
+  out += '═══════════════════════════════════════════════════════════════════════════\n';
+  out += '  TOP 10 FALSE NEGATIVES (vendieron SIN 🔥 — el modelo perdió)\n';
+  out += '═══════════════════════════════════════════════════════════════════════════\n\n';
+  if(falseNegatives.length === 0){
+    out += '(no hubo ventas de items sin 🔥 — modelo perfecto, sospechar muestra chica)\n\n';
+  } else {
+    falseNegatives.slice(0, 10).forEach((m, i) => {
+      out += (i+1) + '. ' + m.itemId + ' — ' + m.snapshot.title + '\n';
+      out += '   Vendió ' + m.unitsSold + ' unid (' + (m.daysBetween) + 'd después del snap)\n';
+      out += '   Snapshot: pos=' + m.snapshot.rank + '/' + m.snapshot.totalRanked
+          + ' termo=' + m.snapshot.thermoScore + ' hot=' + m.snapshot.hotScore + ' (NO hot)\n';
+      out += '   Tráfico: visits7d=' + m.snapshot.visits7d + ' prev=' + m.snapshot.visitsPrev
+          + ' conv=' + m.snapshot.conv.toFixed(2) + '%'
+          + ' sales60d=' + m.snapshot.sales60d
+          + ' preguntas7d=' + m.snapshot.questions7d
+          + ' stock=' + m.snapshot.stock + '\n\n';
+    });
+  }
+
+  // False positives
+  out += '═══════════════════════════════════════════════════════════════════════════\n';
+  out += '  TOP 10 FALSE POSITIVES (marcados 🔥 pero NO vendieron en 7d)\n';
+  out += '═══════════════════════════════════════════════════════════════════════════\n\n';
+  if(falsePositives.length === 0){
+    out += '(todos los items 🔥 vendieron — sospechar muestra chica o filtro estricto)\n\n';
+  } else {
+    falsePositives.slice(0, 10).forEach((fp, i) => {
+      out += (i+1) + '. ' + fp.id + ' — ' + fp.snap.title + '\n';
+      out += '   Score hot=' + fp.snap.hotScore + ' termo=' + fp.snap.thermoScore
+          + ' pos=' + fp.snap.rank + '/' + fp.snap.totalRanked + '\n';
+      out += '   Tráfico: visits7d=' + fp.snap.visits7d + ' prev=' + fp.snap.visitsPrev
+          + ' conv=' + fp.snap.conv.toFixed(2) + '%'
+          + ' sales60d=' + fp.snap.sales60d
+          + ' preguntas7d=' + fp.snap.questions7d
+          + ' stock=' + fp.snap.stock + '\n\n';
+    });
+  }
+
+  // Footer
+  out += '═══════════════════════════════════════════════════════════════════════════\n';
+  out += '  CIERRE\n';
+  out += '═══════════════════════════════════════════════════════════════════════════\n\n';
+  out += 'Snapshots totales en sistema: ' + Object.values(store.snapshots).reduce((s,a) => s+a.length, 0) + '\n';
+  out += 'Items con snapshots: ' + Object.keys(store.snapshots).length + '\n';
+  out += 'Edad del sistema: ' + Math.round((now - store.firstRunTs) / 86400000) + ' días\n';
+  out += 'Próximo reporte disponible: ' + new Date(now + SEO_PRED_REPORT_INTERVAL_MS).toLocaleDateString('es-AR') + '\n';
+  return out;
+}
+
+// ── Hook periódico al abrir el panel: actualizar badge ──
+// (la función se invoca también desde initApp después de cargar items/ventas)
+function predInit(){
+  // Verifica si hay reporte pendiente cada vez que se abra el panel
+  setTimeout(_predUpdateReportBadge, 3000);
 }
 
 // ── HTML de la celda del Termómetro ──
