@@ -723,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v124 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v125 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -893,6 +893,9 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <div class="mc-sub" id="d-qsub">Del período</div>
     </div>
   </div>
+
+  <!-- v125: Radar de Aciertos — widget de gamificación -->
+  <div id="seo-pred-radar" class="mb" style="display:none"></div>
 
   <!-- v124: Badge de reporte predictivo semanal -->
   <div id="seo-pred-badge" class="mb" style="display:none"></div>
@@ -4262,7 +4265,7 @@ async function _pollPendingShipments(){
 // v93 [P5]: detector de versión del Worker. Si el Worker está desactualizado (no v55+),
 // significa que el header `x-format-new: true` no está siendo aplicado y el bug de
 // envíos sigue activo. Mostramos un banner amarillo al usuario.
-const _MIN_WORKER_VERSION = 76; // v119: cron 15min + heartbeat skip + /api/heartbeat
+const _MIN_WORKER_VERSION = 77; // v125: requiere /api/predictive-sync
 async function _checkWorkerVersion(){
   try {
     const r = await fetch(WORKER + '/');
@@ -4572,13 +4575,11 @@ async function loadShippingStatuses(orders){  const toCheck=(orders||[]).filter(
       o.shipping.substatus = cached.substatus || o.shipping.substatus;
       // v122: restaurar provincia desde cache si está disponible
       if(cached.provincia) o.shipping.provincia = cached.provincia;
-      // v123 FIX: si el cache es viejo (de v122 o anterior) y NO tiene
-      // provincia, lo re-fetcheamos para enriquecer. Solo si el shipment
-      // es "delivered/shipped/ready_to_ship" (los pending no tienen address
-      // poblada todavía).
-      if(!cached.provincia && cached.status && ['delivered','shipped','ready_to_ship','handling'].includes(cached.status)){
+      // v123/v125 FIX: si el cache es viejo y NO tiene provincia, lo re-fetcheamos.
+      // v125: ampliado para incluir TODOS los estados (antes excluía pending/printed/
+      // cancelled, que son los que más le importan al usuario para análisis geográfico).
+      if(!cached.provincia && cached.status){
         toLoad.push(o);
-        // NO marcar _statusLoaded para que el fetch lo procese
       } else {
         o.shipping._statusLoaded = true;
         cachedHits++;
@@ -9150,6 +9151,11 @@ function predTakeSnapshot(){
     Object.values(store.snapshots).reduce((s,a) => s+a.length, 0));
   // Avisar al usuario si el reporte está listo
   _predUpdateReportBadge();
+  // v125: dispara upload diferido al KV (con cooldown 12h, así máx 2 writes/día)
+  // Diferimos 30 seg para no bloquear el render principal.
+  setTimeout(() => {
+    if(typeof predSyncUpload === 'function') predSyncUpload(false);
+  }, 30000);
 }
 
 // ── Matchear órdenes con sus snapshots correspondientes ──
@@ -9217,6 +9223,8 @@ function predIsReportDue(){
 
 // ── Actualizar badge en dashboard ──
 function _predUpdateReportBadge(){
+  // v125: también actualizar el radar de aciertos
+  if(typeof renderRadarAciertos === 'function') renderRadarAciertos();
   const el = document.getElementById('seo-pred-badge');
   if(!el) return;
   if(predIsReportDue()){
@@ -9433,8 +9441,243 @@ function predBuildReport(store){
 // ── Hook periódico al abrir el panel: actualizar badge ──
 // (la función se invoca también desde initApp después de cargar items/ventas)
 function predInit(){
-  // Verifica si hay reporte pendiente cada vez que se abra el panel
-  setTimeout(_predUpdateReportBadge, 3000);
+  // v125: primero bajamos data desde KV (cross-PC) ANTES de mostrar el badge
+  // así si una PC subió data ayer, esta PC la ve hoy. Si hay error de red,
+  // el panel sigue funcionando con localStorage local.
+  setTimeout(async () => {
+    await predSyncDownload(); // bajar la versión maestra (merge silencioso)
+    _predUpdateReportBadge();
+  }, 3000);
+}
+
+// ── v125: Radar de Aciertos — stats + widget visual ─────────────────────
+//
+// Calcula True Positives (🔥 que vendieron) y False Positives (🔥 que no
+// vendieron) sobre la ventana de los últimos 7 días. Se renderiza arriba
+// del dashboard como widget de gamificación.
+
+function _predGetRadarStats(){
+  const store = _predLoad();
+  const now = Date.now();
+  const cutoffMs = now - 7*86400000;
+  const recentMatches = store.matches.filter(m => new Date(m.soldAt).getTime() > cutoffMs);
+  // TPs: matches donde el snapshot tenía isHot=1 (items únicos)
+  const tps = recentMatches.filter(m => m.snapshot?.isHot === 1);
+  const uniqueHotSold = new Set(tps.map(m => m.itemId));
+  // FPs: items que estaban marcados 🔥 en snapshot reciente PERO no vendieron
+  const recentHotItemIds = new Set();
+  for(const itemId of Object.keys(store.snapshots)){
+    const snaps = store.snapshots[itemId] || [];
+    const recentSnap = snaps.filter(s => s.ts > cutoffMs).pop();
+    if(recentSnap && recentSnap.isHot === 1) recentHotItemIds.add(itemId);
+  }
+  const fpIds = [...recentHotItemIds].filter(id => !uniqueHotSold.has(id));
+  // FN: items que vendieron SIN estar marcados 🔥
+  const fns = recentMatches.filter(m => m.snapshot?.isHot === 0);
+  const total = uniqueHotSold.size + fpIds.length;
+  const effectiveness = total > 0 ? Math.round((uniqueHotSold.size / total) * 100) : null;
+  return {
+    tp: uniqueHotSold.size,
+    fp: fpIds.length,
+    fn: new Set(fns.map(m => m.itemId)).size,
+    totalHotItems: total,
+    totalMatches: recentMatches.length,
+    effectiveness,
+  };
+}
+
+function _predRadarMessage(stats){
+  if(stats.totalHotItems === 0){
+    return { text: 'Sin items 🔥 esta semana — el algoritmo está esperando datos.', tone: 'neutral' };
+  }
+  if(stats.totalHotItems < 5){
+    return { text: 'Muestra chica — necesitamos más data para evaluar bien.', tone: 'neutral' };
+  }
+  const e = stats.effectiveness;
+  if(e === null) return { text: 'Calculando…', tone: 'neutral' };
+  if(e >= 80) return { text: '🚀 ¡El algoritmo está on fire! Los pronósticos clavan.', tone: 'great' };
+  if(e >= 60) return { text: '✨ Excelente performance — el modelo predice bien.', tone: 'good' };
+  if(e >= 40) return { text: '📊 Performance aceptable — hay margen para afinar.', tone: 'mid' };
+  if(e >= 20) return { text: '⚠ El algoritmo está pifiando — descargá el reporte y afinemos los pesos.', tone: 'low' };
+  return { text: '🔴 El modelo no está prediciendo bien — revisemos urgente la fórmula.', tone: 'critical' };
+}
+
+function renderRadarAciertos(){
+  const el = document.getElementById('seo-pred-radar');
+  if(!el) return;
+  const stats = _predGetRadarStats();
+  if(stats.totalHotItems === 0 && stats.totalMatches === 0){
+    el.style.display = 'none';
+    return;
+  }
+  el.style.display = '';
+  const msg = _predRadarMessage(stats);
+  const toneColors = {
+    great:    { bg: '#dcfce7', bdr: '#86efac', txt: '#14532d', accent: '#16a34a' },
+    good:     { bg: '#f0fdf4', bdr: '#bbf7d0', txt: '#15803d', accent: '#22c55e' },
+    mid:      { bg: '#fefce8', bdr: '#fde68a', txt: '#854d0e', accent: '#eab308' },
+    low:      { bg: '#fff7ed', bdr: '#fed7aa', txt: '#9a3412', accent: '#f97316' },
+    critical: { bg: '#fef2f2', bdr: '#fecaca', txt: '#991b1b', accent: '#dc2626' },
+    neutral:  { bg: '#f1f5f9', bdr: '#cbd5e1', txt: '#334155', accent: '#64748b' },
+  };
+  const c = toneColors[msg.tone] || toneColors.neutral;
+  const effLabel = stats.effectiveness === null ? '—' : stats.effectiveness + '%';
+  const effColor = stats.effectiveness === null ? '#94a3b8' :
+                   stats.effectiveness >= 60 ? '#16a34a' :
+                   stats.effectiveness >= 40 ? '#eab308' :
+                                               '#dc2626';
+
+  el.innerHTML = '<div style="background:'+c.bg+';border:1px solid '+c.bdr+';border-left:4px solid '+c.accent+';border-radius:8px;padding:12px 14px">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px">'
+    +   '<div style="font-size:13px;font-weight:700;color:'+c.txt+'">📡 Radar de Aciertos — últimos 7 días</div>'
+    +   '<button onclick="renderRadarAciertos();if(typeof showToast===\'function\')showToast(\'Radar actualizado\',\'ok\')" style="background:transparent;border:1px solid '+c.bdr+';color:'+c.txt+';font-size:10.5px;padding:3px 8px;border-radius:5px;cursor:pointer">↻ Refrescar</button>'
+    + '</div>'
+    + '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:8px">'
+    +   '<div style="display:flex;align-items:center;gap:6px">'
+    +     '<span style="font-size:18px">🎯</span>'
+    +     '<div><div style="font-size:18px;font-weight:800;color:#16a34a;line-height:1">'+stats.tp+'</div>'
+    +     '<div style="font-size:10px;color:'+c.txt+';line-height:1.2;margin-top:1px">Aciertos<br>(🔥 vendió)</div></div>'
+    +   '</div>'
+    +   '<div style="display:flex;align-items:center;gap:6px">'
+    +     '<span style="font-size:18px">🔴</span>'
+    +     '<div><div style="font-size:18px;font-weight:800;color:#dc2626;line-height:1">'+stats.fp+'</div>'
+    +     '<div style="font-size:10px;color:'+c.txt+';line-height:1.2;margin-top:1px">Fallos<br>(🔥 no vendió)</div></div>'
+    +   '</div>'
+    +   '<div style="display:flex;align-items:center;gap:6px">'
+    +     '<span style="font-size:18px">🏆</span>'
+    +     '<div><div style="font-size:18px;font-weight:800;color:'+effColor+';line-height:1">'+effLabel+'</div>'
+    +     '<div style="font-size:10px;color:'+c.txt+';line-height:1.2;margin-top:1px">Efectividad<br>del algoritmo</div></div>'
+    +   '</div>'
+    +   (stats.fn > 0
+      ? '<div style="display:flex;align-items:center;gap:6px;margin-left:auto">'
+      +   '<span style="font-size:14px;opacity:.7">📊</span>'
+      +   '<div><div style="font-size:13px;font-weight:700;color:'+c.txt+';line-height:1">'+stats.fn+'</div>'
+      +   '<div style="font-size:9.5px;color:'+c.txt+';line-height:1.2;margin-top:1px;opacity:.75">Ventas sin 🔥</div></div>'
+      + '</div>'
+      : '')
+    + '</div>'
+    + '<div style="font-size:11.5px;color:'+c.txt+';line-height:1.4;font-weight:500">'+msg.text+'</div>'
+    + '</div>';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v125: Sincronización cross-PC del sistema predictivo
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// PROBLEMA QUE RESUELVE:
+// El sistema predictivo (v124) guarda snapshots en localStorage. Si Cristian
+// usa el panel en 2 PCs (casa + oficina), cada una tiene su propio historial
+// parcial → el reporte semanal sale incompleto.
+//
+// CÓMO FUNCIONA:
+// 1. Al abrir el panel → predSyncDownload() trae el "estado maestro" de KV
+//    y MERGEA con el localStorage local. Si KV tiene snapshots/matches que
+//    no estaban acá, se agregan al storage local.
+// 2. Después de tomar un snapshot nuevo → si pasaron >12h desde el último
+//    upload, dispara predSyncUpload() automático (en background).
+// 3. El usuario puede forzar un sync desde un botón.
+//
+// COSTO KV:
+// - 1 read/abrir-panel (con cache de edge de Cloudflare)
+// - 1 write/12hs = máx 2 writes/día por PC = ~60/mes (despreciable)
+
+const SEO_PRED_LAST_UPLOAD_KEY = 'mlp_seo_pred_last_upload';
+const SEO_PRED_UPLOAD_COOLDOWN_MS = 12 * 60 * 60 * 1000; // 12 hs
+
+// Lock: evita uploads/downloads concurrentes (ej: si el usuario abre dos pestañas)
+let _predSyncBusy = false;
+
+// ── Descargar la versión maestra de KV y mergear con localStorage local ──
+async function predSyncDownload(){
+  if(_predSyncBusy) return;
+  if(!token) return;
+  _predSyncBusy = true;
+  try {
+    const r = await fetch(WORKER+'/api/predictive-sync', {
+      headers: { 'Authorization': 'Bearer '+token },
+    });
+    if(!r.ok){
+      console.warn('[PredSync] download HTTP '+r.status);
+      return;
+    }
+    const remote = await r.json();
+    if(!remote || typeof remote !== 'object') return;
+    // Mergear con local
+    const local = _predLoad();
+    const merged = _predMerge(local, remote);
+    _predSave(merged);
+    const totalSnaps = Object.values(merged.snapshots).reduce((s,a)=>s+a.length, 0);
+    console.log('[PredSync] ↓ Download OK: ' + totalSnaps + ' snapshots, ' + merged.matches.length + ' matches');
+  } catch(e){
+    console.warn('[PredSync] download error:', e.message);
+  } finally {
+    _predSyncBusy = false;
+  }
+}
+
+// ── Subir el localStorage local a KV (con merge del Worker) ──
+async function predSyncUpload(force){
+  if(_predSyncBusy) return false;
+  if(!token) return false;
+  // Cooldown: solo subir si pasaron >12h del último upload
+  if(!force){
+    const last = parseInt(localStorage.getItem(SEO_PRED_LAST_UPLOAD_KEY) || '0', 10);
+    if(Date.now() - last < SEO_PRED_UPLOAD_COOLDOWN_MS) return false;
+  }
+  _predSyncBusy = true;
+  try {
+    const local = _predLoad();
+    const r = await fetch(WORKER+'/api/predictive-sync', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer '+token, 'Content-Type': 'application/json' },
+      body: JSON.stringify(local),
+      keepalive: true,
+    });
+    if(!r.ok){
+      console.warn('[PredSync] upload HTTP '+r.status);
+      return false;
+    }
+    const result = await r.json();
+    if(result?.ok){
+      // Guardar el resultado mergeado del Worker (puede tener data nueva de otra PC)
+      if(result.merged) _predSave(result.merged);
+      localStorage.setItem(SEO_PRED_LAST_UPLOAD_KEY, String(Date.now()));
+      console.log('[PredSync] ↑ Upload OK:', result.stats);
+      return true;
+    }
+    return false;
+  } catch(e){
+    console.warn('[PredSync] upload error:', e.message);
+    return false;
+  } finally {
+    _predSyncBusy = false;
+  }
+}
+
+// ── Merge de 2 stores predictivos (local + remoto) ──
+// Lógica espejo de la del Worker para que el merge sea idempotente.
+function _predMerge(a, b){
+  // Snapshots: union por (itemId, ts)
+  const merged = { ...(a.snapshots || {}) };
+  for(const itemId of Object.keys(b.snapshots || {})){
+    const aSnaps = merged[itemId] || [];
+    const bSnaps = b.snapshots[itemId] || [];
+    const byTs = new Map(aSnaps.map(s => [s.ts, s]));
+    for(const bs of bSnaps) byTs.set(bs.ts, bs);
+    merged[itemId] = [...byTs.values()].sort((x, y) => x.ts - y.ts);
+  }
+  // Matches: union por orderId
+  const matchMap = new Map((a.matches || []).map(m => [String(m.orderId), m]));
+  for(const m of (b.matches || [])) matchMap.set(String(m.orderId), m);
+  const mergedMatches = [...matchMap.values()].sort((x, y) =>
+    new Date(x.soldAt).getTime() - new Date(y.soldAt).getTime()
+  );
+  return {
+    snapshots: merged,
+    matches: mergedMatches,
+    firstRunTs: Math.min(a.firstRunTs || Date.now(), b.firstRunTs || Date.now()),
+    lastReportTs: Math.max(a.lastReportTs || 0, b.lastReportTs || 0),
+  };
 }
 
 // ── HTML de la celda del Termómetro ──
@@ -14012,16 +14255,34 @@ function renderVentasTable(){
     const thermoCell = (orderItemId && typeof _seoThermoCellHTML === 'function')
       ? _seoThermoCellHTML(orderItemId)
       : '<span style="font-size:10px;color:var(--text3)">—</span>';
-    // v122/v123: Provincia — buscar en múltiples ubicaciones del objeto order.
-    // Algunos shipments ya tienen el dato en o.shipping.receiver_address sin
-    // necesidad de fetch a /shipments. Otros lo dejan en o.buyer.billing_info.
-    const provincia =
+    // v122/v123/v125: Provincia — fallbacks múltiples.
+    // Las órdenes en estado IMPRIMIR/CANCELADO/HANDLING suelen tener el shipment
+    // SIN receiver_address poblado (ML restringe el acceso). Probamos:
+    //   1. shipping.provincia (cargado por loadShippingStatuses)
+    //   2. shipping.receiver_address.state.name (algunas órdenes)
+    //   3. shipping.receiver_address.state.id → map (cuando solo viene el ID)
+    //   4. shipping.destination.* (variantes que ML cambió)
+    //   5. buyer.billing_info.state.* (factura del comprador — funciona en CANCELADO)
+    //   6. order_items[0].item.seller_custom_field si guardás provincia ahí (no aplica)
+    //   7. Último recurso: payments[0] que a veces tiene billing_address
+    let provincia =
          o.shipping?.provincia
       || o.shipping?.receiver_address?.state?.name
-      || o.shipping?.receiver_address?.state?.id && _seoProvinciaFromStateId(o.shipping.receiver_address.state.id)
+      || (o.shipping?.receiver_address?.state?.id && _seoProvinciaFromStateId(o.shipping.receiver_address.state.id))
       || o.shipping?.destination?.state?.name
+      || (o.shipping?.destination?.state?.id && _seoProvinciaFromStateId(o.shipping.destination.state.id))
       || o.buyer?.billing_info?.state?.name
-      || '—';
+      || (o.buyer?.billing_info?.state?.id && _seoProvinciaFromStateId(o.buyer.billing_info.state.id))
+      || o.payments?.[0]?.payer_id?.state?.name
+      || null;
+    // Si está cancelada/imprimir y no tenemos data, mostramos texto explicativo
+    if(!provincia){
+      provincia = (o.status === 'cancelled')
+        ? '<span style="color:var(--text3);font-size:10px" title="Orden cancelada — provincia no disponible">cancelada</span>'
+        : (o.shipping?.id && !o.shipping?._statusLoaded)
+          ? '<span style="color:var(--text3);font-size:10px" title="Cargando datos de envío...">⏳</span>'
+          : '—';
+    }
     return `<tr>
       <td style="font-family:var(--mono);font-size:10.5px;color:var(--text3)">#${o.id}</td>
       <td style="max-width:180px">
