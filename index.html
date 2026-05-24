@@ -723,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v125 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v126 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4067,10 +4067,15 @@ async function pollNewData(){
             // Tenemos status enriquecido — preservarlo. Mergeamos los demás campos
             // del shipping (tracking_number, service_id, etc.) que pueden venir más
             // frescos en /orders/search.
+            // v126 BUG FIX: preservar `provincia` también — sino las órdenes en
+            // estado IMPRIMIR perdían el dato cuando pollNewData corría (porque
+            // /orders/search NO devuelve provincia, pero /shipments/{id} sí la
+            // tenía cargada antes en prevShip.provincia).
             merged.shipping = {
               ...newShip,
               status:        prevShip.status,
               substatus:     prevShip.substatus,
+              provincia:     prevShip.provincia,  // ← preservar
               _statusLoaded: true
             };
           } else {
@@ -9487,12 +9492,33 @@ function _predGetRadarStats(){
 }
 
 function _predRadarMessage(stats){
-  if(stats.totalHotItems === 0){
-    return { text: 'Sin items 🔥 esta semana — el algoritmo está esperando datos.', tone: 'neutral' };
+  // v126: Considerar también la EDAD del sistema, no solo la muestra.
+  // Decir "el modelo pifia" después de 1 día es injusto — necesita tiempo para
+  // que el ciclo predicción → snapshot → venta cierre con suficientes casos.
+  const store = _predLoad();
+  const daysActive = store.firstRunTs
+    ? Math.floor((Date.now() - store.firstRunTs) / 86400000)
+    : 0;
+
+  if(stats.totalHotItems === 0 && stats.totalMatches === 0){
+    return { text: 'Sin items 🔥 esta semana — el algoritmo está esperando datos. Tomá métricas en Análisis SEO para activarlo.', tone: 'neutral' };
   }
+  // Sistema muy nuevo (<3 días): no evaluamos performance todavía
+  if(daysActive < 3){
+    return { text: '🔋 Calentando motores — el sistema lleva ' + (daysActive === 0 ? 'menos de 1 día' : daysActive + ' día' + (daysActive > 1 ? 's' : '')) + ' tomando snapshots. Necesita 7 días para evaluar performance real.', tone: 'neutral' };
+  }
+  // Muestra chica aunque el sistema tenga edad
   if(stats.totalHotItems < 5){
-    return { text: 'Muestra chica — necesitamos más data para evaluar bien.', tone: 'neutral' };
+    return { text: 'Muestra chica (' + stats.totalHotItems + ' items 🔥) — necesitamos más data para evaluar bien.', tone: 'neutral' };
   }
+  // Edad media (3-7 días): evaluamos pero con guard suave
+  if(daysActive < 7){
+    const e = stats.effectiveness;
+    if(e === null) return { text: 'Calculando…', tone: 'neutral' };
+    if(e >= 50) return { text: '✓ Buen arranque ('+e+'%) — el sistema sigue aprendiendo. En unos días tendrás métricas más precisas.', tone: 'good' };
+    return { text: '🔋 Resultados iniciales ('+e+'%) — el sistema sigue calentando, esperá a los 7 días antes de afinar la fórmula.', tone: 'neutral' };
+  }
+  // Sistema maduro: evaluación normal
   const e = stats.effectiveness;
   if(e === null) return { text: 'Calculando…', tone: 'neutral' };
   if(e >= 80) return { text: '🚀 ¡El algoritmo está on fire! Los pronósticos clavan.', tone: 'great' };
@@ -9513,12 +9539,12 @@ function renderRadarAciertos(){
   el.style.display = '';
   const msg = _predRadarMessage(stats);
   const toneColors = {
-    great:    { bg: '#dcfce7', bdr: '#86efac', txt: '#14532d', accent: '#16a34a' },
-    good:     { bg: '#f0fdf4', bdr: '#bbf7d0', txt: '#15803d', accent: '#22c55e' },
-    mid:      { bg: '#fefce8', bdr: '#fde68a', txt: '#854d0e', accent: '#eab308' },
-    low:      { bg: '#fff7ed', bdr: '#fed7aa', txt: '#9a3412', accent: '#f97316' },
-    critical: { bg: '#fef2f2', bdr: '#fecaca', txt: '#991b1b', accent: '#dc2626' },
-    neutral:  { bg: '#f1f5f9', bdr: '#cbd5e1', txt: '#334155', accent: '#64748b' },
+    great:    { bg: '#dcfce7', bdr: '#86efac', txt: '#14532d', accent: '#16a34a', dim: '#15803d' },
+    good:     { bg: '#f0fdf4', bdr: '#bbf7d0', txt: '#15803d', accent: '#22c55e', dim: '#16a34a' },
+    mid:      { bg: '#fefce8', bdr: '#fde68a', txt: '#854d0e', accent: '#eab308', dim: '#a16207' },
+    low:      { bg: '#fff7ed', bdr: '#fed7aa', txt: '#9a3412', accent: '#f97316', dim: '#c2410c' },
+    critical: { bg: '#fef2f2', bdr: '#fecaca', txt: '#991b1b', accent: '#dc2626', dim: '#b91c1c' },
+    neutral:  { bg: '#f8fafc', bdr: '#cbd5e1', txt: '#334155', accent: '#64748b', dim: '#475569' },
   };
   const c = toneColors[msg.tone] || toneColors.neutral;
   const effLabel = stats.effectiveness === null ? '—' : stats.effectiveness + '%';
@@ -9527,36 +9553,103 @@ function renderRadarAciertos(){
                    stats.effectiveness >= 40 ? '#eab308' :
                                                '#dc2626';
 
-  el.innerHTML = '<div style="background:'+c.bg+';border:1px solid '+c.bdr+';border-left:4px solid '+c.accent+';border-radius:8px;padding:12px 14px">'
-    + '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px">'
-    +   '<div style="font-size:13px;font-weight:700;color:'+c.txt+'">📡 Radar de Aciertos — últimos 7 días</div>'
-    +   '<button onclick="renderRadarAciertos();if(typeof showToast===\'function\')showToast(\'Radar actualizado\',\'ok\')" style="background:transparent;border:1px solid '+c.bdr+';color:'+c.txt+';font-size:10.5px;padding:3px 8px;border-radius:5px;cursor:pointer">↻ Refrescar</button>'
+  // v126: Data adicional para enriquecer el widget
+  const store = _predLoad();
+  const totalSnapshots = Object.values(store.snapshots || {}).reduce((s,a) => s+a.length, 0);
+  const itemsTracked = Object.keys(store.snapshots || {}).length;
+  const daysActive = store.firstRunTs
+    ? Math.max(1, Math.round((Date.now() - store.firstRunTs) / 86400000))
+    : 0;
+  // Próximo reporte: 7 días desde el último (o desde firstRun si nunca se descargó)
+  const baseTs = store.lastReportTs || store.firstRunTs || Date.now();
+  const nextReportMs = baseTs + (7 * 86400000);
+  const daysToReport = Math.max(0, Math.ceil((nextReportMs - Date.now()) / 86400000));
+  const nextReportLabel = daysToReport === 0 ? '¡Disponible ahora!' : 'En ' + daysToReport + ' día' + (daysToReport > 1 ? 's' : '');
+
+  // Total ventas matcheadas en los 7 días
+  const totalSalesInWindow = stats.tp + stats.fn; // ventas dentro del Radar window
+
+  // Helper para mini-bar visual de proporción TP vs FP
+  function _miniBar(){
+    if(stats.totalHotItems === 0) return '';
+    const tpPct = (stats.tp / stats.totalHotItems) * 100;
+    return '<div style="margin-top:6px;background:#e5e7eb;height:8px;border-radius:4px;overflow:hidden;display:flex">'
+         + '<div style="background:#16a34a;width:'+tpPct+'%;transition:width .3s"></div>'
+         + '<div style="background:#dc2626;flex:1"></div>'
+         + '</div>';
+  }
+
+  // ── HTML: full-width con 4 stats grandes + info lateral + barra de progreso
+  el.innerHTML = ''
+    + '<div style="background:linear-gradient(135deg,'+c.bg+' 0%,#ffffff 100%);border:1px solid '+c.bdr+';border-left:5px solid '+c.accent+';border-radius:10px;padding:14px 18px;box-shadow:0 1px 3px rgba(0,0,0,.04)">'
+
+    // ─── Header
+    + '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px">'
+    +   '<div style="display:flex;align-items:center;gap:10px">'
+    +     '<span style="font-size:22px">📡</span>'
+    +     '<div>'
+    +       '<div style="font-size:14.5px;font-weight:800;color:'+c.txt+';line-height:1.2">Radar de Aciertos</div>'
+    +       '<div style="font-size:10.5px;color:'+c.dim+';margin-top:2px;font-weight:500">Performance del algoritmo · últimos 7 días</div>'
+    +     '</div>'
+    +   '</div>'
+    +   '<button onclick="renderRadarAciertos();if(typeof showToast===\'function\')showToast(\'Radar actualizado\',\'ok\')" style="background:#ffffff;border:1px solid '+c.bdr+';color:'+c.txt+';font-size:11px;padding:5px 12px;border-radius:6px;cursor:pointer;font-weight:600">↻ Refrescar</button>'
     + '</div>'
-    + '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:8px">'
-    +   '<div style="display:flex;align-items:center;gap:6px">'
-    +     '<span style="font-size:18px">🎯</span>'
-    +     '<div><div style="font-size:18px;font-weight:800;color:#16a34a;line-height:1">'+stats.tp+'</div>'
-    +     '<div style="font-size:10px;color:'+c.txt+';line-height:1.2;margin-top:1px">Aciertos<br>(🔥 vendió)</div></div>'
+
+    // ─── Grid principal: 4 stats grandes
+    + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:14px">'
+
+    //    Aciertos
+    +   '<div style="background:#ffffff;border:1px solid '+c.bdr+';border-radius:8px;padding:11px 13px;text-align:center">'
+    +     '<div style="font-size:11px;color:'+c.dim+';font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px">🎯 Aciertos</div>'
+    +     '<div style="font-size:30px;font-weight:800;color:#16a34a;line-height:1">'+stats.tp+'</div>'
+    +     '<div style="font-size:10.5px;color:'+c.dim+';margin-top:4px">🔥 vendió</div>'
     +   '</div>'
-    +   '<div style="display:flex;align-items:center;gap:6px">'
-    +     '<span style="font-size:18px">🔴</span>'
-    +     '<div><div style="font-size:18px;font-weight:800;color:#dc2626;line-height:1">'+stats.fp+'</div>'
-    +     '<div style="font-size:10px;color:'+c.txt+';line-height:1.2;margin-top:1px">Fallos<br>(🔥 no vendió)</div></div>'
+
+    //    Fallos
+    +   '<div style="background:#ffffff;border:1px solid '+c.bdr+';border-radius:8px;padding:11px 13px;text-align:center">'
+    +     '<div style="font-size:11px;color:'+c.dim+';font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px">🔴 Fallos</div>'
+    +     '<div style="font-size:30px;font-weight:800;color:#dc2626;line-height:1">'+stats.fp+'</div>'
+    +     '<div style="font-size:10.5px;color:'+c.dim+';margin-top:4px">🔥 no vendió aún</div>'
     +   '</div>'
-    +   '<div style="display:flex;align-items:center;gap:6px">'
-    +     '<span style="font-size:18px">🏆</span>'
-    +     '<div><div style="font-size:18px;font-weight:800;color:'+effColor+';line-height:1">'+effLabel+'</div>'
-    +     '<div style="font-size:10px;color:'+c.txt+';line-height:1.2;margin-top:1px">Efectividad<br>del algoritmo</div></div>'
+
+    //    Efectividad
+    +   '<div style="background:#ffffff;border:1px solid '+c.bdr+';border-radius:8px;padding:11px 13px;text-align:center">'
+    +     '<div style="font-size:11px;color:'+c.dim+';font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px">🏆 Efectividad</div>'
+    +     '<div style="font-size:30px;font-weight:800;color:'+effColor+';line-height:1">'+effLabel+'</div>'
+    +     '<div style="font-size:10.5px;color:'+c.dim+';margin-top:4px">'+stats.totalHotItems+' items 🔥 totales</div>'
     +   '</div>'
-    +   (stats.fn > 0
-      ? '<div style="display:flex;align-items:center;gap:6px;margin-left:auto">'
-      +   '<span style="font-size:14px;opacity:.7">📊</span>'
-      +   '<div><div style="font-size:13px;font-weight:700;color:'+c.txt+';line-height:1">'+stats.fn+'</div>'
-      +   '<div style="font-size:9.5px;color:'+c.txt+';line-height:1.2;margin-top:1px;opacity:.75">Ventas sin 🔥</div></div>'
+
+    //    Ventas sin 🔥 (false negatives) — muestra qué tan ciego está el modelo
+    +   '<div style="background:#ffffff;border:1px solid '+c.bdr+';border-radius:8px;padding:11px 13px;text-align:center">'
+    +     '<div style="font-size:11px;color:'+c.dim+';font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px">👁️‍🗨️ Pasó por alto</div>'
+    +     '<div style="font-size:30px;font-weight:800;color:'+c.dim+';line-height:1">'+stats.fn+'</div>'
+    +     '<div style="font-size:10.5px;color:'+c.dim+';margin-top:4px">ventas sin 🔥</div>'
+    +   '</div>'
+
+    + '</div>'
+
+    // ─── Barra de proporción TP/FP visual + footer con info adicional
+    + (stats.totalHotItems > 0
+      ? '<div style="background:#ffffff;border:1px solid '+c.bdr+';border-radius:8px;padding:9px 13px;margin-bottom:10px">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center;font-size:10.5px;color:'+c.dim+';font-weight:600">'
+        +   '<span>🎯 ' + stats.tp + ' aciertos</span>'
+        +   '<span>🔴 ' + stats.fp + ' fallos</span>'
+        + '</div>'
+        + _miniBar()
       + '</div>'
       : '')
+
+    // ─── Mensaje dinámico + meta-info
+    + '<div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;padding-top:10px;border-top:1px dashed '+c.bdr+'">'
+    +   '<div style="font-size:12.5px;color:'+c.txt+';font-weight:600;flex:1;min-width:240px">'+msg.text+'</div>'
+    +   '<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:10.5px;color:'+c.dim+'">'
+    +     '<div><span style="font-weight:700">'+daysActive+'</span>d activo</div>'
+    +     '<div><span style="font-weight:700">'+itemsTracked+'</span> items con historial</div>'
+    +     '<div><span style="font-weight:700">'+totalSnapshots+'</span> snapshots</div>'
+    +     '<div>📊 Próx. reporte: <span style="font-weight:700">'+nextReportLabel+'</span></div>'
+    +   '</div>'
     + '</div>'
-    + '<div style="font-size:11.5px;color:'+c.txt+';line-height:1.4;font-weight:500">'+msg.text+'</div>'
+
     + '</div>';
 }
 
