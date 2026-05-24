@@ -723,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v122 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v123 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4531,8 +4531,25 @@ function _shipCacheSave(cache){
 }
 
 // Cargar status real desde /shipments/{id}, en lotes de 5
-async function loadShippingStatuses(orders){
-  const toCheck=(orders||[]).filter(o=>o.shipping?.id&&!o.shipping._statusLoaded);
+// v123: Mapeo de IDs de provincias argentinas según ML.
+// Útil cuando el response sólo trae el ID sin el name (ej: ciertos shipments
+// con datos parciales del receiver_address por restricciones de privacy).
+const _ML_AR_STATES = {
+  'AR-A': 'Salta', 'AR-B': 'Buenos Aires', 'AR-C': 'Capital Federal',
+  'AR-D': 'San Luis', 'AR-E': 'Entre Ríos', 'AR-F': 'La Rioja',
+  'AR-G': 'Santiago del Estero', 'AR-H': 'Chaco', 'AR-J': 'San Juan',
+  'AR-K': 'Catamarca', 'AR-L': 'La Pampa', 'AR-M': 'Mendoza',
+  'AR-N': 'Misiones', 'AR-P': 'Formosa', 'AR-Q': 'Neuquén',
+  'AR-R': 'Río Negro', 'AR-S': 'Santa Fe', 'AR-T': 'Tucumán',
+  'AR-U': 'Chubut', 'AR-V': 'Tierra del Fuego', 'AR-W': 'Corrientes',
+  'AR-X': 'Córdoba', 'AR-Y': 'Jujuy', 'AR-Z': 'Santa Cruz',
+};
+function _seoProvinciaFromStateId(id){
+  if(!id || typeof id !== 'string') return null;
+  return _ML_AR_STATES[id] || null;
+}
+
+async function loadShippingStatuses(orders){  const toCheck=(orders||[]).filter(o=>o.shipping?.id&&!o.shipping._statusLoaded);
   if(!toCheck.length)return;
 
   // v97 [Opt D]: intentar resolver desde cache primero
@@ -4546,8 +4563,17 @@ async function loadShippingStatuses(orders){
       o.shipping.substatus = cached.substatus || o.shipping.substatus;
       // v122: restaurar provincia desde cache si está disponible
       if(cached.provincia) o.shipping.provincia = cached.provincia;
-      o.shipping._statusLoaded = true;
-      cachedHits++;
+      // v123 FIX: si el cache es viejo (de v122 o anterior) y NO tiene
+      // provincia, lo re-fetcheamos para enriquecer. Solo si el shipment
+      // es "delivered/shipped/ready_to_ship" (los pending no tienen address
+      // poblada todavía).
+      if(!cached.provincia && cached.status && ['delivered','shipped','ready_to_ship','handling'].includes(cached.status)){
+        toLoad.push(o);
+        // NO marcar _statusLoaded para que el fetch lo procese
+      } else {
+        o.shipping._statusLoaded = true;
+        cachedHits++;
+      }
     } else {
       toLoad.push(o);
     }
@@ -4565,10 +4591,18 @@ async function loadShippingStatuses(orders){
         const s=await mlGet('/shipments/'+o.shipping.id);
         if(s?.status)o.shipping.status=s.status;
         if(s?.substatus)o.shipping.substatus=s.substatus;
-        // v122: capturar provincia del receiver_address (siempre que esté).
-        // ML expone esto en /shipments/{id} → receiver_address.state.name.
-        // Ej: "Mendoza", "Buenos Aires", "Capital Federal".
-        const provincia = s?.receiver_address?.state?.name || null;
+        // v123: capturar provincia probando múltiples paths.
+        // ML devuelve el address en distintas ubicaciones según el tipo de envío
+        // (me1/me2/flex/fulfillment) y el estado. Probamos todas en orden.
+        const provincia = s?.receiver_address?.state?.name
+                       || s?.destination?.receiver_address?.state?.name
+                       || s?.destination?.shipping_address?.state?.name
+                       || s?.shipping_address?.state?.name
+                       || s?.destination?.state?.name
+                       // Algunos endpoints devuelven solo el ID (ej: AR-M para Mendoza)
+                       || _seoProvinciaFromStateId(s?.receiver_address?.state?.id)
+                       || _seoProvinciaFromStateId(s?.destination?.state?.id)
+                       || null;
         if(provincia) o.shipping.provincia = provincia;
         o.shipping._statusLoaded=true;
         // v97 [Opt D]: persistir en cache (v122: incluye provincia)
@@ -5485,12 +5519,10 @@ function renderSmartAlerts(){
     const curUnits = _countUnits(curPaid);
     const prvUnits = _countUnits(prvPaid);
 
-    // Formato compacto de moneda (ej: $1.2M, $850k, $12k)
-    const _fmtMoney = (n) => {
-      if(n >= 1e6) return '$' + (n/1e6).toFixed(1).replace('.0','') + 'M';
-      if(n >= 1e3) return '$' + Math.round(n/1e3) + 'k';
-      return '$' + Math.round(n);
-    };
+    // v123: Formato completo de moneda con separador de miles (ej: $1.245.000)
+    // — antes usábamos abreviaciones tipo "$1.2M" o "$850k" pero el usuario
+    // prefiere ver el monto completo.
+    const _fmtMoney = (n) => '$' + Math.round(n).toLocaleString('es-AR');
     const _fmtDelta = (delta) => {
       if(delta === null) return '';
       const sign = delta >= 0 ? '+' : '';
@@ -8373,14 +8405,34 @@ function renderSEOTable(){
       <td style="text-align:center;background:#f0fdf4">
         ${m
           ? '<span style="font-size:14px;font-weight:700;color:var(--text)">'+m.sales+'</span>'
-            +(m.salesTrend!==undefined
-              ? '<div style="font-size:9px;margin-top:1px;color:'+(m.salesTrend>0?'var(--green)':m.salesTrend<0?'var(--red)':'var(--text3)')+'">'+( m.salesTrend>0?'▲ +':'▼ ')+m.salesTrend+'% vs sem.ant.</div>'
+            +(m.salesPrev!==undefined
+              ? (() => {
+                  // v123: Delta absoluto en unidades en vez de %. Misma simbología
+                  // que la columna Termómetro SEO: ▲ verde, ▼ rojo, ▬ azul.
+                  const d = (m.sales||0) - (m.salesPrev||0);
+                  const sign = d > 0 ? '+' : '';
+                  const arr  = d > 0 ? '▲' : d < 0 ? '▼' : '▬';
+                  const col  = d > 0 ? '#16a34a' : d < 0 ? '#dc2626' : '#2563eb';
+                  const word = Math.abs(d) === 1 ? 'venta' : 'ventas';
+                  return '<div style="font-size:10.5px;margin-top:2px;color:'+col+';font-weight:600">'
+                       + '<span style="font-size:13px;font-weight:700">'+arr+'</span> '
+                       + sign + d + ' ' + word + ' vs sem.ant.</div>';
+                })()
               : '')
           : '<span style="font-size:10px;color:var(--text3)">📊 Cargar</span>'}
       </td>
       <td style="text-align:center;background:#eff6ff">
         ${m ? `<div style="font-size:14px;font-weight:700;color:var(--text)">${(m.visits||0).toLocaleString('es-AR')}</div>
-          ${m.visitsTrend!==undefined?`<div style="font-size:9px;margin-top:1px;color:${m.visitsTrend>0?'var(--green)':m.visitsTrend<0?'var(--red)':'var(--text3)'}">${m.visitsTrend>0?'▲ +':'▼ '}${m.visitsTrend}% vs sem.ant.</div>`:''}` 
+          ${m.visitsPrev!==undefined ? (() => {
+              const d = (m.visits||0) - (m.visitsPrev||0);
+              const sign = d > 0 ? '+' : '';
+              const arr  = d > 0 ? '▲' : d < 0 ? '▼' : '▬';
+              const col  = d > 0 ? '#16a34a' : d < 0 ? '#dc2626' : '#2563eb';
+              const word = Math.abs(d) === 1 ? 'visita' : 'visitas';
+              return '<div style="font-size:10.5px;margin-top:2px;color:'+col+';font-weight:600">'
+                   + '<span style="font-size:13px;font-weight:700">'+arr+'</span> '
+                   + sign + d + ' ' + word + ' vs sem.ant.</div>';
+            })() : ''}`
         : '<span style="font-size:10px;color:var(--text3)">📊 Cargar</span>'}
       </td>
       <td style="text-align:center;background:#fefce8">
@@ -8932,17 +8984,20 @@ function _seoThermoCellHTML(itemId){
 
   // v122: Visitas en una sola línea SIN flecha (la flecha va abajo aparte).
   // Esquema de colores Verde/Rojo/Azul.
+  // v123: Flechas en Unicode plano (▲▼) en vez de emojis (⬆️⬇️) para que
+  // respeten el color CSS. Los emojis tienen color nativo del SO y no
+  // se pueden tintar con color:#... Triángulos también más finos y elegantes.
   let arrow, visitsLabel, arrowColor;
   if(deltaVisits >= 3){
-    arrow = '⬆️';
+    arrow = '▲';
     visitsLabel = '+' + deltaVisits + ' visitas';
     arrowColor = '#16a34a'; // verde
   } else if(deltaVisits <= -3){
-    arrow = '⬇️';
+    arrow = '▼';
     visitsLabel = deltaVisits + ' visitas';
     arrowColor = '#dc2626'; // rojo
   } else {
-    arrow = '➖';
+    arrow = '▬';
     const sign = deltaVisits >= 0 ? '+' : '';
     visitsLabel = sign + deltaVisits + ' visitas';
     arrowColor = '#2563eb'; // azul
@@ -8983,7 +9038,7 @@ function _seoThermoCellHTML(itemId){
     + rankRow
     + '<div style="font-size:10.5px;font-weight:600;color:'+scoreColor+';line-height:1.2">'+hotBadge+emoji+' '+score+'</div>'
     + '<div style="font-size:10px;color:'+arrowColor+';margin-top:1px;font-weight:600">'+visitsLabel+'</div>'
-    + '<div style="font-size:11px;color:'+arrowColor+';margin-top:1px;line-height:1">'+arrow+'</div>'
+    + '<div style="font-size:17px;color:'+arrowColor+';margin-top:2px;line-height:1;font-weight:700">'+arrow+'</div>'
     + '</button>';
 }
 
@@ -13485,9 +13540,16 @@ function renderVentasTable(){
     const thermoCell = (orderItemId && typeof _seoThermoCellHTML === 'function')
       ? _seoThermoCellHTML(orderItemId)
       : '<span style="font-size:10px;color:var(--text3)">—</span>';
-    // v122: Provincia extraída del shipment.receiver_address.state.name
-    // (cargado por loadShippingStatuses). Si no está cargado, mostramos —.
-    const provincia = o.shipping?.provincia || '—';
+    // v122/v123: Provincia — buscar en múltiples ubicaciones del objeto order.
+    // Algunos shipments ya tienen el dato en o.shipping.receiver_address sin
+    // necesidad de fetch a /shipments. Otros lo dejan en o.buyer.billing_info.
+    const provincia =
+         o.shipping?.provincia
+      || o.shipping?.receiver_address?.state?.name
+      || o.shipping?.receiver_address?.state?.id && _seoProvinciaFromStateId(o.shipping.receiver_address.state.id)
+      || o.shipping?.destination?.state?.name
+      || o.buyer?.billing_info?.state?.name
+      || '—';
     return `<tr>
       <td style="font-family:var(--mono);font-size:10.5px;color:var(--text3)">#${o.id}</td>
       <td style="max-width:180px">
