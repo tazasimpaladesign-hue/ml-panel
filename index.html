@@ -723,7 +723,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v126 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v127 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -9466,29 +9466,214 @@ function _predGetRadarStats(){
   const now = Date.now();
   const cutoffMs = now - 7*86400000;
   const recentMatches = store.matches.filter(m => new Date(m.soldAt).getTime() > cutoffMs);
-  // TPs: matches donde el snapshot tenía isHot=1 (items únicos)
-  const tps = recentMatches.filter(m => m.snapshot?.isHot === 1);
-  const uniqueHotSold = new Set(tps.map(m => m.itemId));
-  // FPs: items que estaban marcados 🔥 en snapshot reciente PERO no vendieron
+
+  // ── TPs: matches donde el snapshot tenía isHot=1.
+  // Agrupar por itemId (un item puede tener varias ventas → consolidamos).
+  const tpMatchesByItem = {};
+  for(const m of recentMatches){
+    if(m.snapshot?.isHot !== 1) continue;
+    if(!tpMatchesByItem[m.itemId]){
+      tpMatchesByItem[m.itemId] = { itemId: m.itemId, totalUnits: 0, totalRevenue: 0, matches: [], snapshot: m.snapshot };
+    }
+    tpMatchesByItem[m.itemId].totalUnits   += m.unitsSold || 0;
+    tpMatchesByItem[m.itemId].totalRevenue += m.totalAmount || 0;
+    tpMatchesByItem[m.itemId].matches.push(m);
+  }
+  const tpItems = Object.values(tpMatchesByItem)
+    .sort((a, b) => b.totalUnits - a.totalUnits);
+
+  // ── FPs: items con snapshot reciente isHot=1 que NO vendieron en 7d.
   const recentHotItemIds = new Set();
+  const recentHotSnaps = {};
   for(const itemId of Object.keys(store.snapshots)){
     const snaps = store.snapshots[itemId] || [];
     const recentSnap = snaps.filter(s => s.ts > cutoffMs).pop();
-    if(recentSnap && recentSnap.isHot === 1) recentHotItemIds.add(itemId);
+    if(recentSnap && recentSnap.isHot === 1){
+      recentHotItemIds.add(itemId);
+      recentHotSnaps[itemId] = recentSnap;
+    }
   }
-  const fpIds = [...recentHotItemIds].filter(id => !uniqueHotSold.has(id));
-  // FN: items que vendieron SIN estar marcados 🔥
-  const fns = recentMatches.filter(m => m.snapshot?.isHot === 0);
-  const total = uniqueHotSold.size + fpIds.length;
+  const uniqueHotSold = new Set(Object.keys(tpMatchesByItem));
+  const fpItems = [...recentHotItemIds]
+    .filter(id => !uniqueHotSold.has(id))
+    .map(id => ({ itemId: id, snapshot: recentHotSnaps[id] }))
+    .sort((a, b) => (b.snapshot.hotScore || 0) - (a.snapshot.hotScore || 0));
+
+  // ── FNs: matches con isHot=0 (items que vendieron sin estar marcados 🔥).
+  const fnMatchesByItem = {};
+  for(const m of recentMatches){
+    if(m.snapshot?.isHot !== 0) continue;
+    if(!fnMatchesByItem[m.itemId]){
+      fnMatchesByItem[m.itemId] = { itemId: m.itemId, totalUnits: 0, totalRevenue: 0, matches: [], snapshot: m.snapshot };
+    }
+    fnMatchesByItem[m.itemId].totalUnits   += m.unitsSold || 0;
+    fnMatchesByItem[m.itemId].totalRevenue += m.totalAmount || 0;
+    fnMatchesByItem[m.itemId].matches.push(m);
+  }
+  const fnItems = Object.values(fnMatchesByItem)
+    .sort((a, b) => b.totalUnits - a.totalUnits);
+
+  const total = uniqueHotSold.size + fpItems.length;
   const effectiveness = total > 0 ? Math.round((uniqueHotSold.size / total) * 100) : null;
+
   return {
     tp: uniqueHotSold.size,
-    fp: fpIds.length,
-    fn: new Set(fns.map(m => m.itemId)).size,
+    fp: fpItems.length,
+    fn: fnItems.length,
     totalHotItems: total,
     totalMatches: recentMatches.length,
     effectiveness,
+    // v127: listas detalladas para el modal
+    tpItems,
+    fpItems,
+    fnItems,
   };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v127: Modal con lista detallada al hacer click en una stat del Radar
+// ═══════════════════════════════════════════════════════════════════════════
+
+function _radarBucketTitle(bucket){
+  if(bucket === 'tp') return '🎯 Aciertos — items 🔥 que vendieron en últimos 7 días';
+  if(bucket === 'fp') return '🔴 Fallos — items con 🔥 que aún no vendieron en últimos 7 días';
+  if(bucket === 'fn') return '👁️‍🗨️ Pasó por alto — items que vendieron SIN estar marcados 🔥';
+  return 'Detalle';
+}
+function _radarBucketDesc(bucket){
+  if(bucket === 'tp') return 'El modelo predijo bien estos items. Mirá qué factores los hacían "calientes" para entender qué patrones funcionan.';
+  if(bucket === 'fp') return 'El modelo se equivocó (o todavía no vendieron pero podrían en próximos días). Revisá qué factores los marcaron y si son falsos positivos sistemáticos.';
+  if(bucket === 'fn') return 'Estos items vendieron pero el modelo NO los detectó. Mirá qué factor faltaba — quizás necesitamos ajustar pesos para capturarlos mejor.';
+  return '';
+}
+
+function radarOpenBucketModal(bucket){
+  const stats = _predGetRadarStats();
+  let items = [];
+  if(bucket === 'tp') items = stats.tpItems;
+  else if(bucket === 'fp') items = stats.fpItems;
+  else if(bucket === 'fn') items = stats.fnItems;
+
+  const title = _radarBucketTitle(bucket);
+  const desc  = _radarBucketDesc(bucket);
+
+  // Construir HTML
+  let html = '<div style="padding:14px;max-width:780px">';
+  html += '<h3 style="margin:0 0 6px;font-size:15px;color:var(--text)">'+title+'</h3>';
+  html += '<div style="font-size:11.5px;color:var(--text2);margin-bottom:14px;line-height:1.5">'+desc+'</div>';
+
+  if(items.length === 0){
+    html += '<div style="padding:24px;text-align:center;color:var(--text3);background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;font-size:12.5px">';
+    html += (bucket === 'tp' ? '✨ Aún no hay aciertos en esta ventana. Cuando un item 🔥 venda, aparecerá acá.' :
+             bucket === 'fp' ? '🎉 ¡Todos los items 🔥 vendieron! O todavía no se cargaron snapshots recientes.' :
+                               '✓ Todas las ventas fueron predichas. (O no hubo ventas en items sin 🔥.)');
+    html += '</div>';
+  } else {
+    // Header de la tabla
+    html += '<div style="background:#f8fafc;border:1px solid var(--border);border-radius:8px;overflow:hidden">';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:11.5px">';
+    html += '<thead style="background:#f1f5f9;color:var(--text2);font-size:10.5px;text-transform:uppercase;letter-spacing:.03em">';
+    html += '<tr>'
+         +   '<th style="padding:8px 10px;text-align:left;font-weight:700">Item</th>'
+         +   '<th style="padding:8px 6px;text-align:center;font-weight:700;width:62px" title="Score Probabilidad de Venta al momento del snapshot">Hot</th>'
+         +   '<th style="padding:8px 6px;text-align:center;font-weight:700;width:60px" title="Score Termómetro SEO">🌡️</th>'
+         + (bucket === 'tp' || bucket === 'fn'
+              ? '<th style="padding:8px 6px;text-align:center;font-weight:700;width:54px" title="Unidades vendidas">Vend.</th>'
+                + '<th style="padding:8px 6px;text-align:right;font-weight:700;width:78px" title="Facturación generada">Total $</th>'
+              : '<th style="padding:8px 6px;text-align:center;font-weight:700;width:54px" title="Días que lleva marcado 🔥">Días 🔥</th>'
+                + '<th style="padding:8px 6px;text-align:center;font-weight:700;width:62px" title="Visitas/preguntas que motivaron el snapshot">Tráfico</th>')
+         +   '<th style="padding:8px 6px;text-align:right;font-weight:700;width:90px">Acciones</th>'
+         + '</tr>';
+    html += '</thead><tbody>';
+
+    for(const it of items){
+      const itemId  = it.itemId;
+      const snap    = it.snapshot || {};
+      const localItem = (typeof allItems !== 'undefined') ? allItems.find(i => String(i.id) === String(itemId)) : null;
+      const title   = (snap.title || localItem?.title || itemId).slice(0, 60);
+      const thumb   = localItem?.thumbnail || '';
+      const mlUrl   = (typeof mlItemLink === 'function') ? mlItemLink(itemId) :
+                      'https://articulo.mercadolibre.com.ar/' + itemId.replace('MLA','MLA-');
+      // Indicadores
+      const hotBadge = snap.isImminent ? '🔥🔥' : snap.isHot ? '🔥' : '·';
+      const hotColor = snap.isImminent ? '#7f1d1d' : snap.isHot ? '#dc2626' : '#94a3b8';
+      const thermoColor = (snap.thermoLevel === 'high') ? '#166534' :
+                          (snap.thermoLevel === 'mid')  ? '#92400e' : '#991b1b';
+
+      html += '<tr style="border-top:1px solid var(--border)">';
+      // Col Item con thumbnail
+      html += '<td style="padding:7px 10px;max-width:240px">';
+      html += '<div style="display:flex;align-items:center;gap:8px">';
+      if(thumb) html += '<img src="'+thumb+'" loading="lazy" style="width:38px;height:38px;object-fit:cover;border-radius:5px;border:1px solid var(--border);flex-shrink:0" onerror="this.style.display=\'none\'">';
+      html += '<div style="overflow:hidden;line-height:1.3">'
+           +   '<div style="font-weight:600;font-size:11.5px;color:var(--text);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'+title+'</div>'
+           +   '<div style="font-size:9.5px;color:var(--text3);margin-top:1px;font-family:var(--mono)">'+itemId+'</div>'
+           + '</div>';
+      html += '</div></td>';
+
+      // Hot score
+      html += '<td style="padding:7px 6px;text-align:center"><div style="font-size:14px">'+hotBadge+'</div><div style="font-size:10px;color:'+hotColor+';font-weight:700">'+(snap.hotScore != null ? snap.hotScore : '—')+'</div></td>';
+
+      // Termo score
+      html += '<td style="padding:7px 6px;text-align:center"><div style="font-size:13px;font-weight:700;color:'+thermoColor+'">'+(snap.thermoScore != null ? snap.thermoScore : '—')+'</div>'
+            + '<div style="font-size:9.5px;color:var(--text3)">'+(snap.rank ? 'P'+snap.rank : '')+'</div></td>';
+
+      // Columnas específicas según bucket
+      if(bucket === 'tp' || bucket === 'fn'){
+        // Unidades vendidas + facturación
+        const units = it.totalUnits || 0;
+        const rev   = it.totalRevenue || 0;
+        html += '<td style="padding:7px 6px;text-align:center"><div style="font-size:14px;font-weight:700;color:#166534">'+units+'</div></td>';
+        html += '<td style="padding:7px 6px;text-align:right;font-size:11.5px;font-weight:600;color:var(--text)">$'+rev.toLocaleString('es-AR')+'</td>';
+      } else {
+        // FP: días que lleva siendo hot + tráfico del snap
+        const daysHot = snap.ts ? Math.max(0, Math.round((Date.now() - snap.ts) / 86400000)) : 0;
+        html += '<td style="padding:7px 6px;text-align:center;font-size:11.5px;color:var(--text2)">'+daysHot+'d</td>';
+        html += '<td style="padding:7px 6px;text-align:center;font-size:10.5px;color:var(--text2);line-height:1.3">'
+              +    '<div>👁️ '+(snap.visits7d != null ? snap.visits7d : '—')+'</div>'
+              +    (snap.questions7d ? '<div>💬 '+snap.questions7d+'</div>' : '')
+              + '</td>';
+      }
+
+      // Acciones
+      html += '<td style="padding:7px 6px;text-align:right;white-space:nowrap">'
+            +   '<a href="'+mlUrl+'" target="_blank" rel="noopener" title="Abrir publicación en ML" style="display:inline-block;padding:3px 7px;background:#ffe600;color:#333;text-decoration:none;border-radius:4px;font-size:11px;font-weight:600;border:1px solid #cdb500">ML</a> '
+            +   '<button onclick="closeModal(\'radar-bucket-modal\');showSection(\'seo\');setTimeout(()=>{const r=document.getElementById(\'seo-pos-cell-'+itemId+'\');if(r)r.scrollIntoView({block:\'center\',behavior:\'smooth\'});if(typeof seoThermoOpenModal===\'function\')seoThermoOpenModal(\''+itemId+'\')},400)" title="Ver diagnóstico SEO completo" style="background:transparent;border:1px solid var(--border);color:var(--text);padding:3px 7px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:600">🌡️</button>'
+            + '</td>';
+
+      html += '</tr>';
+    }
+    html += '</tbody></table></div>';
+
+    // Total al pie
+    if(bucket === 'tp' || bucket === 'fn'){
+      const totalUnits = items.reduce((s, i) => s + (i.totalUnits || 0), 0);
+      const totalRev   = items.reduce((s, i) => s + (i.totalRevenue || 0), 0);
+      html += '<div style="display:flex;justify-content:space-between;margin-top:10px;padding:8px 12px;background:#f1f5f9;border-radius:6px;font-size:11.5px;color:var(--text2)">'
+           +   '<span><strong>Total:</strong> '+items.length+' item(s)</span>'
+           +   '<span>'+totalUnits+' unidades vendidas · <strong>$'+totalRev.toLocaleString('es-AR')+'</strong></span>'
+           + '</div>';
+    }
+  }
+
+  html += '<div style="display:flex;gap:6px;justify-content:flex-end;margin-top:12px">';
+  html += '<button class="btn btn-ghost btn-sm" onclick="closeModal(\'radar-bucket-modal\')">Cerrar</button>';
+  if(bucket !== 'fp'){
+    html += '<button class="btn btn-primary btn-sm" onclick="closeModal(\'radar-bucket-modal\');showSection(\'seo\');setTimeout(()=>seoSetScenario(\'alta_probabilidad\'),250)">🔥 Ver chip Alta Probabilidad</button>';
+  }
+  html += '</div></div>';
+
+  // Crear/abrir modal
+  let modal = document.getElementById('radar-bucket-modal');
+  if(!modal){
+    modal = document.createElement('div');
+    modal.id = 'radar-bucket-modal';
+    modal.className = 'modal-overlay';
+    modal.addEventListener('click', e => { if(e.target === modal) closeModal('radar-bucket-modal'); });
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML = '<div class="modal" style="max-width:820px;max-height:88vh;overflow:auto"><div class="modal-bd">'+html+'</div></div>';
+  openModal('radar-bucket-modal');
 }
 
 function _predRadarMessage(stats){
@@ -9596,35 +9781,49 @@ function renderRadarAciertos(){
     + '</div>'
 
     // ─── Grid principal: 4 stats grandes
+    // v127: TP/FP/FN son clickeables y abren modal con lista detallada de items.
+    //       Efectividad NO es clickeable (es un score agregado, no una lista).
     + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:14px">'
 
-    //    Aciertos
-    +   '<div style="background:#ffffff;border:1px solid '+c.bdr+';border-radius:8px;padding:11px 13px;text-align:center">'
+    //    Aciertos (clickeable)
+    +   '<button onclick="radarOpenBucketModal(\'tp\')" '
+    +     'title="Click para ver la lista de items 🔥 que vendieron" '
+    +     'style="background:#ffffff;border:1px solid '+c.bdr+';border-radius:8px;padding:11px 13px;text-align:center;cursor:pointer;font-family:inherit;transition:transform .12s,box-shadow .12s" '
+    +     'onmouseover="this.style.transform=\'translateY(-2px)\';this.style.boxShadow=\'0 3px 10px rgba(22,163,74,.15)\';this.style.borderColor=\'#86efac\'" '
+    +     'onmouseout="this.style.transform=\'\';this.style.boxShadow=\'\';this.style.borderColor=\''+c.bdr+'\'">'
     +     '<div style="font-size:11px;color:'+c.dim+';font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px">🎯 Aciertos</div>'
     +     '<div style="font-size:30px;font-weight:800;color:#16a34a;line-height:1">'+stats.tp+'</div>'
-    +     '<div style="font-size:10.5px;color:'+c.dim+';margin-top:4px">🔥 vendió</div>'
-    +   '</div>'
+    +     '<div style="font-size:10.5px;color:'+c.dim+';margin-top:4px">🔥 vendió ' + (stats.tp > 0 ? '👁️ Ver lista' : '') + '</div>'
+    +   '</button>'
 
-    //    Fallos
-    +   '<div style="background:#ffffff;border:1px solid '+c.bdr+';border-radius:8px;padding:11px 13px;text-align:center">'
+    //    Fallos (clickeable)
+    +   '<button onclick="radarOpenBucketModal(\'fp\')" '
+    +     'title="Click para ver la lista de items 🔥 que aún no vendieron" '
+    +     'style="background:#ffffff;border:1px solid '+c.bdr+';border-radius:8px;padding:11px 13px;text-align:center;cursor:pointer;font-family:inherit;transition:transform .12s,box-shadow .12s" '
+    +     'onmouseover="this.style.transform=\'translateY(-2px)\';this.style.boxShadow=\'0 3px 10px rgba(220,38,38,.15)\';this.style.borderColor=\'#fca5a5\'" '
+    +     'onmouseout="this.style.transform=\'\';this.style.boxShadow=\'\';this.style.borderColor=\''+c.bdr+'\'">'
     +     '<div style="font-size:11px;color:'+c.dim+';font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px">🔴 Fallos</div>'
     +     '<div style="font-size:30px;font-weight:800;color:#dc2626;line-height:1">'+stats.fp+'</div>'
-    +     '<div style="font-size:10.5px;color:'+c.dim+';margin-top:4px">🔥 no vendió aún</div>'
-    +   '</div>'
+    +     '<div style="font-size:10.5px;color:'+c.dim+';margin-top:4px">🔥 no vendió aún ' + (stats.fp > 0 ? '👁️ Ver lista' : '') + '</div>'
+    +   '</button>'
 
-    //    Efectividad
+    //    Efectividad (NO clickeable — es métrica agregada)
     +   '<div style="background:#ffffff;border:1px solid '+c.bdr+';border-radius:8px;padding:11px 13px;text-align:center">'
     +     '<div style="font-size:11px;color:'+c.dim+';font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px">🏆 Efectividad</div>'
     +     '<div style="font-size:30px;font-weight:800;color:'+effColor+';line-height:1">'+effLabel+'</div>'
     +     '<div style="font-size:10.5px;color:'+c.dim+';margin-top:4px">'+stats.totalHotItems+' items 🔥 totales</div>'
     +   '</div>'
 
-    //    Ventas sin 🔥 (false negatives) — muestra qué tan ciego está el modelo
-    +   '<div style="background:#ffffff;border:1px solid '+c.bdr+';border-radius:8px;padding:11px 13px;text-align:center">'
+    //    Pasó por alto (clickeable)
+    +   '<button onclick="radarOpenBucketModal(\'fn\')" '
+    +     'title="Click para ver items que vendieron sin estar marcados 🔥" '
+    +     'style="background:#ffffff;border:1px solid '+c.bdr+';border-radius:8px;padding:11px 13px;text-align:center;cursor:pointer;font-family:inherit;transition:transform .12s,box-shadow .12s" '
+    +     'onmouseover="this.style.transform=\'translateY(-2px)\';this.style.boxShadow=\'0 3px 10px rgba(100,116,139,.15)\';this.style.borderColor=\'#94a3b8\'" '
+    +     'onmouseout="this.style.transform=\'\';this.style.boxShadow=\'\';this.style.borderColor=\''+c.bdr+'\'">'
     +     '<div style="font-size:11px;color:'+c.dim+';font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px">👁️‍🗨️ Pasó por alto</div>'
     +     '<div style="font-size:30px;font-weight:800;color:'+c.dim+';line-height:1">'+stats.fn+'</div>'
-    +     '<div style="font-size:10.5px;color:'+c.dim+';margin-top:4px">ventas sin 🔥</div>'
-    +   '</div>'
+    +     '<div style="font-size:10.5px;color:'+c.dim+';margin-top:4px">ventas sin 🔥 ' + (stats.fn > 0 ? '👁️ Ver lista' : '') + '</div>'
+    +   '</button>'
 
     + '</div>'
 
