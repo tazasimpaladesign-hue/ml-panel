@@ -744,7 +744,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v130 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v131 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -8680,6 +8680,16 @@ async function loadSEOMetrics(){
     // v118: recalcular Termómetro SEO ahora que tenemos todas las visitas
     // (esto también dispara predTakeSnapshot → guarda snapshot local + upload diferido)
     if(typeof seoThermoRecalcAll === 'function') seoThermoRecalcAll();
+
+    // v131: Re-renderizar "👀 Los más visitados" del Resumen General usando
+    // el cache compartido (itemMetrics) que recién se actualizó. Esto es lo
+    // que hace que los números coincidan en ambas secciones.
+    // Limpiamos el cache propio de mostVisited para forzar re-cálculo desde
+    // las métricas frescas. Las flechas seguirán funcionando porque el render
+    // compara la nueva posición contra la anterior (que sigue en _mostVisitedCache
+    // como prevCache hasta el próximo render).
+    if(typeof _mvClearCache === 'function') _mvClearCache();
+    if(typeof loadMostVisited === 'function') loadMostVisited(true);
 
     // Actualizar timestamp y notificar otras pestañas (cross-tab sync)
     updateMetricsTimestamp();
@@ -16795,19 +16805,18 @@ async function loadMostVisited(forceRefresh){
   var el = document.getElementById('dash-most-visited');
   if(!el) return;
 
-  // ── 1. Serve fresh cache immediately (< 24h) ──────────────────────────
+  // ── 1. Servir cache fresco al toque (< 24h) ──────────────────────────
   if(!forceRefresh){
     var cached = _mvLoadCache();
     if(cached){
       _mostVisitedCache = cached;
       renderMostVisited(cached);
-      return;   // data is fresh — do NOT start background reload
+      return;
     }
   }
 
-  // ── 2. Cache too old or forced refresh → full load, single run ────────
+  // ── 2. Cache vencida o refresh forzado → carga completa, una sola corrida ────
   if(_mvLoading){
-    // Already loading — just show current state
     if(_mostVisitedCache) renderMostVisited(_mostVisitedCache);
     return;
   }
@@ -16828,11 +16837,7 @@ async function loadMostVisited(forceRefresh){
     return;
   }
 
-  var total    = items.length;
-  var done     = 0;
-  var visitMap = {};
-
-  // Progress indicator in card header
+  // Indicador de progreso en el card header
   var setProgress = function(txt){
     var p = document.getElementById('mv-progress');
     if(p) p.textContent = txt;
@@ -16846,77 +16851,86 @@ async function loadMostVisited(forceRefresh){
     hd.appendChild(sp);
   }
 
-  // Show spinner only if panel is empty
-  if(!el.querySelector('.item-thumb')){
-    el.innerHTML='<div class="loading"><div class="spin"></div>Cargando visitas de '+total+' productos...</div>';
+  // ════════════════════════════════════════════════════════════════════════
+  // v131: UNIFICACIÓN con Analizador SEO.
+  // Antes: llamaba directo a /items/{id}/visits/time_window?last=7 (endpoint
+  //        distinto al de Analizador SEO → daba números diferentes).
+  // Ahora: lee de itemMetrics[id].visits que es el mismo cache que usa el
+  //        Analizador SEO. Endpoint compartido: last=30 + slice últimos 7.
+  // Beneficios:
+  //   1. Coincide 100% con la columna Visitas 7d del Analizador SEO
+  //   2. Si Analizador SEO ya cargó métricas, esta vista es instantánea
+  //   3. Si no, dispara loadPubMetricsBatch que rellena ambas a la vez
+  // ════════════════════════════════════════════════════════════════════════
+
+  // Identificar items que ya tienen métricas en cache compartido
+  var idsNeedingFetch = [];
+  for(var k=0; k<items.length; k++){
+    var idStr = String(items[k].id);
+    var m = (typeof itemMetrics !== 'undefined' && itemMetrics[idStr]) || null;
+    if(!m || typeof m.visits !== 'number'){
+      idsNeedingFetch.push(idStr);
+    }
   }
 
-  // ── 3. Sequential queue — same pattern as SEO Analizador ──────────────
-  // Uses /items/{id}/visits/time_window?last=7&unit=day (proven working)
-  // Fallback: /items/{id}/visits?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD
-  var now    = nowAR();
-  var from7  = new Date(now - 7*86400000);
-  var date_to   = now.toISOString().slice(0,10);
-  var date_from = from7.toISOString().slice(0,10);
-
-  for(var i=0; i<items.length; i++){
-    if(_mvAbort) break;
-
-    var item = items[i];
-    var id   = String(item.id);
-    var visits = 0;
-
-    // Primary: time_window endpoint (same as SEO Analizador — proven working)
-    try{
-      var r = await mlGet('/items/'+id+'/visits/time_window?last=7&unit=day');
-      if(r && typeof r.total_visits === 'number'){
-        visits = r.total_visits;
-      } else if(r && Array.isArray(r.visits)){
-        visits = r.visits.reduce(function(s,d){ return s+(d.total||d.quantity||0); }, 0);
-      }
-    }catch(e1){
-      // Fallback: date range (YYYY-MM-DD format — NOT full ISO)
-      try{
-        var r2 = await mlGet('/items/'+id+'/visits?date_from='+date_from+'&date_to='+date_to);
-        visits = (r2 && r2.total_visits) || 0;
-      }catch(e2){
-        visits = 0;
-      }
+  // Si hay items sin cache, los cargamos vía loadPubMetricsBatch (mismo
+  // endpoint que Analizador SEO). Si todos ya están en cache, salteamos
+  // este paso y renderizamos instantáneo.
+  if(idsNeedingFetch.length > 0){
+    setProgress('Sincronizando con Analizador SEO ('+idsNeedingFetch.length+' a cargar)...');
+    if(!el.querySelector('.item-thumb')){
+      el.innerHTML='<div class="loading"><div class="spin"></div>Cargando visitas reales de '+idsNeedingFetch.length+' productos (~'+Math.ceil(idsNeedingFetch.length*0.25)+' seg)...</div>';
     }
-
-    visitMap[id] = visits;
-    done++;
-
-    // Update progress every item
-    setProgress('Cargando visitas ('+done+' de '+total+')...');
-
-    // Re-render every 100 items with current partial data
-    if(done % 100 === 0 || done === total){
-      var partial = _buildSortedVisits(visitMap);
+    // Re-render parcial cada 30 items para feedback visual
+    var fetchedSoFar = 0;
+    var batchSize = 30;
+    for(var b=0; b<idsNeedingFetch.length; b+=batchSize){
+      if(_mvAbort) break;
+      var slice = idsNeedingFetch.slice(b, b+batchSize);
+      try {
+        await loadPubMetricsBatch(slice);
+      } catch(e){
+        console.warn('[MostVisited] loadPubMetricsBatch falló para chunk:', e?.message);
+      }
+      fetchedSoFar += slice.length;
+      setProgress('Cargando visitas ('+fetchedSoFar+' de '+idsNeedingFetch.length+')...');
+      // Render parcial con lo que ya tenemos
+      var partialMap = _mvBuildVisitMapFromMetrics(items);
+      var partial = _buildSortedVisits(partialMap);
       _mostVisitedCache = partial;
       renderMostVisited(partial);
     }
-
-    // Small yield every 10 items to keep browser responsive
-    if(done % 10 === 0){
-      await new Promise(function(res){ setTimeout(res, 0); });
-    }
   }
 
-  // ── 4. Final: save to cache, clean up ─────────────────────────────────
+  // Final: construir visitMap desde itemMetrics y renderizar
+  var visitMap = _mvBuildVisitMapFromMetrics(items);
   var final = _buildSortedVisits(visitMap);
   _mostVisitedCache = final;
   _mvSaveCache(final);
   renderMostVisited(final);
 
-  setProgress('✓ '+done+' productos · '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}));
+  var doneCount = Object.keys(visitMap).length;
+  setProgress('✓ '+doneCount+' productos · '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})+' · misma data que Analizador SEO');
   setTimeout(function(){
     var p = document.getElementById('mv-progress');
     if(p && p.parentNode) p.parentNode.removeChild(p);
   }, 6000);
 
   _mvLoading = false;
-  console.log('[MostVisited] Completado:', done, 'productos');
+  console.log('[MostVisited] Completado:', doneCount, 'productos (cache compartido con SEO)');
+}
+
+// v131: Helper — construir el visitMap leyendo de itemMetrics (cache compartido)
+function _mvBuildVisitMapFromMetrics(items){
+  var visitMap = {};
+  for(var i=0; i<items.length; i++){
+    var idStr = String(items[i].id);
+    var m = (typeof itemMetrics !== 'undefined' && itemMetrics[idStr]) || null;
+    if(m && typeof m.visits === 'number'){
+      visitMap[idStr] = m.visits;
+    }
+  }
+  return visitMap;
 }
 
 function _buildSortedVisits(visitMap){
