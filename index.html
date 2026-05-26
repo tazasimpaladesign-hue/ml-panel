@@ -744,7 +744,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v129 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v130 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -8628,7 +8628,18 @@ function renderKWDensity(){
 // ── Cargar métricas reales (visitas 7d) para la tabla SEO ───
 async function loadSEOMetrics(){
   const btn = document.getElementById('seo-metrics-btn');
-  if(btn){ btn.disabled=true; btn.textContent='⏳ Cargando...'; }
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Sincronizando...'; }
+
+  // v130: PASO 1 — Sync con KV ANTES de cargar de ML.
+  // Esto trae cualquier snapshot/match que la otra PC haya subido recientemente.
+  // Si el download falla, seguimos con localStorage local (no bloqueamos).
+  try {
+    await predSyncDownload();
+  } catch(e){
+    console.warn('[SEOMetrics] predSyncDownload falló (sigue con local):', e?.message);
+  }
+
+  if(btn) btn.textContent='⏳ Cargando...';
 
   // Filtrar exactamente igual que renderSEOTable para obtener los ítems visibles
   const searchQ = (document.getElementById('seo-search')?.value||'').toLowerCase();
@@ -8667,11 +8678,27 @@ async function loadSEOMetrics(){
     console.log('[SEO] Métricas completas para', ids.length, 'ítems');
 
     // v118: recalcular Termómetro SEO ahora que tenemos todas las visitas
+    // (esto también dispara predTakeSnapshot → guarda snapshot local + upload diferido)
     if(typeof seoThermoRecalcAll === 'function') seoThermoRecalcAll();
 
     // Actualizar timestamp y notificar otras pestañas (cross-tab sync)
     updateMetricsTimestamp();
     try{ _syncChannel && _syncChannel.postMessage({ type:'metrics-updated' }); }catch{}
+
+    // v130: PASO 3 — Upload FORZADO a KV (sin cooldown) para que la otra PC
+    // vea estos snapshots/scores nuevos cuando abra su panel.
+    // Lo diferimos 1s para que el snapshot del paso anterior se haya guardado.
+    setTimeout(async () => {
+      try {
+        const ok = await predSyncUpload(true /* force = ignora cooldown */);
+        if(ok && typeof showToast === 'function'){
+          showToast('☁ Métricas sincronizadas con la nube', 'ok');
+        }
+        if(typeof renderRadarAciertos === 'function') renderRadarAciertos();
+      } catch(e){
+        console.warn('[SEOMetrics] predSyncUpload forzado falló:', e?.message);
+      }
+    }, 1000);
   }catch(e){
     console.error('[SEO] Error cargando métricas:', e.message);
     if(btn){ btn.disabled=false; btn.textContent='📊 Cargar métricas'; }
@@ -9469,13 +9496,19 @@ function predBuildReport(store){
 // ── Hook periódico al abrir el panel: actualizar badge ──
 // (la función se invoca también desde initApp después de cargar items/ventas)
 function predInit(){
-  // v125: primero bajamos data desde KV (cross-PC) ANTES de mostrar el badge
-  // así si una PC subió data ayer, esta PC la ve hoy. Si hay error de red,
-  // el panel sigue funcionando con localStorage local.
-  setTimeout(async () => {
-    await predSyncDownload(); // bajar la versión maestra (merge silencioso)
+  // v130: sync INMEDIATO al abrir el panel (antes había delay de 3s).
+  // Esto garantiza que si la otra PC subió datos recientes, esta PC los ve
+  // ANTES de que el usuario empiece a interactuar.
+  // Es una request GET liviana (cache de edge 60s en Cloudflare) — no bloquea.
+  (async () => {
+    try {
+      await predSyncDownload();
+    } catch(e){
+      console.warn('[PredInit] sync inicial falló (no crítico):', e?.message);
+    }
     _predUpdateReportBadge();
-  }, 3000);
+    if(typeof renderRadarAciertos === 'function') renderRadarAciertos();
+  })();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -9976,10 +10009,13 @@ function renderRadarAciertos(){
     +     '<span style="font-size:22px">📡</span>'
     +     '<div>'
     +       '<div style="font-size:14.5px;font-weight:800;color:'+c.txt+';line-height:1.2">Radar de Aciertos</div>'
-    +       '<div style="font-size:10.5px;color:'+c.dim+';margin-top:2px;font-weight:500">Performance del algoritmo · últimos 7 días</div>'
+    +       '<div style="font-size:10.5px;color:'+c.dim+';margin-top:2px;font-weight:500">Performance del algoritmo · últimos 7 días' + _predLastSyncLabel() + '</div>'
     +     '</div>'
     +   '</div>'
-    +   '<button onclick="renderRadarAciertos();if(typeof showToast===\'function\')showToast(\'Radar actualizado\',\'ok\')" style="background:#ffffff;border:1px solid '+c.bdr+';color:'+c.txt+';font-size:11px;padding:5px 12px;border-radius:6px;cursor:pointer;font-weight:600">↻ Refrescar</button>'
+    +   '<div style="display:flex;gap:6px;flex-wrap:wrap">'
+    +     '<button onclick="predSyncManual()" title="Sincronizar con la nube — sube y baja datos entre todas las PCs donde uses el panel" style="background:#ffffff;border:1px solid '+c.bdr+';color:'+c.txt+';font-size:11px;padding:5px 12px;border-radius:6px;cursor:pointer;font-weight:600">☁ Sync ahora</button>'
+    +     '<button onclick="renderRadarAciertos();if(typeof showToast===\'function\')showToast(\'Radar actualizado\',\'ok\')" title="Refresca solo la vista local (no toca la nube)" style="background:#ffffff;border:1px solid '+c.bdr+';color:'+c.txt+';font-size:11px;padding:5px 12px;border-radius:6px;cursor:pointer;font-weight:600">↻ Refrescar</button>'
+    +   '</div>'
     + '</div>'
 
     // ─── Grid principal: 4 stats grandes
@@ -10076,7 +10112,10 @@ function renderRadarAciertos(){
 // - 1 write/12hs = máx 2 writes/día por PC = ~60/mes (despreciable)
 
 const SEO_PRED_LAST_UPLOAD_KEY = 'mlp_seo_pred_last_upload';
-const SEO_PRED_UPLOAD_COOLDOWN_MS = 12 * 60 * 60 * 1000; // 12 hs
+// v130: bajado de 12hs a 4hs. Costo: ~4-6 writes/día extras por PC, igual
+// despreciable. Beneficio: las 2 PCs se sincronizan mucho más seguido sin
+// depender del sync manual.
+const SEO_PRED_UPLOAD_COOLDOWN_MS = 4 * 60 * 60 * 1000; // 4 hs
 
 // Lock: evita uploads/downloads concurrentes (ej: si el usuario abre dos pestañas)
 let _predSyncBusy = false;
@@ -10145,6 +10184,50 @@ async function predSyncUpload(force){
     return false;
   } finally {
     _predSyncBusy = false;
+  }
+}
+
+// v130: Helper para mostrar "última sync hace X min" en el header del Radar.
+// Lee el timestamp del último upload exitoso desde localStorage.
+function _predLastSyncLabel(){
+  try {
+    const last = parseInt(localStorage.getItem(SEO_PRED_LAST_UPLOAD_KEY) || '0', 10);
+    if(!last) return ' · sin sync aún';
+    const diffMs = Date.now() - last;
+    const diffMin = Math.floor(diffMs / 60000);
+    if(diffMin < 1) return ' · sync hace instantes';
+    if(diffMin < 60) return ' · sync hace ' + diffMin + ' min';
+    const diffH = Math.floor(diffMin / 60);
+    if(diffH < 24) return ' · sync hace ' + diffH + ' h';
+    const diffD = Math.floor(diffH / 24);
+    return ' · sync hace ' + diffD + ' día' + (diffD > 1 ? 's' : '');
+  } catch{ return ''; }
+}
+
+// v130: Sync manual bidireccional (Download → Merge → Upload).
+// Expuesta para uso desde el botón "🔄 Sync ahora" del Radar de Aciertos.
+// Devuelve { ok, stats } para feedback visual.
+async function predSyncManual(){
+  if(_predSyncBusy){
+    if(typeof showToast === 'function') showToast('⏳ Ya hay una sincronización en curso', 'warn');
+    return { ok: false, reason: 'busy' };
+  }
+  try {
+    // Paso 1: Download (trae lo de KV y mergea con local)
+    await predSyncDownload();
+    // Paso 2: Upload FORZADO (sube el merge para que la otra PC tenga lo mismo)
+    const uploaded = await predSyncUpload(true);
+    // Re-render del Radar (muestra nuevo "última sync")
+    if(typeof renderRadarAciertos === 'function') renderRadarAciertos();
+    if(typeof _predUpdateReportBadge === 'function') _predUpdateReportBadge();
+    if(typeof showToast === 'function'){
+      showToast(uploaded ? '☁ Sincronización completa' : '☁ Sin cambios para subir', 'ok');
+    }
+    return { ok: true, uploaded };
+  } catch(e){
+    console.error('[predSyncManual] error:', e);
+    if(typeof showToast === 'function') showToast('❌ Error de sincronización: ' + e.message, 'err');
+    return { ok: false, reason: e.message };
   }
 }
 
