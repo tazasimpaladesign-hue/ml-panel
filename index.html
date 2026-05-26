@@ -140,6 +140,29 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 .tw{overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:12.5px}
 thead th{text-align:left;padding:7px 11px;border-bottom:1px solid var(--border);font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;font-weight:700;white-space:nowrap}
+
+/* v128: Sticky header opt-in para tablas largas (Analizador SEO, Publicaciones,
+   Ventas/Pedidos, Quiebre de Stock). Se agrega la clase .tw-sticky en el .tw o
+   en el <table>. El header queda fijo cuando se scrollea el body.
+   - z-index: 5 para quedar sobre las celdas pero debajo de modales/dropdowns
+   - background sólido para tapar contenido que pasa debajo
+   - box-shadow inferior sutil para indicar el "corte" visual */
+.tw-sticky thead th,
+table.tw-sticky thead th{
+  position:sticky;
+  top:0;
+  z-index:5;
+  background:#f1f3f7;
+  box-shadow:0 1px 0 var(--border), 0 2px 4px -2px rgba(0,0,0,.08);
+}
+/* En tablas con header personalizado (estilo amber, fef3c7, etc.) el bg se
+   define en el <th> directamente y nuestra regla lo respeta gracias a la
+   especificidad. Pero algunas celdas tienen background inline → sticky
+   inline-style override: garantizamos sticky position independiente del bg. */
+.tw-sticky thead th[style*="background"]{
+  position:sticky !important;
+  top:0 !important;
+}
 tbody tr{border-bottom:1px solid var(--border);transition:background .1s}
 tbody tr:last-child{border-bottom:none}
 tbody tr:hover{background:rgba(255,255,255,0.018)}
@@ -723,7 +746,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v127 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v128 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -815,8 +838,8 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   <!-- ── Periodo selector ── -->
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
     <div class="tabs">
-      <button class="tab active" onclick="dashSetPeriod(7,this)">7 días</button>
-      <button class="tab" onclick="dashSetPeriod(30,this)">30 días</button>
+      <button class="tab" onclick="dashSetPeriod(7,this)">7 días</button>
+      <button class="tab active" onclick="dashSetPeriod(30,this)">30 días</button>
       <button class="tab" onclick="dashSetPeriod(90,this)">90 días</button>
     </div>
     <span style="font-size:11px;color:var(--text3)" id="dash-period-label">Últimos 30 días</span>
@@ -1026,7 +1049,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <button class="btn btn-ghost btn-sm" onclick="clearSelection()">✕ Limpiar</button>
       </div>
     </div>
-    <div class="tw">
+    <div class="tw tw-sticky">
       <table>
         <thead><tr>
           <th class="th-check"><input type="checkbox" id="check-all" onchange="toggleAll(this)"></th>
@@ -1266,7 +1289,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <div style="margin-left:auto;font-size:10.5px;color:var(--text3)" id="seo-multi-sort-status">El orden se aplica automáticamente</div>
       </div>
     </div>
-    <div class="tw">
+    <div class="tw tw-sticky">
       <table>
         <thead><tr>
           <th style="min-width:300px">Publicación</th>
@@ -1615,7 +1638,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         </select>
       </div>
     </div>
-    <div class="tw">
+    <div class="tw tw-sticky">
       <table>
         <thead><tr><th>#Orden</th><th>Producto</th><th title="Termómetro SEO al momento de mostrar la tabla — útil para validar las predicciones del 🔥 contra las ventas reales. Si el item con 🔥 efectivamente vendió, la predicción acertó.">🌡️ SEO</th><th>Comprador</th><th title="Provincia de envío extraída de los datos de la factura del comprador. Útil para análisis geográfico de ventas.">Provincia</th><th>Monto</th><th>Envío</th><th>Estado pago</th><th>Fecha y hora</th><th>ML</th></tr></thead>
         <tbody id="orders-tbody"></tbody>
@@ -1862,7 +1885,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <button class="btn btn-ghost btn-sm" onclick="renderStock()">↻ Actualizar</button>
       </div>
     </div>
-    <div class="tw">
+    <div class="tw tw-sticky">
       <table>
         <thead>
           <tr>
@@ -9575,8 +9598,8 @@ function radarOpenBucketModal(bucket){
     html += '<thead style="background:#f1f5f9;color:var(--text2);font-size:10.5px;text-transform:uppercase;letter-spacing:.03em">';
     html += '<tr>'
          +   '<th style="padding:8px 10px;text-align:left;font-weight:700">Item</th>'
-         +   '<th style="padding:8px 6px;text-align:center;font-weight:700;width:62px" title="Score Probabilidad de Venta al momento del snapshot">Hot</th>'
-         +   '<th style="padding:8px 6px;text-align:center;font-weight:700;width:60px" title="Score Termómetro SEO">🌡️</th>'
+         +   '<th style="padding:8px 6px;text-align:center;font-weight:700;width:72px" title="🔥 = score Probabilidad de Venta al momento del snapshot (0-100). Mayor = más chance de venta inminente.">🔥 Prob.</th>'
+         +   '<th style="padding:8px 6px;text-align:center;font-weight:700;width:80px" title="Posición en el ranking interno (Pos. N°) + score Termómetro SEO 0-100 al momento del snapshot. Solo se ranquean publicaciones activas.">Pos. / 🌡️</th>'
          + (bucket === 'tp' || bucket === 'fn'
               ? '<th style="padding:8px 6px;text-align:center;font-weight:700;width:54px" title="Unidades vendidas">Vend.</th>'
                 + '<th style="padding:8px 6px;text-align:right;font-weight:700;width:78px" title="Facturación generada">Total $</th>'
@@ -9611,12 +9634,23 @@ function radarOpenBucketModal(bucket){
            + '</div>';
       html += '</div></td>';
 
-      // Hot score
-      html += '<td style="padding:7px 6px;text-align:center"><div style="font-size:14px">'+hotBadge+'</div><div style="font-size:10px;color:'+hotColor+';font-weight:700">'+(snap.hotScore != null ? snap.hotScore : '—')+'</div></td>';
+      // Hot score (Probabilidad de Venta)
+      html += '<td style="padding:7px 6px;text-align:center;line-height:1.15">'
+            +   '<div style="font-size:14px">'+hotBadge+'</div>'
+            +   '<div style="font-size:10.5px;color:'+hotColor+';font-weight:700">'+(snap.hotScore != null ? snap.hotScore : '—')+'<span style="font-size:8.5px;font-weight:500;color:var(--text3)">/100</span></div>'
+            + '</td>';
 
-      // Termo score
-      html += '<td style="padding:7px 6px;text-align:center"><div style="font-size:13px;font-weight:700;color:'+thermoColor+'">'+(snap.thermoScore != null ? snap.thermoScore : '—')+'</div>'
-            + '<div style="font-size:9.5px;color:var(--text3)">'+(snap.rank ? 'P'+snap.rank : '')+'</div></td>';
+      // Pos. + Termómetro — Pos. como protagonista (azul, grande, igual que en Analizador SEO),
+      // Termo score chico abajo con etiqueta explicativa
+      html += '<td style="padding:7px 6px;text-align:center;line-height:1.15">'
+            +   (snap.rank
+                  ? '<div style="font-size:13.5px;color:#1d4ed8;font-weight:800">Pos. '+snap.rank+'</div>'
+                  : '<div style="font-size:11px;color:var(--text3)">sin rank</div>')
+            +   '<div style="font-size:9.5px;color:var(--text3);margin-top:2px">🌡️ '
+            +     '<span style="font-weight:700;color:'+thermoColor+'">'+(snap.thermoScore != null ? snap.thermoScore : '—')+'</span>'
+            +     '<span style="color:var(--text3)">/100</span>'
+            +   '</div>'
+            + '</td>';
 
       // Columnas específicas según bucket
       if(bucket === 'tp' || bucket === 'fn'){
