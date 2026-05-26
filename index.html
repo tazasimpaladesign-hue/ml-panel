@@ -141,27 +141,25 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 table{width:100%;border-collapse:collapse;font-size:12.5px}
 thead th{text-align:left;padding:7px 11px;border-bottom:1px solid var(--border);font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;font-weight:700;white-space:nowrap}
 
-/* v128: Sticky header opt-in para tablas largas (Analizador SEO, Publicaciones,
-   Ventas/Pedidos, Quiebre de Stock). Se agrega la clase .tw-sticky en el .tw o
-   en el <table>. El header queda fijo cuando se scrollea el body.
-   - z-index: 5 para quedar sobre las celdas pero debajo de modales/dropdowns
-   - background sólido para tapar contenido que pasa debajo
-   - box-shadow inferior sutil para indicar el "corte" visual */
-.tw-sticky thead th,
-table.tw-sticky thead th{
-  position:sticky;
+/* v128/v129: Sticky header SOLO con CSS no funciona en este layout porque
+   los ancestros tienen overflow-x:hidden (body y .content) — eso rompe el
+   sticky de los descendientes (limitación conocida del CSS spec).
+   La solución en v129 es JavaScript: tableSticky.js clona el <thead> y lo
+   posiciona como overlay fijo cuando el header original sale del viewport.
+   Mantengo la clase .tw-sticky como MARCADOR (no aplica estilo) — el JS
+   busca esos elementos al inicializar. */
+.tw-sticky{}
+.tw-sticky-clone{
+  position:fixed;
   top:0;
-  z-index:5;
+  z-index:50;
+  pointer-events:none;
   background:#f1f3f7;
-  box-shadow:0 1px 0 var(--border), 0 2px 4px -2px rgba(0,0,0,.08);
+  box-shadow:0 1px 0 var(--border), 0 4px 8px -4px rgba(0,0,0,.12);
+  overflow:hidden;
 }
-/* En tablas con header personalizado (estilo amber, fef3c7, etc.) el bg se
-   define en el <th> directamente y nuestra regla lo respeta gracias a la
-   especificidad. Pero algunas celdas tienen background inline → sticky
-   inline-style override: garantizamos sticky position independiente del bg. */
-.tw-sticky thead th[style*="background"]{
-  position:sticky !important;
-  top:0 !important;
+.tw-sticky-clone thead th{
+  pointer-events:auto;
 }
 tbody tr{border-bottom:1px solid var(--border);transition:background .1s}
 tbody tr:last-child{border-bottom:none}
@@ -746,7 +744,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v128 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v129 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -2070,7 +2068,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   <div id="fac-invoice-detail" class="card mb" style="padding:14px 18px;min-height:48px"><!-- cargado por renderFacturacion --></div>
   <div class="card">
     <div class="card-hd"><div class="card-title">Órdenes del mes</div></div>
-    <div class="tw">
+    <div class="tw tw-sticky">
       <table>
         <thead><tr><th>#Orden</th><th>Producto</th><th>Comprador</th><th>Monto</th><th>Estado</th><th>Envío</th><th>Fecha</th></tr></thead>
         <tbody id="fac-tbody"></tbody>
@@ -3300,7 +3298,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <span id="wseo-status" style="font-size:11px;color:var(--text3)"></span>
       </div>
     </div>
-    <div class="tw">
+    <div class="tw tw-sticky">
       <table id="wseo-table">
         <thead><tr>
           <th>Producto</th>
@@ -3999,6 +3997,8 @@ async function initApp(){
   startMessagePolling();
   // v124: inicializar sistema predictivo (chequea si hay reporte semanal listo)
   if(typeof predInit === 'function') predInit();
+  // v129: inicializar sticky headers para las 4 tablas marcadas .tw-sticky
+  if(typeof tStickyInit === 'function') tStickyInit();
   // v97 [Tema 2]: POLLING WOO: chequear ventas nuevas en tu tienda web cada 5 min
   if(typeof startWooPolling === 'function') startWooPolling();
   // v103 [Tema 2]: pre-cargar cache de productos Woo en segundo plano para que
@@ -9476,6 +9476,174 @@ function predInit(){
     await predSyncDownload(); // bajar la versión maestra (merge silencioso)
     _predUpdateReportBadge();
   }, 3000);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v129: Sticky table headers — JS engine (CSS sticky no funciona por
+// overflow:hidden en body y .content que rompen el sticky de descendientes)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// FUNCIONAMIENTO:
+// 1. Para cada `.tw-sticky` activo, clonamos su <thead> dentro de un <table>
+//    aparte con position:fixed, top:0, ancho copiado del .tw original.
+// 2. Cuando el thead original sale del viewport (scroll), mostramos el clon.
+// 3. Cuando el thead original o el final de la tabla son visibles, lo ocultamos.
+// 4. Sincronizamos ancho de columnas del clon con el original (responsive).
+// 5. Re-emitimos clicks del clon hacia el thead original (sorts funcionan igual).
+//
+// VENTAJAS sobre CSS sticky:
+//   - No depende de overflow del ancestro
+//   - Funciona con headers complejos (varios colores de background)
+//   - Click sigue funcionando para sortear
+
+// Estado global del módulo
+const _tStickyState = {
+  registered: [],  // [{wrap, table, clone, visible}]
+  inited: false,
+  rafToken: null,
+};
+
+function tStickyInit(){
+  if(_tStickyState.inited) return;
+  _tStickyState.inited = true;
+  // Escuchar scroll y resize globales
+  window.addEventListener('scroll', _tStickyScheduleUpdate, { passive: true });
+  window.addEventListener('resize', _tStickyScheduleUpdate, { passive: true });
+  // Refresh cuando cambia de sección (porque la tabla puede no estar montada antes)
+  document.addEventListener('section:changed', tStickyRefresh);
+  // Refresh inicial
+  setTimeout(tStickyRefresh, 500);
+}
+
+function _tStickyScheduleUpdate(){
+  if(_tStickyState.rafToken) return;
+  _tStickyState.rafToken = requestAnimationFrame(() => {
+    _tStickyState.rafToken = null;
+    _tStickyUpdateAll();
+  });
+}
+
+// Busca todos los .tw-sticky en el DOM y registra los nuevos
+function tStickyRefresh(){
+  const wraps = document.querySelectorAll('.tw-sticky');
+  const known = new Set(_tStickyState.registered.map(r => r.wrap));
+  for(const wrap of wraps){
+    if(known.has(wrap)) continue;
+    const table = wrap.querySelector('table');
+    if(!table) continue;
+    const thead = table.querySelector('thead');
+    if(!thead) continue;
+    _tStickyRegister(wrap, table);
+  }
+  // Limpiar registros muertos (wraps que ya no están en DOM)
+  _tStickyState.registered = _tStickyState.registered.filter(r => {
+    if(!document.contains(r.wrap)){
+      if(r.clone && r.clone.parentNode) r.clone.parentNode.removeChild(r.clone);
+      return false;
+    }
+    return true;
+  });
+  _tStickyUpdateAll();
+}
+
+function _tStickyRegister(wrap, table){
+  // Crear el clon del thead dentro de un <table> fijo
+  const clone = document.createElement('table');
+  clone.className = 'tw-sticky-clone';
+  clone.style.display = 'none';
+  // Copiar atributos table relevantes (cellpadding, etc — no hay en este caso, pero por las dudas)
+  // Insertar al final del body para que el position:fixed funcione sin influencia del layout
+  document.body.appendChild(clone);
+
+  const reg = { wrap, table, clone, visible: false };
+  _tStickyState.registered.push(reg);
+  _tStickyClonHead(reg);
+}
+
+// Clonar el <thead> del original al clon (cada vez que cambia el header)
+function _tStickyClonHead(reg){
+  const origThead = reg.table.querySelector('thead');
+  if(!origThead) return;
+  const newClone = origThead.cloneNode(true);
+  // Limpiar el clon actual
+  while(reg.clone.firstChild) reg.clone.removeChild(reg.clone.firstChild);
+  reg.clone.appendChild(newClone);
+  // Re-emitir clicks: cada <th> del clon → mismo índice en original
+  const cloneThs = reg.clone.querySelectorAll('thead th');
+  const origThs = origThead.querySelectorAll('th');
+  cloneThs.forEach((th, idx) => {
+    if(!origThs[idx]) return;
+    th.style.cursor = origThs[idx].style.cursor || (origThs[idx].onclick ? 'pointer' : '');
+    th.addEventListener('click', (e) => {
+      e.preventDefault();
+      // Re-disparar click en el original (preserva el handler onclick inline)
+      origThs[idx].click();
+      // El click puede haber cambiado el contenido (ej: indicador de sort) — re-clonar
+      setTimeout(() => _tStickyClonHead(reg), 0);
+    });
+  });
+}
+
+function _tStickyUpdateAll(){
+  for(const reg of _tStickyState.registered) _tStickyUpdateOne(reg);
+}
+
+function _tStickyUpdateOne(reg){
+  const { wrap, table, clone } = reg;
+  if(!document.contains(table)){
+    if(clone.parentNode) clone.parentNode.removeChild(clone);
+    return;
+  }
+  const wrapRect = wrap.getBoundingClientRect();
+  const tableRect = table.getBoundingClientRect();
+  const thead = table.querySelector('thead');
+  if(!thead){ clone.style.display = 'none'; reg.visible = false; return; }
+  const theadRect = thead.getBoundingClientRect();
+
+  // Mostrar clon cuando:
+  //   - El header original está fuera del viewport (top < 0)
+  //   - Y la tabla todavía tiene contenido visible (bottom > 60 para que se vea
+  //     algo abajo y no quede el header flotando solo)
+  const shouldShow = theadRect.bottom < 0 && tableRect.bottom > theadRect.height + 60;
+
+  if(!shouldShow){
+    if(reg.visible){
+      clone.style.display = 'none';
+      reg.visible = false;
+    }
+    return;
+  }
+
+  // Sincronizar geometría
+  clone.style.display = 'table';
+  clone.style.left = wrapRect.left + 'px';
+  clone.style.width = wrapRect.width + 'px';
+  // Sincronizar ancho de cada columna con la primera fila del body original
+  const firstBodyRow = table.querySelector('tbody tr');
+  if(firstBodyRow){
+    const bodyCells = firstBodyRow.querySelectorAll('td');
+    const cloneThs = clone.querySelectorAll('thead th');
+    cloneThs.forEach((th, idx) => {
+      if(bodyCells[idx]){
+        const w = bodyCells[idx].getBoundingClientRect().width;
+        th.style.width = w + 'px';
+        th.style.minWidth = w + 'px';
+        th.style.maxWidth = w + 'px';
+      }
+    });
+  }
+  reg.visible = true;
+}
+
+// Hook público: cuando se re-renderiza una tabla, llamar para que el clon se
+// actualice con el thead nuevo (ej: sortBy cambia el indicador ↕).
+function tStickyRefreshHeader(wrapOrTable){
+  const reg = _tStickyState.registered.find(r =>
+    r.wrap === wrapOrTable || r.table === wrapOrTable ||
+    r.wrap.contains(wrapOrTable) || (wrapOrTable && wrapOrTable.contains(r.wrap))
+  );
+  if(reg) _tStickyClonHead(reg);
+  _tStickyScheduleUpdate();
 }
 
 // ── v125: Radar de Aciertos — stats + widget visual ─────────────────────
@@ -17939,6 +18107,9 @@ function showSection(id){
   document.getElementById('topbar-sub').textContent=t[1];
   // Update URL hash for browser back/forward and right-click "open in new tab"
   if(history.replaceState) history.replaceState(null,'','#'+id);
+  // v129: notificar al sticky engine para que re-evalúe los headers de la
+  // nueva sección visible (clonar/sincronizar)
+  document.dispatchEvent(new CustomEvent('section:changed', { detail: { id } }));
 
   if(id==='dashboard' && token) renderDashboard();
   if(id==='publicaciones') renderPubs();
