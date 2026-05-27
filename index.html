@@ -747,7 +747,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v134 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v135 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -10291,29 +10291,56 @@ async function predSyncUpload(force){
       headers = { 'Authorization': 'Bearer '+token, 'Content-Type': 'application/json' };
     }
 
-    let r = await fetch(WORKER+'/api/predictive-sync', {
-      method: 'POST',
-      headers,
-      body,
-      keepalive: true,
-    });
-
-    // v134: Si el upload comprimido falla, REINTENTAR con JSON plano.
-    // Esto cubre el caso donde el Worker no soporta gzip todavía (v77 viejo) o
-    // hay algún bug en la descompresión del Worker. El JSON plano sigue siendo
-    // aceptado por todos los Workers desde v77+.
-    if(!r.ok && headers['X-Compression'] === 'gzip'){
-      console.warn('[PredSync] gzip upload falló HTTP '+r.status+', reintentando con JSON plano...');
-      try {
-        const errBody = await r.text();
-        console.warn('[PredSync] error body comprimido:', errBody.slice(0, 300));
-      } catch{}
+    // v135 FIX: removido `keepalive: true` porque Cloudflare/Browsers tienen
+    // un límite de 64KB en el body cuando keepalive está activo. Nuestro payload
+    // comprimido (~90KB para 3102 snapshots) excede ese límite → el browser
+    // rechaza la request ANTES de enviarla con "Failed to fetch" (error de red,
+    // no HTTP). Sin keepalive el límite sube a varios MB.
+    // Trade-off: si el usuario cierra la pestaña justo durante el upload, este
+    // se aborta. Pero el próximo "Cargar métricas" lo vuelve a intentar.
+    let r;
+    let networkError = null;
+    try {
       r = await fetch(WORKER+'/api/predictive-sync', {
         method: 'POST',
-        headers: { 'Authorization': 'Bearer '+token, 'Content-Type': 'application/json' },
-        body: jsonStr,
-        keepalive: true,
+        headers,
+        body,
       });
+    } catch(netErr){
+      // "Failed to fetch" cae acá — error de red antes de llegar al servidor
+      networkError = netErr;
+      console.warn('[PredSync] Error de red (no llegó al Worker):', netErr.message);
+    }
+
+    // v135: Si el upload (comprimido o no) falló por red O por HTTP, reintentar
+    // con JSON plano sin keepalive. Cubre ambos casos:
+    //   1. gzip rechazado por el Worker (HTTP 400)
+    //   2. payload comprimido muy grande para algún proxy intermedio (red)
+    if((networkError || !r.ok) && headers['X-Compression'] === 'gzip'){
+      const reason = networkError ? 'error de red' : 'HTTP '+r.status;
+      console.warn('[PredSync] gzip upload falló ('+reason+'), reintentando con JSON plano...');
+      if(r && !r.ok){
+        try {
+          const errBody = await r.text();
+          console.warn('[PredSync] error body comprimido:', errBody.slice(0, 300));
+        } catch{}
+      }
+      try {
+        r = await fetch(WORKER+'/api/predictive-sync', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer '+token, 'Content-Type': 'application/json' },
+          body: jsonStr,
+        });
+        networkError = null;
+      } catch(netErr2){
+        networkError = netErr2;
+        console.warn('[PredSync] retry plano también falló de red:', netErr2.message);
+      }
+    }
+
+    if(networkError){
+      console.warn('[PredSync] upload abortado por error de red');
+      return false;
     }
 
     if(!r.ok){
