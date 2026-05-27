@@ -744,7 +744,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v131 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v132 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1263,7 +1263,8 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <div style="display:flex;gap:8px;align-items:center;margin-left:auto;flex-wrap:wrap">
         <input type="text" id="seo-search" placeholder="Buscar por título..." style="max-width:200px;font-size:12px;padding:5px 9px" oninput="seoGoPage(1)">
         <button class="btn btn-ghost btn-sm" id="seo-multi-sort-btn" onclick="seoMultiSortToggle()" title="Ordenar por múltiples criterios en cascada">🔢 Orden avanzado<span id="seo-multi-sort-count" style="margin-left:4px;color:var(--accent);font-weight:700"></span></button>
-        <button class="btn btn-ghost btn-sm" onclick="loadSEOMetrics()" id="seo-metrics-btn" title="Cargar visitas reales de los últimos 7 días desde ML">📊 Cargar métricas</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadSEOMetrics()" id="seo-metrics-btn" title="Cargar visitas reales de los últimos 7 días desde ML (página actual fresca, resto desde caché si está disponible)">📊 Cargar métricas</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadSEOMetricsFull()" id="seo-metrics-full-btn" title="Forzar refresh COMPLETO: borra el caché local y vuelve a pedir todas las métricas a ML. Más lento pero garantiza datos 100% frescos.">🔄 Refresh total</button>
         <button class="btn btn-ghost btn-sm" onclick="analyzeSEOAll()">↻ Actualizar</button>
       </div>
     </div>
@@ -7554,6 +7555,24 @@ const SEO_SCENARIOS = {
       return t && t.score <= 45;
     },
   },
+  // v132: Escenario "Venta Inminente" — Hot Items con 🔥🔥
+  // (visits >= 40, conv histórica >= 1.8%, sales7d = 0, stock > 0)
+  // Estos items tienen tráfico + conversión histórica pero NO han vendido
+  // en 7 días → algo bloquea la venta (precio, foto, título, descripción).
+  // Acción inmediata: revisarlos urgente, no esperar.
+  'venta_inminente': {
+    emoji: '🔥🔥', label: 'Venta Inminente', color: '#7f1d1d',
+    description: 'Items con TODOS los factores predictivos al máximo: tráfico alto (≥40 visitas/7d), conversión histórica probada (≥1.8%), stock disponible, pero 0 ventas en últimos 7 días. Algo bloquea la venta — revisar URGENTE título/precio/fotos.',
+    actionMain:      'Revisar AHORA: ¿precio competitivo? ¿foto principal atractiva? ¿título con keywords? ¿stock visible? Algo está fallando en el cierre.',
+    actionSecondary: 'Son la prioridad máxima del catálogo. Cada día sin vender es plata que se pierde. Compará contra la competencia y ajustá lo que veas raro.',
+    filter: i => {
+      if(typeof seoHotnessScore !== 'function') return false;
+      try {
+        const h = seoHotnessScore(i);
+        return h && h.isImminent;
+      } catch(e){ return false; }
+    },
+  },
   // v119: Escenario "Alta Probabilidad de Venta" — Hot Items predictivos
   'alta_probabilidad': {
     emoji: '🔥', label: 'Alta Probabilidad', color: '#dc2626',
@@ -7566,7 +7585,9 @@ const SEO_SCENARIOS = {
 
 // Orden de los chips en la UI (de izquierda a derecha)
 const SEO_SCENARIO_ORDER = [
-  // v119: Hot Items predictivos (lo más urgente de atender)
+  // v132: Venta inminente (máxima urgencia — accionar HOY)
+  'venta_inminente',
+  // v119: Hot Items predictivos (urgente pero más relajado — 48-72h)
   'alta_probabilidad',
   // Críticos / urgentes (rojos/naranjas)
   'peligro_quiebre', 'alta_conv_bajo_stock', 'trafico_esteril', 'falla_cierre',
@@ -8625,6 +8646,46 @@ function renderKWDensity(){
   if(catEl) catEl.innerHTML=`<div class="chips" style="max-height:250px;overflow-y:auto;padding-right:4px">${top.slice(0,50).map(([w,c])=>`<div class="chip">${w} <span style="opacity:.5">${c}</span></div>`).join('')}</div>`;
 }
 
+// v132: Refresh TOTAL — borra el caché de TODAS las publicaciones del filtro
+// y luego invoca loadSEOMetrics. Útil cuando el usuario sospecha que el cache
+// está desactualizado o quiere garantizar datos frescos.
+async function loadSEOMetricsFull(){
+  const btn = document.getElementById('seo-metrics-full-btn');
+  const mainBtn = document.getElementById('seo-metrics-btn');
+  if(btn){ btn.disabled = true; btn.textContent = '⏳ Limpiando caché...'; }
+  if(mainBtn) mainBtn.disabled = true;
+
+  // Filtrar items visibles (igual que en loadSEOMetrics) para borrar cache
+  const searchQ = (document.getElementById('seo-search')?.value||'').toLowerCase();
+  const st = seoState.statusFilter;
+  let filtered = allItems.filter(i=>{
+    if(!st && (i.status==='closed'||i.status==='deleted'||i.status==='inactive')) return false;
+    if(st && i.status!==st) return false;
+    if(seoState.tipoFilter && getPubType(i)!==seoState.tipoFilter) return false;
+    if(searchQ && !i.title.toLowerCase().includes(searchQ)) return false;
+    return true;
+  });
+
+  // Borrar caché en ambas capas para TODOS los items del filtro
+  let cleaned = 0;
+  filtered.forEach(i => {
+    const id = i.id;
+    delete itemMetrics[id];
+    try {
+      localStorage.removeItem(METRICS_CACHE_KEY + id);
+      cleaned++;
+    } catch(e){}
+  });
+  console.log('[SEOMetrics] Cache borrado para', cleaned, 'items');
+  if(typeof showToast === 'function') showToast('🔄 Cache limpiado, refrescando datos de ML...', 'ok');
+
+  if(btn){ btn.disabled = false; btn.textContent = '🔄 Refresh total'; }
+  if(mainBtn) mainBtn.disabled = false;
+
+  // Ahora invocar loadSEOMetrics normal (que va a ir a ML porque no hay cache)
+  return loadSEOMetrics();
+}
+
 // ── Cargar métricas reales (visitas 7d) para la tabla SEO ───
 async function loadSEOMetrics(){
   const btn = document.getElementById('seo-metrics-btn');
@@ -8656,17 +8717,28 @@ async function loadSEOMetrics(){
   const start = (seoState.page-1) * seoState.perPage;
   const pageItems  = filtered.slice(start, start + seoState.perPage);
   const restItems  = filtered.filter((_, idx) => idx < start || idx >= start + seoState.perPage);
-  // Solo borrar caché de la página actual (forzar refresh), el resto usa localStorage
-  pageItems.forEach(i => delete itemMetrics[i.id]);
+  // v132 BUG FIX: borrar caché de la página actual EN AMBAS CAPAS para forzar
+  // refresh real a ML. Antes solo se borraba `itemMetrics` (memoria) pero el
+  // `localStorage` (`mlp_metrics_v2_*`) seguía siendo válido por 24h, lo que
+  // hacía que `loadPubMetricsBatch` leyera del cache viejo en vez de pegarle a
+  // ML. Resultado: el usuario tocaba "Cargar métricas" y los datos parecían
+  // los mismos. Ahora forzamos fetch real para la página visible.
+  // El resto (background load) sigue usando cache si lo hay (más rápido) pero
+  // se invalida cualquier cache que esté cerca del límite de 24h.
+  pageItems.forEach(i => {
+    delete itemMetrics[i.id];
+    try { localStorage.removeItem(METRICS_CACHE_KEY + i.id); } catch(e){}
+  });
   const ids = [...pageItems.map(i=>i.id), ...restItems.map(i=>i.id)];
 
   if(!ids.length){ if(btn){ btn.disabled=false; btn.textContent='📊 Cargar métricas'; } return; }
 
   try{
-    // Cargar página actual (ya limpió caché → siempre frescos)
+    // Cargar página actual (cache invalidado en ambas capas → siempre frescos de ML)
+    if(btn) btn.textContent='⏳ Pidiendo datos frescos a ML...';
     await loadPubMetricsBatch(pageItems.map(i=>i.id));
     renderSEOTable();
-    if(btn) btn.textContent = '📊 Pág '+seoState.page+' lista ✓';
+    if(btn) btn.textContent = '✓ Pág '+seoState.page+' actualizada';
 
     // Cargar el resto del filtro en background (usa localStorage si disponible)
     if(restItems.length){
