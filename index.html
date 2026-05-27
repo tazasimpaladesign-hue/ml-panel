@@ -10,6 +10,9 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <!-- v89 [P3]: plugin datalabels para mostrar valores fijos sobre las barras (Facturación) -->
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0"></script>
+<!-- v133: pako para comprimir payload de sync predictivo con gzip antes de subir
+     al Worker. Reduce ~5MB JSON a ~500-750KB. CDN gratis, sin tokens. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
 <script>
   // v89 [P3]: chartjs-plugin-datalabels se auto-registra globalmente al cargarse,
   // lo que haría que TODOS los charts del panel muestren etiquetas indeseadas.
@@ -744,7 +747,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v132 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v133 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4294,7 +4297,7 @@ async function _pollPendingShipments(){
 // v93 [P5]: detector de versión del Worker. Si el Worker está desactualizado (no v55+),
 // significa que el header `x-format-new: true` no está siendo aplicado y el bug de
 // envíos sigue activo. Mostramos un banner amarillo al usuario.
-const _MIN_WORKER_VERSION = 77; // v125: requiere /api/predictive-sync
+const _MIN_WORKER_VERSION = 78; // v133: requiere gzip + 10MB payload limit
 async function _checkWorkerVersion(){
   try {
     const r = await fetch(WORKER + '/');
@@ -9588,6 +9591,20 @@ function predInit(){
     } catch(e){
       console.warn('[PredInit] sync inicial falló (no crítico):', e?.message);
     }
+    // v133: Si el sistema ya empezó (firstRunTs existe) pero NUNCA se hizo
+    // upload (last_upload no existe), forzar un upload inicial. Esto resuelve
+    // el caso del usuario donde el cooldown nunca se cumplía y por eso las
+    // PCs nunca se sincronizaban (el "sin sync aún" eterno).
+    const local = _predLoad();
+    const lastUpload = parseInt(localStorage.getItem(SEO_PRED_LAST_UPLOAD_KEY) || '0', 10);
+    if(local.firstRunTs && !lastUpload){
+      console.log('[PredInit] Primera vez con upload — forzando subida inicial');
+      try {
+        await predSyncUpload(true);
+      } catch(e){
+        console.warn('[PredInit] upload inicial falló:', e?.message);
+      }
+    }
     _predUpdateReportBadge();
     if(typeof renderRadarAciertos === 'function') renderRadarAciertos();
   })();
@@ -10242,14 +10259,51 @@ async function predSyncUpload(force){
   _predSyncBusy = true;
   try {
     const local = _predLoad();
+    const jsonStr = JSON.stringify(local);
+
+    // v133: Comprimir con gzip antes de subir. pako está cargado desde CDN.
+    // Reducción típica: 5MB JSON → ~500KB base64. Si pako no cargó por algún
+    // motivo (offline, CDN bloqueado), caemos a envío plano como fallback.
+    let body, headers;
+    if (typeof pako !== 'undefined') {
+      try {
+        const compressed = pako.gzip(jsonStr);
+        // Convertir Uint8Array → base64 (compatible con la API fetch del Worker)
+        let bin = '';
+        for (let i = 0; i < compressed.length; i++) bin += String.fromCharCode(compressed[i]);
+        const b64 = btoa(bin);
+        body = b64;
+        headers = {
+          'Authorization': 'Bearer '+token,
+          'Content-Type': 'text/plain',
+          'X-Compression': 'gzip',
+        };
+        const ratio = ((b64.length / jsonStr.length) * 100).toFixed(1);
+        console.log('[PredSync] ↑ Comprimido: '+(jsonStr.length/1024|0)+'KB → '+(b64.length/1024|0)+'KB ('+ratio+'%)');
+      } catch (e) {
+        console.warn('[PredSync] gzip falló, mando plano:', e.message);
+        body = jsonStr;
+        headers = { 'Authorization': 'Bearer '+token, 'Content-Type': 'application/json' };
+      }
+    } else {
+      // Pako no disponible — envío plano (compatible con Worker v77 antiguo)
+      body = jsonStr;
+      headers = { 'Authorization': 'Bearer '+token, 'Content-Type': 'application/json' };
+    }
+
     const r = await fetch(WORKER+'/api/predictive-sync', {
       method: 'POST',
-      headers: { 'Authorization': 'Bearer '+token, 'Content-Type': 'application/json' },
-      body: JSON.stringify(local),
+      headers,
+      body,
       keepalive: true,
     });
     if(!r.ok){
       console.warn('[PredSync] upload HTTP '+r.status);
+      // v133: si el upload falló, leer el body para diagnóstico
+      try {
+        const errBody = await r.text();
+        console.warn('[PredSync] upload error body:', errBody.slice(0, 300));
+      } catch{}
       return false;
     }
     const result = await r.json();
@@ -10288,22 +10342,53 @@ function _predLastSyncLabel(){
 
 // v130: Sync manual bidireccional (Download → Merge → Upload).
 // Expuesta para uso desde el botón "🔄 Sync ahora" del Radar de Aciertos.
-// Devuelve { ok, stats } para feedback visual.
+// v133: Feedback detallado al usuario sobre cada paso + tamaños.
 async function predSyncManual(){
   if(_predSyncBusy){
     if(typeof showToast === 'function') showToast('⏳ Ya hay una sincronización en curso', 'warn');
     return { ok: false, reason: 'busy' };
   }
   try {
+    if(typeof showToast === 'function') showToast('☁ Sincronizando con la nube...', 'ok');
+
     // Paso 1: Download (trae lo de KV y mergea con local)
+    const localBefore = _predLoad();
+    const snapsBefore = Object.values(localBefore.snapshots || {}).reduce((s,a) => s+a.length, 0);
+    const matchesBefore = (localBefore.matches || []).length;
+
     await predSyncDownload();
+
+    const localAfterDl = _predLoad();
+    const snapsAfterDl = Object.values(localAfterDl.snapshots || {}).reduce((s,a) => s+a.length, 0);
+    const matchesAfterDl = (localAfterDl.matches || []).length;
+
+    if(snapsAfterDl > snapsBefore || matchesAfterDl > matchesBefore){
+      console.log('[predSyncManual] ↓ Download trajo: +' + (snapsAfterDl - snapsBefore) + ' snapshots, +' + (matchesAfterDl - matchesBefore) + ' matches');
+    }
+
     // Paso 2: Upload FORZADO (sube el merge para que la otra PC tenga lo mismo)
     const uploaded = await predSyncUpload(true);
+
     // Re-render del Radar (muestra nuevo "última sync")
     if(typeof renderRadarAciertos === 'function') renderRadarAciertos();
     if(typeof _predUpdateReportBadge === 'function') _predUpdateReportBadge();
-    if(typeof showToast === 'function'){
-      showToast(uploaded ? '☁ Sincronización completa' : '☁ Sin cambios para subir', 'ok');
+
+    if(uploaded){
+      if(typeof showToast === 'function') showToast('☁ Sincronización completa', 'ok');
+    } else {
+      // Upload falló — diagnosticar
+      const localStr = JSON.stringify(_predLoad());
+      const sizeMB = (localStr.length / 1024 / 1024).toFixed(2);
+      const pakoOk = typeof pako !== 'undefined';
+      const msg = '❌ Upload falló. Tamaño: ' + sizeMB + 'MB · pako: ' + (pakoOk ? 'OK' : 'NO CARGADO') + '. Ver consola F12.';
+      if(typeof showToast === 'function') showToast(msg, 'err');
+      console.error('[predSyncManual] Upload FAIL. Diagnóstico:', {
+        sizeJSON: localStr.length,
+        pakoLoaded: pakoOk,
+        snapshots: snapsAfterDl,
+        matches: matchesAfterDl,
+        hint: 'Revisar Worker version (v78+ requerido para gzip). Si tu Worker es v77, el panel hace fallback a plano y el límite es 4MB.',
+      });
     }
     return { ok: true, uploaded };
   } catch(e){
