@@ -747,7 +747,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v137 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v138 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1269,6 +1269,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <button class="btn btn-ghost btn-sm" onclick="loadSEOMetrics()" id="seo-metrics-btn" title="Cargar visitas reales de los últimos 7 días desde ML (página actual fresca, resto desde caché si está disponible)">📊 Cargar métricas</button>
         <button class="btn btn-ghost btn-sm" onclick="loadSEOMetricsFull()" id="seo-metrics-full-btn" title="Forzar refresh COMPLETO: borra el caché local y vuelve a pedir todas las métricas a ML. Más lento pero garantiza datos 100% frescos.">🔄 Refresh total</button>
         <button class="btn btn-ghost btn-sm" onclick="analyzeSEOAll()">↻ Actualizar</button>
+        <button class="btn btn-primary btn-sm" onclick="seoExportOpen()" id="seo-export-btn" title="Exportar las publicaciones filtradas a un archivo .xlsx para subir a una IA y pedirle estrategia">📥 Exportar reporte</button>
       </div>
     </div>
     <!-- v76: Panel de Orden Avanzado — diseño compacto, centrado, con sombra -->
@@ -1316,6 +1317,50 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       </table>
     </div>
     <div id="seo-pagination" style="display:flex;align-items:center;justify-content:space-between;padding:12px 0 0;gap:8px;flex-wrap:wrap"></div>
+  </div>
+
+  <!-- v138: Modal de exportación de reporte SEO -->
+  <div id="seo-export-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center">
+    <div style="background:var(--bg2);border-radius:14px;width:560px;max-width:94vw;max-height:88vh;overflow-y:auto;border:1px solid var(--border);box-shadow:0 20px 60px rgba(0,0,0,.4)">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px 14px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg2);z-index:2">
+        <div>
+          <div style="font-size:15px;font-weight:700">📥 Exportar reporte SEO</div>
+          <div style="font-size:11.5px;color:var(--text3);margin-top:2px" id="seo-export-sub">—</div>
+        </div>
+        <button onclick="seoExportClose()" style="background:none;border:none;font-size:24px;cursor:pointer;color:var(--text3);line-height:1">×</button>
+      </div>
+
+      <div style="padding:16px 22px">
+        <!-- Aviso métricas -->
+        <div id="seo-export-metrics-warn" style="display:none;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:11px 14px;margin-bottom:14px;font-size:12px;line-height:1.5;color:#78350f">
+          <strong>⚠️ Métricas de tráfico sin cargar.</strong><br>
+          Las columnas de visitas, conversión y termómetro saldrán vacías. Para un reporte completo conviene cargarlas primero.
+          <div style="margin-top:9px;display:flex;gap:7px;flex-wrap:wrap">
+            <button class="btn btn-primary btn-xs" onclick="seoExportLoadMetricsThenReopen()" style="font-size:11px">📊 Cargar métricas y volver</button>
+            <button class="btn btn-ghost btn-xs" onclick="document.getElementById('seo-export-metrics-warn').style.display='none'" style="font-size:11px">Exportar igual</button>
+          </div>
+        </div>
+
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <span style="font-size:12px;font-weight:600;color:var(--text)">Columnas a incluir</span>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-ghost btn-xs" onclick="seoExportSelectAll(true)" style="font-size:10.5px">Todas</button>
+            <button class="btn btn-ghost btn-xs" onclick="seoExportSelectAll(false)" style="font-size:10.5px">Ninguna</button>
+          </div>
+        </div>
+        <div id="seo-export-cols" style="display:grid;grid-template-columns:1fr 1fr;gap:5px 14px;margin-bottom:16px"></div>
+
+        <div style="background:var(--bg3);border-radius:8px;padding:11px 14px;font-size:11.5px;line-height:1.5;color:var(--text2)">
+          📄 El archivo <strong>.xlsx</strong> incluye 3 hojas: <strong>Datos</strong> (la tabla filtrada), <strong>Resumen</strong> (totales y promedios) y <strong>Contexto para IA</strong> (qué significa cada columna + un prompt listo para copiar). Subilo a ChatGPT, Claude o Gemini y pedile estrategia.
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:14px 22px;border-top:1px solid var(--border);position:sticky;bottom:0;background:var(--bg2)">
+        <span id="seo-export-status" style="font-size:11px;color:var(--text3);margin-right:auto"></span>
+        <button class="btn btn-ghost btn-sm" onclick="seoExportClose()">Cancelar</button>
+        <button class="btn btn-primary btn-sm" id="seo-export-go" onclick="seoExportRun()">📥 Descargar .xlsx</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -8325,15 +8370,341 @@ function seoGoPage(n){
   if(btn && btn.textContent.includes('✓')) btn.textContent='📊 Cargar métricas';
 }
 
-function renderSEOTable(){
+// ═══════════════════════════════════════════════════════════════════════════
+// v138: EXPORTADOR DE REPORTE SEO → .xlsx (3 hojas) para análisis con IA
+// ═══════════════════════════════════════════════════════════════════════════
+// Toma las publicaciones FILTRADAS en pantalla (respeta escenario, estado,
+// tipo y búsqueda) y genera un .xlsx con:
+//   Hoja 1 "Datos"            → una fila por publicación, columnas elegibles
+//   Hoja 2 "Resumen"          → totales y promedios automáticos
+//   Hoja 3 "Contexto para IA" → diccionario de columnas + prompt sugerido
+// 100% del lado del navegador, cero requests a ML. SheetJS se carga lazy del CDN.
+
+// Definición de TODAS las columnas exportables. value(item) calcula el dato.
+// type: 'num' = número (lo escribimos como número real en el xlsx), 'text' = texto.
+function _seoExportColumns(){
+  const fmtTs = ts => {
+    if(!ts) return '';
+    const d = new Date(ts);
+    if(isNaN(d.getTime())) return '';
+    return d.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric'});
+  };
+  const pubTypeLabel = { catalog:'Catálogo', gold:'Gold/Premium', free:'Gratuita', classic:'Clásica' };
+  const statusLabel  = { active:'Activa', paused:'Pausada', closed:'Cerrada', under_review:'Inactiva/Revisión', inactive:'Inactiva' };
+
+  return [
+    { id:'id',          label:'ID Publicación',     type:'text', def:true,  value:i=> i.id||'' },
+    { id:'title',       label:'Título',             type:'text', def:true,  value:i=> i.title||'' },
+    { id:'sku',         label:'SKU',                type:'text', def:true,  value:i=> i.seller_custom_field||'' },
+    { id:'pubtype',     label:'Tipo publicación',   type:'text', def:true,  value:i=> pubTypeLabel[getPubType(i)]||getPubType(i) },
+    { id:'status',      label:'Estado',             type:'text', def:true,  value:i=> statusLabel[i.status]||i.status||'' },
+    { id:'price',       label:'Precio',             type:'num',  def:true,  value:i=> i.price||0 },
+    { id:'stock',       label:'Stock disponible',   type:'num',  def:true,  value:i=> i.available_quantity??0 },
+    { id:'sold',        label:'Vendidas históricas',type:'num',  def:true,  value:i=> i.sold_quantity||0 },
+    { id:'created',     label:'Fecha creación',     type:'text', def:true,  value:i=> fmtTs(i.date_created) },
+    { id:'ageDays',     label:'Antigüedad (días)',  type:'num',  def:true,  value:i=> i.date_created ? Math.floor((Date.now()-new Date(i.date_created).getTime())/86400000) : '' },
+    { id:'seoScore',    label:'Score SEO título',   type:'num',  def:true,  value:i=> seoScore(i.title||'') },
+    { id:'quality',     label:'Calidad publicación',type:'num',  def:true,  value:i=> qualityScore(i) },
+    { id:'rank',        label:'Ranking interno (Pos.)', type:'num', def:true, value:i=>{ const r=(window._seoRanking||{})[String(i.id)]; return r?r.rank:''; } },
+    { id:'percentile',  label:'Percentil ranking',  type:'num',  def:true,  value:i=>{ const r=(window._seoRanking||{})[String(i.id)]; return r?r.percentile:''; } },
+    { id:'thermo',      label:'Termómetro SEO',     type:'num',  def:true,  value:i=>{ const t=(window._seoThermo||{})[String(i.id)]; return t?t.score:''; } },
+    { id:'thermoLevel', label:'Nivel termómetro',   type:'text', def:true,  value:i=>{ const t=(window._seoThermo||{})[String(i.id)]; return t?({high:'Alto',mid:'Medio',low:'Bajo'}[t.level]||t.level):''; } },
+    { id:'visits30',    label:'Visitas 30d',        type:'num',  def:true,  value:i=>{ const m=itemMetrics[i.id]; return m?(m.visits30||0):''; } },
+    { id:'visits7',     label:'Visitas 7d',         type:'num',  def:true,  value:i=>{ const m=itemMetrics[i.id]; return m?(m.visits||0):''; } },
+    { id:'visitsTrend', label:'Tendencia visitas %',type:'num',  def:true,  value:i=>{ const m=itemMetrics[i.id]; return m?(m.visitsTrend||0):''; } },
+    { id:'sales60',     label:'Ventas 60d',         type:'num',  def:true,  value:i=>{ const m=itemMetrics[i.id]; return m?(m.sales60||0):''; } },
+    { id:'sales7',      label:'Ventas 7d',          type:'num',  def:true,  value:i=>{ const m=itemMetrics[i.id]; return m?(m.sales||0):''; } },
+    { id:'salesTrend',  label:'Tendencia ventas %', type:'num',  def:true,  value:i=>{ const m=itemMetrics[i.id]; return m?(m.salesTrend||0):''; } },
+    { id:'conv',        label:'Conversión %',       type:'num',  def:true,  value:i=>{ const m=itemMetrics[i.id]; return m?(m.conv||0):''; } },
+    { id:'lastSale',    label:'Última venta',       type:'text', def:true,  value:i=> fmtTs(getLastSaleTs(i.id)) },
+    { id:'daysNoSale',  label:'Días sin ventas',    type:'num',  def:true,  value:i=>{ const d=getDaysSinceLastSale(i.id); return d===Infinity?'':d; } },
+    { id:'hasEAN',      label:'Tiene EAN/GTIN',     type:'text', def:true,  value:i=> itemHasEAN(i)?'Sí':'No' },
+    { id:'pics',        label:'Cantidad fotos',     type:'num',  def:true,  value:i=> (i.pictures||[]).length || (i.thumbnail?1:0) },
+    { id:'freeShip',    label:'Envío gratis',       type:'text', def:true,  value:i=> ((i.shipping?.free_shipping)||(i.tags||[]).includes('free_shipping'))?'Sí':'No' },
+    { id:'health',      label:'Health ML (%)',      type:'num',  def:true,  value:i=> typeof i.health==='number'?Math.round(i.health*100):'' },
+    { id:'problems',    label:'Problemas detectados',type:'text', def:true, value:i=> qualityChecks(i).map(p=>p.label).join(' · ') },
+    { id:'permalink',   label:'Link publicación',   type:'text', def:true,  value:i=> i.permalink||'' },
+  ];
+}
+
+// Estado del modal
+var _seoExportColState = {}; // { colId: true/false }
+
+function seoExportOpen(){
+  if(!Array.isArray(allItems) || !allItems.length){
+    if(typeof showToast==='function') showToast('Primero cargá las publicaciones','warn');
+    return;
+  }
+  const filtered = seoGetFilteredItems();
+  const sub = document.getElementById('seo-export-sub');
+  if(sub) sub.textContent = filtered.length + ' publicación' + (filtered.length!==1?'es':'') + ' filtrada' + (filtered.length!==1?'s':'') + ' se exportarán';
+
+  // ¿Hay métricas cargadas? (al menos un item con itemMetrics)
+  const hasMetrics = filtered.some(i => itemMetrics[i.id] && (itemMetrics[i.id].visits>0 || itemMetrics[i.id].visits30>0 || itemMetrics[i.id].sales60>0));
+  const warn = document.getElementById('seo-export-metrics-warn');
+  if(warn) warn.style.display = hasMetrics ? 'none' : 'block';
+
+  // Render de checkboxes de columnas (init estado si vacío)
+  const cols = _seoExportColumns();
+  if(!Object.keys(_seoExportColState).length){
+    cols.forEach(c => { _seoExportColState[c.id] = c.def; });
+  }
+  const box = document.getElementById('seo-export-cols');
+  if(box){
+    box.innerHTML = cols.map(c =>
+      '<label style="display:flex;align-items:center;gap:7px;font-size:12px;cursor:pointer;padding:2px 0">'
+      + '<input type="checkbox" '+(_seoExportColState[c.id]!==false?'checked':'')+' onchange="_seoExportColState[\''+c.id+'\']=this.checked">'
+      + '<span>'+c.label+'</span>'
+      + '</label>'
+    ).join('');
+  }
+  const st = document.getElementById('seo-export-status');
+  if(st) st.textContent = '';
+  document.getElementById('seo-export-modal').style.display = 'flex';
+}
+
+function seoExportClose(){
+  const m = document.getElementById('seo-export-modal');
+  if(m) m.style.display = 'none';
+}
+
+function seoExportSelectAll(val){
+  const cols = _seoExportColumns();
+  cols.forEach(c => { _seoExportColState[c.id] = val; });
+  document.querySelectorAll('#seo-export-cols input[type=checkbox]').forEach(cb => { cb.checked = val; });
+}
+
+// Cargar métricas y reabrir el modal cuando terminen
+async function seoExportLoadMetricsThenReopen(){
+  const warn = document.getElementById('seo-export-metrics-warn');
+  if(warn) warn.innerHTML = '<strong>⏳ Cargando métricas desde ML...</strong><br>Esto puede tardar según la cantidad de publicaciones. El modal se actualizará al terminar.';
+  seoExportClose();
+  try{
+    if(typeof loadSEOMetrics === 'function') await loadSEOMetrics();
+  }catch(e){ console.warn('[seoExport] error cargando métricas:', e); }
+  // Reabrir con métricas frescas
+  setTimeout(seoExportOpen, 400);
+}
+
+// Cargar SheetJS de forma diferida (solo cuando se exporta)
+function _seoLoadSheetJS(){
+  return new Promise((resolve, reject) => {
+    if(window.XLSX) return resolve(window.XLSX);
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    s.onload = () => window.XLSX ? resolve(window.XLSX) : reject(new Error('XLSX no disponible tras cargar'));
+    s.onerror = () => reject(new Error('No se pudo cargar SheetJS desde el CDN'));
+    document.head.appendChild(s);
+  });
+}
+
+async function seoExportRun(){
+  const btn = document.getElementById('seo-export-go');
+  const st  = document.getElementById('seo-export-status');
+  const cols = _seoExportColumns().filter(c => _seoExportColState[c.id] !== false);
+  if(!cols.length){
+    if(st){ st.textContent = '⚠️ Elegí al menos una columna'; st.style.color = 'var(--red)'; }
+    return;
+  }
+  const items = seoGetFilteredItems();
+  if(!items.length){
+    if(st){ st.textContent = '⚠️ No hay publicaciones para exportar'; st.style.color = 'var(--red)'; }
+    return;
+  }
+
+  if(btn){ btn.disabled = true; btn.textContent = '⏳ Generando...'; }
+  if(st){ st.textContent = 'Cargando librería...'; st.style.color = 'var(--text3)'; }
+
+  try{
+    const XLSX = await _seoLoadSheetJS();
+    if(st) st.textContent = 'Armando archivo...';
+
+    // ── HOJA 1: Datos ──
+    const header = cols.map(c => c.label);
+    const aoa = [header];
+    items.forEach(it => {
+      aoa.push(cols.map(c => {
+        let v;
+        try { v = c.value(it); } catch(e){ v = ''; }
+        if(c.type === 'num' && (v === '' || v === null || v === undefined)) return '';
+        return v;
+      }));
+    });
+    const wsData = XLSX.utils.aoa_to_sheet(aoa);
+    // Anchos de columna automáticos (cap 60)
+    wsData['!cols'] = cols.map(c => ({ wch: Math.min(60, Math.max(c.label.length+2, c.id==='title'?42:c.id==='permalink'?38:c.id==='problems'?34:12)) }));
+
+    // ── HOJA 2: Resumen ──
+    const num = (arr) => arr.filter(v => typeof v === 'number' && !isNaN(v));
+    const avg = (arr) => { const n = num(arr); return n.length ? Math.round((n.reduce((a,b)=>a+b,0)/n.length)*10)/10 : 0; };
+    const sum = (arr) => num(arr).reduce((a,b)=>a+b,0);
+    const M = id => items.map(i => { const m=itemMetrics[i.id]; return m ? (m[id]||0) : 0; });
+
+    const totalPubs = items.length;
+    const activas   = items.filter(i=>i.status==='active').length;
+    const pausadas  = items.filter(i=>i.status==='paused').length;
+    const sinStock  = items.filter(i=>(i.available_quantity??0)===0).length;
+    const sinVentas90 = items.filter(i=>{ const d=getDaysSinceLastSale(i.id); return d===Infinity || d>90; }).length;
+    const sinEAN    = items.filter(i=>!itemHasEAN(i)).length;
+    const scoreProm = avg(items.map(i=>seoScore(i.title||'')));
+    const calProm   = avg(items.map(i=>qualityScore(i)));
+    const convProm  = avg(items.map(i=>{ const m=itemMetrics[i.id]; return m?(m.conv||0):null; }).filter(v=>v!==null));
+
+    const now = new Date();
+    const fechaRep = now.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric'}) + ' ' + now.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+
+    // Describir el filtro activo en texto
+    const scenLabel = _seoActiveScenario && SEO_SCENARIOS[_seoActiveScenario] ? (SEO_SCENARIOS[_seoActiveScenario].label || _seoActiveScenario) : 'Ninguno';
+    const stLabel = seoState.statusFilter ? ({active:'Activas',paused:'Pausadas',under_review:'Inactivas'}[seoState.statusFilter]||seoState.statusFilter) : 'Todas (activas+pausadas)';
+    const tipoLabel = seoState.tipoFilter ? seoState.tipoFilter : 'Todos';
+    const searchQ = (document.getElementById('seo-search')?.value||'').trim() || '(sin búsqueda)';
+
+    const resumen = [
+      ['REPORTE SEO — TIENDA IMPALA DESIGN (MercadoLibre)'],
+      ['Generado', fechaRep],
+      [''],
+      ['── FILTROS APLICADOS ──'],
+      ['Escenario', scenLabel],
+      ['Estado', stLabel],
+      ['Tipo de publicación', tipoLabel],
+      ['Búsqueda', searchQ],
+      [''],
+      ['── TOTALES ──'],
+      ['Publicaciones en el reporte', totalPubs],
+      ['Activas', activas],
+      ['Pausadas', pausadas],
+      ['Sin stock', sinStock],
+      ['Sin ventas (+90 días o nunca)', sinVentas90],
+      ['Sin código EAN/GTIN', sinEAN],
+      [''],
+      ['── PROMEDIOS ──'],
+      ['Score SEO promedio', scoreProm],
+      ['Calidad de publicación promedio', calProm],
+      ['Conversión promedio %', convProm],
+      [''],
+      ['── ACUMULADOS ──'],
+      ['Visitas 30d (total)', sum(M('visits30'))],
+      ['Visitas 7d (total)', sum(M('visits'))],
+      ['Ventas 60d (total)', sum(M('sales60'))],
+      ['Ventas 7d (total)', sum(M('sales'))],
+      ['Vendidas históricas (total)', sum(items.map(i=>i.sold_quantity||0))],
+      ['Valor de inventario (precio×stock)', sum(items.map(i=>(i.price||0)*(i.available_quantity??0)))],
+    ];
+    const wsResumen = XLSX.utils.aoa_to_sheet(resumen);
+    wsResumen['!cols'] = [{ wch: 36 }, { wch: 24 }];
+
+    // ── HOJA 3: Contexto para IA ──
+    const dict = [
+      ['CONTEXTO PARA ANÁLISIS CON IA'],
+      [''],
+      ['Este archivo es un reporte SEO de publicaciones de una tienda en MercadoLibre Argentina'],
+      ['(Tienda Impala Design — drinkware personalizado: tazas, jarros, termos, botellas, mates).'],
+      ['La hoja "Datos" tiene una fila por publicación. La hoja "Resumen" tiene totales y promedios.'],
+      [''],
+      ['── DICCIONARIO DE COLUMNAS ──'],
+      ['Columna', 'Qué significa'],
+      ['ID Publicación', 'Código MLA de la publicación en MercadoLibre'],
+      ['Título', 'Título actual de la publicación (clave para SEO)'],
+      ['SKU', 'Código interno del producto'],
+      ['Tipo publicación', 'Catálogo / Gold-Premium / Gratuita / Clásica'],
+      ['Estado', 'Activa, Pausada, Cerrada o Inactiva'],
+      ['Precio', 'Precio de venta en pesos argentinos'],
+      ['Stock disponible', 'Unidades en stock'],
+      ['Vendidas históricas', 'Total de unidades vendidas desde su publicación'],
+      ['Fecha creación / Antigüedad', 'Cuándo se publicó y días desde entonces'],
+      ['Score SEO título', '0-100: qué tan optimizado está el título (largo, keywords, sin errores)'],
+      ['Calidad publicación', '0-100: completitud (fotos, EAN, ficha, envío, etc). Es el health de ML'],
+      ['Ranking interno (Pos.)', 'Posición de la publicación entre las activas (1=mejor). Combina termómetro 70% + probabilidad de venta 30%'],
+      ['Percentil ranking', '100=top, 0=último. Percentil dentro de las publicaciones activas'],
+      ['Termómetro SEO', '0-100: salud comercial combinada (momentum de visitas, conversión, health, velocidad de venta, antigüedad)'],
+      ['Nivel termómetro', 'Alto (≥70), Medio (45-69), Bajo (<45)'],
+      ['Visitas 30d / 7d', 'Visitas recibidas en los últimos 30 y 7 días'],
+      ['Tendencia visitas/ventas %', 'Variación respecto al período anterior (positivo=creciendo)'],
+      ['Ventas 60d / 7d', 'Ventas en los últimos 60 y 7 días'],
+      ['Conversión %', 'Ventas dividido visitas. Indicador clave de eficiencia de la publicación'],
+      ['Última venta / Días sin ventas', 'Fecha de la última venta y días transcurridos'],
+      ['Tiene EAN/GTIN', 'Si tiene código universal de producto (mejora posicionamiento)'],
+      ['Cantidad fotos', 'Número de imágenes (ML premia ≥2, idealmente más)'],
+      ['Envío gratis', 'Si ofrece envío gratis'],
+      ['Health ML (%)', 'Score de salud oficial de MercadoLibre'],
+      ['Problemas detectados', 'Lista de issues que el panel encontró en la publicación'],
+      ['Link publicación', 'URL pública de la publicación'],
+      [''],
+      ['── PROMPT SUGERIDO (copialo y pegalo junto con este archivo en la IA) ──'],
+      [''],
+      ['Sos un experto en posicionamiento y ventas en MercadoLibre Argentina. Te paso un reporte SEO'],
+      ['de mis publicaciones (tienda de drinkware personalizado: tazas, jarros, termos, mates).'],
+      ['Analizá los datos de la hoja "Datos" y la hoja "Resumen" y dame:'],
+      ['1) Las 10 publicaciones que más urge optimizar y por qué (priorizá las que tienen tráfico'],
+      ['   pero baja conversión, o buen historial pero cayendo).'],
+      ['2) Qué publicaciones convendría pausar o revisar (sin ventas hace mucho, sin stock, score bajo).'],
+      ['3) Patrones que veas entre las que MÁS convierten vs las que menos (precio, título, fotos, tipo).'],
+      ['4) 5 mejoras concretas de títulos para las publicaciones de peor Score SEO título.'],
+      ['5) Un plan de acción priorizado para las próximas 2 semanas.'],
+      ['Respondé en español argentino, concreto y accionable.'],
+    ];
+    const wsDict = XLSX.utils.aoa_to_sheet(dict);
+    wsDict['!cols'] = [{ wch: 30 }, { wch: 90 }];
+
+    // ── Armar workbook ──
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, wsData,    'Datos');
+    XLSX.utils.book_append_sheet(wb, wsResumen, 'Resumen');
+    XLSX.utils.book_append_sheet(wb, wsDict,    'Contexto para IA');
+
+    const fname = 'reporte-seo-impala-' + now.toISOString().slice(0,10) + '.xlsx';
+    XLSX.writeFile(wb, fname);
+
+    if(st){ st.textContent = '✅ Descargado: ' + fname; st.style.color = 'var(--green)'; }
+    if(typeof showToast==='function') showToast('📥 Reporte exportado — '+items.length+' publicaciones','success',4000);
+    if(btn){ btn.disabled = false; btn.textContent = '📥 Descargar .xlsx'; }
+    setTimeout(seoExportClose, 1200);
+  }catch(e){
+    console.error('[seoExport] error:', e);
+    if(st){ st.textContent = '❌ '+(e.message||'Error al generar'); st.style.color = 'var(--red)'; }
+    if(btn){ btn.disabled = false; btn.textContent = '📥 Descargar .xlsx'; }
+    // Fallback CSV si SheetJS no cargó
+    if(/CDN|SheetJS|XLSX/.test(e.message||'')){
+      if(confirm('No se pudo cargar la librería de Excel (¿sin internet?). ¿Querés descargar un CSV en su lugar?')){
+        _seoExportCSVFallback();
+      }
+    }
+  }
+}
+
+// Fallback: CSV con BOM UTF-8 (Excel lo abre con acentos correctos)
+function _seoExportCSVFallback(){
+  const cols = _seoExportColumns().filter(c => _seoExportColState[c.id] !== false);
+  const items = seoGetFilteredItems();
+  const esc = v => {
+    if(v===null||v===undefined) v='';
+    v = String(v).replace(/"/g,'""');
+    return /[",;\n]/.test(v) ? '"'+v+'"' : v;
+  };
+  let csv = cols.map(c=>esc(c.label)).join(';') + '\n';
+  items.forEach(it => {
+    csv += cols.map(c => { let v; try{ v=c.value(it); }catch(e){ v=''; } return esc(v); }).join(';') + '\n';
+  });
+  const blob = new Blob(['\ufeff'+csv], { type:'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'reporte-seo-impala-' + new Date().toISOString().slice(0,10) + '.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+  if(typeof showToast==='function') showToast('📥 Reporte CSV exportado','success',4000);
+  seoExportClose();
+}
+
+// v138: Lógica de filtrado extraída a función reutilizable.
+// La usan renderSEOTable (para mostrar) y seoExportRun (para exportar el reporte),
+// garantizando que el .xlsx contenga EXACTAMENTE las publicaciones filtradas en pantalla.
+function seoGetFilteredItems(){
   const searchQ=(document.getElementById('seo-search')?.value||'').toLowerCase();
   const f=seoState.filter;
   const st=seoState.statusFilter;
 
-  // 1. FILTRAR
-  // Si no hay filtro de estado, mostrar solo active/paused (excluye closed/deleted)
-  // Si hay filtro específico (incluyendo under_review/inactive), aplicar ese
-  let items=allItems.filter(i=>{
+  return allItems.filter(i=>{
     if(!st && (i.status==='closed'||i.status==='deleted'||i.status==='inactive')) return false;
     // Búsqueda multicriterio: título, ID (MLA...) y SKU (seller_custom_field)
     if(searchQ&&!(
@@ -8344,13 +8715,12 @@ function renderSEOTable(){
     if(st&&i.status!==st) return false;
     if(seoState.tipoFilter && getPubType(i)!==seoState.tipoFilter) return false;
 
-    // v80: Filtro por escenario activo. Antes solo Sin Fotos/EAN tenían filter.
-    // Ahora cada escenario filtra: solo se ven los ítems que califican.
+    // v80: Filtro por escenario activo.
     if(_seoActiveScenario){
       if(!_scenarioMatchesItem(_seoActiveScenario, i)) return false;
     }
 
-    // Filtros viejos de score/calidad (mantenemos por retro-compat con insightGoToSEO)
+    // Filtros viejos de score/calidad (retro-compat con insightGoToSEO)
     if(!f) return true;
     const sc=seoScore(i.title),qs=qualityScore(i),ch=qualityChecks(i);
     const hasErr=/[.!?,;:()]/.test(i.title)||i.title===i.title.toUpperCase();
@@ -8364,6 +8734,11 @@ function renderSEOTable(){
     if(f==='q_err')    return ch.some(p=>p.sev===2);
     return ch.some(c=>c.id===f);
   });
+}
+
+function renderSEOTable(){
+  // 1. FILTRAR (lógica compartida con el exportador de reportes)
+  let items = seoGetFilteredItems();
 
   // 2. ORDENAR (multi-sort tiene prioridad sobre el sort simple por click en header)
   if(_seoMultiSort && _seoMultiSort.length){
