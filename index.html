@@ -112,6 +112,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 .mgt{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
 .mgt-3{grid-template-columns:repeat(3,1fr)}
 .mgt-5{grid-template-columns:repeat(5,1fr)}
+.mgt-6{grid-template-columns:repeat(6,1fr)}
 .mc{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:16px 18px;position:relative;overflow:hidden;transition:border-color .2s}
 .mc:hover{border-color:var(--border2)}
 .mc::after{content:'';position:absolute;top:0;left:0;right:0;height:2px;border-radius:2px 2px 0 0}
@@ -747,7 +748,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v138 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v139 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -2015,29 +2016,34 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   </div>
 
   <!-- ── KPIs principales ── -->
-  <div class="mgt mgt-5" style="margin-bottom:16px">
+  <div class="mgt mgt-6" style="margin-bottom:16px">
     <div class="mc c-blue">
-      <div class="mc-label">Inversión (Spend)</div>
+      <div class="mc-label" title="Es el gasto total en tus anuncios de Product Ads durante el período seleccionado.">Inversión (Spend)</div>
       <div class="mc-val" id="ads-kpi-spend">—</div>
       <div class="mc-sub" id="ads-kpi-spend-sub">Período seleccionado</div>
     </div>
     <div class="mc c-green">
-      <div class="mc-label">Ventas por Ads</div>
+      <div class="mc-label" title="Es el dinero generado a partir de tus ventas por Product Ads. Los ingresos directos se obtienen de ventas directas y los indirectos de ventas indirectas.">Ventas por Ads</div>
       <div class="mc-val" id="ads-kpi-revenue">—</div>
       <div class="mc-sub" id="ads-kpi-revenue-sub">Ingresos atribuidos</div>
     </div>
     <div class="mc c-amber">
-      <div class="mc-label">ACOS</div>
+      <div class="mc-label" title="Es el costo de tu publicidad, calculado según la relación entre tu inversión e ingresos. Ejemplo: si tu inversión es $100 y tus ingresos $1.000, tu ACOS es de 10%.">ACOS</div>
       <div class="mc-val" id="ads-kpi-acos">—</div>
       <div class="mc-sub"><span id="ads-acos-badge" class="badge">—</span></div>
     </div>
     <div class="mc c-teal">
-      <div class="mc-label">ROAS</div>
+      <div class="mc-label" title="Retorno sobre tu inversión publicitaria. Es la relación entre tus ingresos y tu inversión de Product Ads. Es decir, lo que ganas por cada peso invertido. Ejemplo: si tu ROAS es 2x, quiere decir que generás $2 por cada $1 invertido.">ROAS</div>
       <div class="mc-val" id="ads-kpi-roas">—</div>
       <div class="mc-sub">Retorno sobre inversión</div>
     </div>
+    <div class="mc c-pink">
+      <div class="mc-label" title="Es la relación entre la inversión en Product Ads y el ingreso total de tus ventas (por y sin Product Ads). Ejemplo: si tu inversión es de $100 y tu ingreso total $1.000, tu TACOS será del 10%.">TACOS</div>
+      <div class="mc-val" id="ads-kpi-tacos">—</div>
+      <div class="mc-sub" id="ads-kpi-tacos-sub">Sobre venta total</div>
+    </div>
     <div class="mc c-purple">
-      <div class="mc-label">Clicks</div>
+      <div class="mc-label" title="Cantidad de clics que recibieron tus anuncios y total de impresiones en el período.">Clicks</div>
       <div class="mc-val" id="ads-kpi-clicks">—</div>
       <div class="mc-sub" id="ads-kpi-impressions">— impresiones</div>
     </div>
@@ -4377,7 +4383,7 @@ async function _pollPendingShipments(){
 // v93 [P5]: detector de versión del Worker. Si el Worker está desactualizado (no v55+),
 // significa que el header `x-format-new: true` no está siendo aplicado y el bug de
 // envíos sigue activo. Mostramos un banner amarillo al usuario.
-const _MIN_WORKER_VERSION = 80; // v137: Rank Math focus_keyword en SEO Tienda Woo
+const _MIN_WORKER_VERSION = 81; // v139: Product Ads v2 (api-version header)
 async function _checkWorkerVersion(){
   try {
     const r = await fetch(WORKER + '/');
@@ -13270,13 +13276,45 @@ const _ads = {
   metricsData: null,
   adsItems: [],
   currentDays: 30,
-  chartInst: null
+  chartInst: null,
+  // v139: Product Ads v2
+  advertiserId: null,      // se resuelve 1 vez desde /advertising/advertisers?product_id=PADS
+  itemMetrics: {},         // { itemId: { clicks, prints, cost, cpc, acos, roas, totalAmount, units } }
+  itemsMerged: [],         // anuncios + métricas fusionados, listos para renderizar
+  sortCol: 'cost',         // columna de orden por defecto (mayor inversión primero)
+  sortDir: -1,             // -1 desc, 1 asc
+  globalTotals: null       // { cost, revenue, clicks, prints } del período (para KPIs)
 };
+
+// v139: Resolver el advertiser_id (requerido por todos los endpoints de Ads v2).
+// Se cachea en _ads.advertiserId para no repetir la llamada en cada refresh.
+async function _adsGetAdvertiserId(){
+  if(_ads.advertiserId) return _ads.advertiserId;
+  try{
+    const d = await mlGet('/advertising/advertisers?product_id=PADS');
+    const list = d.advertisers || d.results || (Array.isArray(d) ? d : []);
+    if(list && list.length){
+      // Preferir el advertiser del site de Argentina (MLA) si viene varios
+      const arg = list.find(a => (a.site_id === 'MLA')) || list[0];
+      _ads.advertiserId = arg.advertiser_id || arg.id;
+      console.log('[Ads] advertiser_id resuelto:', _ads.advertiserId, '(site '+(arg.site_id||'?')+')');
+      return _ads.advertiserId;
+    }
+    console.warn('[Ads] /advertisers devolvió lista vacía:', d);
+    return null;
+  }catch(e){
+    // 404 "No permissions found" = Product Ads no habilitado para esta cuenta
+    console.warn('[Ads] No se pudo resolver advertiser_id:', e.message);
+    return null;
+  }
+}
 
 // ── Punto de entrada principal ──────────────────────────────
 async function loadAdsData(){
   if(!token){ console.warn('[Ads] Sin token'); return; }
-  // Lanzar en paralelo métricas y campaña
+  // v139: resolver advertiser_id primero (lo necesitan todos los endpoints v2)
+  await _adsGetAdvertiserId();
+  // Lanzar en paralelo métricas (KPIs + chart) y campaña
   await Promise.allSettled([
     fetchAdsCampaign(),
     loadAdsMetrics(_ads.currentDays)
@@ -13284,7 +13322,7 @@ async function loadAdsData(){
   loadAdsItems();
 }
 
-// ── 1. Métricas de rendimiento ──────────────────────────────
+// ── 1. Métricas de rendimiento (KPIs + gráfico) ─────────────
 async function loadAdsMetrics(days){
   _ads.currentDays = days;
   const wrap  = document.getElementById('ads-chart-wrap');
@@ -13292,11 +13330,9 @@ async function loadAdsMetrics(days){
   if(wrap) wrap.style.display = 'none';
   if(loading) loading.style.display = 'flex';
 
-  // Period label
   const sub = document.getElementById('ads-chart-period');
   if(sub) sub.textContent = 'Últimos '+days+' días';
 
-  // Active period button
   document.querySelectorAll('.ads-period-btn').forEach(b=>b.classList.remove('active'));
 
   try{
@@ -13305,15 +13341,26 @@ async function loadAdsMetrics(days){
     const fromStr = dateFrom.toISOString().split('T')[0];
     const toStr   = new Date().toISOString().split('T')[0];
 
+    const advId = await _adsGetAdvertiserId();
+    if(!advId) throw new Error('Sin advertiser_id (Product Ads no habilitado)');
+
+    // v139: endpoint v2 — campañas del advertiser con métricas diarias + resumen.
+    // metrics_summary=true agrega el total del período; aggregation_type=DAILY
+    // da la serie por día para el gráfico.
+    const metricList = 'clicks,prints,cost,cpc,acos,roas,total_amount,units_quantity';
     const data = await mlGet(
-      `/advertising/product_ads/ads/metrics?date_from=${fromStr}&date_to=${toStr}&time_window=day&metrics=SPEND,REVENUE,IMPRESSIONS,CLICKS,ACOS,ROAS`
+      '/advertising/advertisers/'+advId+'/product_ads/campaigns'
+      + '?limit=50&offset=0'
+      + '&date_from='+fromStr+'&date_to='+toStr
+      + '&metrics='+metricList
+      + '&metrics_summary=true'
+      + '&aggregation_type=DAILY'
     );
     _ads.metricsData = data;
     renderAdsKPIs(data);
     renderAdsChart(data);
   }catch(e){
-    // Fallback: si la cuenta no tiene Product Ads habilitado mostramos placeholder
-    console.warn('[Ads] fetchAdsMetrics error:', e.message);
+    console.warn('[Ads] loadAdsMetrics error:', e.message);
     renderAdsKPIsPlaceholder();
     renderAdsChartPlaceholder(days);
   }finally{
@@ -13323,63 +13370,131 @@ async function loadAdsMetrics(days){
 }
 
 function renderAdsKPIs(data){
-  // Acumular totales desde el array de resultados diarios
-  let totalSpend=0, totalRevenue=0, totalClicks=0, totalImpressions=0;
-  const results = data.results || data.data || [];
-  results.forEach(d=>{
-    totalSpend       += (d.spend||d.SPEND||0);
-    totalRevenue     += (d.revenue||d.REVENUE||0);
-    totalClicks      += (d.clicks||d.CLICKS||0);
-    totalImpressions += (d.impressions||d.IMPRESSIONS||0);
+  // v139: La v2 devuelve results[] (campañas). Cada una puede traer:
+  //   - metrics_summary: { clicks, prints, cost, total_amount, acos, roas, ... } (total período)
+  //   - metrics: [ { date, clicks, prints, cost, ... } ] (serie diaria)
+  // Acumulamos los summary de todas las campañas para los KPIs globales.
+  const results = data.results || data.data || data.campaigns || [];
+  let totalCost=0, totalRevenue=0, totalClicks=0, totalPrints=0;
+
+  const pick = (o, ...keys) => {
+    for(const k of keys){ if(o && o[k] !== undefined && o[k] !== null) return Number(o[k])||0; }
+    return 0;
+  };
+
+  results.forEach(c => {
+    const s = c.metrics_summary || c.summary || c.metrics_total || c;
+    totalCost    += pick(s, 'cost', 'spend', 'SPEND');
+    totalRevenue += pick(s, 'total_amount', 'revenue', 'REVENUE', 'amount_total');
+    totalClicks  += pick(s, 'clicks', 'CLICKS');
+    totalPrints  += pick(s, 'prints', 'impressions', 'IMPRESSIONS');
   });
 
-  const acos = totalRevenue > 0 ? (totalSpend / totalRevenue) * 100 : null;
-  const roas = totalSpend   > 0 ? totalRevenue / totalSpend        : null;
+  // Si no hubo summary (algunas cuentas), acumular desde las series diarias
+  if(totalCost===0 && totalClicks===0){
+    results.forEach(c => {
+      (c.metrics || []).forEach(d => {
+        totalCost    += pick(d, 'cost', 'spend', 'SPEND');
+        totalRevenue += pick(d, 'total_amount', 'revenue', 'REVENUE');
+        totalClicks  += pick(d, 'clicks', 'CLICKS');
+        totalPrints  += pick(d, 'prints', 'impressions', 'IMPRESSIONS');
+      });
+    });
+  }
 
-  _setKPI('ads-kpi-spend',   '$'+Math.round(totalSpend).toLocaleString('es-AR'));
+  _ads.globalTotals = { cost: totalCost, revenue: totalRevenue, clicks: totalClicks, prints: totalPrints };
+
+  const acos = totalRevenue > 0 ? (totalCost / totalRevenue) * 100 : null;
+  const roas = totalCost     > 0 ? totalRevenue / totalCost        : null;
+
+  _setKPI('ads-kpi-spend',   '$'+Math.round(totalCost).toLocaleString('es-AR'));
   _setKPI('ads-kpi-revenue', '$'+Math.round(totalRevenue).toLocaleString('es-AR'));
   _setKPI('ads-kpi-clicks',  totalClicks.toLocaleString('es-AR'));
   _setKPI('ads-kpi-roas',    roas !== null ? roas.toFixed(2)+'x' : '—');
-  _setKPI('ads-kpi-impressions', totalImpressions.toLocaleString('es-AR')+' imp.');
+  _setKPI('ads-kpi-impressions', totalPrints.toLocaleString('es-AR')+' impresiones');
 
   if(acos !== null){
     _setKPI('ads-kpi-acos', acos.toFixed(1)+'%');
     const badge = document.getElementById('ads-acos-badge');
     if(badge){
-      if(acos < 15){
-        badge.className='badge bg-green'; badge.textContent='✔ Excelente (<15%)';
-      } else if(acos <= 30){
-        badge.className='badge bg-amber'; badge.textContent='⚠ Moderado (15-30%)';
-      } else {
-        badge.className='badge bg-red';   badge.textContent='✖ Alto (>30%)';
-      }
+      if(acos < 15){      badge.className='badge bg-green'; badge.textContent='✔ Excelente (<15%)'; }
+      else if(acos <= 30){badge.className='badge bg-amber'; badge.textContent='⚠ Moderado (15-30%)'; }
+      else {              badge.className='badge bg-red';   badge.textContent='✖ Alto (>30%)'; }
     }
   } else {
     _setKPI('ads-kpi-acos','—');
     const badge = document.getElementById('ads-acos-badge');
     if(badge){ badge.className='badge bg-gray'; badge.textContent='Sin datos'; }
   }
+
+  // v139: TACOS global = inversión Ads / ingreso TOTAL (ventas con + sin Ads).
+  // El ingreso total del período lo tomamos de los pedidos ya cargados (allOrders).
+  _renderTacosGlobal(totalCost);
+}
+
+// Calcula y muestra el TACOS global cruzando inversión con la facturación total
+// del mismo período (ventas con y sin Product Ads), tomada de allOrders.
+function _renderTacosGlobal(totalCost){
+  let totalVentas = 0;
+  try{
+    if(Array.isArray(allOrders) && allOrders.length){
+      const since = new Date();
+      since.setDate(since.getDate() - _ads.currentDays);
+      allOrders.forEach(o => {
+        const dt = o.date_created ? new Date(o.date_created) : null;
+        if(dt && dt >= since && o.status !== 'cancelled'){
+          totalVentas += (o.total_amount || 0);
+        }
+      });
+    }
+  }catch(e){ console.warn('[Ads] TACOS: error sumando ventas', e); }
+
+  const sub = document.getElementById('ads-kpi-tacos-sub');
+  if(totalVentas > 0 && totalCost >= 0){
+    const tacos = (totalCost / totalVentas) * 100;
+    _setKPI('ads-kpi-tacos', tacos.toFixed(2)+'%');
+    if(sub) sub.textContent = 'sobre $'+Math.round(totalVentas).toLocaleString('es-AR')+' vendidos';
+  } else {
+    _setKPI('ads-kpi-tacos', '—');
+    if(sub) sub.textContent = 'Sin datos de ventas del período';
+  }
 }
 
 function renderAdsKPIsPlaceholder(){
-  ['ads-kpi-spend','ads-kpi-revenue','ads-kpi-acos','ads-kpi-roas','ads-kpi-clicks'].forEach(id=>_setKPI(id,'—'));
+  ['ads-kpi-spend','ads-kpi-revenue','ads-kpi-acos','ads-kpi-roas','ads-kpi-clicks','ads-kpi-tacos'].forEach(id=>_setKPI(id,'—'));
   const badge = document.getElementById('ads-acos-badge');
   if(badge){ badge.className='badge bg-gray'; badge.textContent='Sin datos de API'; }
   const sub = document.getElementById('ads-kpi-impressions');
   if(sub) sub.textContent = '— impresiones';
+  const tsub = document.getElementById('ads-kpi-tacos-sub');
+  if(tsub) tsub.textContent = 'Sin datos';
 }
 
 function renderAdsChart(data){
   setTimeout(()=>{
     const el = document.getElementById('chart-ads-main');
     if(!el) return;
-    const results = (data.results || data.data || []).slice(-_ads.currentDays);
-    const labels = results.map(d=>{
-      const date = new Date(d.date||d.DATE||'');
-      return isNaN(date)?d.date:(date.getDate()+'/'+(date.getMonth()+1));
+    // v139: agregar las series diarias de TODAS las campañas en un mapa por fecha
+    const results = data.results || data.data || data.campaigns || [];
+    const byDate = {}; // fecha → { clicks, prints }
+    results.forEach(c => {
+      (c.metrics || []).forEach(d => {
+        const dateKey = d.date || d.DATE || d.day || '';
+        if(!dateKey) return;
+        if(!byDate[dateKey]) byDate[dateKey] = { clicks:0, prints:0 };
+        byDate[dateKey].clicks += Number(d.clicks||d.CLICKS||0);
+        byDate[dateKey].prints += Number(d.prints||d.impressions||d.IMPRESSIONS||0);
+      });
     });
-    const clicks      = results.map(d=>d.clicks||d.CLICKS||0);
-    const impressions = results.map(d=>Math.round((d.impressions||d.IMPRESSIONS||0)/100)); // escala /100
+    const dates = Object.keys(byDate).sort().slice(-_ads.currentDays);
+    const labels = dates.map(dk=>{
+      const date = new Date(dk);
+      return isNaN(date)?dk:(date.getDate()+'/'+(date.getMonth()+1));
+    });
+    const clicks      = dates.map(dk=>byDate[dk].clicks);
+    const impressions = dates.map(dk=>Math.round(byDate[dk].prints/100)); // escala /100
+
+    if(!dates.length){ return renderAdsChartPlaceholder(_ads.currentDays); }
 
     if(_ads.chartInst){ try{_ads.chartInst.destroy();}catch(e){} }
     _ads.chartInst = new Chart(el, {
@@ -13441,10 +13556,16 @@ function renderAdsChartPlaceholder(days){
 async function fetchAdsCampaign(){
   var el = document.getElementById('ads-campaign-status');
   try{
-    // Intentar endpoint principal de Product Ads
     var data;
+    var advId = await _adsGetAdvertiserId();
     try {
-      data = await mlGet('/advertising/product_ads/campaigns?limit=10&status=active');
+      // v139: endpoint v2 (requiere advertiser_id)
+      if(advId){
+        data = await mlGet('/advertising/advertisers/'+advId+'/product_ads/campaigns?limit=10');
+      } else {
+        // Fallback al endpoint sin advertiser (compat)
+        data = await mlGet('/advertising/product_ads/campaigns?limit=10&status=active');
+      }
     } catch(e1) {
       if (e1.message && e1.message.includes('403')) {
         var msg = '<div class="alert a-warn" style="margin:12px 0">'
@@ -13468,7 +13589,7 @@ async function fetchAdsCampaign(){
       var camp = campaigns[0];
       _ads.campaignId     = camp.id;
       _ads.campaignStatus = camp.status;
-      _ads.budget         = camp.daily_budget;
+      _ads.budget         = camp.daily_budget || camp.budget;
       renderCampaignStatus(camp);
     } else {
       renderCampaignStatusEmpty();
@@ -13521,7 +13642,11 @@ async function toggleCampaign(active){
   const budStatus = document.getElementById('ads-budget-status');
   if(budStatus){ budStatus.style.color='#1e40af'; budStatus.textContent='Actualizando campaña...'; }
   try{
-    await mlPut('/advertising/product_ads/campaigns/'+_ads.campaignId, { status: newStatus });
+    const advId = _ads.advertiserId;
+    const path = advId
+      ? '/advertising/advertisers/'+advId+'/product_ads/campaigns/'+_ads.campaignId
+      : '/advertising/product_ads/campaigns/'+_ads.campaignId;
+    await mlPut(path, { status: newStatus });
     _ads.campaignStatus = newStatus;
     if(pill){
       pill.className = active ? 'badge bg-green' : 'badge bg-amber';
@@ -13552,7 +13677,11 @@ async function updateBudget(){
   }
   if(status){ status.style.color='#1e40af'; status.textContent='Actualizando presupuesto...'; }
   try{
-    await mlPut('/advertising/product_ads/campaigns/'+_ads.campaignId, { daily_budget: budget });
+    const advId = _ads.advertiserId;
+    const path = advId
+      ? '/advertising/advertisers/'+advId+'/product_ads/campaigns/'+_ads.campaignId
+      : '/advertising/product_ads/campaigns/'+_ads.campaignId;
+    await mlPut(path, { daily_budget: budget });
     _ads.budget = budget;
     if(status){ status.style.color='#166534'; status.textContent='✔ Presupuesto actualizado a $'+budget.toLocaleString('es-AR'); }
   }catch(e){
@@ -13562,56 +13691,216 @@ async function updateBudget(){
   setTimeout(()=>{ if(status) status.textContent=''; }, 4000);
 }
 
-// ── 3. Gestión de anuncios por producto ──────────────────────
+// ── 3. Gestión de anuncios por producto (con métricas v2) ────
 async function loadAdsItems(){
   const wrap = document.getElementById('ads-items-table-wrap');
   const countEl = document.getElementById('ads-items-count');
-  if(wrap) wrap.innerHTML = '<div class="loading"><div class="spin"></div>Cargando anuncios...</div>';
+  if(wrap) wrap.innerHTML = '<div class="loading"><div class="spin"></div>Cargando anuncios y métricas...</div>';
 
   try{
-    const data = await mlGet('/advertising/product_ads/ads/search?limit=50&offset=0');
-    const items = data.results || data.data || data.ads || [];
-    _ads.adsItems = items;
-    if(countEl) countEl.textContent = items.length + ' anuncios encontrados';
-    renderAdsTable(items);
+    const advId = await _adsGetAdvertiserId();
+    if(!advId) throw new Error('Sin advertiser_id (Product Ads no habilitado)');
+
+    const dateFrom = new Date();
+    dateFrom.setDate(dateFrom.getDate() - _ads.currentDays);
+    const fromStr = dateFrom.toISOString().split('T')[0];
+    const toStr   = new Date().toISOString().split('T')[0];
+
+    // v139: métricas agregadas POR ITEM. aggregation_type=item devuelve una fila
+    // por publicación anunciada, con sus métricas del período.
+    const metricList = 'clicks,prints,ctr,cost,cpc,acos,roas,total_amount,units_quantity,direct_units_quantity,indirect_units_quantity,direct_amount,indirect_amount';
+    let metricsRows = [];
+    let adsList = [];
+
+    // Traer métricas por item (puede paginar; pedimos hasta 200)
+    try{
+      const md = await mlGet(
+        '/advertising/advertisers/'+advId+'/product_ads/campaigns'
+        + '?limit=100&offset=0'
+        + '&date_from='+fromStr+'&date_to='+toStr
+        + '&metrics='+metricList
+        + '&aggregation_type=item'
+      );
+      metricsRows = md.results || md.data || md.metrics || [];
+    }catch(e1){
+      console.warn('[Ads] métricas por item (campaigns) falló, intento endpoint items:', e1.message);
+    }
+
+    // Traer el listado de anuncios (para título, thumbnail, estado, ad_id)
+    try{
+      const ad = await mlGet('/advertising/product_ads/ads/search?limit=100&offset=0');
+      adsList = ad.results || ad.data || ad.ads || [];
+    }catch(e2){
+      console.warn('[Ads] ads/search falló:', e2.message);
+    }
+
+    // Indexar métricas por item_id
+    const metricsByItem = {};
+    metricsRows.forEach(r => {
+      const id = r.id || r.item_id || r.item || r.ad_id;
+      if(!id) return;
+      metricsByItem[String(id)] = _adsNormalizeMetrics(r);
+    });
+    _ads.itemMetrics = metricsByItem;
+
+    // Fusionar: para cada anuncio, anexar sus métricas
+    let merged = [];
+    if(adsList.length){
+      merged = adsList.map(a => {
+        const itemId = String(a.item_id || a.id);
+        return Object.assign({
+          ad_id: a.id,
+          item_id: a.item_id || a.id,
+          title: a.title || '',
+          thumbnail: a.thumbnail || '',
+          status: (a.status || 'active').toLowerCase()
+        }, metricsByItem[itemId] || _adsEmptyMetrics());
+      });
+    } else {
+      // Si ads/search no devolvió nada pero sí hay métricas, construir desde métricas
+      merged = metricsRows.map(r => {
+        const itemId = String(r.id || r.item_id);
+        const local = (allItems||[]).find(i => String(i.id) === itemId);
+        return Object.assign({
+          ad_id: itemId,
+          item_id: itemId,
+          title: (local && local.title) || r.title || itemId,
+          thumbnail: (local && local.thumbnail) || '',
+          status: 'active'
+        }, _adsNormalizeMetrics(r));
+      });
+    }
+
+    _ads.itemsMerged = merged;
+    _ads.adsItems = merged;
+    if(countEl) countEl.textContent = merged.length + ' anuncios encontrados';
+    renderAdsTable();
   }catch(e){
     console.warn('[Ads] loadAdsItems error:', e.message);
-    // Fallback: usar allItems para poblar tabla si no hay endpoint de ads
+    // Fallback: usar allItems para poblar tabla en modo simulado (sin métricas)
     if(allItems && allItems.length){
       const active = allItems.filter(i=>i.status==='active').slice(0,30);
-      _ads.adsItems = active.map(i=>({
-        id: 'sim_'+i.id,
-        item_id: i.id,
-        title: i.title,
-        thumbnail: i.thumbnail,
-        status: 'active',
-        _simulated: true
-      }));
-      if(countEl) countEl.textContent = _ads.adsItems.length + ' publicaciones (modo simulado)';
-      renderAdsTable(_ads.adsItems);
+      _ads.itemsMerged = active.map(i=>Object.assign({
+        ad_id: 'sim_'+i.id, item_id: i.id, title: i.title,
+        thumbnail: i.thumbnail, status: 'active', _simulated: true
+      }, _adsEmptyMetrics()));
+      _ads.adsItems = _ads.itemsMerged;
+      if(countEl) countEl.textContent = _ads.itemsMerged.length + ' publicaciones (modo simulado — sin métricas de API)';
+      renderAdsTable();
     } else {
-      if(wrap) wrap.innerHTML = '<div class="loading" style="color:#6b7280">No se pudieron cargar los anuncios. Verificá que tenés Product Ads habilitado.</div>';
+      if(wrap) wrap.innerHTML = '<div class="loading" style="color:#6b7280;flex-direction:column;gap:8px;text-align:center">'
+        + '<div>No se pudieron cargar los anuncios.</div>'
+        + '<div style="font-size:11px;max-width:420px">Verificá que tengas <b>Product Ads habilitado</b> en Mercado Libre (Mi perfil → Publicidad) y que tu cuenta esté reconectada con permisos de Advertising.</div>'
+        + '</div>';
       if(countEl) countEl.textContent = 'Sin datos disponibles';
     }
   }
 }
 
-function renderAdsTable(items){
+// Normaliza una fila de métricas de la API v2 a nuestra estructura interna.
+// La API usa: prints (impresiones), cost (inversión), total_amount (ingresos),
+// units_quantity (ventas por ads). Tomamos también direct/indirect por si sirven.
+function _adsNormalizeMetrics(r){
+  const n = (...keys) => { for(const k of keys){ if(r[k]!==undefined && r[k]!==null) return Number(r[k])||0; } return 0; };
+  const cost    = n('cost','spend');
+  const revenue = n('total_amount','amount_total','revenue');
+  const acos = r.acos !== undefined && r.acos !== null ? Number(r.acos)
+             : (revenue > 0 ? (cost/revenue)*100 : null);
+  const roas = r.roas !== undefined && r.roas !== null ? Number(r.roas)
+             : (cost > 0 ? revenue/cost : null);
+  return {
+    prints:  n('prints','impressions'),
+    clicks:  n('clicks'),
+    cpc:     n('cpc'),
+    cost:    cost,
+    revenue: revenue,
+    units:   n('units_quantity','sold_quantity_total','advertising_items_quantity'),
+    acos:    acos,
+    roas:    roas,
+    _hasMetrics: true
+  };
+}
+function _adsEmptyMetrics(){
+  return { prints:0, clicks:0, cpc:0, cost:0, revenue:0, units:0, acos:null, roas:null, _hasMetrics:false };
+}
+
+// Tooltips exactos (como ML) para los encabezados
+const _ADS_TOOLTIPS = {
+  impresiones: 'Cantidad de veces que tus anuncios se mostraron en el período.',
+  clics: 'Cantidad de clics que recibieron tus anuncios.',
+  cpc: 'Costo por clic: el promedio que pagaste por cada clic en tus anuncios.',
+  ventas: 'Es la cantidad de ventas generadas a partir de tus anuncios de Product Ads. Contamos una por cada producto diferente en el carrito. Directas: cuando una persona hace clic en tu anuncio y compra ese producto. Indirectas: cuando una persona hace clic en tu anuncio, pero compra otro de tus productos.',
+  ingresos: 'Es el dinero generado a partir de tus ventas por Product Ads. Los ingresos directos se obtienen de ventas directas y los indirectos de ventas indirectas.',
+  inversion: 'Es el gasto en tus anuncios de Product Ads durante el período.',
+  acos: 'Es el costo de tu publicidad, calculado según la relación entre tu inversión e ingresos. Ejemplo: si tu inversión es $100 y tus ingresos $1.000, tu ACOS es de 10%.',
+  roas: 'Retorno sobre tu inversión publicitaria. Es la relación entre tus ingresos y tu inversión de Product Ads. Es decir, lo que ganas por cada peso invertido. Ejemplo: si tu ROAS es 2x, quiere decir que generás $2 por cada $1 invertido.',
+  tacos: 'Es la relación entre la inversión en Product Ads y el ingreso total de tus ventas (por y sin Product Ads). Ejemplo: si tu inversión es de $100 y tu ingreso total $1.000, tu TACOS será del 10%. Se calcula a nivel global (arriba); por anuncio individual no se muestra para no dar un dato impreciso.'
+};
+
+// Definición de columnas ordenables. key = campo en el objeto item fusionado.
+const _ADS_COLS = [
+  { id:'impresiones', label:'Impresiones', key:'prints',  tip:_ADS_TOOLTIPS.impresiones, fmt:v=>v.toLocaleString('es-AR'), align:'right' },
+  { id:'clics',       label:'Clics',       key:'clicks',  tip:_ADS_TOOLTIPS.clics,       fmt:v=>v.toLocaleString('es-AR'), align:'right' },
+  { id:'cpc',         label:'CPC',         key:'cpc',     tip:_ADS_TOOLTIPS.cpc,         fmt:v=>'$'+Math.round(v).toLocaleString('es-AR'), align:'right' },
+  { id:'inversion',   label:'Inversión',   key:'cost',    tip:_ADS_TOOLTIPS.inversion,   fmt:v=>'$'+Math.round(v).toLocaleString('es-AR'), align:'right' },
+  { id:'ventas',      label:'Ventas Ads',  key:'units',   tip:_ADS_TOOLTIPS.ventas,      fmt:v=>v.toLocaleString('es-AR'), align:'right' },
+  { id:'ingresos',    label:'Ingresos',    key:'revenue', tip:_ADS_TOOLTIPS.ingresos,    fmt:v=>'$'+Math.round(v).toLocaleString('es-AR'), align:'right' },
+  { id:'acos',        label:'ACOS',        key:'acos',    tip:_ADS_TOOLTIPS.acos,        fmt:v=>v===null?'—':v.toFixed(1)+'%', align:'right' },
+  { id:'roas',        label:'ROAS',        key:'roas',    tip:_ADS_TOOLTIPS.roas,        fmt:v=>v===null?'—':v.toFixed(2)+'x', align:'right' },
+  { id:'tacos',       label:'TACOS',       key:null,      tip:_ADS_TOOLTIPS.tacos,       fmt:()=>'—', align:'center' },
+];
+
+function adsSortBy(key){
+  if(!key) return; // TACOS no ordena (siempre —)
+  if(_ads.sortCol === key){ _ads.sortDir *= -1; }
+  else { _ads.sortCol = key; _ads.sortDir = -1; }
+  renderAdsTable();
+}
+
+function renderAdsTable(){
   const wrap = document.getElementById('ads-items-table-wrap');
   if(!wrap) return;
+  let items = (_ads.itemsMerged || []).slice();
   if(!items.length){
-    wrap.innerHTML = '<div style="padding:24px;text-align:center;color:#6b7280;font-size:13px">No hay anuncios activos en esta campaña.</div>';
+    wrap.innerHTML = '<div style="padding:24px;text-align:center;color:#6b7280;font-size:13px">No hay anuncios para mostrar en este período.</div>';
     return;
   }
+
+  // Ordenar. Convención: sortDir = -1 (desc, mayor primero) | 1 (asc).
+  const col = _ads.sortCol, dir = _ads.sortDir;
+  if(col === 'title'){
+    items.sort((a,b)=>{
+      const va = (a.title||'').toLowerCase(), vb = (b.title||'').toLowerCase();
+      if(va < vb) return dir === -1 ? 1 : -1;
+      if(va > vb) return dir === -1 ? -1 : 1;
+      return 0;
+    });
+  } else if(col){
+    items.sort((a,b)=>{
+      let va = a[col], vb = b[col];
+      va = (va===null||va===undefined) ? -Infinity : Number(va);
+      vb = (vb===null||vb===undefined) ? -Infinity : Number(vb);
+      // dir=-1 → desc (mayor primero): va-vb invertido por dir
+      return dir * (va - vb);
+    });
+  }
+
+  // Indicador de orden en cada encabezado
+  const arrow = (key) => key && _ads.sortCol===key ? (_ads.sortDir===-1?' ▼':' ▲') : '';
+  const thMetric = (c) =>
+    '<th onclick="adsSortBy('+(c.key?("'"+c.key+"'"):'null')+')" '
+    + 'title="'+c.tip.replace(/"/g,'&quot;')+'" '
+    + 'style="cursor:'+(c.key?'pointer':'help')+';user-select:none;white-space:nowrap;text-align:'+(c.align||'right')+';font-size:11px">'
+    + c.label + '<span style="font-size:9px;color:var(--accent)">'+arrow(c.key)+'</span></th>';
 
   wrap.innerHTML = `
     <table>
       <thead><tr>
-        <th style="width:44px">Img</th>
-        <th>Producto</th>
-        <th style="width:110px;text-align:center">ACOS ind.</th>
-        <th style="width:90px;text-align:center">Estado</th>
-        <th style="width:80px;text-align:center">Activar</th>
+        <th style="width:40px">Img</th>
+        <th onclick="adsSortBy('title')" title="Título de la publicación. Clic para ordenar alfabéticamente." style="cursor:pointer;user-select:none;min-width:200px">Producto<span style="font-size:9px;color:var(--accent)">${_ads.sortCol==='title'?(_ads.sortDir===-1?' ▼':' ▲'):''}</span></th>
+        ${_ADS_COLS.map(thMetric).join('')}
+        <th style="width:84px;text-align:center;font-size:11px">Estado</th>
+        <th style="width:70px;text-align:center;font-size:11px">Activar</th>
       </tr></thead>
       <tbody id="ads-tbody">
         ${items.map((item,idx)=>_adsRow(item,idx)).join('')}
@@ -13622,15 +13911,35 @@ function renderAdsTable(items){
 function _adsRow(item, idx){
   const isActive = (item.status||'active').toLowerCase() === 'active';
   const thumb    = item.thumbnail || '';
-  const title    = (item.title||'Producto sin título').slice(0,55);
-  const itemId   = item.item_id || item.id;
-  const adId     = item.id;
-  // ACOS individual: si la API lo devuelve, usarlo; si no, marcar como N/D
-  const acos = item.acos !== undefined && item.acos !== null
-    ? Number(item.acos).toFixed(1) + '%'
-    : '—';
-  const acosClass = item.acos < 15 ? 'bg-green' : item.acos <= 30 ? 'bg-amber' : item.acos > 30 ? 'bg-red' : 'bg-gray';
+  const title    = (item.title||'Producto sin título').slice(0,60);
+  const itemId   = item.item_id || item.ad_id;
+  const adId     = item.ad_id;
   const simBadge = item._simulated ? '<span style="font-size:9px;color:#9ca3af;margin-left:4px">(sim)</span>' : '';
+
+  // Celdas de métricas
+  const cells = _ADS_COLS.map(c=>{
+    if(c.id === 'tacos'){
+      return '<td style="text-align:center;color:var(--text3)" title="El TACOS se calcula a nivel global (ver arriba)">—</td>';
+    }
+    const raw = item[c.key];
+    let display;
+    if(!item._hasMetrics && (raw===0 || raw===null || raw===undefined)){
+      display = '<span style="color:var(--text3)">—</span>';
+    } else {
+      display = c.fmt(raw===null||raw===undefined ? (c.key==='acos'||c.key==='roas'?null:0) : raw);
+    }
+    // Coloreo de ACOS / ROAS
+    let extra = '';
+    if(c.id==='acos' && raw!==null && raw!==undefined && item._hasMetrics){
+      const col = raw<15?'var(--green)':raw<=30?'var(--amber)':'var(--red)';
+      extra = 'color:'+col+';font-weight:600';
+    }
+    if(c.id==='roas' && raw!==null && raw!==undefined && item._hasMetrics){
+      const col = raw>=4?'var(--green)':raw>=2?'var(--amber)':'var(--red)';
+      extra = 'color:'+col+';font-weight:600';
+    }
+    return '<td style="text-align:'+(c.align||'right')+';font-size:12px;'+extra+'">'+display+'</td>';
+  }).join('');
 
   return `<tr id="ads-row-${idx}">
     <td>
@@ -13639,12 +13948,10 @@ function _adsRow(item, idx){
       </div>
     </td>
     <td>
-      <div style="font-size:12.5px;font-weight:500;color:#0f172a;line-height:1.35">${title}${simBadge}</div>
+      <div style="font-size:12.5px;font-weight:500;color:var(--text);line-height:1.35">${title}${simBadge}</div>
       <div style="font-size:10px;color:#6b7280;margin-top:2px;font-family:var(--mono)">${itemId}</div>
     </td>
-    <td style="text-align:center">
-      <span class="badge ${acosClass}">${acos}</span>
-    </td>
+    ${cells}
     <td style="text-align:center">
       <span class="badge ${isActive?'bg-green':'bg-gray'}" id="ads-status-badge-${idx}">
         ${isActive?'● Activo':'⏸ Pausado'}
@@ -17392,14 +17699,26 @@ async function loadPadsMetrics(){
   try{
     var toStr = new Date().toISOString().slice(0,10);
     var frStr = new Date(Date.now()-30*24*60*60*1000).toISOString().slice(0,10);
-    var data  = await mlGet('/advertising/product_ads/ads/metrics?date_from='+frStr+'&date_to='+toStr+'&time_window=day&metrics=SPEND,REVENUE,IMPRESSIONS,CLICKS,ACOS,ROAS');
+
+    // v139: usar advertiser_id + endpoint v2
+    var advId = (typeof _adsGetAdvertiserId === 'function') ? await _adsGetAdvertiserId() : null;
+    if(!advId) throw new Error('Product Ads no habilitado (sin advertiser_id)');
+
+    var metricList = 'clicks,prints,cost,total_amount,acos,roas';
+    var data = await mlGet(
+      '/advertising/advertisers/'+advId+'/product_ads/campaigns'
+      + '?limit=50&offset=0&date_from='+frStr+'&date_to='+toStr
+      + '&metrics='+metricList+'&metrics_summary=true&aggregation_type=DAILY'
+    );
 
     var totals = { spend:0, revenue:0, impressions:0, clicks:0 };
-    (data.results||[]).forEach(function(r){
-      totals.spend      += r.SPEND||0;
-      totals.revenue    += r.REVENUE||0;
-      totals.impressions+= r.IMPRESSIONS||0;
-      totals.clicks     += r.CLICKS||0;
+    var campList = data.results || data.data || data.campaigns || [];
+    campList.forEach(function(c){
+      var s = c.metrics_summary || c.summary || {};
+      totals.spend      += Number(s.cost||0);
+      totals.revenue    += Number(s.total_amount||0);
+      totals.impressions+= Number(s.prints||0);
+      totals.clicks     += Number(s.clicks||0);
     });
     var acos = totals.revenue>0?(totals.spend/totals.revenue*100).toFixed(1)+'%':'—';
     var roas = totals.spend>0?(totals.revenue/totals.spend).toFixed(2)+'x':'—';
@@ -17408,14 +17727,11 @@ async function loadPadsMetrics(){
     var re=document.getElementById('pads-revenue'); if(re) re.textContent='$'+Math.round(totals.revenue).toLocaleString('es-AR');
     var ae=document.getElementById('pads-acos'); if(ae) ae.textContent=acos;
 
-    // Fetch campaigns
-    var camps = await mlGet('/advertising/product_ads/campaigns?user_id='+userId+'&limit=10');
-    var campList = (camps.results||camps||[]);
     var campHtml = campList.map(function(camp){
       return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">'
         +'<div style="font-size:11.5px;font-weight:500">'+(camp.name||'Campaña')+'</div>'
         +'<div style="display:flex;gap:6px;align-items:center">'
-        +'<span style="font-size:11px;color:var(--text3)">$'+(camp.daily_budget||0).toLocaleString('es-AR')+'/día</span>'
+        +'<span style="font-size:11px;color:var(--text3)">$'+((camp.daily_budget||camp.budget||0)).toLocaleString('es-AR')+'/día</span>'
         +'<span class="badge '+(camp.status==='active'?'bg-green':'bg-amber')+'" style="font-size:10px">'+(camp.status||'—')+'</span>'
         +'</div></div>';
     }).join('');
