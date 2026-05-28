@@ -747,7 +747,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v136 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v137 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1642,7 +1642,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     </div>
     <div class="tw tw-sticky">
       <table>
-        <thead><tr><th>#Orden</th><th>Producto</th><th title="Termómetro SEO al momento de mostrar la tabla — útil para validar las predicciones del 🔥 contra las ventas reales. Si el item con 🔥 efectivamente vendió, la predicción acertó.">🌡️ SEO</th><th>Comprador</th><th title="Provincia de envío extraída de los datos de la factura del comprador. Útil para análisis geográfico de ventas.">Provincia</th><th>Monto</th><th>Envío</th><th>Estado pago</th><th>Fecha y hora</th><th>ML</th></tr></thead>
+        <thead><tr><th>#Orden</th><th>Producto</th><th title="Termómetro SEO al momento de mostrar la tabla — útil para validar las predicciones del 🔥 contra las ventas reales. Si el item con 🔥 efectivamente vendió, la predicción acertó.">🌡️ SEO</th><th>Comprador</th><th title="Provincia de envío extraída de los datos de la factura del comprador. Útil para análisis geográfico de ventas.">Provincia</th><th>Monto</th><th>Envío</th><th>Estado pago</th><th title="Fecha y hora en que se generó la venta">Fecha Venta</th><th title="Fecha en la que el cliente recibió o retiró el producto (cuando el envío pasa a Entregado)">Fecha Entrega</th><th title="Días transcurridos entre la venta y la entrega" style="text-align:center">Días de entrega</th><th>ML</th></tr></thead>
         <tbody id="orders-tbody"></tbody>
       </table>
     </div>
@@ -3306,6 +3306,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <table id="wseo-table">
         <thead><tr>
           <th>Producto</th>
+          <th style="min-width:160px;line-height:1.2" title="Palabra clave objetivo de Rank Math (focus_keyword). Editable inline — separá los términos con coma. La coma final no es obligatoria pero se conserva si la ponés.">Palabras<br>claves<br><span style="font-size:9.5px;color:var(--text3);font-weight:400">Rank Math</span></th>
           <th onclick="wseoSort('created')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:80px;max-width:80px" title="Fecha de creación del producto en WooCommerce">Creada<br><span style="font-size:10px">↕</span><span id="wseo-sort-created" style="font-size:10px"></span></th>
           <th onclick="wseoSort('status')"  style="cursor:pointer;user-select:none;white-space:nowrap">Estado <span id="wseo-sort-status" style="font-size:10px"></span></th>
           <th onclick="wseoSort('price')"   style="cursor:pointer;user-select:none;white-space:nowrap;text-align:right">Precio <span id="wseo-sort-price" style="font-size:10px"></span></th>
@@ -3317,7 +3318,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <th style="min-width:120px;text-align:center">Acciones</th>
         </tr></thead>
         <tbody id="wseo-tbody">
-          <tr><td colspan="10" style="text-align:center;padding:32px;color:var(--text3)">Hacé clic en "Cargar productos" para analizar tu tienda WooCommerce.</td></tr>
+          <tr><td colspan="11" style="text-align:center;padding:32px;color:var(--text3)">Hacé clic en "Cargar productos" para analizar tu tienda WooCommerce.</td></tr>
         </tbody>
       </table>
     </div>
@@ -4287,6 +4288,14 @@ async function _pollPendingShipments(){
         const prevSubst  = o.shipping.substatus || '(none)';
         if(s.status)    o.shipping.status = s.status;
         if(s.substatus) o.shipping.substatus = s.substatus;
+        // v137: capturar fecha de entrega cuando el polling detecta el cambio
+        // a "delivered". Lo guardamos en o.shipping para que renderVentasTable
+        // muestre las columnas Fecha Entrega y Días de entrega sin esperar
+        // un refresh completo.
+        const dateDelivered = (s.status === 'delivered')
+          ? (s.status_history?.date_delivered || s.last_updated || null)
+          : (s.status_history?.date_delivered || null);
+        if(dateDelivered) o.shipping.date_delivered = dateDelivered;
         o.shipping._statusLoaded = true;
         if(prevStatus !== (o.shipping.status||'(none)') || prevSubst !== (o.shipping.substatus||'(none)')){
           changed++;
@@ -4323,7 +4332,7 @@ async function _pollPendingShipments(){
 // v93 [P5]: detector de versión del Worker. Si el Worker está desactualizado (no v55+),
 // significa que el header `x-format-new: true` no está siendo aplicado y el bug de
 // envíos sigue activo. Mostramos un banner amarillo al usuario.
-const _MIN_WORKER_VERSION = 79; // v134: gzip fix (DecompressionStream correcto)
+const _MIN_WORKER_VERSION = 80; // v137: Rank Math focus_keyword en SEO Tienda Woo
 async function _checkWorkerVersion(){
   try {
     const r = await fetch(WORKER + '/');
@@ -4633,6 +4642,8 @@ async function loadShippingStatuses(orders){  const toCheck=(orders||[]).filter(
       o.shipping.substatus = cached.substatus || o.shipping.substatus;
       // v122: restaurar provincia desde cache si está disponible
       if(cached.provincia) o.shipping.provincia = cached.provincia;
+      // v137: restaurar fecha de entrega desde cache si está disponible
+      if(cached.date_delivered) o.shipping.date_delivered = cached.date_delivered;
       // v123/v125 FIX: si el cache es viejo y NO tiene provincia, lo re-fetcheamos.
       // v125: ampliado para incluir TODOS los estados (antes excluía pending/printed/
       // cancelled, que son los que más le importan al usuario para análisis geográfico).
@@ -4672,12 +4683,22 @@ async function loadShippingStatuses(orders){  const toCheck=(orders||[]).filter(
                        || _seoProvinciaFromStateId(s?.destination?.state?.id)
                        || null;
         if(provincia) o.shipping.provincia = provincia;
+        // v137: capturar fecha de entrega para columna "Fecha Entrega" en Ventas.
+        // ML expone date_delivered de varias formas según el tipo de envío:
+        //   1. status_history.date_delivered → más confiable cuando status=delivered
+        //   2. Cuando status_history NO trae date_delivered pero status=delivered,
+        //      usamos last_updated como aproximación (es la última transición).
+        const dateDelivered = (s?.status === 'delivered')
+          ? (s?.status_history?.date_delivered || s?.last_updated || null)
+          : (s?.status_history?.date_delivered || null);
+        if(dateDelivered) o.shipping.date_delivered = dateDelivered;
         o.shipping._statusLoaded=true;
-        // v97 [Opt D]: persistir en cache (v122: incluye provincia)
+        // v97 [Opt D]: persistir en cache (v122: incluye provincia, v137: + date_delivered)
         cache[o.shipping.id] = {
           status: s?.status || null,
           substatus: s?.substatus || null,
           provincia: provincia,
+          date_delivered: dateDelivered,
           ts: Date.now()
         };
         cacheUpdated = true;
@@ -15080,13 +15101,51 @@ function renderVentasTable(){
 
   const tbody=document.getElementById('orders-tbody');
   if(!tbody)return;
-  if(!orders.length){tbody.innerHTML='<tr><td colspan="10" style="text-align:center;padding:22px;color:var(--text3)">Sin pedidos para mostrar</td></tr>';return;}
+  if(!orders.length){tbody.innerHTML='<tr><td colspan="12" style="text-align:center;padding:22px;color:var(--text3)">Sin pedidos para mostrar</td></tr>';return;}
   tbody.innerHTML=orders.map(o=>{
     const stateLabel=ORDER_STATES[o.status]||o.status||'—';
     const stateClass=o.status==='paid'||o.status==='delivered'||o.status==='confirmed'?'bg-green':o.status==='cancelled'?'bg-red':'bg-amber';
     const total=o.total_amount||0;
     const dt=o.date_created?new Date(o.date_created):null;
     const dateStr=dt?dt.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'2-digit'})+' '+dt.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}):'—';
+    // v137: Fecha Entrega — cuando el envío pasó a "delivered", mostramos la fecha
+    // capturada por loadShippingStatuses / _pollPendingShipments. Si todavía no
+    // se entregó, mostramos un placeholder según el estado.
+    let deliveredCell;
+    let diasCell;
+    const dd = o.shipping?.date_delivered ? new Date(o.shipping.date_delivered) : null;
+    const isDelivered = (o.shipping?.status === 'delivered') || (o.status === 'delivered');
+    if(dd && !isNaN(dd.getTime())){
+      const ddStr = dd.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'2-digit'})
+                  + ' ' + dd.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+      deliveredCell = '<span style="font-size:11px;white-space:nowrap;color:var(--green)">'+ddStr+'</span>';
+      // Días de entrega = diferencia entre fecha de venta y fecha de entrega.
+      if(dt && !isNaN(dt.getTime())){
+        const diff = dd.getTime() - dt.getTime();
+        const dias = Math.max(0, Math.round(diff / (1000*60*60*24)));
+        const color = dias <= 3 ? 'var(--green)' : dias <= 7 ? 'var(--text)' : dias <= 14 ? 'var(--amber)' : 'var(--red)';
+        diasCell = '<span style="font-size:11px;font-weight:600;color:'+color+';white-space:nowrap">'+dias+' día'+(dias!==1?'s':'')+'</span>';
+      } else {
+        diasCell = '<span style="font-size:10px;color:var(--text3)">—</span>';
+      }
+    } else if(isDelivered){
+      // status=delivered pero sin fecha (caso raro: cache viejo). Disparamos
+      // re-fetch silencioso para la próxima vez y mostramos placeholder.
+      deliveredCell = '<span style="font-size:10px;color:var(--text3)" title="Entregado — fecha no capturada todavía. Se actualizará en el próximo ciclo de polling.">⏳ entregado</span>';
+      diasCell = '<span style="font-size:10px;color:var(--text3)">—</span>';
+    } else if(o.status === 'cancelled'){
+      deliveredCell = '<span style="font-size:10px;color:var(--text3)">cancelada</span>';
+      diasCell = '<span style="font-size:10px;color:var(--text3)">—</span>';
+    } else {
+      const ss = (o.shipping?.status||'').toLowerCase();
+      let pending = '—';
+      if(ss === 'shipped' || ss === 'in_transit' || ss === 'almost_there') pending = '📦 en tránsito';
+      else if(ss === 'ready_to_ship' || ss === 'handling' || ss === 'printed') pending = '🏷️ a despachar';
+      else if(ss === 'pending') pending = '⏳ pendiente';
+      else if(ss === 'not_delivered' || ss === 'returned' || ss === 'lost') pending = '❌ no entregada';
+      deliveredCell = '<span style="font-size:10px;color:var(--text3)">'+pending+'</span>';
+      diasCell = '<span style="font-size:10px;color:var(--text3)">—</span>';
+    }
     const productTitle=o.order_items?.[0]?.item?.title||'—';
     const orderItemId = o.order_items?.[0]?.item?.id;
     // Thumbnail: buscar en caché local primero (allItems), luego _thumbCache
@@ -15140,7 +15199,9 @@ function renderVentasTable(){
       <td style="font-weight:600">$${total.toLocaleString('es-AR')}</td>
       <td><span class="badge ${ship.cls}" style="white-space:nowrap">${ship.label}</span></td>
       <td><span class="badge ${stateClass}">${stateLabel}</span></td>
-      <td style="font-size:11px;white-space:nowrap;color:var(--text3)">${dateStr}</td>
+      <td style="font-size:11px;white-space:nowrap;color:var(--text3)" title="Fecha de la venta">${dateStr}</td>
+      <td style="white-space:nowrap" title="Fecha en la que el cliente recibió o retiró el producto">${deliveredCell}</td>
+      <td style="text-align:center" title="Días entre venta y entrega">${diasCell}</td>
       <td><a href="${mlUrl}" target="_blank" class="btn btn-ghost btn-xs" style="text-decoration:none">🔗</a></td>
     </tr>`;
   }).join('');
@@ -18493,6 +18554,10 @@ function showSection(id){
     wooSeoInit();
     // v97 [Tema 2]: actualizar estado de ventas pendientes al entrar a la sección
     if(typeof _pollWooNotifications === 'function') _pollWooNotifications();
+    // v137: sync silencioso contra WP-API para que los pedidos completados en
+    // WooCommerce desaparezcan inmediatamente del listado sin esperar al
+    // próximo ciclo de polling (que tarda hasta 5 min en correr).
+    if(typeof _wooSilentSyncPending === 'function') setTimeout(_wooSilentSyncPending, 1500);
   }
   if(id==='quiebre-stock') qsInit();
 }
@@ -18899,6 +18964,12 @@ var _wooPollTimer = null;
 var _wooLastSeenIds = new Set();   // IDs de órdenes ya vistas — para detectar nuevas
 var _wooFirstPoll = true;          // flag para no toastear todas en el primer ciclo
 const _WOO_POLL_MS = 5 * 60 * 1000; // 5 minutos
+// v137: contador de polls para gatillar auto-sync silencioso cada N ciclos.
+// Auto-sync = verificar contra WP-API que los pedidos en "processing" sigan
+// en ese estado (no hayan sido marcados como Completado). Resuelve el caso
+// de webhooks perdidos sin que el usuario tenga que tocar "🧹 Sincronizar".
+var _wooPollCount = 0;
+const _WOO_AUTOSYNC_EVERY = 3; // cada 3 polls (≈ 15 min)
 
 async function _pollWooNotifications(){
   if(!token || !userId) return;
@@ -18963,8 +19034,55 @@ async function _pollWooNotifications(){
     _wooLastSeenIds = new Set(notifs.filter(n => n.status === 'processing').map(n => n.orderId));
     _wooFirstPoll = false;
 
+    // v137: AUTO-SYNC SILENCIOSO contra WP-API.
+    // Si hay pedidos en "processing" en el KV, verificamos cada N ciclos que
+    // sigan vivos en WP. Si el usuario marcó alguno como "Completado" en
+    // WooCommerce y el webhook se perdió, esto lo limpia automáticamente.
+    // Sin toasts, sin spinners — silencioso por completo.
+    _wooPollCount++;
+    if(pending > 0 && (_wooPollCount % _WOO_AUTOSYNC_EVERY === 0)){
+      _wooSilentSyncPending();
+    }
+
   } catch(e) {
     console.warn('[WooPoll] Error:', e.message);
+  }
+}
+
+// v137: sync silencioso (sin UI, sin toasts) — llamado por _pollWooNotifications
+// cada ~15 min y manualmente cuando el usuario entra a la sección SEO Tienda Woo.
+// Reutiliza el endpoint /api/woo/sync-pending que ya implementa la lógica.
+async function _wooSilentSyncPending(){
+  if(!token) return;
+  try{
+    const r = await fetch(WORKER + '/api/woo/sync-pending', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+    });
+    if(!r.ok) return;
+    const d = await r.json();
+    if(d && d.removed > 0){
+      console.log('[WooAutoSync] '+d.removed+' pedido(s) ya completado(s) en WP eliminados del listado.');
+      // Refrescar el listado del panel para reflejar el cambio sin esperar al
+      // próximo ciclo de poll (5 min).
+      const r2 = await fetch(WORKER + '/api/woo/notifications', {
+        headers: { 'Authorization': 'Bearer ' + token }
+      });
+      if(r2.ok){
+        const d2 = await r2.json();
+        _wooPendingOrders = (d2.pendingRecent || []).slice();
+        const cnt = document.getElementById('woo-pending-count');
+        if(cnt) cnt.textContent = d2.pendingCount || 0;
+        const nb = document.getElementById('nb-woo');
+        if(nb){
+          nb.textContent = (d2.pendingCount || 0) || '';
+          nb.style.display = (d2.pendingCount || 0) > 0 ? 'inline-flex' : 'none';
+        }
+        if(typeof wooRenderPendingTable === 'function') wooRenderPendingTable();
+      }
+    }
+  }catch(e){
+    // Silencioso: si falla el sync no molestamos al usuario, ya hay botón manual de respaldo
   }
 }
 
@@ -22755,7 +22873,7 @@ function wseoRenderTable(){
   if(countEl) countEl.textContent = total ? total+' productos · página '+_wseoState.page+'/'+pages : 'Sin resultados';
 
   if(!rows.length){
-    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:24px;color:var(--text3)">Sin productos para este filtro.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:24px;color:var(--text3)">Sin productos para este filtro.</td></tr>';
     wseoRenderPagination(pages, total);
     return;
   }
@@ -22804,6 +22922,7 @@ function wseoRenderTable(){
           </div>
         </div>
       </td>
+      <td style="padding:6px 8px;vertical-align:middle" id="wseo-kw-cell-${p.id}">${wseoRenderKeywordCell(p)}</td>
       <td style="white-space:nowrap;text-align:center">${(()=>{
         // v89 [P6]: clon de la columna CREADA del Analizador SEO de ML
         const dc = p.date_created;
@@ -23046,6 +23165,69 @@ async function wseoSaveSku(productId){
   }catch(e){
     inp.disabled=false; inp.style.borderColor='var(--red)';
     if(msgEl){ msgEl.textContent='❌'+e.message.slice(0,30); msgEl.style.color='var(--red)'; }
+  }
+}
+
+// ── v137: Edición inline: PALABRAS CLAVES (Rank Math focus_keyword) ──
+// Rank Math guarda en meta_data.rank_math_focus_keyword un string coma-separado
+// (ej "meme,flork,frase"). Mostramos cada término como chip y permitimos editar
+// el string completo. Compatible con la convención del usuario de poner coma al
+// final de cada término ("meme,flork,frase," → se acepta tal cual).
+function wseoRenderKeywordCell(p){
+  const kw = (p.rank_math_focus_keyword || '').trim();
+  if(!kw){
+    return '<span onclick="wseoStartKwEdit('+p.id+')" style="cursor:pointer;font-size:10.5px;color:var(--text3);font-style:italic" title="Clic para agregar palabras clave">— sin palabras clave ✎</span>';
+  }
+  // Separar por coma y limpiar vacíos (acepta coma final)
+  const terms = kw.split(',').map(t=>t.trim()).filter(Boolean);
+  const chips = terms.map(t =>
+    '<span style="display:inline-block;font-size:10px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:10px;padding:1px 7px;margin:1px 2px 1px 0;white-space:nowrap">'
+    + t.replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    + '</span>'
+  ).join('');
+  return '<div onclick="wseoStartKwEdit('+p.id+')" style="cursor:pointer;line-height:1.4;max-width:180px" title="Clic para editar — '+terms.length+' palabra'+(terms.length!==1?'s':'')+' clave">'
+       + chips
+       + '<span style="font-size:9px;color:var(--text3);margin-left:3px">✎</span>'
+       + '</div>';
+}
+function wseoStartKwEdit(productId){
+  const p = _wseoProducts.find(x=>x.id===productId);
+  if(!p) return;
+  const cell = document.getElementById('wseo-kw-cell-'+productId);
+  if(!cell) return;
+  const cur = (p.rank_math_focus_keyword || '').replace(/"/g,'&quot;');
+  cell.innerHTML = '<div style="display:flex;flex-direction:column;gap:3px">'
+    + '<input id="wseo-kw-'+productId+'" type="text" value="'+cur+'" placeholder="meme, flork, frase,"'
+    + ' style="width:100%;min-width:160px;font-size:11px;padding:3px 6px;border-radius:4px;border:1px solid var(--accent);background:var(--bg3);color:var(--text)"'
+    + ' onkeydown="if(event.key===\'Enter\'){event.preventDefault();wseoSaveKw('+productId+');}if(event.key===\'Escape\')wseoRenderTable();">'
+    + '<div style="display:flex;align-items:center;gap:3px">'
+      + '<button class="btn btn-primary btn-xs" style="padding:1px 7px" onclick="wseoSaveKw('+productId+')">✓ Guardar</button>'
+      + '<button class="btn btn-ghost btn-xs" style="padding:1px 6px" onclick="wseoRenderTable()">✕</button>'
+      + '<span id="wseo-kw-msg-'+productId+'" style="font-size:9px;margin-left:3px"></span>'
+    + '</div>'
+    + '<div style="font-size:9px;color:var(--text3);line-height:1.2">Separá por coma — la coma final se conserva</div>'
+    + '</div>';
+  const inp = document.getElementById('wseo-kw-'+productId);
+  if(inp){ inp.focus(); inp.select(); }
+}
+async function wseoSaveKw(productId){
+  const inp   = document.getElementById('wseo-kw-'+productId);
+  const msgEl = document.getElementById('wseo-kw-msg-'+productId);
+  if(!inp) return;
+  // Conservamos el valor exacto que escribió el usuario (incluyendo coma final si la puso)
+  const val = (inp.value||'').trim();
+  inp.disabled = true;
+  if(msgEl){ msgEl.textContent='⏳ Guardando...'; msgEl.style.color='var(--text3)'; }
+  try{
+    const d = await _wseoApiPut(productId, { rank_math_focus_keyword: val });
+    // El worker normaliza/trimea; usamos lo que devuelve para reflejar el estado real en KV
+    const saved = (d && typeof d.rank_math_focus_keyword === 'string') ? d.rank_math_focus_keyword : val;
+    await _wseoPersistLocal(productId, { rank_math_focus_keyword: saved });
+    if(typeof showToast==='function') showToast('🏷️ Palabras clave actualizadas','success');
+    wseoRenderTable();
+  }catch(e){
+    inp.disabled=false; inp.style.borderColor='var(--red)';
+    if(msgEl){ msgEl.textContent='❌ '+(e.message||'').slice(0,40); msgEl.style.color='var(--red)'; }
   }
 }
 
