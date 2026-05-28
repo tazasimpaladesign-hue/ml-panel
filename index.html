@@ -747,7 +747,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v135 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v136 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -3799,8 +3799,34 @@ async function exchangeCode(code){
   }
 }
 // Todas las llamadas a ML van por el Worker (evita CORS)
-async function mlGet(ep){
+// v136: Variable global para coordinar requests a ML.
+// Cuando ML devuelve 429, ponemos un "cooldown" global durante el cual TODOS
+// los siguientes requests esperan. Esto evita que loadMostVisited y
+// loadSEOMetrics peleen por requests y se sumen los rate-limits.
+let _mlRateLimitUntil = 0;
+
+async function mlGet(ep, _retryCount){
+  _retryCount = _retryCount || 0;
+  // Si estamos en cooldown global por 429, esperar
+  if(_mlRateLimitUntil > Date.now()){
+    const waitMs = _mlRateLimitUntil - Date.now();
+    console.log('[mlGet] Esperando '+waitMs+'ms (cooldown global 429)');
+    await new Promise(resolve => setTimeout(resolve, waitMs));
+  }
+
   const r = await fetch(WORKER+'/api'+ep,{headers:{Authorization:'Bearer '+token}});
+
+  // v136: Manejo de 429 con backoff exponencial.
+  // Esperamos 2s → 4s → 8s y reintentamos hasta 3 veces.
+  // Pasamos el cooldown a _mlRateLimitUntil así otros mlGet en curso también esperan.
+  if(r.status === 429 && _retryCount < 3){
+    const backoffMs = Math.pow(2, _retryCount + 1) * 1000; // 2s, 4s, 8s
+    _mlRateLimitUntil = Date.now() + backoffMs;
+    console.warn('[mlGet] 429 Too Many Requests para '+ep+' — backoff '+backoffMs+'ms (intento '+(_retryCount+1)+'/3)');
+    await new Promise(resolve => setTimeout(resolve, backoffMs));
+    return mlGet(ep, _retryCount + 1);
+  }
+
   if(r.status===401){const ok=await tryRefreshToken();if(ok)return mlGet(ep);showSessionExpired();throw new Error('401');}
   return r.json();
 }
@@ -5121,8 +5147,33 @@ function _onTabVisible(){
 document.addEventListener('visibilitychange', _onTabVisible);
 window.addEventListener('focus', _onTabVisible);
 
+// v136: Mutex global para coordinar batches concurrentes.
+// Si dos secciones (Resumen General + Analizador SEO) piden métricas a la vez,
+// el segundo espera al primero para no sumar 429.
+let _pubMetricsBatchLock = null;
+
 async function loadPubMetricsBatch(ids){
   if(!userId || !ids || !ids.length) return;
+
+  // v136: Esperar si hay otro batch corriendo
+  if(_pubMetricsBatchLock){
+    console.log('[loadPubMetricsBatch] Esperando batch anterior...');
+    await _pubMetricsBatchLock;
+  }
+
+  // Reservar el mutex con un Promise que resolveremos al final
+  let releaseLock;
+  _pubMetricsBatchLock = new Promise(resolve => { releaseLock = resolve; });
+
+  try {
+    return await _loadPubMetricsBatchInner(ids);
+  } finally {
+    releaseLock();
+    _pubMetricsBatchLock = null;
+  }
+}
+
+async function _loadPubMetricsBatchInner(ids){
 
   const now   = nowAR();
   const from7 = new Date(now - 7*86400000);
@@ -5225,8 +5276,11 @@ async function loadPubMetricsBatch(ids){
     itemMetrics[id] = data;
     metricsToCache(id, data); // persistir en localStorage
 
-    // Delay anti-429: 200ms entre cada request (secuencial, no paralelo)
-    await new Promise(resolve => setTimeout(resolve, 200));
+    // v136: Delay anti-429 aumentado de 200ms a 350ms entre requests.
+    // Con 350ms entre items, son ~3 requests/seg = 180 req/min.
+    // ML permite hasta 5000 req/hora (~83 req/min) por usuario.
+    // El backoff exponencial en mlGet maneja cualquier 429 esporádico.
+    await new Promise(resolve => setTimeout(resolve, 350));
   }
 
   // Poblar ventas para ítems con ventas pero sin visitas aún
@@ -17083,9 +17137,12 @@ async function loadMostVisited(forceRefresh){
     if(!el.querySelector('.item-thumb')){
       el.innerHTML='<div class="loading"><div class="spin"></div>Cargando visitas reales de '+idsNeedingFetch.length+' productos (~'+Math.ceil(idsNeedingFetch.length*0.25)+' seg)...</div>';
     }
-    // Re-render parcial cada 30 items para feedback visual
+    // v136: Bajado de 30 a 10 items por chunk para reducir presión sobre ML.
+    // El mutex global + delay 350ms en loadPubMetricsBatch coordina los requests.
+    // Si hay 220 items: 22 chunks × ~3.5 seg c/u = ~75 seg total (antes era ~50 seg
+    // pero con 429 frecuentes que reintentaban → quedaba peor).
     var fetchedSoFar = 0;
-    var batchSize = 30;
+    var batchSize = 10;
     for(var b=0; b<idsNeedingFetch.length; b+=batchSize){
       if(_mvAbort) break;
       var slice = idsNeedingFetch.slice(b, b+batchSize);
