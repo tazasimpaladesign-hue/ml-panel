@@ -748,7 +748,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v139 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v140 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1271,6 +1271,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <button class="btn btn-ghost btn-sm" onclick="loadSEOMetricsFull()" id="seo-metrics-full-btn" title="Forzar refresh COMPLETO: borra el caché local y vuelve a pedir todas las métricas a ML. Más lento pero garantiza datos 100% frescos.">🔄 Refresh total</button>
         <button class="btn btn-ghost btn-sm" onclick="analyzeSEOAll()">↻ Actualizar</button>
         <button class="btn btn-primary btn-sm" onclick="seoExportOpen()" id="seo-export-btn" title="Exportar las publicaciones filtradas a un archivo .xlsx para subir a una IA y pedirle estrategia">📥 Exportar reporte</button>
+        <button class="btn btn-ghost btn-sm" onclick="seoImportOpen()" id="seo-import-btn" title="Importar un .xlsx (con el mismo formato del reporte) para hacer cambios masivos en MercadoLibre: SKU, estado, precio, stock, código universal y tiempo de disponibilidad" style="border:1px solid var(--accent);color:var(--accent)">📤 Importar cambios</button>
       </div>
     </div>
     <!-- v76: Panel de Orden Avanzado — diseño compacto, centrado, con sombra -->
@@ -1360,6 +1361,57 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <span id="seo-export-status" style="font-size:11px;color:var(--text3);margin-right:auto"></span>
         <button class="btn btn-ghost btn-sm" onclick="seoExportClose()">Cancelar</button>
         <button class="btn btn-primary btn-sm" id="seo-export-go" onclick="seoExportRun()">📥 Descargar .xlsx</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- v140: Modal de IMPORTACIÓN de cambios masivos -->
+  <div id="seo-import-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center">
+    <div style="background:var(--bg2);border-radius:14px;width:680px;max-width:95vw;max-height:90vh;overflow-y:auto;border:1px solid var(--border);box-shadow:0 20px 60px rgba(0,0,0,.4)">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px 14px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg2);z-index:2">
+        <div>
+          <div style="font-size:15px;font-weight:700">📤 Importar cambios masivos a MercadoLibre</div>
+          <div style="font-size:11.5px;color:var(--text3);margin-top:2px">Subí un .xlsx con el formato del reporte. Se actualizan solo las celdas con valor.</div>
+        </div>
+        <button onclick="seoImportClose()" style="background:none;border:none;font-size:24px;cursor:pointer;color:var(--text3);line-height:1">×</button>
+      </div>
+
+      <div style="padding:16px 22px">
+        <!-- Instrucciones -->
+        <div style="background:var(--bg3);border-radius:8px;padding:12px 14px;font-size:11.5px;line-height:1.55;color:var(--text2);margin-bottom:14px">
+          <div style="font-weight:600;color:var(--text);margin-bottom:5px">Cómo funciona:</div>
+          La columna <b>ID Publicación</b> (MLA...) identifica cada producto y es obligatoria. Se modifican únicamente estos campos cuando tienen un valor nuevo (las celdas vacías se ignoran):
+          <div style="margin-top:7px;display:flex;flex-wrap:wrap;gap:5px">
+            <span style="background:#e0e7ff;color:#3730a3;border-radius:6px;padding:2px 8px;font-size:10.5px">SKU</span>
+            <span style="background:#e0e7ff;color:#3730a3;border-radius:6px;padding:2px 8px;font-size:10.5px">Estado</span>
+            <span style="background:#e0e7ff;color:#3730a3;border-radius:6px;padding:2px 8px;font-size:10.5px">Precio</span>
+            <span style="background:#e0e7ff;color:#3730a3;border-radius:6px;padding:2px 8px;font-size:10.5px">Stock disponible</span>
+            <span style="background:#e0e7ff;color:#3730a3;border-radius:6px;padding:2px 8px;font-size:10.5px">Código universal (GTIN/EAN)</span>
+            <span style="background:#e0e7ff;color:#3730a3;border-radius:6px;padding:2px 8px;font-size:10.5px">Tiempo de disponibilidad</span>
+          </div>
+        </div>
+
+        <!-- Zona de carga -->
+        <div id="seo-import-drop" onclick="document.getElementById('seo-import-file').click()"
+             style="border:2px dashed var(--border);border-radius:10px;padding:28px 16px;text-align:center;cursor:pointer;transition:all .15s;background:var(--bg3)">
+          <div style="font-size:30px;margin-bottom:6px">📂</div>
+          <div style="font-size:13px;font-weight:600;color:var(--text)">Hacé clic para elegir el archivo .xlsx</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:3px">o arrastralo acá</div>
+          <input type="file" id="seo-import-file" accept=".xlsx,.xls,.csv" style="display:none" onchange="seoImportFileChosen(this.files[0])">
+        </div>
+        <div id="seo-import-filename" style="font-size:12px;color:var(--text2);margin-top:8px;min-height:18px"></div>
+
+        <!-- Preview / confirmación -->
+        <div id="seo-import-preview" style="display:none;margin-top:14px"></div>
+
+        <!-- Log de resultados -->
+        <div id="seo-import-log" style="display:none;margin-top:14px"></div>
+      </div>
+
+      <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:14px 22px;border-top:1px solid var(--border);position:sticky;bottom:0;background:var(--bg2)">
+        <span id="seo-import-status" style="font-size:11px;color:var(--text3);margin-right:auto"></span>
+        <button class="btn btn-ghost btn-sm" onclick="seoImportClose()">Cerrar</button>
+        <button class="btn btn-primary btn-sm" id="seo-import-go" onclick="seoImportRun()" disabled style="opacity:.5">⚡ Aplicar cambios</button>
       </div>
     </div>
   </div>
@@ -7320,6 +7372,31 @@ function itemHasEAN(item){
   return false;
 }
 
+// v140: Devuelve el VALOR del código universal (GTIN/EAN/UPC) de un ítem, o '' si no tiene.
+// Lo usa el exportador (columna editable) y el importador.
+function itemGetEAN(item){
+  const attrs = item.attributes || [];
+  const gtin = attrs.find(a => a.id === 'GTIN');
+  if(gtin && gtin.value_name && gtin.value_name.trim() && gtin.value_name !== '0') return gtin.value_name.trim();
+  const alt = attrs.find(a => ['EAN','UPC','ISBN','MPN'].includes(a.id));
+  if(alt && alt.value_name && alt.value_name.trim()) return alt.value_name.trim();
+  return '';
+}
+
+// v140: Devuelve el tiempo de disponibilidad de stock (sale_term MANUFACTURING_TIME)
+// como string "N días", o '' si no está configurado. number_unit en la API de ML.
+function itemGetManufacturingTime(item){
+  const terms = item.sale_terms || [];
+  const mt = terms.find(t => t.id === 'MANUFACTURING_TIME');
+  if(!mt) return '';
+  // value_name suele venir como "5 días"; si no, armar desde value_struct
+  if(mt.value_name && mt.value_name.trim()) return mt.value_name.trim();
+  if(mt.value_struct && mt.value_struct.number != null){
+    return mt.value_struct.number + ' ' + (mt.value_struct.unit || 'días');
+  }
+  return '';
+}
+
 // v77: Eliminada toda la lógica de detección de Clips de ML.
 // El endpoint /items/{id}/videos consumía demasiados recursos en Cloudflare
 // (warning del plan free) y la utilidad real era baja. Si en el futuro ML
@@ -8425,6 +8502,8 @@ function _seoExportColumns(){
     { id:'lastSale',    label:'Última venta',       type:'text', def:true,  value:i=> fmtTs(getLastSaleTs(i.id)) },
     { id:'daysNoSale',  label:'Días sin ventas',    type:'num',  def:true,  value:i=>{ const d=getDaysSinceLastSale(i.id); return d===Infinity?'':d; } },
     { id:'hasEAN',      label:'Tiene EAN/GTIN',     type:'text', def:true,  value:i=> itemHasEAN(i)?'Sí':'No' },
+    { id:'ean',         label:'Código universal (GTIN/EAN)', type:'text', def:true, value:i=> itemGetEAN(i) },
+    { id:'availTime',   label:'Tiempo de disponibilidad',    type:'text', def:true, value:i=> itemGetManufacturingTime(i) },
     { id:'pics',        label:'Cantidad fotos',     type:'num',  def:true,  value:i=> (i.pictures||[]).length || (i.thumbnail?1:0) },
     { id:'freeShip',    label:'Envío gratis',       type:'text', def:true,  value:i=> ((i.shipping?.free_shipping)||(i.tags||[]).includes('free_shipping'))?'Sí':'No' },
     { id:'health',      label:'Health ML (%)',      type:'num',  def:true,  value:i=> typeof i.health==='number'?Math.round(i.health*100):'' },
@@ -8630,6 +8709,8 @@ async function seoExportRun(){
       ['Conversión %', 'Ventas dividido visitas. Indicador clave de eficiencia de la publicación'],
       ['Última venta / Días sin ventas', 'Fecha de la última venta y días transcurridos'],
       ['Tiene EAN/GTIN', 'Si tiene código universal de producto (mejora posicionamiento)'],
+      ['Código universal (GTIN/EAN)', 'El valor del código de barras universal del producto. Editable para importar.'],
+      ['Tiempo de disponibilidad', 'Días que tardás en tener el producto listo (sale_term MANUFACTURING_TIME). Editable para importar.'],
       ['Cantidad fotos', 'Número de imágenes (ML premia ≥2, idealmente más)'],
       ['Envío gratis', 'Si ofrece envío gratis'],
       ['Health ML (%)', 'Score de salud oficial de MercadoLibre'],
@@ -8700,6 +8781,306 @@ function _seoExportCSVFallback(){
   setTimeout(()=>URL.revokeObjectURL(url), 1000);
   if(typeof showToast==='function') showToast('📥 Reporte CSV exportado','success',4000);
   seoExportClose();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v140: IMPORTADOR DE CAMBIOS MASIVOS → actualiza publicaciones en MercadoLibre
+// ═══════════════════════════════════════════════════════════════════════════
+// Lee un .xlsx con el formato del reporte. Clave primaria: "ID Publicación" (MLA...).
+// Campos editables: SKU, Estado, Precio, Stock, Código universal (GTIN/EAN),
+// Tiempo de disponibilidad. Solo actualiza celdas con valor nuevo (ignora vacías).
+// Muestra un log con aciertos y errores (con el motivo exacto del rechazo de ML).
+
+var _seoImportRows = null; // filas parseadas del archivo, listas para aplicar
+
+// Mapeo de encabezados aceptados (tolerante a mayúsc/acentos) → campo interno
+function _seoImportMatchHeader(h){
+  const norm = (h||'').toString().trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,''); // sacar acentos
+  if(/id.*public|^id$|^mla/.test(norm)) return 'id';
+  if(/sku/.test(norm)) return 'sku';
+  if(/estado|status/.test(norm)) return 'status';
+  if(/precio|price/.test(norm)) return 'price';
+  if(/stock/.test(norm)) return 'stock';
+  if(/codigo.*universal|gtin|ean|codigo de barras|barra/.test(norm)) return 'ean';
+  if(/tiempo.*disponib|disponibilidad|manufacturing/.test(norm)) return 'availTime';
+  return null; // columna ignorada (no editable)
+}
+
+function seoImportOpen(){
+  _seoImportRows = null;
+  document.getElementById('seo-import-filename').textContent = '';
+  document.getElementById('seo-import-preview').style.display = 'none';
+  document.getElementById('seo-import-preview').innerHTML = '';
+  document.getElementById('seo-import-log').style.display = 'none';
+  document.getElementById('seo-import-log').innerHTML = '';
+  document.getElementById('seo-import-status').textContent = '';
+  const go = document.getElementById('seo-import-go');
+  go.disabled = true; go.style.opacity = '.5';
+  document.getElementById('seo-import-modal').style.display = 'flex';
+  // Drag & drop
+  const drop = document.getElementById('seo-import-drop');
+  if(drop && !drop._dndBound){
+    drop._dndBound = true;
+    drop.addEventListener('dragover', e=>{ e.preventDefault(); drop.style.borderColor='var(--accent)'; drop.style.background='var(--bg4)'; });
+    drop.addEventListener('dragleave', e=>{ e.preventDefault(); drop.style.borderColor='var(--border)'; drop.style.background='var(--bg3)'; });
+    drop.addEventListener('drop', e=>{
+      e.preventDefault(); drop.style.borderColor='var(--border)'; drop.style.background='var(--bg3)';
+      if(e.dataTransfer.files && e.dataTransfer.files[0]) seoImportFileChosen(e.dataTransfer.files[0]);
+    });
+  }
+}
+function seoImportClose(){
+  const m = document.getElementById('seo-import-modal');
+  if(m) m.style.display = 'none';
+}
+
+// Cuando el usuario elige un archivo: lo parsea y muestra preview
+async function seoImportFileChosen(file){
+  if(!file) return;
+  const fnEl = document.getElementById('seo-import-filename');
+  if(fnEl) fnEl.innerHTML = '📄 <b>'+file.name+'</b> · leyendo...';
+  try{
+    const XLSX = await _seoLoadSheetJS();
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type:'array' });
+    // Usar la primera hoja (suele ser "Datos")
+    const wsName = wb.SheetNames.find(n => /dato/i.test(n)) || wb.SheetNames[0];
+    const ws = wb.Sheets[wsName];
+    const aoa = XLSX.utils.sheet_to_json(ws, { header:1, defval:'' });
+    if(!aoa.length){ throw new Error('La hoja está vacía'); }
+
+    // Primera fila = encabezados
+    const headers = aoa[0].map(h => _seoImportMatchHeader(h));
+    const idCol = headers.indexOf('id');
+    if(idCol === -1){ throw new Error('No encontré la columna "ID Publicación" (MLA...). Es obligatoria.'); }
+
+    // Parsear filas
+    const rows = [];
+    for(let r=1; r<aoa.length; r++){
+      const raw = aoa[r];
+      const id = (raw[idCol]||'').toString().trim().toUpperCase();
+      if(!/^ML[A-Z]\d+/.test(id)) continue; // saltar filas sin ID válido
+      const changes = {};
+      headers.forEach((field, c) => {
+        if(!field || field === 'id') return;
+        let val = raw[c];
+        if(val === '' || val === null || val === undefined) return; // celda vacía → ignorar
+        changes[field] = (typeof val === 'string') ? val.trim() : val;
+      });
+      if(Object.keys(changes).length) rows.push({ id, changes });
+    }
+
+    _seoImportRows = rows;
+    if(fnEl) fnEl.innerHTML = '📄 <b>'+file.name+'</b> · hoja "'+wsName+'"';
+
+    // Preview
+    const prev = document.getElementById('seo-import-preview');
+    if(!rows.length){
+      prev.style.display = 'block';
+      prev.innerHTML = '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:11px 14px;font-size:12px;color:#78350f">⚠️ No encontré filas con cambios. Verificá que haya IDs válidos (MLA...) y al menos una celda editable con valor.</div>';
+      const go = document.getElementById('seo-import-go'); go.disabled=true; go.style.opacity='.5';
+      return;
+    }
+    // Contar cambios por campo
+    const fieldLabels = { sku:'SKU', status:'Estado', price:'Precio', stock:'Stock', ean:'Código universal', availTime:'Tiempo disponib.' };
+    const counts = {};
+    rows.forEach(row => Object.keys(row.changes).forEach(f => counts[f] = (counts[f]||0)+1));
+    const countHtml = Object.keys(counts).map(f => '<span style="background:#dcfce7;color:#166534;border-radius:6px;padding:2px 8px;font-size:10.5px;margin:2px">'+(fieldLabels[f]||f)+': '+counts[f]+'</span>').join('');
+
+    // Tabla de preview (primeras 8)
+    const sample = rows.slice(0,8).map(row=>{
+      const ch = Object.keys(row.changes).map(f=>(fieldLabels[f]||f)+'='+row.changes[f]).join(', ');
+      return '<tr><td style="font-family:var(--mono);font-size:10.5px;padding:3px 6px">'+row.id+'</td><td style="font-size:11px;padding:3px 6px;color:var(--text2)">'+ch+'</td></tr>';
+    }).join('');
+
+    prev.style.display = 'block';
+    prev.innerHTML =
+      '<div style="font-size:12.5px;font-weight:600;color:var(--text);margin-bottom:6px">📋 '+rows.length+' publicación'+(rows.length!==1?'es':'')+' con cambios detectados</div>'
+      + '<div style="margin-bottom:8px">'+countHtml+'</div>'
+      + '<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;max-height:220px;overflow-y:auto">'
+      +   '<table style="width:100%;border-collapse:collapse"><thead><tr style="background:var(--bg3)"><th style="text-align:left;font-size:10px;padding:5px 6px;color:var(--text3)">ID</th><th style="text-align:left;font-size:10px;padding:5px 6px;color:var(--text3)">Cambios a aplicar</th></tr></thead><tbody>'+sample
+      +   (rows.length>8 ? '<tr><td colspan="2" style="text-align:center;font-size:10.5px;padding:5px;color:var(--text3)">... y '+(rows.length-8)+' más</td></tr>' : '')
+      +   '</tbody></table>'
+      + '</div>';
+
+    const go = document.getElementById('seo-import-go');
+    go.disabled = false; go.style.opacity = '1';
+    document.getElementById('seo-import-status').textContent = 'Listo para aplicar '+rows.length+' cambio(s)';
+  }catch(e){
+    console.error('[seoImport] error parseando:', e);
+    if(fnEl) fnEl.innerHTML = '❌ Error: '+(e.message||'no se pudo leer el archivo');
+    const go = document.getElementById('seo-import-go'); go.disabled=true; go.style.opacity='.5';
+  }
+}
+
+// Normaliza el valor de "Estado" del Excel → status de ML (active/paused)
+function _seoImportNormStatus(val){
+  const n = (val||'').toString().trim().toLowerCase();
+  if(/activ/.test(n)) return 'active';
+  if(/pausad|paus/.test(n)) return 'paused';
+  if(n === 'active' || n === 'paused') return n;
+  return null; // no reconocido
+}
+
+// Construye el body de PUT /items/{id} para una fila de cambios.
+// Devuelve { body, notes } o lanza error si un valor es inválido.
+function _seoImportBuildBody(changes){
+  const body = {};
+  const notes = [];
+
+  if(changes.sku !== undefined){
+    body.seller_custom_field = changes.sku.toString();
+  }
+  if(changes.status !== undefined){
+    const st = _seoImportNormStatus(changes.status);
+    if(!st) throw new Error('Estado inválido: "'+changes.status+'" (usá Activa o Pausada)');
+    body.status = st;
+  }
+  if(changes.price !== undefined){
+    let p;
+    if(typeof changes.price === 'number'){
+      // SheetJS ya devolvió un número (caso normal del reporte exportado)
+      p = changes.price;
+    } else {
+      // String editado a mano: interpretar formato argentino (1.234,56) o simple
+      const s = String(changes.price).trim();
+      // Si tiene coma decimal → formato AR: quitar puntos de miles, coma→punto
+      if(/,\d{1,2}$/.test(s)){
+        p = parseFloat(s.replace(/\./g,'').replace(',','.'));
+      } else if(/\.\d{1,2}$/.test(s) && (s.match(/\./g)||[]).length === 1){
+        // Un solo punto con 1-2 decimales → formato inglés (8500.50)
+        p = parseFloat(s.replace(/[^\d.]/g,''));
+      } else {
+        // Solo separadores de miles o entero: quitar todo lo no numérico
+        p = parseFloat(s.replace(/[^\d]/g,''));
+      }
+    }
+    if(isNaN(p) || p <= 0) throw new Error('Precio inválido: "'+changes.price+'"');
+    body.price = p;
+  }
+  if(changes.stock !== undefined){
+    const s = parseInt(String(changes.stock).replace(/[^\d-]/g,''), 10);
+    if(isNaN(s) || s < 0) throw new Error('Stock inválido: "'+changes.stock+'"');
+    body.available_quantity = s;
+  }
+  // Código universal (GTIN) → attributes
+  if(changes.ean !== undefined){
+    const gtin = changes.ean.toString().trim();
+    body.attributes = (body.attributes||[]).concat([{ id:'GTIN', value_name: gtin }]);
+  }
+  // Tiempo de disponibilidad → sale_terms MANUFACTURING_TIME
+  if(changes.availTime !== undefined){
+    // Aceptar "5", "5 días", "5 dias" → extraer número
+    const num = parseInt(String(changes.availTime).replace(/[^\d]/g,''), 10);
+    if(isNaN(num) || num < 0) throw new Error('Tiempo de disponibilidad inválido: "'+changes.availTime+'"');
+    body.sale_terms = (body.sale_terms||[]).concat([{
+      id:'MANUFACTURING_TIME',
+      value_name: num + ' días'
+    }]);
+    notes.push('tiempo disponib. solo aplica si la categoría lo permite');
+  }
+
+  return { body, notes };
+}
+
+// PUT a /items/{id} capturando status HTTP y mensaje de error de ML
+async function _seoImportPutItem(itemId, body){
+  const r = await fetch(WORKER+'/api/items/'+itemId, {
+    method:'PUT',
+    headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' },
+    body: JSON.stringify(body)
+  });
+  let data = null;
+  try{ data = await r.json(); }catch(e){}
+  if(r.status === 401){ showSessionExpired(); throw new Error('Sesión expirada'); }
+  if(!r.ok){
+    // Extraer el motivo del error de ML (cause / message)
+    let reason = (data && (data.message || data.error)) || ('HTTP '+r.status);
+    if(data && Array.isArray(data.cause) && data.cause.length){
+      const c = data.cause[0];
+      reason = (c.message || c.code || reason);
+    }
+    const err = new Error(reason);
+    err.httpStatus = r.status;
+    throw err;
+  }
+  return data;
+}
+
+// Ejecuta la importación: aplica cada fila y arma el log de resultados
+async function seoImportRun(){
+  if(!_seoImportRows || !_seoImportRows.length) return;
+  if(!token){ if(typeof showToast==='function') showToast('Iniciá sesión primero','warn'); return; }
+
+  const go = document.getElementById('seo-import-go');
+  const status = document.getElementById('seo-import-status');
+  const logEl = document.getElementById('seo-import-log');
+  go.disabled = true; go.style.opacity = '.5'; go.textContent = '⏳ Aplicando...';
+  logEl.style.display = 'block';
+
+  const total = _seoImportRows.length;
+  const results = { ok:[], err:[] };
+  const fieldLabels = { sku:'SKU', status:'Estado', price:'Precio', stock:'Stock', ean:'Cód.universal', availTime:'T.disponib.' };
+
+  for(let i=0; i<total; i++){
+    const row = _seoImportRows[i];
+    if(status) status.textContent = 'Procesando '+(i+1)+'/'+total+' — '+row.id;
+    try{
+      const { body, notes } = _seoImportBuildBody(row.changes);
+      if(!Object.keys(body).length){ continue; }
+      await _seoImportPutItem(row.id, body);
+      results.ok.push({
+        id: row.id,
+        fields: Object.keys(row.changes).map(f=>fieldLabels[f]||f).join(', '),
+        notes: notes.join('; ')
+      });
+      // Actualizar allItems local para reflejar cambios sin recargar todo
+      try{
+        const local = (allItems||[]).find(it => String(it.id) === row.id);
+        if(local){
+          if(body.price!=null) local.price = body.price;
+          if(body.available_quantity!=null) local.available_quantity = body.available_quantity;
+          if(body.status) local.status = body.status;
+          if(body.seller_custom_field) local.seller_custom_field = body.seller_custom_field;
+        }
+      }catch(e){}
+    }catch(e){
+      results.err.push({ id: row.id, reason: e.message || 'Error desconocido' });
+    }
+    // Pequeño delay anti rate-limit (ML permite varias por seg, pero somos conservadores)
+    await new Promise(res => setTimeout(res, 250));
+  }
+
+  // Render del log
+  const okHtml = results.ok.map(r =>
+    '<tr><td style="padding:4px 7px;font-family:var(--mono);font-size:10.5px;color:#166534">✓ '+r.id+'</td>'
+    + '<td style="padding:4px 7px;font-size:11px;color:var(--text2)">'+r.fields+(r.notes?' <span style="color:var(--text3)">('+r.notes+')</span>':'')+'</td></tr>'
+  ).join('');
+  const errHtml = results.err.map(r =>
+    '<tr><td style="padding:4px 7px;font-family:var(--mono);font-size:10.5px;color:#dc2626">✗ '+r.id+'</td>'
+    + '<td style="padding:4px 7px;font-size:11px;color:#dc2626">'+r.reason+'</td></tr>'
+  ).join('');
+
+  logEl.innerHTML =
+    '<div style="display:flex;gap:10px;margin-bottom:10px">'
+    + '<div style="flex:1;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;text-align:center">'
+    +   '<div style="font-size:22px;font-weight:700;color:#166534">'+results.ok.length+'</div>'
+    +   '<div style="font-size:11px;color:#166534">Actualizadas OK</div></div>'
+    + '<div style="flex:1;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 12px;text-align:center">'
+    +   '<div style="font-size:22px;font-weight:700;color:#dc2626">'+results.err.length+'</div>'
+    +   '<div style="font-size:11px;color:#dc2626">Con errores</div></div>'
+    + '</div>'
+    + (results.ok.length ? '<div style="font-size:11px;font-weight:600;color:#166534;margin:8px 0 3px">Aciertos</div><div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;max-height:180px;overflow-y:auto"><table style="width:100%;border-collapse:collapse"><tbody>'+okHtml+'</tbody></table></div>' : '')
+    + (results.err.length ? '<div style="font-size:11px;font-weight:600;color:#dc2626;margin:10px 0 3px">Errores (motivo del rechazo de ML)</div><div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;max-height:200px;overflow-y:auto"><table style="width:100%;border-collapse:collapse"><tbody>'+errHtml+'</tbody></table></div>' : '');
+
+  if(status) status.textContent = 'Finalizado: '+results.ok.length+' OK, '+results.err.length+' con error';
+  go.textContent = '⚡ Aplicar cambios';
+  go.disabled = false; go.style.opacity = '1';
+
+  // Refrescar la tabla SEO para mostrar los valores nuevos
+  if(typeof renderSEOTable === 'function') renderSEOTable();
+  if(typeof showToast==='function') showToast('📤 Importación finalizada: '+results.ok.length+' OK / '+results.err.length+' error(es)', results.err.length?'warn':'success', 5000);
 }
 
 // v138: Lógica de filtrado extraída a función reutilizable.
@@ -13279,6 +13660,7 @@ const _ads = {
   chartInst: null,
   // v139: Product Ads v2
   advertiserId: null,      // se resuelve 1 vez desde /advertising/advertisers?product_id=PADS
+  siteId: 'MLA',           // v140: site del advertiser (necesario en la ruta de items/search)
   itemMetrics: {},         // { itemId: { clicks, prints, cost, cpc, acos, roas, totalAmount, units } }
   itemsMerged: [],         // anuncios + métricas fusionados, listos para renderizar
   sortCol: 'cost',         // columna de orden por defecto (mayor inversión primero)
@@ -13297,7 +13679,8 @@ async function _adsGetAdvertiserId(){
       // Preferir el advertiser del site de Argentina (MLA) si viene varios
       const arg = list.find(a => (a.site_id === 'MLA')) || list[0];
       _ads.advertiserId = arg.advertiser_id || arg.id;
-      console.log('[Ads] advertiser_id resuelto:', _ads.advertiserId, '(site '+(arg.site_id||'?')+')');
+      _ads.siteId = arg.site_id || 'MLA';  // v140: guardar site para items/search
+      console.log('[Ads] advertiser_id resuelto:', _ads.advertiserId, '(site '+_ads.siteId+')');
       return _ads.advertiserId;
     }
     console.warn('[Ads] /advertisers devolvió lista vacía:', d);
@@ -13492,7 +13875,12 @@ function renderAdsChart(data){
       return isNaN(date)?dk:(date.getDate()+'/'+(date.getMonth()+1));
     });
     const clicks      = dates.map(dk=>byDate[dk].clicks);
-    const impressions = dates.map(dk=>Math.round(byDate[dk].prints/100)); // escala /100
+    const impressions = dates.map(dk=>byDate[dk].prints); // v140: valores REALES (sin escalar)
+    // Guardar fechas completas para el tooltip
+    const fullDates = dates.map(dk=>{
+      const date = new Date(dk);
+      return isNaN(date)?dk:date.toLocaleDateString('es-AR',{weekday:'short',day:'2-digit',month:'2-digit',year:'numeric'});
+    });
 
     if(!dates.length){ return renderAdsChartPlaceholder(_ads.currentDays); }
 
@@ -13502,15 +13890,44 @@ function renderAdsChart(data){
       data:{
         labels,
         datasets:[
-          {label:'Clics',data:clicks,borderColor:'#4f8ef7',backgroundColor:'rgba(79,142,247,0.08)',fill:true,tension:.4,borderWidth:2,pointRadius:2},
-          {label:'Impresiones (/100)',data:impressions,borderColor:'#23d18b',backgroundColor:'rgba(35,209,139,0.07)',fill:true,tension:.4,borderWidth:2,pointRadius:2}
+          // v140: clics en eje izquierdo, impresiones en eje derecho (sin escalar a /100)
+          {label:'Clics',data:clicks,borderColor:'#4f8ef7',backgroundColor:'rgba(79,142,247,0.10)',fill:true,tension:.4,borderWidth:2,pointRadius:3,pointHoverRadius:6,pointBackgroundColor:'#4f8ef7',yAxisID:'yClicks'},
+          {label:'Impresiones',data:impressions,borderColor:'#23d18b',backgroundColor:'rgba(35,209,139,0.08)',fill:true,tension:.4,borderWidth:2,pointRadius:3,pointHoverRadius:6,pointBackgroundColor:'#23d18b',yAxisID:'yPrints'}
         ]
       },
       options:{
         responsive:true,maintainAspectRatio:false,
-        plugins:{legend:{display:true,labels:{color:'#374151',font:{size:11},boxWidth:10}}},
+        interaction:{ mode:'index', intersect:false }, // v140: hover muestra ambas series del día
+        plugins:{
+          legend:{display:true,labels:{color:'#374151',font:{size:11},boxWidth:10,usePointStyle:true}},
+          // v140: tooltip con valores exactos del día
+          tooltip:{
+            enabled:true,
+            backgroundColor:'rgba(15,23,42,0.92)',
+            titleColor:'#fff', bodyColor:'#e2e8f0',
+            titleFont:{size:12,weight:'bold'}, bodyFont:{size:12},
+            padding:10, cornerRadius:8, displayColors:true, usePointStyle:true,
+            callbacks:{
+              title:(items)=> items.length ? (fullDates[items[0].dataIndex]||items[0].label) : '',
+              label:(ctx)=>{
+                const v = ctx.parsed.y;
+                if(ctx.dataset.label==='Clics') return '  Clics: '+v.toLocaleString('es-AR');
+                if(ctx.dataset.label==='Impresiones') return '  Impresiones: '+v.toLocaleString('es-AR');
+                return '  '+ctx.dataset.label+': '+v.toLocaleString('es-AR');
+              },
+              afterBody:(items)=>{
+                // CTR del día si tenemos clics e impresiones
+                let cl=0, pr=0;
+                items.forEach(it=>{ if(it.dataset.label==='Clics') cl=it.parsed.y; if(it.dataset.label==='Impresiones') pr=it.parsed.y; });
+                if(pr>0) return '\n  CTR: '+((cl/pr)*100).toFixed(2)+'%';
+                return '';
+              }
+            }
+          }
+        },
         scales:{
-          y:{grid:{color:'rgba(0,0,0,0.06)'},ticks:{color:'#374151',font:{size:10}}},
+          yClicks:{ type:'linear', position:'left', grid:{color:'rgba(0,0,0,0.06)'}, ticks:{color:'#4f8ef7',font:{size:10}}, title:{display:true,text:'Clics',color:'#4f8ef7',font:{size:10}} },
+          yPrints:{ type:'linear', position:'right', grid:{drawOnChartArea:false}, ticks:{color:'#23d18b',font:{size:10}}, title:{display:true,text:'Impresiones',color:'#23d18b',font:{size:10}} },
           x:{grid:{display:false},ticks:{color:'#374151',font:{size:10},maxTicksLimit:10}}
         }
       }
@@ -13615,15 +14032,17 @@ function renderCampaignStatus(c){
   }
   if(name)  name.textContent  = c.name || ('Campaña #'+c.id);
   if(tog)   tog.checked       = isActive;
-  if(budInput && c.daily_budget) budInput.value = c.daily_budget;
+  // v140: el budget en v2 puede venir como daily_budget o budget. Mostrar el real.
+  const realBudget = c.daily_budget || c.budget || c.budget_amount || 0;
+  if(budInput && realBudget) budInput.value = realBudget;
 
   if(detail){
     detail.innerHTML = `
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
         <div><div style="font-size:10px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:.05em">ID Campaña</div><div style="font-weight:600;color:#0f172a;font-family:var(--mono);font-size:11px">${c.id||'—'}</div></div>
         <div><div style="font-size:10px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:.05em">Estado</div><div style="font-weight:600;color:${isActive?'#166534':'#78350f'}">${isActive?'Activa':'Pausada'}</div></div>
-        <div><div style="font-size:10px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:.05em">Presupuesto/día</div><div style="font-weight:600;color:#0f172a">$${(c.daily_budget||0).toLocaleString('es-AR')}</div></div>
-        <div><div style="font-size:10px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:.05em">Tipo</div><div style="font-weight:500">${c.type||'Product Ads'}</div></div>
+        <div><div style="font-size:10px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:.05em">Presupuesto/día</div><div style="font-weight:600;color:#0f172a">$${realBudget.toLocaleString('es-AR')}</div></div>
+        <div><div style="font-size:10px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:.05em">Tipo</div><div style="font-weight:500">${c.type||c.strategy||'Product Ads'}</div></div>
       </div>`;
   }
 }
@@ -13700,84 +14119,109 @@ async function loadAdsItems(){
   try{
     const advId = await _adsGetAdvertiserId();
     if(!advId) throw new Error('Sin advertiser_id (Product Ads no habilitado)');
+    const siteId = _ads.siteId || 'MLA';
 
     const dateFrom = new Date();
     dateFrom.setDate(dateFrom.getDate() - _ads.currentDays);
     const fromStr = dateFrom.toISOString().split('T')[0];
     const toStr   = new Date().toISOString().split('T')[0];
 
-    // v139: métricas agregadas POR ITEM. aggregation_type=item devuelve una fila
-    // por publicación anunciada, con sus métricas del período.
-    const metricList = 'clicks,prints,ctr,cost,cpc,acos,roas,total_amount,units_quantity,direct_units_quantity,indirect_units_quantity,direct_amount,indirect_amount';
+    // v140 FIX CRÍTICO: el endpoint correcto para métricas POR ITEM es
+    //   /advertising/{SITE_ID}/advertisers/{ADV_ID}/product_ads/items/search
+    // (NO /campaigns?aggregation_type=item, que devuelve campañas, no items).
+    // En este endpoint las métricas van en MAYÚSCULAS y los filtros con corchetes.
+    // Devuelve results[] con: item_id, title, status, y las métricas por publicación.
+    const metricList = 'CLICKS,PRINTS,CTR,COST,CPC,ACOS,ROAS,TOTAL_AMOUNT,DIRECT_AMOUNT,INDIRECT_AMOUNT,UNITS_QUANTITY,DIRECT_UNITS_QUANTITY,INDIRECT_UNITS_QUANTITY,ADVERTISING_ITEMS_QUANTITY';
     let metricsRows = [];
-    let adsList = [];
+    let usedEndpoint = '';
 
-    // Traer métricas por item (puede paginar; pedimos hasta 200)
+    // Estrategia 1 (correcta v2): items/search con SITE_ID en la ruta
     try{
       const md = await mlGet(
-        '/advertising/advertisers/'+advId+'/product_ads/campaigns'
-        + '?limit=100&offset=0'
-        + '&date_from='+fromStr+'&date_to='+toStr
+        '/advertising/'+siteId+'/advertisers/'+advId+'/product_ads/items/search'
+        + '?date_from='+fromStr+'&date_to='+toStr
+        + '&limit=500&offset=0&sort=desc&sort_by=clicks'
         + '&metrics='+metricList
-        + '&aggregation_type=item'
+        + '&metrics_summary=true'
+        + '&filters[statuses]=active,paused,idle'
+        + '&filters[channel]=marketplace'
       );
-      metricsRows = md.results || md.data || md.metrics || [];
+      metricsRows = md.results || md.data || [];
+      usedEndpoint = 'items/search';
     }catch(e1){
-      console.warn('[Ads] métricas por item (campaigns) falló, intento endpoint items:', e1.message);
+      console.warn('[Ads] items/search falló:', e1.message);
     }
 
-    // Traer el listado de anuncios (para título, thumbnail, estado, ad_id)
-    try{
-      const ad = await mlGet('/advertising/product_ads/ads/search?limit=100&offset=0');
-      adsList = ad.results || ad.data || ad.ads || [];
-    }catch(e2){
-      console.warn('[Ads] ads/search falló:', e2.message);
+    // Estrategia 2 (fallback): endpoint sin SITE_ID (algunas cuentas lo aceptan)
+    if(!metricsRows.length){
+      try{
+        const md2 = await mlGet(
+          '/advertising/advertisers/'+advId+'/product_ads/items/search'
+          + '?date_from='+fromStr+'&date_to='+toStr
+          + '&limit=500&offset=0'
+          + '&metrics='+metricList.toLowerCase()
+          + '&metrics_summary=true'
+          + '&filters[statuses]=active,paused,idle'
+        );
+        metricsRows = md2.results || md2.data || [];
+        usedEndpoint = 'items/search (sin site)';
+      }catch(e2){
+        console.warn('[Ads] items/search sin site falló:', e2.message);
+      }
     }
 
-    // Indexar métricas por item_id
-    const metricsByItem = {};
-    metricsRows.forEach(r => {
-      const id = r.id || r.item_id || r.item || r.ad_id;
-      if(!id) return;
-      metricsByItem[String(id)] = _adsNormalizeMetrics(r);
-    });
-    _ads.itemMetrics = metricsByItem;
+    console.log('[Ads] métricas por item recibidas:', metricsRows.length, 'vía', usedEndpoint, metricsRows[0]||'(vacío)');
 
-    // Fusionar: para cada anuncio, anexar sus métricas
+    // Construir tabla desde las filas de métricas (cada una ES un item)
     let merged = [];
-    if(adsList.length){
-      merged = adsList.map(a => {
-        const itemId = String(a.item_id || a.id);
-        return Object.assign({
-          ad_id: a.id,
-          item_id: a.item_id || a.id,
-          title: a.title || '',
-          thumbnail: a.thumbnail || '',
-          status: (a.status || 'active').toLowerCase()
-        }, metricsByItem[itemId] || _adsEmptyMetrics());
-      });
-    } else {
-      // Si ads/search no devolvió nada pero sí hay métricas, construir desde métricas
+    if(metricsRows.length){
       merged = metricsRows.map(r => {
-        const itemId = String(r.id || r.item_id);
+        const itemId = String(r.item_id || r.id || r.itemId || '');
         const local = (allItems||[]).find(i => String(i.id) === itemId);
+        const norm = _adsNormalizeMetrics(r);
         return Object.assign({
-          ad_id: itemId,
-          item_id: itemId,
-          title: (local && local.title) || r.title || itemId,
-          thumbnail: (local && local.thumbnail) || '',
-          status: 'active'
-        }, _adsNormalizeMetrics(r));
+          ad_id:     itemId,
+          item_id:   itemId,
+          title:     r.title || (local && local.title) || itemId,
+          thumbnail: r.thumbnail || (local && local.thumbnail) || '',
+          status:    (r.status || (r.ad_status) || 'active').toString().toLowerCase()
+        }, norm);
       });
+    }
+
+    // Si no llegaron métricas, intentar al menos listar los anuncios (sin métricas)
+    if(!merged.length){
+      try{
+        const ad = await mlGet('/advertising/product_ads/ads/search?limit=200&offset=0');
+        const adsList = ad.results || ad.data || ad.ads || [];
+        merged = adsList.map(a => {
+          const itemId = String(a.item_id || a.id);
+          const local = (allItems||[]).find(i => String(i.id) === itemId);
+          return Object.assign({
+            ad_id: a.id, item_id: itemId,
+            title: a.title || (local && local.title) || itemId,
+            thumbnail: a.thumbnail || (local && local.thumbnail) || '',
+            status: (a.status||'active').toLowerCase()
+          }, _adsEmptyMetrics());
+        });
+      }catch(e3){ console.warn('[Ads] ads/search fallback falló:', e3.message); }
     }
 
     _ads.itemsMerged = merged;
     _ads.adsItems = merged;
-    if(countEl) countEl.textContent = merged.length + ' anuncios encontrados';
+
+    // Indexar para otros usos
+    const idx = {};
+    merged.forEach(m => { idx[String(m.item_id)] = m; });
+    _ads.itemMetrics = idx;
+
+    if(countEl){
+      const conMetricas = merged.filter(m=>m._hasMetrics).length;
+      countEl.textContent = merged.length + ' anuncios' + (conMetricas? ' · '+conMetricas+' con métricas del período' : '');
+    }
     renderAdsTable();
   }catch(e){
     console.warn('[Ads] loadAdsItems error:', e.message);
-    // Fallback: usar allItems para poblar tabla en modo simulado (sin métricas)
     if(allItems && allItems.length){
       const active = allItems.filter(i=>i.status==='active').slice(0,30);
       _ads.itemsMerged = active.map(i=>Object.assign({
@@ -13798,16 +14242,32 @@ async function loadAdsItems(){
 }
 
 // Normaliza una fila de métricas de la API v2 a nuestra estructura interna.
-// La API usa: prints (impresiones), cost (inversión), total_amount (ingresos),
-// units_quantity (ventas por ads). Tomamos también direct/indirect por si sirven.
+// El endpoint items/search devuelve claves en MAYÚSCULAS (CLICKS, PRINTS, COST,
+// TOTAL_AMOUNT, UNITS_QUANTITY...). El de campaigns las usa en minúsculas.
+// Probamos ambas para ser robustos.
 function _adsNormalizeMetrics(r){
-  const n = (...keys) => { for(const k of keys){ if(r[k]!==undefined && r[k]!==null) return Number(r[k])||0; } return 0; };
+  const n = (...keys) => {
+    for(const k of keys){
+      if(r[k]!==undefined && r[k]!==null && r[k]!=='') return Number(r[k])||0;
+      const up = k.toUpperCase(), lo = k.toLowerCase();
+      if(r[up]!==undefined && r[up]!==null && r[up]!=='') return Number(r[up])||0;
+      if(r[lo]!==undefined && r[lo]!==null && r[lo]!=='') return Number(r[lo])||0;
+    }
+    return 0;
+  };
+  const has = (...keys) => keys.some(k =>
+    (r[k]!==undefined && r[k]!==null) ||
+    (r[k.toUpperCase()]!==undefined && r[k.toUpperCase()]!==null) ||
+    (r[k.toLowerCase()]!==undefined && r[k.toLowerCase()]!==null)
+  );
   const cost    = n('cost','spend');
   const revenue = n('total_amount','amount_total','revenue');
-  const acos = r.acos !== undefined && r.acos !== null ? Number(r.acos)
-             : (revenue > 0 ? (cost/revenue)*100 : null);
-  const roas = r.roas !== undefined && r.roas !== null ? Number(r.roas)
-             : (cost > 0 ? revenue/cost : null);
+  const acosRaw = has('acos') ? n('acos') : null;
+  const roasRaw = has('roas') ? n('roas') : null;
+  const acos = acosRaw !== null ? acosRaw : (revenue > 0 ? (cost/revenue)*100 : null);
+  const roas = roasRaw !== null ? roasRaw : (cost > 0 ? revenue/cost : null);
+  // Detectar si la fila trae alguna métrica real (para distinguir de fila vacía)
+  const hasMetrics = has('clicks','prints','cost','total_amount','units_quantity','cpc','acos','roas');
   return {
     prints:  n('prints','impressions'),
     clicks:  n('clicks'),
@@ -13817,7 +14277,7 @@ function _adsNormalizeMetrics(r){
     units:   n('units_quantity','sold_quantity_total','advertising_items_quantity'),
     acos:    acos,
     roas:    roas,
-    _hasMetrics: true
+    _hasMetrics: hasMetrics
   };
 }
 function _adsEmptyMetrics(){
@@ -13868,9 +14328,10 @@ function renderAdsTable(){
 
   // Ordenar. Convención: sortDir = -1 (desc, mayor primero) | 1 (asc).
   const col = _ads.sortCol, dir = _ads.sortDir;
-  if(col === 'title'){
+  if(col === 'title' || col === 'status'){
+    // Orden alfabético para campos de texto (título y estado)
     items.sort((a,b)=>{
-      const va = (a.title||'').toLowerCase(), vb = (b.title||'').toLowerCase();
+      const va = (a[col]||'').toString().toLowerCase(), vb = (b[col]||'').toString().toLowerCase();
       if(va < vb) return dir === -1 ? 1 : -1;
       if(va > vb) return dir === -1 ? -1 : 1;
       return 0;
@@ -13899,7 +14360,7 @@ function renderAdsTable(){
         <th style="width:40px">Img</th>
         <th onclick="adsSortBy('title')" title="Título de la publicación. Clic para ordenar alfabéticamente." style="cursor:pointer;user-select:none;min-width:200px">Producto<span style="font-size:9px;color:var(--accent)">${_ads.sortCol==='title'?(_ads.sortDir===-1?' ▼':' ▲'):''}</span></th>
         ${_ADS_COLS.map(thMetric).join('')}
-        <th style="width:84px;text-align:center;font-size:11px">Estado</th>
+        <th onclick="adsSortBy('status')" title="Estado del anuncio (activo/pausado). Clic para ordenar." style="cursor:pointer;user-select:none;width:90px;text-align:center;font-size:11px">Estado<span style="font-size:9px;color:var(--accent)">${_ads.sortCol==='status'?(_ads.sortDir===-1?' ▼':' ▲'):''}</span></th>
         <th style="width:70px;text-align:center;font-size:11px">Activar</th>
       </tr></thead>
       <tbody id="ads-tbody">
