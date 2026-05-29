@@ -748,7 +748,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v140 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v141 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1056,12 +1056,14 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <thead><tr>
           <th class="th-check"><input type="checkbox" id="check-all" onchange="toggleAll(this)"></th>
           <th>Publicación</th>
-          <th onclick="pubSort('price')" style="cursor:pointer;user-select:none;white-space:nowrap">Precio <span id="pub-sort-price" style="font-size:10px"></span></th>
-          <th onclick="pubSort('stock')" style="cursor:pointer;user-select:none;white-space:nowrap">Stock <span id="pub-sort-stock" style="font-size:10px"></span></th>
-          <th onclick="pubSort('sold')"  style="cursor:pointer;user-select:none;white-space:nowrap">Vendidas <span id="pub-sort-sold" style="font-size:10px"></span></th>
           <th onclick="pubSort('sku')"   style="cursor:pointer;user-select:none;white-space:nowrap">SKU <span id="pub-sort-sku" style="font-size:10px"></span></th>
-          <th onclick="pubSort('seo')"   style="cursor:pointer;user-select:none;white-space:nowrap">Score SEO <span id="pub-sort-seo" style="font-size:10px"></span></th>
-          <th onclick="pubSort('quality')" style="cursor:pointer;user-select:none;white-space:nowrap">Calidad <span id="pub-sort-quality" style="font-size:10px"></span></th>
+          <th onclick="pubSort('price')" style="cursor:pointer;user-select:none;white-space:nowrap;text-align:right">Precio <span id="pub-sort-price" style="font-size:10px"></span></th>
+          <th onclick="pubSort('stock')" style="cursor:pointer;user-select:none;white-space:nowrap;text-align:center">Stock <span id="pub-sort-stock" style="font-size:10px"></span></th>
+          <th onclick="pubSort('ean')"   style="cursor:pointer;user-select:none;white-space:nowrap" title="Código de barras universal (GTIN/EAN). Clic en el lápiz para editar.">Cód. universal <span id="pub-sort-ean" style="font-size:10px"></span></th>
+          <th onclick="pubSort('type')"  style="cursor:pointer;user-select:none;white-space:nowrap" title="Tipo de publicación: Clásica, Gold/Premium, Catálogo, etc.">Tipo public. <span id="pub-sort-type" style="font-size:10px"></span></th>
+          <th onclick="pubSort('sold')"  style="cursor:pointer;user-select:none;white-space:nowrap;text-align:center">Vendidas <span id="pub-sort-sold" style="font-size:10px"></span></th>
+          <th onclick="pubSort('avail')" style="cursor:pointer;user-select:none;white-space:nowrap;text-align:center" title="Tiempo de disponibilidad (días de fabricación configurados en ML).">T. disponib. <span id="pub-sort-avail" style="font-size:10px"></span></th>
+          <th onclick="pubSort('thermo')" style="cursor:pointer;user-select:none;white-space:nowrap;text-align:center" title="Termómetro SEO: salud comercial combinada (tráfico, conversión, health, velocidad de venta, antigüedad).">🌡️ SEO <span id="pub-sort-thermo" style="font-size:10px"></span></th>
           <th>Estado</th><th>Acciones</th>
         </tr></thead>
         <tbody id="pubs-tbody"></tbody>
@@ -1115,7 +1117,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   <!-- ── Acciones rápidas masivas ── -->
   <div class="card mb">
     <div class="card-hd"><div class="card-title">⚡ Acciones sobre publicaciones filtradas</div></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:4px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-top:4px">
 
       <!-- Pausa / Reactiva -->
       <div style="padding:14px;background:var(--bg3);border-radius:8px;border:1px solid var(--border)">
@@ -1148,6 +1150,22 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <button class="btn btn-primary btn-sm" onclick="bulkUpdatePrices()">Aplicar</button>
         </div>
         <div id="bulk-price-result" style="margin-top:8px;font-size:12px;min-height:16px"></div>
+      </div>
+
+      <!-- v141: Cambiar Tiempo de Disponibilidad (manufacturing_time) -->
+      <div style="padding:14px;background:var(--bg3);border-radius:8px;border:1px solid var(--border)">
+        <div style="font-size:13px;font-weight:600;margin-bottom:10px">⏳ Cambiar Tiempo de Disponibilidad</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <div>
+            <label style="font-size:11px;font-weight:500;display:block;margin-bottom:3px">Días</label>
+            <input type="number" id="bulk-avail-val" placeholder="Días" min="0" max="30" style="width:90px;font-size:12px;padding:6px 8px">
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="bulkUpdateAvailability()">Aplicar</button>
+        </div>
+        <div style="font-size:10.5px;color:var(--text3);margin-top:8px;line-height:1.45">
+          Indicá los días corridos que tardás en tener listo el producto para entregar. Cuanto más tiempo tardes en tener tu producto listo para entregar, menos exposición tendrás. <b>0 = entrega inmediata</b> (elimina el tiempo).
+        </div>
+        <div id="bulk-avail-result" style="margin-top:8px;font-size:12px;min-height:16px"></div>
       </div>
     </div>
   </div>
@@ -6917,12 +6935,26 @@ function sortArrow(col, stateCol, stateDir){
   return stateDir>0?'↓':'↑';
 }
 
+// ── v141: helpers para ordenar las columnas nuevas de la tabla de Publicaciones ──
+// Días de fabricación (MANUFACTURING_TIME) como número, para ordenar. -1 si no tiene.
+function _itemManufDays(item){
+  const s = itemGetManufacturingTime(item);
+  if(!s) return -1;
+  const n = parseInt(String(s).replace(/[^\d]/g,''), 10);
+  return isNaN(n) ? -1 : n;
+}
+// Score del Termómetro SEO (0-100) desde el cache global, o -1 si no está calculado.
+function _itemThermoScore(item){
+  const t = (window._seoThermo||{})[String(item.id)];
+  return (t && typeof t.score === 'number') ? t.score : -1;
+}
+
 // ── Ordenamiento Publicaciones (clic en encabezado) ──────────
 function pubSort(col){
   if(pubState.sortCol===col) pubState.sortDir*=-1;
   else{ pubState.sortCol=col; pubState.sortDir=-1; }
-  // actualizar flechas
-  ['price','stock','sold','sku','seo','quality'].forEach(c=>{
+  // actualizar flechas (v141: nuevas columnas sku, ean, type, avail, thermo)
+  ['price','stock','sold','sku','ean','type','avail','thermo'].forEach(c=>{
     const el=document.getElementById('pub-sort-'+c);
     if(el) el.innerHTML=sortArrow(c,pubState.sortCol,pubState.sortDir);
   });
@@ -6947,9 +6979,11 @@ function renderPubs(){
     if(col==='price')        { va=a.price||0;                              vb=b.price||0; }
     else if(col==='stock')   { va=a.available_quantity??0;                 vb=b.available_quantity??0; }
     else if(col==='sold')    { va=a.sold_quantity||0;                      vb=b.sold_quantity||0; }
-    else if(col==='sku')     { va=(a.seller_custom_field||'').toLowerCase();vb=(b.seller_custom_field||'').toLowerCase();return dir*(va<vb?-1:va>vb?1:0); }
-    else if(col==='seo')     { va=seoScore(a.title);                       vb=seoScore(b.title); }
-    else if(col==='quality') { va=qualityScore(a);                         vb=qualityScore(b); }
+    else if(col==='sku')     { va=itemGetSKU(a).toLowerCase();vb=itemGetSKU(b).toLowerCase();return dir*(va<vb?-1:va>vb?1:0); }
+    else if(col==='ean')     { va=itemGetEAN(a).toLowerCase();vb=itemGetEAN(b).toLowerCase();return dir*(va<vb?-1:va>vb?1:0); }
+    else if(col==='type')    { va=(getPubType(a)||'').toLowerCase();vb=(getPubType(b)||'').toLowerCase();return dir*(va<vb?-1:va>vb?1:0); }
+    else if(col==='avail')   { va=_itemManufDays(a);                       vb=_itemManufDays(b); }
+    else if(col==='thermo')  { va=_itemThermoScore(a);                     vb=_itemThermoScore(b); }
     else if(legacySort==='sold')       { return (b.sold_quantity||0)-(a.sold_quantity||0); }
     else if(legacySort==='price-asc')  { return (a.price||0)-(b.price||0); }
     else if(legacySort==='price-desc') { return (b.price||0)-(a.price||0); }
@@ -6961,15 +6995,17 @@ function renderPubs(){
 
   const tbody=document.getElementById('pubs-tbody');
   if(!tbody) return;
-  if(!items.length){tbody.innerHTML='<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:22px">Sin resultados para los filtros actuales</td></tr>';return;}
+  if(!items.length){tbody.innerHTML='<tr><td colspan="12" style="text-align:center;color:var(--text3);padding:22px">Sin resultados para los filtros actuales</td></tr>';return;}
+  const _pubTypeLabel = { catalog:'Catálogo', gold:'Gold/Premium', free:'Gratuita', classic:'Clásica' };
   tbody.innerHTML=items.map(item=>{
-    const sc=seoScore(item.title);
-    const qs=qualityScore(item);
-    const scColor=sc>=70?'var(--green)':sc>=40?'var(--amber)':'var(--red)';
-    const qsC=qs>=70?'#16a34a':qs>=40?'#92400e':'#dc2626';
-    const qsBg=qs>=70?'#f0fdf4':qs>=40?'#fffbeb':'#fef2f2';
-    const qE=qs>=70?'🟢':qs>=40?'🟡':'🔴';
-    const sku=item.seller_custom_field||'—';
+    const sku = itemGetSKU(item) || '';
+    const skuDisp = sku || '—';
+    const ean = itemGetEAN(item) || '';
+    const eanDisp = ean || '—';
+    const ptype = getPubType(item);
+    const ptypeLabel = _pubTypeLabel[ptype] || ptype || '—';
+    const manuf = itemGetManufacturingTime(item);
+    const manufDisp = manuf ? manuf : '0 días';
     return `<tr>
       <td><input type="checkbox" class="row-check" value="${item.id}" onchange="toggleItem(this,'${item.id}')"></td>
       <td><div style="display:flex;align-items:flex-start;gap:9px">
@@ -6979,34 +7015,36 @@ function renderPubs(){
           <div style="font-size:10px;color:var(--text3);margin-top:2px">${item.id}</div>
         </div>
       </div></td>
-      <td>
-        <div id="price-cell-${item.id}" style="display:flex;align-items:center;gap:4px">
+      <td style="font-size:11px;color:var(--text2)">
+        <div style="display:flex;align-items:center;gap:4px">
+          <span id="sku-val-${item.id}" style="font-family:var(--mono);font-size:11px">${skuDisp}</span>
+          <button class="btn btn-ghost btn-xs" style="padding:2px 5px;font-size:10px;opacity:.6" title="Editar SKU"
+            onclick="startSKUEdit('${item.id}','${skuDisp.replace(/'/g,"\\'")}')">✎</button>
+        </div>
+      </td>
+      <td style="text-align:right">
+        <div id="price-cell-${item.id}" style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
           <span style="font-weight:600;color:var(--text);cursor:pointer" title="Clic para editar precio" onclick="startPriceEdit('${item.id}',${item.price||0})">$${(item.price||0).toLocaleString('es-AR')}</span>
           <button class="btn btn-ghost btn-xs" style="padding:2px 5px;font-size:10px;opacity:.5" title="Editar precio" onclick="startPriceEdit('${item.id}',${item.price||0})">✎</button>
         </div>
       </td>
-      <td>
-        <div id="stock-cell-${item.id}" style="display:flex;align-items:center;gap:4px">
+      <td style="text-align:center">
+        <div id="stock-cell-${item.id}" style="display:flex;align-items:center;gap:4px;justify-content:center">
           <span class="${(item.available_quantity||0)===0?'badge bg-red':(item.available_quantity||0)<=3?'badge bg-amber':'badge bg-green'}" style="cursor:pointer" title="Clic para editar stock" onclick="startStockEdit('${item.id}',${item.available_quantity??0})">${item.available_quantity??'—'}</span>
           <button class="btn btn-ghost btn-xs" style="padding:2px 5px;font-size:10px;opacity:.5" title="Editar stock" onclick="startStockEdit('${item.id}',${item.available_quantity??0})">✎</button>
         </div>
       </td>
-      <td>${item.sold_quantity||0}</td>
       <td style="font-size:11px;color:var(--text2)">
         <div style="display:flex;align-items:center;gap:4px">
-          <span id="sku-val-${item.id}" style="font-family:var(--mono);font-size:11px">${sku}</span>
-          <button class="btn btn-ghost btn-xs" style="padding:2px 5px;font-size:10px;opacity:.6" title="Editar SKU"
-            onclick="startSKUEdit('${item.id}','${sku.replace(/'/g,"\\'")}')">✎</button>
+          <span id="ean-val-${item.id}" style="font-family:var(--mono);font-size:11px">${eanDisp}</span>
+          <button class="btn btn-ghost btn-xs" style="padding:2px 5px;font-size:10px;opacity:.6" title="Editar código universal (GTIN/EAN)"
+            onclick="startEANEdit('${item.id}','${eanDisp.replace(/'/g,"\\'")}')">✎</button>
         </div>
       </td>
-      <td><div style="display:flex;align-items:center;gap:6px">
-        <div class="pbar" style="width:50px"><div class="pfill" style="width:${sc}%;background:${scColor}"></div></div>
-        <span style="font-size:11px;font-weight:700;color:${scColor}">${sc}</span>
-      </div></td>
-      <td><div style="display:flex;align-items:center;gap:5px">
-        <span style="font-size:12px">${qE}</span>
-        <span style="font-size:11px;font-weight:700;padding:1px 5px;border-radius:4px;background:${qsBg};color:${qsC}">${qs}</span>
-      </div></td>
+      <td><span class="badge ${ptype==='gold'?'bg-amber':ptype==='catalog'?'bg-blue':'bg-gray'}" style="font-size:10px;white-space:nowrap">${ptypeLabel}</span></td>
+      <td style="text-align:center">${item.sold_quantity||0}</td>
+      <td style="text-align:center;font-size:11px;color:var(--text2)">${manufDisp}</td>
+      <td style="text-align:center;padding:6px 4px" id="pub-thermo-cell-${item.id}">${_seoThermoCellHTML(item.id)}</td>
       <td><span class="badge ${item.status==='active'?'bg-green':'bg-amber'}">${item.status==='active'?'● Activa':'⏸ Pausada'}</span></td>
       <td>
         <div style="display:flex;gap:4px">
@@ -7124,6 +7162,68 @@ async function saveSKU(itemId){
     inp.disabled = false;
     inp.style.borderColor = 'var(--red)';
     if(msgEl){ msgEl.textContent='❌ '+(e.message||'Sin conexion').slice(0,40); msgEl.style.color='var(--red)'; }
+  }
+}
+
+// ─── v141: Inline edición de CÓDIGO UNIVERSAL (GTIN/EAN) ────────────────────
+// Escribe el atributo GTIN del ítem (forma oficial de ML para el código de barras).
+function startEANEdit(itemId, currentEan){
+  const span = document.getElementById('ean-val-'+itemId);
+  if(!span) return;
+  const parent = span.parentElement;
+  parent.innerHTML = `
+    <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
+      <input id="ean-inp-${itemId}" type="text" value="${currentEan==='—'?'':currentEan}"
+        maxlength="14" placeholder="GTIN/EAN"
+        style="font-family:var(--mono);font-size:11px;padding:3px 6px;width:120px;border-radius:4px;border:1px solid var(--accent);outline:none;background:var(--bg3);color:var(--text)"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();saveEAN('${itemId}');}if(event.key==='Escape')renderPubs();">
+      <button class="btn btn-primary btn-xs" style="padding:2px 7px" onclick="saveEAN('${itemId}')">✓</button>
+      <button class="btn btn-ghost btn-xs" style="padding:2px 5px" onclick="renderPubs()">✕</button>
+      <span id="ean-msg-${itemId}" style="font-size:10px"></span>
+    </div>`;
+  document.getElementById('ean-inp-'+itemId)?.focus();
+}
+
+async function saveEAN(itemId){
+  const inp   = document.getElementById('ean-inp-'+itemId);
+  const msgEl = document.getElementById('ean-msg-'+itemId);
+  if(!inp) return;
+  const val = inp.value.trim().slice(0,14);
+  if(val && !/^\d{8,14}$/.test(val)){
+    inp.style.borderColor='var(--red)';
+    if(msgEl){ msgEl.textContent='⚠️ El GTIN/EAN debe ser numérico (8-14 dígitos)'; msgEl.style.color='var(--red)'; }
+    return;
+  }
+  inp.disabled = true;
+  if(msgEl){ msgEl.textContent='Guardando...'; msgEl.style.color='var(--text3)'; }
+
+  const item = allItems.find(i=>i.id===itemId);
+  const body = { attributes: [{ id:'GTIN', value_name: val || '' }] };
+
+  try{
+    const res = await fetch(WORKER+'/api/items/'+itemId, {
+      method:'PUT',
+      headers:{ 'Authorization':'Bearer '+token, 'Content-Type':'application/json', 'Accept':'application/json' },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if(res.status===401){ inp.disabled=false; if(msgEl){msgEl.textContent='❌ Token vencido';msgEl.style.color='var(--red)';} return; }
+    if(data.error){
+      inp.disabled=false; inp.style.borderColor='var(--red)';
+      if(msgEl){ msgEl.textContent='❌ '+(data.message||data.error).slice(0,50); msgEl.style.color='var(--red)'; }
+      return;
+    }
+    // Sincronizar cache local del atributo GTIN
+    if(item){
+      item.attributes = item.attributes || [];
+      const ga = item.attributes.find(a=>a.id==='GTIN');
+      if(ga) ga.value_name = val; else item.attributes.push({ id:'GTIN', value_name: val });
+    }
+    if(msgEl){ msgEl.textContent='✅ Código guardado en ML'; msgEl.style.color='var(--green)'; }
+    setTimeout(()=>renderPubs(), 1000);
+  }catch(e){
+    inp.disabled=false; inp.style.borderColor='var(--red)';
+    if(msgEl){ msgEl.textContent='❌ '+(e.message||'Sin conexión').slice(0,40); msgEl.style.color='var(--red)'; }
   }
 }
 
@@ -7355,6 +7455,30 @@ function getPubType(item){
 function mlEditLink(id){
   if(!id||typeof id!=='string'||id.length<5) return null;
   return 'https://www.mercadolibre.com.ar/publicaciones/'+id+'/modificar';
+}
+
+// ── v141: Lectura unificada del SKU desde TODAS las fuentes de ML ──
+// ML guarda el SKU en distintos lugares según la antigüedad/tipo de publicación:
+//   1. attributes[] con id "SELLER_SKU" (forma moderna y oficial)
+//   2. seller_custom_field (forma legacy, todavía presente en muchas pubs)
+//   3. variations[].attributes[] con id "SELLER_SKU" (publicaciones con variaciones)
+// Esta función devuelve el primer SKU que encuentre, priorizando el atributo oficial.
+function itemGetSKU(item){
+  if(!item) return '';
+  // 1. Atributo SELLER_SKU a nivel raíz (oficial)
+  const attrs = item.attributes || [];
+  const skuAttr = attrs.find(a => a.id === 'SELLER_SKU');
+  if(skuAttr && skuAttr.value_name && skuAttr.value_name.trim()) return skuAttr.value_name.trim();
+  // 2. Campo legacy seller_custom_field
+  if(item.seller_custom_field && String(item.seller_custom_field).trim()) return String(item.seller_custom_field).trim();
+  // 3. SELLER_SKU dentro de la primera variación que lo tenga
+  const vars = item.variations || [];
+  for(const v of vars){
+    const va = (v.attributes || []).find(a => a.id === 'SELLER_SKU');
+    if(va && va.value_name && va.value_name.trim()) return va.value_name.trim();
+    if(v.seller_custom_field && String(v.seller_custom_field).trim()) return String(v.seller_custom_field).trim();
+  }
+  return '';
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -8924,13 +9048,27 @@ function _seoImportNormStatus(val){
 }
 
 // Construye el body de PUT /items/{id} para una fila de cambios.
+// Recibe el item (si está en allItems) para detectar variaciones.
 // Devuelve { body, notes } o lanza error si un valor es inválido.
-function _seoImportBuildBody(changes){
+function _seoImportBuildBody(changes, item){
   const body = {};
   const notes = [];
 
   if(changes.sku !== undefined){
-    body.seller_custom_field = changes.sku.toString();
+    // v141 FIX: ML solo considera el SKU cargado en el ATRIBUTO SELLER_SKU,
+    // no en seller_custom_field (legacy, que ML ignora al escribir).
+    // Para publicaciones con variaciones, el SELLER_SKU va dentro de cada variación.
+    const skuVal = changes.sku.toString().trim();
+    const vars = (item && item.variations) || [];
+    if(vars.length){
+      body.variations = vars.map(v => ({
+        id: v.id,
+        attributes: [{ id:'SELLER_SKU', value_name: skuVal }]
+      }));
+      notes.push('SKU aplicado a '+vars.length+' variación(es)');
+    } else {
+      body.attributes = (body.attributes||[]).concat([{ id:'SELLER_SKU', value_name: skuVal }]);
+    }
   }
   if(changes.status !== undefined){
     const st = _seoImportNormStatus(changes.status);
@@ -8974,11 +9112,14 @@ function _seoImportBuildBody(changes){
     // Aceptar "5", "5 días", "5 dias" → extraer número
     const num = parseInt(String(changes.availTime).replace(/[^\d]/g,''), 10);
     if(isNaN(num) || num < 0) throw new Error('Tiempo de disponibilidad inválido: "'+changes.availTime+'"');
-    body.sale_terms = (body.sale_terms||[]).concat([{
-      id:'MANUFACTURING_TIME',
-      value_name: num + ' días'
-    }]);
-    notes.push('tiempo disponib. solo aplica si la categoría lo permite');
+    if(num === 0){
+      // v141: 0 días = entrega inmediata → ML requiere eliminar el sale_term (value_name vacío)
+      body.sale_terms = (body.sale_terms||[]).concat([{ id:'MANUFACTURING_TIME', value_name: '' }]);
+      notes.push('tiempo disponib. = entrega inmediata (eliminado)');
+    } else {
+      body.sale_terms = (body.sale_terms||[]).concat([{ id:'MANUFACTURING_TIME', value_name: num + ' días' }]);
+      notes.push('tiempo disponib. solo aplica si la categoría lo permite');
+    }
   }
 
   return { body, notes };
@@ -9009,6 +9150,19 @@ async function _seoImportPutItem(itemId, body){
 }
 
 // Ejecuta la importación: aplica cada fila y arma el log de resultados
+// v141: extrae el SKU de un body de PUT (puede estar en attributes raíz o en variaciones)
+function changes_skuOf(body){
+  if(body.attributes){
+    const a = body.attributes.find(x=>x.id==='SELLER_SKU');
+    if(a) return a.value_name;
+  }
+  if(body.variations && body.variations[0] && body.variations[0].attributes){
+    const a = body.variations[0].attributes.find(x=>x.id==='SELLER_SKU');
+    if(a) return a.value_name;
+  }
+  return null;
+}
+
 async function seoImportRun(){
   if(!_seoImportRows || !_seoImportRows.length) return;
   if(!token){ if(typeof showToast==='function') showToast('Iniciá sesión primero','warn'); return; }
@@ -9027,7 +9181,8 @@ async function seoImportRun(){
     const row = _seoImportRows[i];
     if(status) status.textContent = 'Procesando '+(i+1)+'/'+total+' — '+row.id;
     try{
-      const { body, notes } = _seoImportBuildBody(row.changes);
+      const local0 = (allItems||[]).find(it => String(it.id) === row.id);
+      const { body, notes } = _seoImportBuildBody(row.changes, local0);
       if(!Object.keys(body).length){ continue; }
       await _seoImportPutItem(row.id, body);
       results.ok.push({
@@ -9037,12 +9192,19 @@ async function seoImportRun(){
       });
       // Actualizar allItems local para reflejar cambios sin recargar todo
       try{
-        const local = (allItems||[]).find(it => String(it.id) === row.id);
+        const local = local0 || (allItems||[]).find(it => String(it.id) === row.id);
         if(local){
           if(body.price!=null) local.price = body.price;
           if(body.available_quantity!=null) local.available_quantity = body.available_quantity;
           if(body.status) local.status = body.status;
-          if(body.seller_custom_field) local.seller_custom_field = body.seller_custom_field;
+          // v141: sincronizar SKU en cache local (atributo SELLER_SKU)
+          if(changes_skuOf(body)){
+            local.attributes = local.attributes || [];
+            const sa = local.attributes.find(a=>a.id==='SELLER_SKU');
+            const skuVal = changes_skuOf(body);
+            if(sa) sa.value_name = skuVal; else local.attributes.push({ id:'SELLER_SKU', value_name: skuVal });
+            local.seller_custom_field = skuVal; // legacy sync por las dudas
+          }
         }
       }catch(e){}
     }catch(e){
@@ -15994,6 +16156,67 @@ async function bulkUpdatePrices(){
 
 // Compatibilidad con código antiguo
 function executeBulkPrice(){ bulkUpdatePrices(); }
+
+// v141: Cambiar Tiempo de Disponibilidad (manufacturing_time) en masa.
+// Aplica el sale_term MANUFACTURING_TIME a todas las publicaciones filtradas.
+// 0 días = entrega inmediata → se elimina el sale_term (value_name vacío).
+async function bulkUpdateAvailability(){
+  const targets=_bulkSelected();
+  if(!targets.length){ alert('Aplicá un filtro primero para seleccionar publicaciones.'); return; }
+  const valEl = document.getElementById('bulk-avail-val');
+  const days = parseInt(valEl?.value, 10);
+  if(isNaN(days) || days < 0){ alert('Ingresá un número de días válido (0 o más).'); return; }
+
+  const accion = days === 0
+    ? 'poner en entrega inmediata (eliminar el tiempo de disponibilidad)'
+    : 'fijar el tiempo de disponibilidad en '+days+' día(s)';
+  if(!confirm('¿Seguro que querés '+accion+' en '+targets.length+' publicaciones?')) return;
+
+  _cloudStatus('saving');
+  const res=document.getElementById('bulk-avail-result');
+  if(res) res.innerHTML='⏳ Procesando '+targets.length+' publicaciones...';
+
+  // body según la regla de ML: 0 → value_name vacío (elimina); >0 → "N días"
+  const saleTerm = days === 0
+    ? { id:'MANUFACTURING_TIME', value_name:'' }
+    : { id:'MANUFACTURING_TIME', value_name: days+' días' };
+
+  let ok=0, fail=0; const errSamples=[];
+  for(const item of targets){
+    try{
+      const r=await fetch(WORKER+'/api/items/'+item.id,{
+        method:'PUT',
+        headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
+        body:JSON.stringify({ sale_terms:[ saleTerm ] })
+      });
+      const d=await r.json();
+      if(d.error||!r.ok){
+        let reason = d.message||d.error||'HTTP '+r.status;
+        if(Array.isArray(d.cause)&&d.cause.length) reason = d.cause[0].message||d.cause[0].code||reason;
+        throw new Error(reason);
+      }
+      // Sincronizar cache local del sale_term
+      item.sale_terms = item.sale_terms || [];
+      const st = item.sale_terms.find(t=>t.id==='MANUFACTURING_TIME');
+      if(days===0){ item.sale_terms = item.sale_terms.filter(t=>t.id!=='MANUFACTURING_TIME'); }
+      else if(st){ st.value_name = days+' días'; }
+      else { item.sale_terms.push({ id:'MANUFACTURING_TIME', value_name: days+' días' }); }
+      ok++;
+    }catch(e){
+      console.warn('[Bulk avail]',item.id,e.message); fail++;
+      if(errSamples.length<3) errSamples.push(item.id+': '+e.message);
+    }
+    await new Promise(r=>setTimeout(r,200)); // rate limit
+  }
+  _cloudStatus(fail===0?'ok':'error');
+  if(res){
+    let html = (fail===0?'✅':'⚠️')+' '+ok+' actualizadas'+(fail>0?' · '+fail+' fallaron':'');
+    if(errSamples.length) html += '<div style="font-size:10.5px;color:var(--red);margin-top:4px;line-height:1.4">'+errSamples.map(e=>'• '+e).join('<br>')+(fail>errSamples.length?'<br>...':'')+'</div>';
+    res.innerHTML = html;
+  }
+  renderBulkList();
+}
+
 function setBulkTab(tab,btn){
   document.querySelectorAll('#modal-bulk .tab').forEach(t=>t.classList.remove('active'));
   if(btn) btn.classList.add('active');
