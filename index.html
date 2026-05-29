@@ -141,7 +141,12 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 .g40{display:grid;grid-template-columns:1fr 1.6fr;gap:14px}
 
 /* ── TABLE ── */
-.tw{overflow-x:auto}
+.tw{overflow-x:auto;scrollbar-width:thin}
+.tw::-webkit-scrollbar{height:12px}
+.tw::-webkit-scrollbar-track{background:var(--bg3);border-radius:6px}
+.tw::-webkit-scrollbar-thumb{background:var(--accent);border-radius:6px;border:2px solid var(--bg3)}
+.tw::-webkit-scrollbar-thumb:hover{background:var(--accent2)}
+#seo-main-table{min-width:1550px}
 table{width:100%;border-collapse:collapse;font-size:12.5px}
 thead th{text-align:left;padding:7px 11px;border-bottom:1px solid var(--border);font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;font-weight:700;white-space:nowrap}
 
@@ -748,7 +753,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v143 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v144 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1313,7 +1318,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       </div>
     </div>
     <div class="tw tw-sticky">
-      <table>
+      <table id="seo-main-table">
         <thead><tr>
           <th style="min-width:360px">Publicación</th>
           <th onclick="seoSort('created')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:80px;max-width:80px" title="Fecha de creación del producto en ML">Creada<br><span style="font-size:10px">↕</span><span id="seo-sort-created" style="font-size:10px"></span></th>
@@ -9606,6 +9611,9 @@ function renderSEOTable(){
     </tr>`;
   }).join('');
 
+  // v144: verificar clips en background SOLO para los ítems visibles sin verificar
+  setTimeout(()=>{ if(typeof _seoVerifyClipsVisible==='function') _seoVerifyClipsVisible(paged); }, 300);
+
   const pgEl=document.getElementById('seo-pagination');
   if(pgEl){
     if(pages<=1){pgEl.innerHTML='';return;}
@@ -9625,35 +9633,137 @@ const SEO_MIN_PRICE = 100; // precio mínimo en pesos — validación anti-typo
 // ═══════════════════════════════════════════════════════════════════════════
 
 // Badge estético del tipo de publicación. Gold y Premium SEPARADOS.
+// Colores BIEN distintos entre sí para identificar de un vistazo.
 // gold_special = Clásica · gold_pro = Premium · free = Gratuita · catálogo aparte.
 function _seoPubTypeBadge(item){
   let label, bg, fg;
   if(item.catalog_listing === true || item.catalog_product_id){
-    label='Catálogo'; bg='#dbeafe'; fg='#1e40af';
+    label='Catálogo'; bg='#2563eb'; fg='#ffffff';        // Azul fuerte
   } else {
     const lt = (item.listing_type_id||'').toLowerCase();
-    if(lt === 'gold_pro'){            label='Premium';   bg='#fef3c7'; fg='#92400e'; }
-    else if(lt === 'gold_premium'){   label='Premium';   bg='#fef3c7'; fg='#92400e'; }
-    else if(lt === 'gold_special'){   label='Clásica';   bg='#e0e7ff'; fg='#3730a3'; }
-    else if(lt.includes('gold')){     label='Gold';      bg='#fde68a'; fg='#78350f'; }
-    else if(lt === 'free' || lt === 'bronze'){ label='Gratuita'; bg='#f3f4f6'; fg='#6b7280'; }
-    else {                            label='Clásica';   bg='#e0e7ff'; fg='#3730a3'; }
+    if(lt === 'gold_pro' || lt === 'gold_premium'){
+      label='Premium';  bg='#7c3aed'; fg='#ffffff';       // Violeta
+    } else if(lt === 'gold_special'){
+      label='Clásica';  bg='#0891b2'; fg='#ffffff';       // Cyan/Teal
+    } else if(lt.includes('gold')){
+      label='Gold';     bg='#f59e0b'; fg='#ffffff';       // Naranja/Dorado
+    } else if(lt === 'free' || lt === 'bronze'){
+      label='Gratuita'; bg='#6b7280'; fg='#ffffff';       // Gris
+    } else {
+      label='Clásica';  bg='#0891b2'; fg='#ffffff';       // Cyan/Teal
+    }
   }
-  return '<span style="display:inline-block;font-size:9px;font-weight:700;padding:2px 7px;border-radius:9px;background:'+bg+';color:'+fg+';white-space:nowrap;letter-spacing:.02em">'+label+'</span>';
+  return '<span style="display:inline-block;font-size:10.5px;font-weight:700;padding:3px 10px;border-radius:10px;background:'+bg+';color:'+fg+';white-space:nowrap;letter-spacing:.02em">'+label+'</span>';
 }
 
-// Badge "SIN CLIP" para publicaciones sin video/clip. Estético (no funcional).
-// ML expone video_id para video tradicional; los clips nativos no vienen en /items,
-// así que marcamos SIN CLIP cuando no hay video_id ni clips conocidos.
+// Badge "SIN CLIP" para publicaciones sin video/clip nativo.
+// v144: La detección de clips nativos NO viene en /items. Hay que consultar
+// /items/{id}/clips por separado (1 request/ítem), así que lo hacemos LAZY con
+// caché (igual que health goals). Mientras no se verificó un ítem, NO mostramos
+// el badge para evitar falsos positivos (marcar "sin clip" a uno que sí tiene).
 function _seoHasVideo(item){
   if(item.video_id && String(item.video_id).trim()) return true;
-  if(Array.isArray(item.clips) && item.clips.length) return true;
-  if(item._hasClip === true) return true;
   return false;
 }
+// Estado de clips por ítem: true=tiene, false=no tiene, undefined=sin verificar
+const _SEO_CLIP_CACHE_KEY = 'mlp_clips_v1';
+let _seoClipStatus = (()=>{ try{ return JSON.parse(localStorage.getItem(_SEO_CLIP_CACHE_KEY)||'{}'); }catch(e){ return {}; } })();
+
 function _seoClipBadge(item){
+  // YouTube tradicional → tiene video, no marcamos
   if(_seoHasVideo(item)) return '';
-  return '<span style="display:inline-block;font-size:8px;font-weight:700;padding:1px 5px;border-radius:7px;background:#fee2e2;color:#991b1b;white-space:nowrap;margin-top:1px" title="Esta publicación no tiene video ni clip">SIN CLIP</span>';
+  const st = _seoClipStatus[item.id];
+  if(st && (Date.now()-st.ts) < 7*86400000){
+    // Verificado en los últimos 7 días
+    if(st.hasClip) return ''; // tiene clip → sin badge
+    return '<span style="display:inline-block;font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:7px;background:#fee2e2;color:#991b1b;white-space:nowrap;margin-top:2px" title="Sin video ni clip vertical">SIN CLIP</span>';
+  }
+  // No verificado todavía → placeholder neutro (se resuelve en background)
+  return '<span class="seo-clip-pending" data-item="'+item.id+'" style="display:inline-block;font-size:8px;font-weight:600;padding:1px 5px;border-radius:7px;background:var(--bg4);color:var(--text3);white-space:nowrap;margin-top:2px" title="Verificando clip...">clip ?</span>';
+}
+
+function _seoClipCacheSave(){
+  try{
+    const now = Date.now();
+    Object.keys(_seoClipStatus).forEach(k=>{ if(!_seoClipStatus[k] || (now-_seoClipStatus[k].ts) > 14*86400000) delete _seoClipStatus[k]; });
+    localStorage.setItem(_SEO_CLIP_CACHE_KEY, JSON.stringify(_seoClipStatus));
+  }catch(e){}
+}
+
+// Verifica clips de los ítems visibles que no estén en caché. Lazy + throttle.
+// Endpoint: GET /items/{id}/clips → si devuelve clips con status válido, tiene clip.
+let _seoClipVerifying = false;
+async function _seoVerifyClipsVisible(items){
+  if(_seoClipVerifying) return;
+  // Filtrar los que no tienen video YouTube y no están verificados (o caché vencido)
+  const pending = (items||[]).filter(it=>{
+    if(_seoHasVideo(it)) return false;
+    const st = _seoClipStatus[it.id];
+    return !(st && (Date.now()-st.ts) < 7*86400000);
+  });
+  if(!pending.length) return;
+  _seoClipVerifying = true;
+  let changed = false;
+
+  // Lotes de 4 con pausa para no saturar
+  for(let i=0; i<pending.length; i+=4){
+    const batch = pending.slice(i, i+4);
+    await Promise.allSettled(batch.map(async it=>{
+      try{
+        const hasClip = await _seoCheckItemClip(it.id);
+        _seoClipStatus[it.id] = { hasClip, ts: Date.now() };
+        changed = true;
+        // Actualizar el badge en vivo
+        _seoUpdateClipBadge(it);
+      }catch(e){
+        // Si el endpoint no responde para este ítem, marcar como "desconocido"
+        // (no mostramos badge para no dar info incorrecta)
+        _seoClipStatus[it.id] = { hasClip: true, ts: Date.now(), _unknown: true };
+        _seoUpdateClipBadge(it);
+      }
+    }));
+    await new Promise(r=>setTimeout(r, 250));
+  }
+  if(changed) _seoClipCacheSave();
+  _seoClipVerifying = false;
+}
+
+// Consulta si un ítem tiene clip. Prueba 2 rutas (local y marketplace/CBT).
+async function _seoCheckItemClip(itemId){
+  // Ruta 1: /items/{id}/clips (local, no siempre documentada pero a veces responde)
+  try{
+    const d = await mlGet('/items/'+itemId+'/clips');
+    const clips = d.clips || d.results || (Array.isArray(d)?d:[]);
+    if(Array.isArray(clips) && clips.length) return true;
+    if(d && (d.clip_uuid || d.status)) return true;
+  }catch(e1){
+    // Ruta 2: /marketplace/items/{id}/clips
+    try{
+      const d2 = await mlGet('/marketplace/items/'+itemId+'/clips');
+      const clips2 = d2.clips || d2.results || (Array.isArray(d2)?d2:[]);
+      if(Array.isArray(clips2) && clips2.length) return true;
+      if(d2 && (d2.clip_uuid || d2.status)) return true;
+    }catch(e2){
+      throw e2; // ambos fallaron → desconocido
+    }
+  }
+  return false; // respondió pero sin clips → realmente no tiene
+}
+
+// Actualiza el badge de clip de un ítem en el DOM sin re-renderizar toda la tabla
+function _seoUpdateClipBadge(item){
+  const el = document.querySelector('.seo-clip-pending[data-item="'+item.id+'"]');
+  if(!el) return;
+  const st = _seoClipStatus[item.id];
+  if(!st || st._unknown){
+    el.outerHTML = ''; // desconocido → quitar placeholder
+    return;
+  }
+  if(st.hasClip){
+    el.outerHTML = ''; // tiene clip → sin badge
+  } else {
+    el.outerHTML = '<span style="display:inline-block;font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:7px;background:#fee2e2;color:#991b1b;white-space:nowrap;margin-top:2px" title="Sin video ni clip vertical">SIN CLIP</span>';
+  }
 }
 
 // ── Health goals (objetivos pendientes) con caché — hover lazy ──
@@ -9705,20 +9815,70 @@ async function seoLoadHealthGoals(itemId, cellEl){
   if(_seoHealthLoading[itemId]) return;
   _seoHealthLoading[itemId] = true;
   if(goalsEl){ goalsEl.textContent = '⏳ cargando...'; }
+
+  let goals = null;
+
+  // Estrategia A (moderna): /item/{id}/performance → buckets[].variables[].rules[]
+  // Cada rule con status != COMPLETED es un objetivo pendiente. El title/wording
+  // describe qué hacer. Esta es la que alimenta el panel de calidad de ML.
   try{
-    // El endpoint /health/actions devuelve las acciones pendientes
-    const d = await mlGet('/items/'+itemId+'/health/actions');
-    const actions = d.actions || d.results || (Array.isArray(d)?d:[]);
-    const goals = actions.map(a => _seoHealthActionLabel(a.id || a.action || a.key)).filter(Boolean);
-    _seoHealthGoals[itemId] = { goals, ts: Date.now() };
-    _seoHealthCacheSave();
-    _seoRenderHealthGoals(itemId, goals, cellEl);
-  }catch(e){
-    console.warn('[Health goals] '+itemId+':', e.message);
-    if(goalsEl){ goalsEl.textContent = 'objetivos no disponibles'; }
-  }finally{
-    _seoHealthLoading[itemId] = false;
+    const p = await mlGet('/item/'+itemId+'/performance');
+    if(p && Array.isArray(p.buckets)){
+      goals = [];
+      p.buckets.forEach(b => {
+        (b.variables||[]).forEach(v => {
+          const vDone = (v.status||'').toUpperCase()==='COMPLETED';
+          (v.rules||[]).forEach(r => {
+            const done = (r.status||'').toUpperCase()==='COMPLETED';
+            if(!done){
+              // Preferir el wording de ML, luego el title de la variable
+              const w = (r.wordings && (r.wordings.label || r.wordings.title)) || v.title || r.key || b.title;
+              if(w) goals.push(_seoHealthCleanWording(w));
+            }
+          });
+          // Si la variable está pendiente pero no tiene rules con texto, usar su título
+          if(!vDone && (!v.rules || !v.rules.length) && v.title){
+            goals.push(_seoHealthCleanWording(v.title));
+          }
+        });
+      });
+      // dedup
+      goals = [...new Set(goals)].slice(0, 8);
+    }
+  }catch(eA){
+    console.warn('[Health goals] performance falló '+itemId+':', eA.message);
   }
+
+  // Estrategia B (legacy): /items/{id}/health/actions
+  if(goals === null){
+    try{
+      const d = await mlGet('/items/'+itemId+'/health/actions');
+      const actions = d.actions || d.results || (Array.isArray(d)?d:[]);
+      goals = actions.map(a => _seoHealthActionLabel(a.id || a.action || a.key || a.title)).filter(Boolean);
+      goals = [...new Set(goals)].slice(0, 8);
+    }catch(eB){
+      console.warn('[Health goals] health/actions falló '+itemId+':', eB.message);
+    }
+  }
+
+  if(goals === null){
+    // Ambos endpoints fallaron → no cacheamos (reintentará la próxima)
+    if(goalsEl){ goalsEl.textContent = 'no disponible'; goalsEl.style.color='var(--text3)'; }
+    _seoHealthLoading[itemId] = false;
+    return;
+  }
+
+  _seoHealthGoals[itemId] = { goals, ts: Date.now() };
+  _seoHealthCacheSave();
+  _seoRenderHealthGoals(itemId, goals, cellEl);
+  _seoHealthLoading[itemId] = false;
+}
+
+// Limpia el wording de ML (saca tags HTML, recorta) para el tooltip
+function _seoHealthCleanWording(w){
+  let s = String(w||'').replace(/<[^>]+>/g,'').trim();
+  if(s.length > 90) s = s.slice(0,87)+'...';
+  return s;
 }
 
 function _seoRenderHealthGoals(itemId, goals, cellEl){
@@ -9730,7 +9890,7 @@ function _seoRenderHealthGoals(itemId, goals, cellEl){
     if(cellEl) cellEl.title = 'Calidad: sin objetivos pendientes 🎉';
     return;
   }
-  goalsEl.textContent = goals.length+' por mejorar';
+  goalsEl.textContent = goals.length+' por mejorar ⓘ';
   goalsEl.style.color = 'var(--amber)';
   // Tooltip nativo con la lista de objetivos
   if(cellEl) cellEl.title = 'Para mejorar la calidad:\n• ' + goals.join('\n• ');
