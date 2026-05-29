@@ -748,7 +748,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v141 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v142 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -2081,6 +2081,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <span class="ads-slider"></span>
         </label>
       </div>
+      <a href="https://www.mercadolibre.com.ar/publicidad/resumen-anunciante?from=menu_header&validate_user=true#menu-user" target="_blank" rel="noopener" class="btn btn-primary btn-sm" style="text-decoration:none;white-space:nowrap" title="Abrir el administrador de Publicidad de Mercado Libre en una pestaña nueva">📣 Publicidad en ML ↗</a>
       <a href="#publicidad" class="btn btn-ghost btn-sm" onclick="loadAdsData();return false;">↻ Actualizar</a>
     </div>
   </div>
@@ -5020,6 +5021,21 @@ function _saveDataCache(){
       thumbnail: i.thumbnail, category_id: i.category_id,
       listing_type_id: i.listing_type_id, health: i.health,
       seller_custom_field: i.seller_custom_field, tags: i.tags,
+      // v142: persistir SKU(attr), EAN y tiempo de disponibilidad ya extraídos
+      // como atributos mínimos, para que itemGetSKU/itemGetEAN/itemGetManufacturingTime
+      // sigan funcionando al renderizar desde el cache de localStorage (sin API).
+      attributes: (()=>{ try{
+        const out=[];
+        const sku = (typeof itemGetSKU==='function') ? itemGetSKU(i) : '';
+        const ean = (typeof itemGetEAN==='function') ? itemGetEAN(i) : '';
+        if(sku) out.push({ id:'SELLER_SKU', value_name: sku });
+        if(ean) out.push({ id:'GTIN', value_name: ean });
+        return out;
+      }catch(e){ return []; } })(),
+      sale_terms: (()=>{ try{
+        const mt = (i.sale_terms||[]).find(t=>t.id==='MANUFACTURING_TIME');
+        return mt ? [{ id:'MANUFACTURING_TIME', value_name: mt.value_name }] : [];
+      }catch(e){ return []; } })(),
     }));
     // Órdenes: solo últimos 90 días (el dashboard usa 30 días máximo)
     const cutoff90 = Date.now() - 90 * 24 * 60 * 60 * 1000;
@@ -7145,7 +7161,10 @@ async function saveSKU(itemId){
       const skuAttr = (verify.attributes||[]).find(a => a.id === 'SELLER_SKU');
       const saved   = (skuAttr && skuAttr.value_name) || verify.seller_custom_field || null;
       console.log('[SKU] Verificacion GET -> SELLER_SKU:', saved);
-      if(item) item.seller_custom_field = saved; // sync local cache
+      // v142 FIX refresco: la tabla lee con itemGetSKU() que prioriza el ATRIBUTO
+      // SELLER_SKU. Hay que sincronizar el atributo en el cache local, no solo
+      // seller_custom_field, o la UI sigue mostrando el valor viejo.
+      _syncLocalSKU(item, saved, verify.variations);
       const confirmed = (val==='' || val===null) ? (!saved || saved==='') : (saved===val);
       if(msgEl){
         msgEl.textContent = confirmed ? '✅ SKU guardado en ML' : '⚠️ ML devolvio: '+String(saved);
@@ -7153,7 +7172,8 @@ async function saveSKU(itemId){
       }
     }catch(ve){
       console.warn('[SKU] No se pudo verificar:', ve.message);
-      if(item) item.seller_custom_field = val || null;
+      // Sin verificación: sincronizar con el valor que mandamos
+      _syncLocalSKU(item, val || null, null);
       if(msgEl){ msgEl.textContent='✅ SKU enviado a ML'; msgEl.style.color='var(--green)'; }
     }
     setTimeout(()=>renderPubs(), 1200);
@@ -7481,11 +7501,33 @@ function itemGetSKU(item){
   return '';
 }
 
-// ═══════════════════════════════════════════════════════════
-// CALIDAD DE PUBLICACIÓN
-// ═══════════════════════════════════════════════════════════
-
-// ── Detección correcta de EAN/GTIN desde attributes de ML ──
+// v142: Sincroniza el SKU en el cache local del item tras un guardado exitoso,
+// actualizando TODAS las fuentes que lee itemGetSKU (atributo SELLER_SKU raíz,
+// seller_custom_field legacy, y variaciones) para que la UI refleje el cambio
+// sin recargar la página.
+function _syncLocalSKU(item, newSku, freshVariations){
+  if(!item) return;
+  const val = (newSku === null || newSku === undefined) ? '' : String(newSku);
+  // 1. Atributo SELLER_SKU a nivel raíz
+  item.attributes = item.attributes || [];
+  const sa = item.attributes.find(a => a.id === 'SELLER_SKU');
+  if(sa) sa.value_name = val;
+  else if(val) item.attributes.push({ id:'SELLER_SKU', name:'SKU', value_name: val });
+  // 2. Campo legacy
+  item.seller_custom_field = val || null;
+  // 3. Variaciones: si ML devolvió las variaciones frescas, usarlas; si no,
+  //    propagar el mismo SKU al atributo SELLER_SKU de cada variación local.
+  if(Array.isArray(freshVariations) && freshVariations.length){
+    item.variations = freshVariations;
+  } else if(Array.isArray(item.variations) && item.variations.length){
+    item.variations.forEach(v => {
+      v.attributes = v.attributes || [];
+      const va = v.attributes.find(a => a.id === 'SELLER_SKU');
+      if(va) va.value_name = val;
+      else if(val) v.attributes.push({ id:'SELLER_SKU', value_name: val });
+    });
+  }
+}
 // Campo oficial: item.attributes[] con id "GTIN"
 function itemHasEAN(item){
   const attrs = item.attributes || [];
@@ -8602,7 +8644,7 @@ function _seoExportColumns(){
   return [
     { id:'id',          label:'ID Publicación',     type:'text', def:true,  value:i=> i.id||'' },
     { id:'title',       label:'Título',             type:'text', def:true,  value:i=> i.title||'' },
-    { id:'sku',         label:'SKU',                type:'text', def:true,  value:i=> i.seller_custom_field||'' },
+    { id:'sku',         label:'SKU',                type:'text', def:true,  value:i=> itemGetSKU(i) },
     { id:'pubtype',     label:'Tipo publicación',   type:'text', def:true,  value:i=> pubTypeLabel[getPubType(i)]||getPubType(i) },
     { id:'status',      label:'Estado',             type:'text', def:true,  value:i=> statusLabel[i.status]||i.status||'' },
     { id:'price',       label:'Precio',             type:'num',  def:true,  value:i=> i.price||0 },
@@ -9259,7 +9301,7 @@ function seoGetFilteredItems(){
     if(searchQ&&!(
       (i.title||'').toLowerCase().includes(searchQ)||
       (i.id||'').toLowerCase().includes(searchQ)||
-      (i.seller_custom_field||'').toLowerCase().includes(searchQ)
+      itemGetSKU(i).toLowerCase().includes(searchQ)
     )) return false;
     if(st&&i.status!==st) return false;
     if(seoState.tipoFilter && getPubType(i)!==seoState.tipoFilter) return false;
@@ -13404,7 +13446,7 @@ function renderStock(){
   if(type === 'title' && textVal){
     items = items.filter(i => (i.title||'').toLowerCase().includes(textVal));
   } else if(type === 'sku' && textVal){
-    items = items.filter(i => (i.seller_custom_field||'').toLowerCase().includes(textVal));
+    items = items.filter(i => itemGetSKU(i).toLowerCase().includes(textVal));
   } else if(type === 'id' && textVal){
     items = items.filter(i => (i.id||'').toLowerCase().includes(textVal));
   } else if(type === 'status' && statusVal){
@@ -14288,51 +14330,68 @@ async function loadAdsItems(){
     const fromStr = dateFrom.toISOString().split('T')[0];
     const toStr   = new Date().toISOString().split('T')[0];
 
-    // v140 FIX CRÍTICO: el endpoint correcto para métricas POR ITEM es
-    //   /advertising/{SITE_ID}/advertisers/{ADV_ID}/product_ads/items/search
-    // (NO /campaigns?aggregation_type=item, que devuelve campañas, no items).
-    // En este endpoint las métricas van en MAYÚSCULAS y los filtros con corchetes.
-    // Devuelve results[] con: item_id, title, status, y las métricas por publicación.
-    const metricList = 'CLICKS,PRINTS,CTR,COST,CPC,ACOS,ROAS,TOTAL_AMOUNT,DIRECT_AMOUNT,INDIRECT_AMOUNT,UNITS_QUANTITY,DIRECT_UNITS_QUANTITY,INDIRECT_UNITS_QUANTITY,ADVERTISING_ITEMS_QUANTITY';
+    // v142: el endpoint de métricas POR ITEM tiene varias rutas posibles según
+    // cómo ML tenga habilitada la cuenta. Probamos en cascada y logueamos cuál
+    // funcionó. Las métricas pueden venir en MAYÚSCULAS o minúsculas según la ruta.
+    const metricList = 'clicks,prints,ctr,cost,cpc,acos,roas,total_amount,direct_amount,indirect_amount,units_quantity,direct_units_quantity,indirect_units_quantity,advertising_items_quantity';
     let metricsRows = [];
     let usedEndpoint = '';
+    const _grab = d => (d && (d.results || d.data || d.ads || d.items)) || [];
 
-    // Estrategia 1 (correcta v2): items/search con SITE_ID en la ruta
+    // Estrategia 1: items/search con SITE_ID (Product Ads v2 catálogo/user products)
     try{
       const md = await mlGet(
         '/advertising/'+siteId+'/advertisers/'+advId+'/product_ads/items/search'
         + '?date_from='+fromStr+'&date_to='+toStr
         + '&limit=500&offset=0&sort=desc&sort_by=clicks'
-        + '&metrics='+metricList
+        + '&metrics='+metricList.toUpperCase()
         + '&metrics_summary=true'
         + '&filters[statuses]=active,paused,idle'
         + '&filters[channel]=marketplace'
       );
-      metricsRows = md.results || md.data || [];
-      usedEndpoint = 'items/search';
-    }catch(e1){
-      console.warn('[Ads] items/search falló:', e1.message);
-    }
+      metricsRows = _grab(md);
+      if(metricsRows.length) usedEndpoint = 'items/search (site)';
+    }catch(e1){ console.warn('[Ads] E1 items/search(site) falló:', e1.message); }
 
-    // Estrategia 2 (fallback): endpoint sin SITE_ID (algunas cuentas lo aceptan)
+    // Estrategia 2: campaigns con aggregation_type=item (devuelve una fila por item)
     if(!metricsRows.length){
       try{
         const md2 = await mlGet(
-          '/advertising/advertisers/'+advId+'/product_ads/items/search'
+          '/advertising/advertisers/'+advId+'/product_ads/campaigns'
           + '?date_from='+fromStr+'&date_to='+toStr
-          + '&limit=500&offset=0'
-          + '&metrics='+metricList.toLowerCase()
-          + '&metrics_summary=true'
-          + '&filters[statuses]=active,paused,idle'
+          + '&limit=200&offset=0'
+          + '&metrics='+metricList
+          + '&aggregation_type=item'
         );
-        metricsRows = md2.results || md2.data || [];
-        usedEndpoint = 'items/search (sin site)';
-      }catch(e2){
-        console.warn('[Ads] items/search sin site falló:', e2.message);
-      }
+        metricsRows = _grab(md2);
+        if(metricsRows.length) usedEndpoint = 'campaigns?aggregation_type=item';
+      }catch(e2){ console.warn('[Ads] E2 campaigns(item) falló:', e2.message); }
     }
 
-    console.log('[Ads] métricas por item recibidas:', metricsRows.length, 'vía', usedEndpoint, metricsRows[0]||'(vacío)');
+    // Estrategia 3: por cada campaña, /campaigns/{id}/ads/metrics (marketplace legacy v2)
+    if(!metricsRows.length){
+      try{
+        const camps = await mlGet('/advertising/advertisers/'+advId+'/product_ads/campaigns?limit=20&offset=0');
+        const campList = _grab(camps).concat(camps.campaigns||[]);
+        for(const camp of campList){
+          const cid = camp.id || camp.campaign_id;
+          if(!cid) continue;
+          try{
+            const cm = await mlGet(
+              '/advertising/product_ads/campaigns/'+cid+'/ads'
+              + '?date_from='+fromStr+'&date_to='+toStr
+              + '&limit=500&offset=0'
+              + '&metrics='+metricList+'&metrics_summary=true'
+            );
+            const rows = _grab(cm);
+            if(rows.length) metricsRows = metricsRows.concat(rows);
+          }catch(ec){ console.warn('[Ads] E3 campaña '+cid+' falló:', ec.message); }
+        }
+        if(metricsRows.length) usedEndpoint = 'campaigns/{id}/ads';
+      }catch(e3){ console.warn('[Ads] E3 listar campañas falló:', e3.message); }
+    }
+
+    console.log('[Ads] métricas por item:', metricsRows.length, 'vía', usedEndpoint||'(ninguna)', metricsRows[0]||'(vacío)');
 
     // Construir tabla desde las filas de métricas (cada una ES un item)
     let merged = [];
@@ -14366,7 +14425,8 @@ async function loadAdsItems(){
             status: (a.status||'active').toLowerCase()
           }, _adsEmptyMetrics());
         });
-      }catch(e3){ console.warn('[Ads] ads/search fallback falló:', e3.message); }
+        if(merged.length) console.warn('[Ads] Mostrando '+merged.length+' anuncios SIN métricas (ningún endpoint de métricas respondió). Revisá permisos de Advertising o que haya datos en el período.');
+      }catch(e4){ console.warn('[Ads] ads/search fallback falló:', e4.message); }
     }
 
     _ads.itemsMerged = merged;
@@ -15910,6 +15970,7 @@ function _bulkApplySort(arr){
     let va = 0, vb = 0;
     if(col === 'price'){ va = a.price||0; vb = b.price||0; }
     else if(col === 'stock'){ va = a.available_quantity??0; vb = b.available_quantity??0; }
+    else if(col === 'avail'){ va = _itemManufDays(a); vb = _itemManufDays(b); } // v142: tiempo disponib.
     else if(col === 'title'){ return dir * String(a.title||'').localeCompare(String(b.title||''), 'es'); }
     return dir * (vb - va);
   });
@@ -15936,8 +15997,7 @@ function applyBulkFilters(){
 
   _bulkFiltered = allItems.filter(i=>{
     if(q){
-      const skuA=(i.attributes||[]).find(a=>a.id==='SELLER_SKU');
-      const sku=(skuA?.value_name||i.seller_custom_field||'').toLowerCase();
+      const sku = itemGetSKU(i).toLowerCase();
       if(!i.title.toLowerCase().includes(q) && !sku.includes(q) && !String(i.id).includes(q)) return false;
     }
     if(pMin && (i.price||0)<pMin) return false;
@@ -15969,6 +16029,7 @@ function renderBulkList(){
     +'<button class="btn btn-xs '+(_bulkSort.col==='title'?'btn-primary':'btn-ghost')+'" onclick="bulkSetSort(\'title\')" style="font-size:10.5px">Título'+arrow('title')+'</button>'
     +'<button class="btn btn-xs '+(_bulkSort.col==='price'?'btn-primary':'btn-ghost')+'" onclick="bulkSetSort(\'price\')" style="font-size:10.5px">Precio'+arrow('price')+'</button>'
     +'<button class="btn btn-xs '+(_bulkSort.col==='stock'?'btn-primary':'btn-ghost')+'" onclick="bulkSetSort(\'stock\')" style="font-size:10.5px">Stock'+arrow('stock')+'</button>'
+    +'<button class="btn btn-xs '+(_bulkSort.col==='avail'?'btn-primary':'btn-ghost')+'" onclick="bulkSetSort(\'avail\')" style="font-size:10.5px" title="Tiempo de disponibilidad (días de fabricación)">T. disponib.'+arrow('avail')+'</button>'
   +'</div>';
 
   const items = _bulkApplySort(_bulkFiltered);
@@ -15996,6 +16057,7 @@ function renderBulkList(){
               +'title="Clic para editar precio">$'+(i.price||0).toLocaleString('es-AR')+' ✎</span>'
           +'</span>'
           +'<span style="color:'+qColor+';font-weight:600">Stock: '+qty+'</span>'
+          +'<span style="color:var(--text3)" title="Tiempo de disponibilidad (días de fabricación)">⏳ '+(itemGetManufacturingTime(i)||'0 días')+'</span>'
           +statusBadge
           +'<span style="color:var(--text3)">'+i.id+'</span>'
         +'</div>'
