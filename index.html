@@ -753,7 +753,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v144 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v145 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -957,6 +957,18 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <div class="card-hd"><div class="card-title">Distribución por categoría</div></div>
       <div style="position:relative;height:180px"><canvas id="chart-cats"></canvas></div>
       <div id="dash-cat-names" style="margin-top:8px"></div>
+    </div>
+  </div>
+
+  <!-- v145: Ventas por tipo de publicación ── -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-hd">
+      <div class="card-title">📊 Ventas por tipo de publicación</div>
+      <span style="font-size:10px;color:var(--text3)" id="dash-ptype-period">últimos 60 días</span>
+    </div>
+    <div style="display:grid;grid-template-columns:200px 1fr;gap:16px;align-items:center">
+      <div style="position:relative;height:180px"><canvas id="chart-ptype"></canvas></div>
+      <div id="dash-ptype-insights" style="display:flex;flex-direction:column;gap:8px"></div>
     </div>
   </div>
 
@@ -6182,6 +6194,97 @@ function switchMainChart(mode,btn){
   renderMainChart(mode);
 }
 
+// v145: Torta de VENTAS por tipo de publicación (Clásica/Premium/Catálogo/Gratuita).
+// Cruza las ventas de los últimos 60 días con el listing_type de cada ítem vendido.
+// Se actualiza en cada renderDashboard (o sea, en cada venta nueva detectada).
+function renderPubTypeChart(){
+  if(!Array.isArray(allOrders) || !Array.isArray(allItems)) return;
+
+  // Índice rápido itemId → item (para resolver el tipo)
+  const itemById = {};
+  allItems.forEach(i => { itemById[String(i.id)] = i; });
+
+  const since = Date.now() - 60*24*60*60*1000;
+  // Acumular unidades y facturación por tipo
+  const stats = { 'Clásica':{u:0,$:0}, 'Premium':{u:0,$:0}, 'Catálogo':{u:0,$:0}, 'Gratuita':{u:0,$:0}, 'Gold':{u:0,$:0} };
+
+  allOrders.forEach(o => {
+    if(o.status === 'cancelled') return;
+    const dt = o.date_created ? new Date(o.date_created).getTime() : 0;
+    if(dt < since) return;
+    (o.order_items||[]).forEach(oi => {
+      const itId = String(oi.item?.id || '');
+      const it = itemById[itId];
+      // Tipo: si tenemos el ítem usamos su tipo real; si no, intentamos por el order_item
+      let label;
+      if(it){ label = getPubTypeLabel(it); }
+      else {
+        const lt = (oi.item?.listing_type_id||'').toLowerCase();
+        if(lt==='gold_pro'||lt==='gold_premium') label='Premium';
+        else if(lt==='gold_special') label='Clásica';
+        else if(lt.includes('gold')) label='Gold';
+        else if(lt==='free') label='Gratuita';
+        else label='Clásica';
+      }
+      if(!stats[label]) stats[label] = {u:0,$:0};
+      const qty = oi.quantity || 1;
+      const unitPrice = oi.unit_price || 0;
+      stats[label].u += qty;
+      stats[label].$ += qty * unitPrice;
+    });
+  });
+
+  // Filtrar tipos sin ventas
+  const entries = Object.entries(stats).filter(([k,v]) => v.u > 0);
+  const totalU = entries.reduce((a,[,v])=>a+v.u,0);
+
+  const colorMap = { 'Clásica':'#0891b2', 'Premium':'#7c3aed', 'Catálogo':'#2563eb', 'Gratuita':'#6b7280', 'Gold':'#f59e0b' };
+
+  // Si no hay datos, mostrar mensaje
+  const insightsEl = document.getElementById('dash-ptype-insights');
+  if(!entries.length){
+    if(insightsEl) insightsEl.innerHTML = '<div style="font-size:12px;color:var(--text3);padding:20px;text-align:center">Sin ventas en los últimos 60 días para distribuir por tipo.</div>';
+    makeChart('chart-ptype',{type:'doughnut',data:{labels:['Sin datos'],datasets:[{data:[1],backgroundColor:['#e5e7eb'],borderWidth:0}]},options:{...chartDefaults(),cutout:'62%',plugins:{legend:{display:false}}}});
+    return;
+  }
+
+  const labels = entries.map(([k])=>k);
+  const dataU  = entries.map(([,v])=>v.u);
+  const colors = labels.map(l=>colorMap[l]||'#999');
+
+  makeChart('chart-ptype',{
+    type:'doughnut',
+    data:{ labels, datasets:[{ data:dataU, backgroundColor:colors, borderWidth:0, hoverOffset:5 }] },
+    options:{ ...chartDefaults(), cutout:'58%',
+      plugins:{ legend:{ display:false },
+        tooltip:{ callbacks:{ label:(ctx)=>{
+          const v = stats[ctx.label];
+          const pct = totalU>0 ? ((v.u/totalU)*100).toFixed(1) : 0;
+          return ctx.label+': '+v.u+' u ('+pct+'%) · $'+Math.round(v.$).toLocaleString('es-AR');
+        }}}
+      }
+    }
+  });
+
+  // Insights con números, ordenados por unidades
+  if(insightsEl){
+    const sorted = entries.slice().sort((a,b)=>b[1].u-a[1].u);
+    const totalRev = entries.reduce((a,[,v])=>a+v.$,0);
+    insightsEl.innerHTML = sorted.map(([k,v])=>{
+      const pctU = totalU>0 ? ((v.u/totalU)*100).toFixed(1) : 0;
+      const pctR = totalRev>0 ? ((v.$/totalRev)*100).toFixed(1) : 0;
+      return '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg3);border-radius:8px;border-left:3px solid '+(colorMap[k]||'#999')+'">'
+        + '<span style="font-size:11px;font-weight:700;color:'+(colorMap[k]||'#999')+';min-width:62px">'+k+'</span>'
+        + '<span style="font-size:13px;font-weight:700;color:var(--text)">'+v.u+' u</span>'
+        + '<span style="font-size:10.5px;color:var(--text3)">'+pctU+'% de ventas</span>'
+        + '<span style="font-size:11px;color:var(--text2);margin-left:auto">$'+Math.round(v.$).toLocaleString('es-AR')+'</span>'
+        + '<span style="font-size:10px;color:var(--text3)">('+pctR+'%)</span>'
+        + '</div>';
+    }).join('')
+    + '<div style="font-size:10.5px;color:var(--text3);margin-top:4px;text-align:center">Total: '+totalU+' unidades · $'+Math.round(totalRev).toLocaleString('es-AR')+' en 60 días</div>';
+  }
+}
+
 // ── Categorías con nombres reales ─────────────────────────
 async function renderCatChart(){
   const cats={};
@@ -6682,7 +6785,7 @@ function renderDashboard(){
   renderSmartAlerts();
   renderDashKPIs();
   loadDashVisits().then(()=>renderMainChart()).catch(()=>renderMainChart());
-  renderCatChart(); renderDashTopPubs(); renderDashInsights(); renderDashStock(); renderDashConv(); renderDashRepMini();
+  renderCatChart(); renderPubTypeChart(); renderDashTopPubs(); renderDashInsights(); renderDashStock(); renderDashConv(); renderDashRepMini();
   renderCalWidget();
   // v109: refrescar estado Telegram 24/7
   if(typeof tg247Refresh === 'function') tg247Refresh();
@@ -7075,6 +7178,7 @@ function renderPubs(){
           <button class="btn btn-ghost btn-xs" onclick="quickOptimize('${item.id}','${item.title.replace(/'/g,"\\'")}')">✨</button>
           <a href="${item.permalink||'#'}" target="_blank" class="btn btn-ghost btn-xs" style="text-decoration:none">🔗</a>
           ${item.id?`<a href="${mlEditLink(item.id)}" target="_blank" rel="noopener" class="btn btn-ghost btn-xs" style="text-decoration:none;background:#fffbeb;color:#78350f;border-color:#fde68a" title="Editar en MercadoLibre">✏️</a>`:''}
+          ${item.id?`<a href="${mlRepublishLink(item.id)}" target="_blank" rel="noopener" class="btn btn-ghost btn-xs" style="text-decoration:none;background:#eff6ff;color:#1e40af;border-color:#bfdbfe" title="Republicar producto (Vender uno igual): copia fotos, título, descripción y características a una publicación nueva para que la ajustes">🔄</a>`:''}
         </div>
       </td>
     </tr>`;
@@ -7480,9 +7584,32 @@ function getPubType(item){
   return 'classic';
 }
 
+// v145: etiqueta de tipo de publicación SEPARADA (texto plano, sin agrupar).
+// Gold y Premium quedan distintos: gold_special=Clásica, gold_pro/gold_premium=Premium.
+// La usan el exportador y cualquier lugar que necesite el nombre limpio.
+function getPubTypeLabel(item){
+  if(item.catalog_listing === true || item.catalog_product_id) return 'Catálogo';
+  const lt = (item.listing_type_id||'').toLowerCase();
+  if(lt === 'gold_pro' || lt === 'gold_premium') return 'Premium';
+  if(lt === 'gold_special') return 'Clásica';
+  if(lt.includes('gold')) return 'Gold';
+  if(lt === 'free' || lt === 'bronze') return 'Gratuita';
+  return 'Clásica';
+}
+
 function mlEditLink(id){
   if(!id||typeof id!=='string'||id.length<5) return null;
   return 'https://www.mercadolibre.com.ar/publicaciones/'+id+'/modificar';
+}
+
+// v145: link a "Vender uno igual" — copia fotos, título, descripción y
+// características del ítem a una publicación NUEVA donde el usuario ajusta antes
+// de publicar (ML pide diferenciarla para que no sea duplicada). La URL usa el
+// ID NUMÉRICO (sin el prefijo MLA).
+function mlRepublishLink(id){
+  if(!id||typeof id!=='string') return '#';
+  const num = id.replace(/^ML[A-Z]/,''); // MLA2058135704 → 2058135704
+  return 'https://listado.mercadolibre.com.ar/vender-uno-igual-publicacion-'+num;
 }
 
 // ── v141: Lectura unificada del SKU desde TODAS las fuentes de ML ──
@@ -8653,7 +8780,7 @@ function _seoExportColumns(){
     { id:'id',          label:'ID Publicación',     type:'text', def:true,  value:i=> i.id||'' },
     { id:'title',       label:'Título',             type:'text', def:true,  value:i=> i.title||'' },
     { id:'sku',         label:'SKU',                type:'text', def:true,  value:i=> itemGetSKU(i) },
-    { id:'pubtype',     label:'Tipo publicación',   type:'text', def:true,  value:i=> pubTypeLabel[getPubType(i)]||getPubType(i) },
+    { id:'pubtype',     label:'Tipo publicación',   type:'text', def:true,  value:i=> getPubTypeLabel(i) },
     { id:'status',      label:'Estado',             type:'text', def:true,  value:i=> statusLabel[i.status]||i.status||'' },
     { id:'price',       label:'Precio',             type:'num',  def:true,  value:i=> i.price||0 },
     { id:'stock',       label:'Stock disponible',   type:'num',  def:true,  value:i=> i.available_quantity??0 },
