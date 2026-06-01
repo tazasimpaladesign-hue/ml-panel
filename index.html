@@ -141,12 +141,14 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 .g40{display:grid;grid-template-columns:1fr 1.6fr;gap:14px}
 
 /* ── TABLE ── */
-.tw{overflow-x:auto;scrollbar-width:thin}
+.tw{overflow-x:auto;overflow-y:visible;scrollbar-width:thin;max-width:100%}
 .tw::-webkit-scrollbar{height:12px}
 .tw::-webkit-scrollbar-track{background:var(--bg3);border-radius:6px}
 .tw::-webkit-scrollbar-thumb{background:var(--accent);border-radius:6px;border:2px solid var(--bg3)}
 .tw::-webkit-scrollbar-thumb:hover{background:var(--accent2)}
-#seo-main-table{min-width:1550px}
+#seo-main-table{min-width:1900px}
+#seo-main-table th,#seo-main-table td{white-space:nowrap}
+#seo-main-table th:first-child,#seo-main-table td:first-child{white-space:normal}
 table{width:100%;border-collapse:collapse;font-size:12.5px}
 thead th{text-align:left;padding:7px 11px;border-bottom:1px solid var(--border);font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;font-weight:700;white-space:nowrap}
 
@@ -753,7 +755,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v146 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v147 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -9736,10 +9738,10 @@ function renderSEOTable(){
         ${ch.map(p=>`<span class="badge ${p.sev===2?'bg-red':'bg-amber'}" style="font-size:9px">${p.label}</span>`).join('')}
         ${(!tI.length&&!ch.length)?'<span class="badge bg-green" style="font-size:9px">✓ Sin problemas</span>':''}
       </div></td>
-      <td><div style="display:flex;gap:4px;align-items:center;justify-content:center;flex-wrap:wrap">
+      <td><div style="display:grid;grid-template-columns:30px 30px;gap:4px;justify-content:center;align-content:center">
         <a href="#optimizar" class="btn btn-ghost btn-xs" style="font-size:13px;width:30px;height:28px;padding:0;display:inline-flex;align-items:center;justify-content:center;text-decoration:none" onclick="goToOptimizerWith('${item.id}','${sT}',${eanArg});return false;" title="Optimizar título y descripción con IA">✨</a>
         <button class="btn btn-ghost btn-xs" id="seo-toggle-${item.id}" style="font-size:13px;width:30px;height:28px;padding:0;display:inline-flex;align-items:center;justify-content:center;background:${item.status==='active'?'#fef2f2':'#f0fdf4'};color:${item.status==='active'?'#dc2626':'#166534'};border-color:${item.status==='active'?'#fecaca':'#bbf7d0'}" onclick="seoToggleStatus('${item.id}')" title="${item.status==='active'?'Pausar publicación':'Activar publicación'}">${item.status==='active'?'⏸':'▶'}</button>
-        ${editUrl?`<a href="${editUrl}" target="_blank" rel="noopener" class="btn btn-ghost btn-xs" style="font-size:13px;width:30px;height:28px;padding:0;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;background:#fffbeb;color:#78350f;border-color:#fde68a" title="Editar en MercadoLibre">✏️</a>`:''}
+        ${editUrl?`<a href="${editUrl}" target="_blank" rel="noopener" class="btn btn-ghost btn-xs" style="font-size:13px;width:30px;height:28px;padding:0;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;background:#fffbeb;color:#78350f;border-color:#fde68a" title="Editar en MercadoLibre">✏️</a>`:'<span></span>'}
         <a href="${mlRepublishLink(item)}" target="_blank" rel="noopener" class="btn btn-ghost btn-xs" style="font-size:13px;width:30px;height:28px;padding:0;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;background:#eff6ff;color:#1e40af;border-color:#bfdbfe" title="Republicar producto: abre la publicación en ML, donde arriba tenés el botón &quot;Vender uno igual&quot; que copia todo a una publicación nueva">🔄</a>
       </div></td>
     </tr>`;
@@ -10483,16 +10485,18 @@ function seoThermoCalc(item){
 // el Hotness Score predice qué publicaciones tienen alta probabilidad
 // de generar una venta en las próximas 48-72h.
 //
-// FÓRMULA (0-100):
-//   40% Momentum acelerado (visits/visitsPrev > 1.3 = señal MUY fuerte)
-//   25% Conversión histórica validada (sales60 + conv >= 1.5%)
-//   15% Preguntas recientes 7d sin responder (gente interesada AHORA)
-//   10% Stock disponible (>0)
-//   10% Velocidad reciente (sales 7d > 0)
+// FÓRMULA v2 combinada (0-100):
+//   20% Momentum acelerado CONDICIONADO (requiere >=10 visitas)
+//   25% Volumen de tráfico absoluto (best-sellers estables)
+//   25% Conversión histórica validada (sales60 >= 1)
+//   15% Ventas recientes 60d (demanda comprobada)
+//    8% Velocidad reciente (sales 7d > 0)
+//    4% Preguntas recientes 7d (señal menor)
+//    3% Stock disponible (gate)
 //
 // THRESHOLD para 🔥:
-//   - Score >= 60 → "Alta probabilidad" (mostrar emoji 🔥)
-//   - Trigger especial: si visits7d >= 40 Y conversion histórica >= 2% Y
+//   - Score >= 55 → "Alta probabilidad" (mostrar emoji 🔥)
+//   - Trigger especial: si visits7d >= 35 Y conversion histórica >= 1.8% Y
 //     sales7d == 0 → "Venta inminente por estadística" (🔥🔥)
 //
 // COSTO KV: cero. Cálculo client-side desde itemMetrics + allQuestions.
@@ -10510,42 +10514,83 @@ function seoHotnessScore(item){
   const visits30 = m.visits30 || 0;
   const stock    = (typeof item.available_quantity === 'number') ? item.available_quantity : 0;
 
-  // ── Factor 1: Momentum acelerado (40%) ──
-  // No basta con "subió", premio especial si subió >30%
+  // ════════════════════════════════════════════════════════════════════════
+  // v147: MODELO COMBINADO v2 (Gemini + Sonnet). Threshold 55.
+  // Cambios clave vs v1:
+  //  - Momentum 40→20% y CONDICIONADO a mín. de visitas (era el principal
+  //    generador de falsos positivos: 3→6 visitas disparaba el ratio sin
+  //    significancia estadística).
+  //  - NUEVO Volumen de tráfico absoluto 25% (capta best-sellers estables que
+  //    no aceleran pero tienen tráfico sostenido).
+  //  - Conversión 25% con umbral sales60>=1 (antes >=2: descartaba items con
+  //    1 venta y conversión altísima).
+  //  - NUEVO Ventas 60d explícito 15% (demanda real comprobada).
+  //  - Velocidad 7d 8% · Preguntas 4% (señal menor) · Stock 3% (gate).
+  // ════════════════════════════════════════════════════════════════════════
+
+  // ── Factor 1: Momentum acelerado CONDICIONADO (20%) ──
+  // Solo cuenta si hay un volumen mínimo de visitas (>=10), para no premiar
+  // crecimientos irrelevantes de micro-tráfico.
   let momentumScore = 0;
   let momentumRatio = 0;
   if(previous > 0){
     momentumRatio = recent / previous;
-    if(momentumRatio >= 1.5)      momentumScore = 40;  // explotó (+50%)
-    else if(momentumRatio >= 1.3) momentumScore = 35;  // acelerando (+30%)
-    else if(momentumRatio >= 1.1) momentumScore = 25;  // subiendo (+10%)
-    else if(momentumRatio >= 0.9) momentumScore = 15;  // estable
-    else if(momentumRatio >= 0.7) momentumScore = 5;   // bajando
-    else                          momentumScore = 0;   // crash
-  } else if(recent > 5){
-    momentumScore = 30; // arrancó de cero
+    if(recent >= 10){
+      if(momentumRatio >= 1.5)      momentumScore = 20;  // explotó (+50%)
+      else if(momentumRatio >= 1.3) momentumScore = 17;  // acelerando (+30%)
+      else if(momentumRatio >= 1.1) momentumScore = 12;  // subiendo (+10%)
+      else if(momentumRatio >= 0.9) momentumScore = 7;   // estable
+      else if(momentumRatio >= 0.7) momentumScore = 2;   // bajando
+      else                          momentumScore = 0;   // crash
+    } else {
+      // Pocas visitas: el ratio no es confiable, damos crédito mínimo
+      if(momentumRatio >= 1.3) momentumScore = 6;
+      else if(momentumRatio >= 0.9) momentumScore = 3;
+    }
+  } else if(recent >= 10){
+    momentumScore = 14; // arrancó de cero con volumen real
+    momentumRatio = 2;
+  } else if(recent > 0){
+    momentumScore = 4;
     momentumRatio = 2;
   }
 
-  // ── Factor 2: Conversión histórica validada (25%) ──
-  // Solo cuenta si tiene historial real: sales60 >= 2
+  // ── Factor 2: Volumen de tráfico absoluto (25%) — NUEVO ──
+  // Premia tráfico real sostenido aunque no esté acelerando.
+  let volumeScore = 0;
+  if(recent >= 40)      volumeScore = 25;  // tráfico muy alto
+  else if(recent >= 25) volumeScore = 20;
+  else if(recent >= 15) volumeScore = 14;
+  else if(recent >= 8)  volumeScore = 8;
+  else if(recent >= 3)  volumeScore = 3;
+
+  // ── Factor 3: Conversión histórica validada (25%) — umbral sales60>=1 ──
   let convScore = 0;
   let convHist = 0;
-  if(visits30 > 0 && sales60 >= 2){
-    // Estimación de conv con sales60/2 (≈30d) sobre visits30
+  if(visits30 > 0 && sales60 >= 1){
     convHist = ((sales60/2) / visits30) * 100;
-    if(convHist >= 4)      convScore = 25;
-    else if(convHist >= 2.5) convScore = 22;
-    else if(convHist >= 1.5) convScore = 18;
+    if(convHist >= 4)        convScore = 25;
+    else if(convHist >= 2.5) convScore = 21;
+    else if(convHist >= 1.5) convScore = 17;
     else if(convHist >= 1)   convScore = 12;
-    else if(convHist >= 0.5) convScore = 5;
+    else if(convHist >= 0.5) convScore = 6;
   } else if(sales60 >= 5){
-    // Buenas ventas históricas pero sin visits30 → asumir conv ok
-    convScore = 15;
+    convScore = 15; // muchas ventas históricas sin visits30 → conv asumida ok
   }
 
-  // ── Factor 3: Preguntas recientes 7d (15%) ──
-  // Cada pregunta no respondida = señal MUY fuerte de interés activo
+  // ── Factor 4: Ventas recientes 60d (15%) — NUEVO explícito ──
+  let sales60Score = 0;
+  if(sales60 >= 6)      sales60Score = 15;
+  else if(sales60 >= 3) sales60Score = 11;
+  else if(sales60 >= 1) sales60Score = 6;
+
+  // ── Factor 5: Velocidad reciente 7d (8%) ──
+  let velScore = 0;
+  if(sales7 >= 2)      velScore = 8;
+  else if(sales7 >= 1) velScore = 6;
+  else if(sales60 >= 2 && recent > previous) velScore = 3; // tracción sin venta semanal
+
+  // ── Factor 6: Preguntas recientes 7d (4%) — señal menor ──
   let questionsScore = 0;
   let recentQs = 0;
   try {
@@ -10555,39 +10600,30 @@ function seoHotnessScore(item){
         String(q.item_id) === id &&
         q.date_created && new Date(q.date_created).getTime() > cutoff
       ).length;
-      if(recentQs >= 3)      questionsScore = 15;
-      else if(recentQs >= 2) questionsScore = 12;
-      else if(recentQs >= 1) questionsScore = 8;
+      if(recentQs >= 2)      questionsScore = 4;
+      else if(recentQs >= 1) questionsScore = 2;
     }
   } catch(e){}
 
-  // ── Factor 4: Stock disponible (10%) ──
+  // ── Factor 7: Stock disponible (3%) — gate binario ──
   let stockScore = 0;
-  if(stock >= 10)     stockScore = 10;
-  else if(stock >= 3) stockScore = 8;
-  else if(stock >= 1) stockScore = 5;
-  // stock 0 → 0 puntos (no se puede vender)
+  if(stock >= 3)      stockScore = 3;
+  else if(stock >= 1) stockScore = 2;
+  // stock 0 → 0 (no se puede vender)
 
-  // ── Factor 5: Velocidad reciente (10%) ──
-  let velScore = 0;
-  if(sales7 >= 2)      velScore = 10;
-  else if(sales7 >= 1) velScore = 7;
-  else if(sales60 >= 2 && recent > previous) velScore = 5; // sin venta esta semana PERO con tracción
-
-  const totalScore = momentumScore + convScore + questionsScore + stockScore + velScore;
+  const totalScore = momentumScore + volumeScore + convScore + sales60Score + velScore + questionsScore + stockScore;
 
   // Trigger especial: "Venta inminente por estadística"
-  // Mucho tráfico ESTA semana, conversión histórica buena, pero 0 ventas aún
-  // = probabilidad muy alta de que caiga una venta en próximas 48h.
+  // Mucho tráfico ESTA semana, conversión histórica buena, pero 0 ventas aún.
   const isImminent = (
-    recent >= 40 &&
+    recent >= 35 &&
     convHist >= 1.8 &&
     sales7 === 0 &&
     stock > 0
   );
 
-  // Nivel
-  const isHot = totalScore >= 60;
+  // Nivel — threshold 55 (equilibrio recall/precisión)
+  const isHot = totalScore >= 55;
   const level = isImminent ? 'imminent' : isHot ? 'hot' : 'normal';
 
   return {
@@ -10596,11 +10632,13 @@ function seoHotnessScore(item){
     isHot,
     isImminent,
     factors: {
-      momentum:   { score: momentumScore, ratio: momentumRatio.toFixed(2), max: 40 },
+      momentum:   { score: momentumScore, ratio: momentumRatio.toFixed(2), max: 20 },
+      volume:     { score: volumeScore,   value: recent,                    max: 25 },
       conversion: { score: convScore,     value: convHist.toFixed(2),       max: 25 },
-      questions:  { score: questionsScore, count: recentQs,                  max: 15 },
-      stock:      { score: stockScore,    value: stock,                      max: 10 },
-      velocity:   { score: velScore,      sales7,                            max: 10 },
+      sales60:    { score: sales60Score,  value: sales60,                   max: 15 },
+      velocity:   { score: velScore,      sales7,                           max: 8 },
+      questions:  { score: questionsScore, count: recentQs,                 max: 4 },
+      stock:      { score: stockScore,    value: stock,                     max: 3 },
     },
   };
 }
@@ -11252,6 +11290,10 @@ function _tStickyRegister(wrap, table){
   const reg = { wrap, table, clone, visible: false };
   _tStickyState.registered.push(reg);
   _tStickyClonHead(reg);
+  // v147: actualizar el header clonado cuando se hace scroll horizontal en el wrap
+  wrap.addEventListener('scroll', () => {
+    if(reg.visible) _tStickyUpdateOne(reg);
+  }, { passive:true });
 }
 
 // Clonar el <thead> del original al clon (cada vez que cambia el header)
@@ -11310,8 +11352,11 @@ function _tStickyUpdateOne(reg){
 
   // Sincronizar geometría
   clone.style.display = 'table';
-  clone.style.left = wrapRect.left + 'px';
-  clone.style.width = wrapRect.width + 'px';
+  clone.style.left = (wrapRect.left - wrap.scrollLeft) + 'px';
+  clone.style.width = table.getBoundingClientRect().width + 'px';
+  // v147: clip al ancho visible del wrap para que el scroll horizontal no muestre
+  // el header desbordado fuera del contenedor.
+  clone.style.clipPath = 'inset(0 ' + Math.max(0, (table.getBoundingClientRect().width - wrapRect.width - wrap.scrollLeft)) + 'px 0 ' + wrap.scrollLeft + 'px)';
   // Sincronizar ancho de cada columna con la primera fila del body original
   const firstBodyRow = table.querySelector('tbody tr');
   if(firstBodyRow){
@@ -12185,11 +12230,13 @@ function seoThermoOpenModal(itemId){
       html += '<div style="font-size:13px;font-weight:700;color:'+hotColor+'">'+h.score+'/100 — '+hotLabel+'</div>';
       html += '</div>';
       html += '<div style="font-size:11.5px;color:#374151;line-height:1.7">';
-      html += '<div>Momentum: <strong>'+h.factors.momentum.score+'/40</strong> (ratio '+h.factors.momentum.ratio+'×)</div>';
+      html += '<div>Volumen de tráfico: <strong>'+h.factors.volume.score+'/25</strong> ('+h.factors.volume.value+' visitas 7d)</div>';
       html += '<div>Conversión histórica: <strong>'+h.factors.conversion.score+'/25</strong> ('+h.factors.conversion.value+'%)</div>';
-      html += '<div>Preguntas recientes (7d): <strong>'+h.factors.questions.score+'/15</strong> ('+h.factors.questions.count+' preguntas)</div>';
-      html += '<div>Stock: <strong>'+h.factors.stock.score+'/10</strong> ('+h.factors.stock.value+' unidades)</div>';
-      html += '<div>Velocidad reciente: <strong>'+h.factors.velocity.score+'/10</strong> ('+h.factors.velocity.sales7+' ventas 7d)</div>';
+      html += '<div>Momentum: <strong>'+h.factors.momentum.score+'/20</strong> (ratio '+h.factors.momentum.ratio+'×)</div>';
+      html += '<div>Ventas 60d: <strong>'+h.factors.sales60.score+'/15</strong> ('+h.factors.sales60.value+' ventas)</div>';
+      html += '<div>Velocidad reciente: <strong>'+h.factors.velocity.score+'/8</strong> ('+h.factors.velocity.sales7+' ventas 7d)</div>';
+      html += '<div>Preguntas recientes (7d): <strong>'+h.factors.questions.score+'/4</strong> ('+h.factors.questions.count+' preguntas)</div>';
+      html += '<div>Stock: <strong>'+h.factors.stock.score+'/3</strong> ('+h.factors.stock.value+' unidades)</div>';
       html += '</div>';
       if(h.isImminent){
         html += '<div style="margin-top:9px;font-size:11.5px;color:#7f1d1d;background:#fff;padding:7px 9px;border-radius:6px;border-left:3px solid #dc2626"><strong>Acción:</strong> tenés mucho tráfico hot y la conversión histórica indica que la venta debería caer en próximas 48h. <em>NO bajes el precio, no toques el listing</em>. Asegurate de tener stock y responder preguntas rápido.</div>';
