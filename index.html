@@ -1052,7 +1052,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <button class="tab" onclick="filterPubs('all',this)" id="tab-all">📋 Todas</button>
       </div>
       <div style="display:flex;gap:8px;flex:1;min-width:0">
-        <input type="text" placeholder="🔍 Buscar..." id="pub-search" oninput="renderPubs()" style="max-width:220px">
+        <input type="text" placeholder="🔍 Título, SKU o ID (MLA / MLAU / número)..." title="Busca por título, SKU o ID de MercadoLibre (detecta MLA, MLAU o el número). Filtra en tiempo real." id="pub-search" oninput="pubSearchDebounced()" style="max-width:320px;flex:1;min-width:180px">
         <select id="pub-sort" onchange="renderPubs()" style="max-width:160px">
           <option value="sold">Más vendidas</option>
           <option value="price-asc">Precio ↑</option>
@@ -1063,8 +1063,9 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <select id="pub-type-filter" onchange="renderPubs()" style="max-width:150px" title="Filtrar por tipo">
           <option value="">Todos los tipos</option>
           <option value="catalog">Catálogo</option>
-          <option value="gold">Gold/Premium</option>
-          <option value="free">Gratuitas</option>
+          <option value="classic">Clásica</option>
+          <option value="premium">Premium</option>
+          <option value="free">Gratuita</option>
         </select>
       </div>
       <div class="bulk-bar" id="bulk-bar">
@@ -1130,6 +1131,16 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <option value="">Todos</option>
           <option value="active">Activas</option>
           <option value="paused">Pausadas</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:11px;font-weight:500;display:block;margin-bottom:3px">Tipo de publicación</label>
+        <select id="bulk-filter-type" style="width:100%;font-size:12px;padding:6px 8px" onchange="applyBulkFilters()">
+          <option value="">Todos</option>
+          <option value="catalog">Catálogo</option>
+          <option value="classic">Clásica</option>
+          <option value="premium">Premium</option>
+          <option value="free">Gratuita</option>
         </select>
       </div>
     </div>
@@ -1276,8 +1287,9 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <div class="chips" style="margin:0;gap:5px">
         <div class="chip" id="chip-tipo-all"     onclick="seoSetTipo('')"          style="font-size:11px;background:var(--accent);color:#fff;border-color:var(--accent)">Todas</div>
         <div class="chip" id="chip-tipo-catalog" onclick="seoSetTipo('catalog')"   style="font-size:11px">📚 Catálogo</div>
-        <div class="chip" id="chip-tipo-gold"    onclick="seoSetTipo('gold')"      style="font-size:11px">⭐ Gold/Premium</div>
-        <div class="chip" id="chip-tipo-free"    onclick="seoSetTipo('free')"      style="font-size:11px">🆓 Gratuitas</div>
+        <div class="chip" id="chip-tipo-classic" onclick="seoSetTipo('classic')"   style="font-size:11px">📄 Clásica</div>
+        <div class="chip" id="chip-tipo-premium" onclick="seoSetTipo('premium')"   style="font-size:11px">⭐ Premium</div>
+        <div class="chip" id="chip-tipo-free"    onclick="seoSetTipo('free')"      style="font-size:11px">🆓 Gratuita</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
@@ -1305,13 +1317,53 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <div class="card-sub" id="seo-result-count">—</div>
       </div>
       <div style="display:flex;gap:8px;align-items:center;margin-left:auto;flex-wrap:wrap">
-        <input type="text" id="seo-search" placeholder="Buscar por título..." style="max-width:200px;font-size:12px;padding:5px 9px" oninput="seoGoPage(1)">
+        <input type="text" id="seo-search" placeholder="🔍 Título, SKU o ID (MLA / MLAU / número)..." title="Busca por título, SKU o ID de MercadoLibre (detecta MLA, MLAU o el número). Filtra en tiempo real." style="min-width:230px;flex:1;max-width:330px;font-size:12px;padding:6px 10px" oninput="seoSearchDebounced()">
+        <button class="btn btn-ghost btn-sm" id="seo-adv-btn" onclick="seoAdvToggle()" title="Filtros avanzados por rango: precio, stock, fecha, calidad, conversión, visitas, ventas y temperatura SEO" style="position:relative;white-space:nowrap">🔧 Filtros avanzados<span id="seo-adv-badge" style="display:none;position:absolute;top:-7px;right:-7px;min-width:17px;height:17px;line-height:17px;padding:0 4px;border-radius:9px;background:var(--accent);color:#fff;font-size:10px;font-weight:700;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.25)"></span></button>
         <button class="btn btn-ghost btn-sm" id="seo-multi-sort-btn" onclick="seoMultiSortToggle()" title="Ordenar por múltiples criterios en cascada">🔢 Orden avanzado<span id="seo-multi-sort-count" style="margin-left:4px;color:var(--accent);font-weight:700"></span></button>
         <button class="btn btn-ghost btn-sm" onclick="loadSEOMetrics()" id="seo-metrics-btn" title="Cargar visitas reales de los últimos 7 días desde ML (página actual fresca, resto desde caché si está disponible)">📊 Cargar métricas</button>
         <button class="btn btn-ghost btn-sm" onclick="loadSEOMetricsFull()" id="seo-metrics-full-btn" title="Forzar refresh COMPLETO: borra el caché local y vuelve a pedir todas las métricas a ML. Más lento pero garantiza datos 100% frescos.">🔄 Refresh total</button>
         <button class="btn btn-ghost btn-sm" onclick="analyzeSEOAll()">↻ Actualizar</button>
         <button class="btn btn-primary btn-sm" onclick="seoExportOpen()" id="seo-export-btn" title="Exportar las publicaciones filtradas a un archivo .xlsx para subir a una IA y pedirle estrategia">📥 Exportar reporte</button>
         <button class="btn btn-ghost btn-sm" onclick="seoImportOpen()" id="seo-import-btn" title="Importar un .xlsx (con el mismo formato del reporte) para hacer cambios masivos en MercadoLibre: SKU, estado, precio, stock, código universal y tiempo de disponibilidad" style="border:1px solid var(--accent);color:var(--accent)">📤 Importar cambios</button>
+      </div>
+    </div>
+    <!-- v149: Panel de Filtros Avanzados multi-rango (AND con chips + busqueda) -->
+    <div id="seo-adv-panel" style="display:none;margin:0 0 12px 0;background:linear-gradient(180deg,var(--bg2) 0%,var(--bg) 100%);border:1px solid var(--border);border-radius:10px;padding:14px 16px;box-shadow:0 4px 14px rgba(0,0,0,.07),0 1px 2px rgba(0,0,0,.04)">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;gap:12px">
+        <div>
+          <div style="font-size:12.5px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:6px"><span style="font-size:14px">🔧</span> Filtros avanzados por rango</div>
+          <div style="font-size:10.5px;color:var(--text3);margin-top:2px;line-height:1.35">Se combinan con <b>Y (AND)</b> junto a los chips de Tipo, Estado, Escenario y la búsqueda. Dejá vacío lo que no quieras filtrar.</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="seoAdvToggle()" title="Cerrar" style="padding:3px 8px;font-size:14px;line-height:1">✕</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:18px">
+        <div>
+          <div style="font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px;border-bottom:1px solid var(--border);padding-bottom:5px">📦 Inventario y tiempo</div>
+          <div style="display:flex;flex-direction:column;gap:9px">
+        <div style="display:flex;align-items:center;gap:7px"><label style="font-size:11px;color:var(--text2);flex:0 0 120px">Precio ($)</label><input type="number" id="seo-adv-pmin" placeholder="mín" min="0" style="width:100%;font-size:11.5px;padding:5px 7px" oninput="seoAdvLive()"><span style="color:var(--text3);font-size:11px">&ndash;</span><input type="number" id="seo-adv-pmax" placeholder="máx" min="0" style="width:100%;font-size:11.5px;padding:5px 7px" oninput="seoAdvLive()"></div>
+        <div style="display:flex;align-items:center;gap:7px"><label style="font-size:11px;color:var(--text2);flex:0 0 120px">Stock (u.)</label><input type="number" id="seo-adv-smin" placeholder="mín" min="0" style="width:100%;font-size:11.5px;padding:5px 7px" oninput="seoAdvLive()"><span style="color:var(--text3);font-size:11px">&ndash;</span><input type="number" id="seo-adv-smax" placeholder="máx" min="0" style="width:100%;font-size:11.5px;padding:5px 7px" oninput="seoAdvLive()"></div>
+        <div style="display:flex;align-items:center;gap:7px"><label style="font-size:11px;color:var(--text2);flex:0 0 120px">Creación</label><input type="date" id="seo-adv-dfrom" style="flex:1;min-width:0;font-size:11.5px;padding:5px 6px" oninput="seoAdvLive()"><span style="color:var(--text3);font-size:11px">a</span><input type="date" id="seo-adv-dto" style="flex:1;min-width:0;font-size:11.5px;padding:5px 6px" oninput="seoAdvLive()"></div>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px;border-bottom:1px solid var(--border);padding-bottom:5px">📈 Rendimiento y conversión</div>
+          <div id="seo-adv-perf-hint" style="display:none;font-size:10px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:5px 8px;margin-bottom:8px;line-height:1.35">⚠️ Cargá las métricas con el botón 📊 para poder filtrar por visitas, ventas, conversión y temperatura.</div>
+          <div style="display:flex;flex-direction:column;gap:9px">
+        <div style="display:flex;align-items:center;gap:7px"><label style="font-size:11px;color:var(--text2);flex:0 0 120px">Calidad (%)</label><input type="number" id="seo-adv-qmin" placeholder="0" min="0" max="100" style="width:100%;font-size:11.5px;padding:5px 7px" oninput="seoAdvLive()"><span style="color:var(--text3);font-size:11px">&ndash;</span><input type="number" id="seo-adv-qmax" placeholder="100" min="0" max="100" style="width:100%;font-size:11.5px;padding:5px 7px" oninput="seoAdvLive()"></div>
+        <div style="display:flex;align-items:center;gap:7px"><label style="font-size:11px;color:var(--text2);flex:0 0 120px">Conversión (%)</label><input type="number" id="seo-adv-cmin" placeholder="0" min="0" max="100" style="width:100%;font-size:11.5px;padding:5px 7px" oninput="seoAdvLive()"><span style="color:var(--text3);font-size:11px">&ndash;</span><input type="number" id="seo-adv-cmax" placeholder="100" min="0" max="100" style="width:100%;font-size:11.5px;padding:5px 7px" oninput="seoAdvLive()"></div>
+        <div style="display:flex;align-items:center;gap:7px"><label style="font-size:11px;color:var(--text2);flex:0 0 120px">Visitas 7d</label><input type="number" id="seo-adv-v7min" placeholder="mín" min="0" style="width:100%;font-size:11.5px;padding:5px 7px" oninput="seoAdvLive()"><span style="color:var(--text3);font-size:11px">&ndash;</span><input type="number" id="seo-adv-v7max" placeholder="máx" min="0" style="width:100%;font-size:11.5px;padding:5px 7px" oninput="seoAdvLive()"></div>
+        <div style="display:flex;align-items:center;gap:7px"><label style="font-size:11px;color:var(--text2);flex:0 0 120px">Visitas 30d</label><input type="number" id="seo-adv-v30min" placeholder="mín" min="0" style="width:100%;font-size:11.5px;padding:5px 7px" oninput="seoAdvLive()"><span style="color:var(--text3);font-size:11px">&ndash;</span><input type="number" id="seo-adv-v30max" placeholder="máx" min="0" style="width:100%;font-size:11.5px;padding:5px 7px" oninput="seoAdvLive()"></div>
+        <div style="display:flex;align-items:center;gap:7px"><label style="font-size:11px;color:var(--text2);flex:0 0 120px">Ventas 7d</label><input type="number" id="seo-adv-s7min" placeholder="mín" min="0" style="width:100%;font-size:11.5px;padding:5px 7px" oninput="seoAdvLive()"><span style="color:var(--text3);font-size:11px">&ndash;</span><input type="number" id="seo-adv-s7max" placeholder="máx" min="0" style="width:100%;font-size:11.5px;padding:5px 7px" oninput="seoAdvLive()"></div>
+        <div style="display:flex;align-items:center;gap:7px"><label style="font-size:11px;color:var(--text2);flex:0 0 120px">Ventas 60d</label><input type="number" id="seo-adv-s60min" placeholder="mín" min="0" style="width:100%;font-size:11.5px;padding:5px 7px" oninput="seoAdvLive()"><span style="color:var(--text3);font-size:11px">&ndash;</span><input type="number" id="seo-adv-s60max" placeholder="máx" min="0" style="width:100%;font-size:11.5px;padding:5px 7px" oninput="seoAdvLive()"></div>
+        <div style="display:flex;align-items:center;gap:7px"><label style="font-size:11px;color:var(--text2);flex:0 0 120px">Vendidas histór.</label><input type="number" id="seo-adv-soldmin" placeholder="mín" min="0" style="width:100%;font-size:11.5px;padding:5px 7px" oninput="seoAdvLive()"><span style="color:var(--text3);font-size:11px">&ndash;</span><input type="number" id="seo-adv-soldmax" placeholder="máx" min="0" style="width:100%;font-size:11.5px;padding:5px 7px" oninput="seoAdvLive()"></div>
+        <div style="display:flex;align-items:center;gap:7px"><label style="font-size:11px;color:var(--text2);flex:0 0 120px">Temp./SEO (%)</label><input type="number" id="seo-adv-thmin" placeholder="0" min="0" max="100" style="width:100%;font-size:11.5px;padding:5px 7px" oninput="seoAdvLive()"><span style="color:var(--text3);font-size:11px">&ndash;</span><input type="number" id="seo-adv-thmax" placeholder="100" min="0" max="100" style="width:100%;font-size:11.5px;padding:5px 7px" oninput="seoAdvLive()"></div>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:14px;align-items:center;flex-wrap:wrap;padding-top:12px;border-top:1px solid var(--border)">
+        <button class="btn btn-primary btn-sm" onclick="seoAdvApply()" style="font-size:11px">✓ Aplicar filtros</button>
+        <button class="btn btn-ghost btn-sm" onclick="seoAdvClear()" style="font-size:11px">🗑️ Limpiar rangos</button>
+        <div style="margin-left:auto;font-size:10.5px;color:var(--text3)" id="seo-adv-status"></div>
       </div>
     </div>
     <!-- v76: Panel de Orden Avanzado — diseño compacto, centrado, con sombra -->
@@ -7100,9 +7152,18 @@ function renderPubs(){
 
   let items = visibleItems();
   if(pubFilter!=='all') items=items.filter(i=>i.status===pubFilter);
-  if(search) items=items.filter(i=>i.title.toLowerCase().includes(search));
+  if(search){
+    const qn=search.replace(/[\s\-_.]/g,'');
+    items=items.filter(i=>{
+      const idn=(i.id||'').toLowerCase(), cat=(i.catalog_product_id||'').toLowerCase();
+      return (i.title||'').toLowerCase().includes(search)
+        || idn.includes(search) || (qn && idn.includes(qn))
+        || cat.includes(search) || (qn && cat.includes(qn))
+        || itemGetSKU(i).toLowerCase().includes(search);
+    });
+  }
   // Tipo filter
-  if(tipoFilter) items=items.filter(i=>getPubType(i)===tipoFilter);
+  if(tipoFilter) items=items.filter(i=>getPubTypeKey(i)===tipoFilter);
 
   // Ordenar
   const col=pubState.sortCol, dir=pubState.sortDir;
@@ -7113,7 +7174,7 @@ function renderPubs(){
     else if(col==='sold')    { va=a.sold_quantity||0;                      vb=b.sold_quantity||0; }
     else if(col==='sku')     { va=itemGetSKU(a).toLowerCase();vb=itemGetSKU(b).toLowerCase();return dir*(va<vb?-1:va>vb?1:0); }
     else if(col==='ean')     { va=itemGetEAN(a).toLowerCase();vb=itemGetEAN(b).toLowerCase();return dir*(va<vb?-1:va>vb?1:0); }
-    else if(col==='type')    { va=(getPubType(a)||'').toLowerCase();vb=(getPubType(b)||'').toLowerCase();return dir*(va<vb?-1:va>vb?1:0); }
+    else if(col==='type')    { va=(getPubTypeKey(a)||'').toLowerCase();vb=(getPubTypeKey(b)||'').toLowerCase();return dir*(va<vb?-1:va>vb?1:0); }
     else if(col==='avail')   { va=_itemManufDays(a);                       vb=_itemManufDays(b); }
     else if(col==='thermo')  { va=_itemThermoScore(a);                     vb=_itemThermoScore(b); }
     else if(legacySort==='sold')       { return (b.sold_quantity||0)-(a.sold_quantity||0); }
@@ -7128,13 +7189,13 @@ function renderPubs(){
   const tbody=document.getElementById('pubs-tbody');
   if(!tbody) return;
   if(!items.length){tbody.innerHTML='<tr><td colspan="12" style="text-align:center;color:var(--text3);padding:22px">Sin resultados para los filtros actuales</td></tr>';return;}
-  const _pubTypeLabel = { catalog:'Catálogo', gold:'Gold/Premium', free:'Gratuita', classic:'Clásica' };
+  const _pubTypeLabel = { catalog:'Catálogo', premium:'Premium', free:'Gratuita', classic:'Clásica' };
   tbody.innerHTML=items.map(item=>{
     const sku = itemGetSKU(item) || '';
     const skuDisp = sku || '—';
     const ean = itemGetEAN(item) || '';
     const eanDisp = ean || '—';
-    const ptype = getPubType(item);
+    const ptype = getPubTypeKey(item);
     const ptypeLabel = _pubTypeLabel[ptype] || ptype || '—';
     const manuf = itemGetManufacturingTime(item);
     const manufDisp = manuf ? manuf : '0 días';
@@ -7600,6 +7661,20 @@ function getPubTypeLabel(item){
   if(lt.includes('gold')) return 'Gold';
   if(lt === 'free' || lt === 'bronze') return 'Gratuita';
   return 'Clásica';
+}
+
+// v149: clave de tipo de publicacion para FILTRAR (4 buckets separados).
+// A diferencia de getPubType (que agrupa todo lo Gold en 'gold'), separa
+// Clasica (gold_special) de Premium (gold_pro / gold_premium / gold legacy).
+// Devuelve: 'catalog' | 'classic' | 'premium' | 'free'.
+function getPubTypeKey(item){
+  if(!item) return 'classic';
+  if(item.catalog_listing === true || item.catalog_product_id) return 'catalog';
+  const lt = (item.listing_type_id||'').toLowerCase();
+  if(lt === 'gold_special') return 'classic';
+  if(lt === 'gold_pro' || lt === 'gold_premium' || lt === 'gold') return 'premium';
+  if(lt === 'free' || lt === 'bronze' || lt === 'silver') return 'free';
+  return 'classic';
 }
 
 function mlEditLink(id){
@@ -8763,6 +8838,183 @@ function seoGoPage(n){
   if(btn && btn.textContent.includes('✓')) btn.textContent='📊 Cargar métricas';
 }
 
+// ════════════════════════════════════════════════════════════════════
+// v149: FILTROS AVANZADOS multi-rango para el Analizador SEO.
+// Conviven con AND junto a los chips de Tipo/Estado/Escenario y la
+// omnibusqueda (titulo / SKU / ID MLA-MLAU-numero, con debounce).
+// ════════════════════════════════════════════════════════════════════
+var seoAdvFilters = {
+  pmin:null, pmax:null, smin:null, smax:null,
+  dfrom:null, dto:null,
+  qmin:null, qmax:null, cmin:null, cmax:null,
+  v7min:null, v7max:null, v30min:null, v30max:null,
+  s7min:null, s7max:null, s60min:null, s60max:null,
+  soldmin:null, soldmax:null, thmin:null, thmax:null
+};
+var _seoAdvLiveTimer = null;
+var _seoSearchTimer  = null;
+
+// Calidad mostrada en la columna "Calidad pub." (qualityGoals.score 0-100)
+function _seoQualityPct(item){
+  try { return (typeof qualityGoals==='function') ? qualityGoals(item).score : 0; }
+  catch(e){ return 0; }
+}
+// Termometro/Score SEO (0-100). null = sin termometro calculado todavia.
+function _seoThermoPct(item){
+  const t = (window._seoThermo||{})[String(item.id)];
+  return t ? (t.score||0) : null;
+}
+function _seoAdvNum(id){
+  const el = document.getElementById(id);
+  if(!el) return null;
+  const v = el.value;
+  if(v === '' || v === null || v === undefined) return null;
+  const n = parseFloat(v);
+  return isNaN(n) ? null : n;
+}
+function _seoAdvDate(id){
+  const el = document.getElementById(id);
+  if(!el || !el.value) return null;
+  const t = new Date(el.value + 'T00:00:00').getTime();
+  return isNaN(t) ? null : t;
+}
+function seoAdvReadInputs(){
+  seoAdvFilters = {
+    pmin:_seoAdvNum('seo-adv-pmin'),     pmax:_seoAdvNum('seo-adv-pmax'),
+    smin:_seoAdvNum('seo-adv-smin'),     smax:_seoAdvNum('seo-adv-smax'),
+    dfrom:_seoAdvDate('seo-adv-dfrom'),  dto:_seoAdvDate('seo-adv-dto'),
+    qmin:_seoAdvNum('seo-adv-qmin'),     qmax:_seoAdvNum('seo-adv-qmax'),
+    cmin:_seoAdvNum('seo-adv-cmin'),     cmax:_seoAdvNum('seo-adv-cmax'),
+    v7min:_seoAdvNum('seo-adv-v7min'),   v7max:_seoAdvNum('seo-adv-v7max'),
+    v30min:_seoAdvNum('seo-adv-v30min'), v30max:_seoAdvNum('seo-adv-v30max'),
+    s7min:_seoAdvNum('seo-adv-s7min'),   s7max:_seoAdvNum('seo-adv-s7max'),
+    s60min:_seoAdvNum('seo-adv-s60min'), s60max:_seoAdvNum('seo-adv-s60max'),
+    soldmin:_seoAdvNum('seo-adv-soldmin'),soldmax:_seoAdvNum('seo-adv-soldmax'),
+    thmin:_seoAdvNum('seo-adv-thmin'),   thmax:_seoAdvNum('seo-adv-thmax')
+  };
+}
+function _seoInRange(val, mn, mx){
+  if(mn !== null && (val === null || val < mn)) return false;
+  if(mx !== null && (val === null || val > mx)) return false;
+  return true;
+}
+// Devuelve true si el item pasa TODOS los rangos activos (AND).
+function seoAdvMatches(item){
+  const f = seoAdvFilters;
+  // ── Inventario / tiempo ──
+  if(!_seoInRange(item.price||0, f.pmin, f.pmax)) return false;
+  if(!_seoInRange(item.available_quantity==null?0:item.available_quantity, f.smin, f.smax)) return false;
+  if(f.dfrom !== null || f.dto !== null){
+    const ts = item.date_created ? new Date(item.date_created).getTime() : null;
+    if(ts === null || isNaN(ts)) return false;
+    if(f.dfrom !== null && ts < f.dfrom) return false;
+    if(f.dto !== null && ts > (f.dto + 86399999)) return false; // incluir todo el dia "hasta"
+  }
+  // ── Rendimiento / conversion ──
+  if(f.qmin !== null || f.qmax !== null){
+    if(!_seoInRange(_seoQualityPct(item), f.qmin, f.qmax)) return false;
+  }
+  const m = itemMetrics[item.id];
+  if(f.cmin !== null || f.cmax !== null){
+    if(!_seoInRange(m ? (m.conv||0) : null, f.cmin, f.cmax)) return false;
+  }
+  if(f.v7min !== null || f.v7max !== null){
+    if(!_seoInRange(m ? (m.visits||0) : null, f.v7min, f.v7max)) return false;
+  }
+  if(f.v30min !== null || f.v30max !== null){
+    if(!_seoInRange(m ? (m.visits30||0) : null, f.v30min, f.v30max)) return false;
+  }
+  if(f.s7min !== null || f.s7max !== null){
+    if(!_seoInRange(m ? (m.sales||0) : null, f.s7min, f.s7max)) return false;
+  }
+  if(f.s60min !== null || f.s60max !== null){
+    if(!_seoInRange(m ? (m.sales60||0) : null, f.s60min, f.s60max)) return false;
+  }
+  if(!_seoInRange(item.sold_quantity||0, f.soldmin, f.soldmax)) return false;
+  if(f.thmin !== null || f.thmax !== null){
+    if(!_seoInRange(_seoThermoPct(item), f.thmin, f.thmax)) return false;
+  }
+  return true;
+}
+function seoAdvActiveCount(){
+  const f = seoAdvFilters;
+  let n = 0;
+  if(f.pmin!==null||f.pmax!==null) n++;
+  if(f.smin!==null||f.smax!==null) n++;
+  if(f.dfrom!==null||f.dto!==null) n++;
+  if(f.qmin!==null||f.qmax!==null) n++;
+  if(f.cmin!==null||f.cmax!==null) n++;
+  if(f.v7min!==null||f.v7max!==null) n++;
+  if(f.v30min!==null||f.v30max!==null) n++;
+  if(f.s7min!==null||f.s7max!==null) n++;
+  if(f.s60min!==null||f.s60max!==null) n++;
+  if(f.soldmin!==null||f.soldmax!==null) n++;
+  if(f.thmin!==null||f.thmax!==null) n++;
+  return n;
+}
+function seoAdvUpdateBadge(){
+  const n = seoAdvActiveCount();
+  const badge = document.getElementById('seo-adv-badge');
+  const btn   = document.getElementById('seo-adv-btn');
+  if(badge){
+    if(n>0){ badge.style.display='inline-block'; badge.textContent=String(n); }
+    else { badge.style.display='none'; }
+  }
+  if(btn){
+    btn.style.background  = n>0 ? 'var(--accent)' : '';
+    btn.style.color       = n>0 ? '#fff' : '';
+    btn.style.borderColor = n>0 ? 'var(--accent)' : '';
+  }
+}
+function seoAdvApply(){
+  seoAdvReadInputs();
+  seoAdvUpdateBadge();
+  const f = seoAdvFilters;
+  const needMetrics = (f.cmin!==null||f.cmax!==null||f.v7min!==null||f.v7max!==null||
+    f.v30min!==null||f.v30max!==null||f.s7min!==null||f.s7max!==null||
+    f.s60min!==null||f.s60max!==null||f.thmin!==null||f.thmax!==null);
+  const anyMetrics = Object.keys(itemMetrics||{}).length>0;
+  const hint = document.getElementById('seo-adv-perf-hint');
+  if(hint) hint.style.display = (needMetrics && !anyMetrics) ? 'block' : 'none';
+  const stt = document.getElementById('seo-adv-status');
+  if(stt){ const n=seoAdvActiveCount(); stt.textContent = n ? (n+' filtro(s) de rango activo(s)') : ''; }
+  seoGoPage(1);
+}
+function seoAdvLive(){
+  clearTimeout(_seoAdvLiveTimer);
+  _seoAdvLiveTimer = setTimeout(seoAdvApply, 220);
+}
+function seoAdvClear(){
+  ['pmin','pmax','smin','smax','dfrom','dto','qmin','qmax','cmin','cmax',
+   'v7min','v7max','v30min','v30max','s7min','s7max','s60min','s60max',
+   'soldmin','soldmax','thmin','thmax'].forEach(k=>{
+    const el = document.getElementById('seo-adv-'+k);
+    if(el) el.value='';
+  });
+  seoAdvReadInputs();
+  seoAdvUpdateBadge();
+  const stt = document.getElementById('seo-adv-status'); if(stt) stt.textContent='';
+  const hint = document.getElementById('seo-adv-perf-hint'); if(hint) hint.style.display='none';
+  seoGoPage(1);
+}
+function seoAdvToggle(){
+  const p = document.getElementById('seo-adv-panel');
+  if(!p) return;
+  p.style.display = (p.style.display==='none'||!p.style.display) ? 'block' : 'none';
+}
+// Omnibusqueda con debounce (titulo / SKU / ID MLA-MLAU-numero)
+function seoSearchDebounced(){
+  clearTimeout(_seoSearchTimer);
+  _seoSearchTimer = setTimeout(function(){ seoGoPage(1); }, 240);
+}
+
+// Debounce de la busqueda en la seccion Publicaciones
+var _pubSearchTimer = null;
+function pubSearchDebounced(){
+  clearTimeout(_pubSearchTimer);
+  _pubSearchTimer = setTimeout(function(){ if(typeof renderPubs==='function') renderPubs(); }, 240);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // v138: EXPORTADOR DE REPORTE SEO → .xlsx (3 hojas) para análisis con IA
 // ═══════════════════════════════════════════════════════════════════════════
@@ -8811,8 +9063,7 @@ function _seoExportColumns(){
     { id:'conv',        label:'Conversión %',       type:'num',  def:true,  value:i=>{ const m=itemMetrics[i.id]; return m?(m.conv||0):''; } },
     { id:'lastSale',    label:'Última venta',       type:'text', def:true,  value:i=> fmtTs(getLastSaleTs(i.id)) },
     { id:'daysNoSale',  label:'Días sin ventas',    type:'num',  def:true,  value:i=>{ const d=getDaysSinceLastSale(i.id); return d===Infinity?'':d; } },
-    { id:'hasEAN',      label:'Tiene EAN/GTIN',     type:'text', def:true,  value:i=> itemHasEAN(i)?'Sí':'No' },
-    { id:'ean',         label:'Código universal (GTIN/EAN)', type:'text', def:true, value:i=> itemGetEAN(i) },
+    { id:'ean',         label:'Código de Barras / EAN', type:'text', def:true,  value:i=> itemGetEAN(i) || '' },
     { id:'availTime',   label:'Tiempo de disponibilidad',    type:'text', def:true, value:i=> itemGetManufacturingTime(i) },
     { id:'pics',        label:'Cantidad fotos',     type:'num',  def:true,  value:i=> (i.pictures||[]).length || (i.thumbnail?1:0) },
     { id:'freeShip',    label:'Envío gratis',       type:'text', def:true,  value:i=> ((i.shipping?.free_shipping)||(i.tags||[]).includes('free_shipping'))?'Sí':'No' },
@@ -9018,8 +9269,7 @@ async function seoExportRun(){
       ['Ventas 60d / 7d', 'Ventas en los últimos 60 y 7 días'],
       ['Conversión %', 'Ventas dividido visitas. Indicador clave de eficiencia de la publicación'],
       ['Última venta / Días sin ventas', 'Fecha de la última venta y días transcurridos'],
-      ['Tiene EAN/GTIN', 'Si tiene código universal de producto (mejora posicionamiento)'],
-      ['Código universal (GTIN/EAN)', 'El valor del código de barras universal del producto. Editable para importar.'],
+      ['Código de Barras / EAN', 'Código de barras universal (GTIN / EAN-13) del producto. Celda vacía = sin código cargado. Editable: modificá el número para subirlo en lote a ML.'],
       ['Tiempo de disponibilidad', 'Días que tardás en tener el producto listo (sale_term MANUFACTURING_TIME). Editable para importar.'],
       ['Cantidad fotos', 'Número de imágenes (ML premia ≥2, idealmente más)'],
       ['Envío gratis', 'Si ofrece envío gratis'],
@@ -9162,24 +9412,45 @@ async function seoImportFileChosen(file){
 
     // Primera fila = encabezados
     const headers = aoa[0].map(h => _seoImportMatchHeader(h));
-    const idCol = headers.indexOf('id');
-    if(idCol === -1){ throw new Error('No encontré la columna "ID Publicación" (MLA...). Es obligatoria.'); }
+    const idCol  = headers.indexOf('id');
+    const skuCol = headers.indexOf('sku');
+    if(idCol === -1 && skuCol === -1){
+      throw new Error('No encontré ni la columna "ID Publicación" (MLA...) ni "SKU". Necesito al menos una para identificar las publicaciones.');
+    }
 
-    // Parsear filas
+    // v149: indice SKU -> ID para mapear filas que solo traen SKU (codigo interno).
+    const skuIndex = {};
+    (allItems||[]).forEach(it => {
+      const s = ((typeof itemGetSKU==='function' ? itemGetSKU(it) : (it.seller_custom_field||''))||'').toString().trim().toLowerCase();
+      if(s && !(s in skuIndex)) skuIndex[s] = String(it.id);
+    });
+
+    // Parsear filas. Clave primaria: ID (MLA); si falta, se resuelve por SKU.
     const rows = [];
+    let unresolved = 0;
     for(let r=1; r<aoa.length; r++){
       const raw = aoa[r];
-      const id = (raw[idCol]||'').toString().trim().toUpperCase();
-      if(!/^ML[A-Z]\d+/.test(id)) continue; // saltar filas sin ID válido
+      const rawId  = idCol  !== -1 ? (raw[idCol]||'').toString().trim().toUpperCase() : '';
+      const rowSku = skuCol !== -1 ? (raw[skuCol]||'').toString().trim() : '';
+      let id = rawId;
+      let bySku = false;
+      if(!/^ML[A-Z]\d+/.test(id)){
+        const key = rowSku.toLowerCase();
+        if(key && skuIndex[key]){ id = skuIndex[key]; bySku = true; }
+        else { if(rowSku) unresolved++; continue; } // sin ID ni SKU resoluble -> saltar
+      }
       const changes = {};
       headers.forEach((field, c) => {
         if(!field || field === 'id') return;
         let val = raw[c];
-        if(val === '' || val === null || val === undefined) return; // celda vacía → ignorar
+        if(val === '' || val === null || val === undefined) return; // celda vacia -> ignorar
         changes[field] = (typeof val === 'string') ? val.trim() : val;
       });
+      // Si la fila se identifico por SKU, el SKU es la CLAVE de mapeo, no un cambio a aplicar.
+      if(bySku) delete changes.sku;
       if(Object.keys(changes).length) rows.push({ id, changes });
     }
+    window._seoImportUnresolvedSku = unresolved;
 
     _seoImportRows = rows;
     if(fnEl) fnEl.innerHTML = '📄 <b>'+file.name+'</b> · hoja "'+wsName+'"';
@@ -9207,6 +9478,7 @@ async function seoImportFileChosen(file){
     prev.style.display = 'block';
     prev.innerHTML =
       '<div style="font-size:12.5px;font-weight:600;color:var(--text);margin-bottom:6px">📋 '+rows.length+' publicación'+(rows.length!==1?'es':'')+' con cambios detectados</div>'
+      + (window._seoImportUnresolvedSku ? '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 11px;font-size:11px;color:#78350f;margin-bottom:8px">⚠️ '+window._seoImportUnresolvedSku+' fila(s) traían SKU pero no coincidió con ninguna publicación cargada (no se pudieron mapear). Verificá que el catálogo esté cargado y que los SKU sean correctos.</div>' : '')
       + '<div style="margin-bottom:8px">'+countHtml+'</div>'
       + '<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;max-height:220px;overflow-y:auto">'
       +   '<table style="width:100%;border-collapse:collapse"><thead><tr style="background:var(--bg3)"><th style="text-align:left;font-size:10px;padding:5px 6px;color:var(--text3)">ID</th><th style="text-align:left;font-size:10px;padding:5px 6px;color:var(--text3)">Cambios a aplicar</th></tr></thead><tbody>'+sample
@@ -9441,14 +9713,22 @@ function seoGetFilteredItems(){
 
   return allItems.filter(i=>{
     if(!st && (i.status==='closed'||i.status==='deleted'||i.status==='inactive')) return false;
-    // Búsqueda multicriterio: título, ID (MLA...) y SKU (seller_custom_field)
-    if(searchQ&&!(
-      (i.title||'').toLowerCase().includes(searchQ)||
-      (i.id||'').toLowerCase().includes(searchQ)||
-      itemGetSKU(i).toLowerCase().includes(searchQ)
-    )) return false;
+    // v149: Omnibusqueda multicriterio: titulo, SKU, ID de ML (detecta MLA / MLAU / numero) y catalogo.
+    if(searchQ){
+      const qn  = searchQ.replace(/[\s\-_.]/g,'');
+      const idn = (i.id||'').toLowerCase();
+      const cat = (i.catalog_product_id||'').toLowerCase();
+      const hit =
+        (i.title||'').toLowerCase().includes(searchQ) ||
+        idn.includes(searchQ) || (qn && idn.includes(qn)) ||
+        cat.includes(searchQ) || (qn && cat.includes(qn)) ||
+        itemGetSKU(i).toLowerCase().includes(searchQ);
+      if(!hit) return false;
+    }
     if(st&&i.status!==st) return false;
-    if(seoState.tipoFilter && getPubType(i)!==seoState.tipoFilter) return false;
+    if(seoState.tipoFilter && getPubTypeKey(i)!==seoState.tipoFilter) return false;
+    // v149: Filtros avanzados por rango (precio, stock, fecha, metricas) -- AND estricto
+    if(typeof seoAdvMatches==='function' && !seoAdvMatches(i)) return false;
 
     // v80: Filtro por escenario activo.
     if(_seoActiveScenario){
@@ -10224,7 +10504,7 @@ async function loadSEOMetricsFull(){
   let filtered = allItems.filter(i=>{
     if(!st && (i.status==='closed'||i.status==='deleted'||i.status==='inactive')) return false;
     if(st && i.status!==st) return false;
-    if(seoState.tipoFilter && getPubType(i)!==seoState.tipoFilter) return false;
+    if(seoState.tipoFilter && getPubTypeKey(i)!==seoState.tipoFilter) return false;
     if(searchQ && !i.title.toLowerCase().includes(searchQ)) return false;
     return true;
   });
@@ -10271,7 +10551,7 @@ async function loadSEOMetrics(){
   let filtered = allItems.filter(i=>{
     if(!st && (i.status==='closed'||i.status==='deleted'||i.status==='inactive')) return false;
     if(st && i.status!==st) return false;
-    if(seoState.tipoFilter && getPubType(i)!==seoState.tipoFilter) return false;
+    if(seoState.tipoFilter && getPubTypeKey(i)!==seoState.tipoFilter) return false;
     if(searchQ && !i.title.toLowerCase().includes(searchQ)) return false;
     return true;
   });
@@ -13838,7 +14118,7 @@ const seoState = {
 function seoSetTipo(t){
   seoState.tipoFilter = t;
   seoState.page = 1;
-  ['all','catalog','gold','free'].forEach(s=>{
+  ['all','catalog','classic','premium','free'].forEach(s=>{
     const chip = document.getElementById('chip-tipo-'+s);
     if(!chip) return;
     const active = (s==='all'&&t==='')||(s===t);
@@ -16549,6 +16829,7 @@ function bulkClearFilters(){
     const el=document.getElementById(id); if(el) el.value='';
   });
   const st=document.getElementById('bulk-filter-status'); if(st) st.value='';
+  const tp=document.getElementById('bulk-filter-type'); if(tp) tp.value='';
   _bulkFiltered=[];
   const el=document.getElementById('bulk-item-list');
   if(el) el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:16px 0">Aplicá un filtro para ver publicaciones.</div>';
@@ -16562,8 +16843,10 @@ function applyBulkFilters(){
   const sMin  = parseFloat(document.getElementById('bulk-filter-smin')?.value);
   const sMax  = parseFloat(document.getElementById('bulk-filter-smax')?.value);
   const st    = document.getElementById('bulk-filter-status')?.value||'';
+  const tp    = document.getElementById('bulk-filter-type')?.value||'';
 
   _bulkFiltered = allItems.filter(i=>{
+    if(tp && typeof getPubTypeKey==='function' && getPubTypeKey(i)!==tp) return false;
     if(q){
       const sku = itemGetSKU(i).toLowerCase();
       if(!i.title.toLowerCase().includes(q) && !sku.includes(q) && !String(i.id).includes(q)) return false;
