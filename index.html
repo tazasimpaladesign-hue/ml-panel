@@ -5,6 +5,19 @@
   <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>ML Panel Pro — Panel Maestro</title>
+<!-- v151: arreglo GLOBAL de ventanas flotantes. Todos los overlays del panel usan
+     position:fixed + z-index:9999 + align-items:center, lo que recorta la parte superior
+     de los modales altos (había que scrollear hacia abajo). Forzamos alineado arriba +
+     scroll del overlay para que siempre se vean desde el encabezado. !important vence al
+     estilo inline. -->
+<style id="modal-top-fix">
+  div[style*="position:fixed"][style*="z-index:9999"][style*="align-items:center"]{
+    align-items:flex-start !important;
+    overflow-y:auto !important;
+    padding-top:20px !important;
+    padding-bottom:40px !important;
+  }
+</style>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
@@ -756,7 +769,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v150 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v151 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4636,7 +4649,7 @@ async function _pollPendingShipments(){
 // v93 [P5]: detector de versión del Worker. Si el Worker está desactualizado (no v55+),
 // significa que el header `x-format-new: true` no está siendo aplicado y el bug de
 // envíos sigue activo. Mostramos un banner amarillo al usuario.
-const _MIN_WORKER_VERSION = 82; // v150: Rank Math score real + imágenes Face Marketplace
+const _MIN_WORKER_VERSION = 83; // v151: lookup por id + Rank Math score
 async function _checkWorkerVersion(){
   try {
     const r = await fetch(WORKER + '/');
@@ -25367,7 +25380,7 @@ function wseoRenderTable(){
           <span>${scIcon}</span>
           <span style="font-size:12px;font-weight:700;color:${scC}">${sc}%</span>
         </div>
-        <div style="font-size:8.5px;margin-top:2px;font-weight:600;letter-spacing:.02em;color:${scIsRM?'#7c3aed':'var(--text3)'}">${scIsRM?'Rank Math':'auto'}</div>
+        <div style="font-size:9px;margin-top:3px;font-weight:700;letter-spacing:.02em">${scIsRM?'<span style="background:#7c3aed;color:#fff;padding:1px 6px;border-radius:8px">Rank Math</span>':'<span style="color:var(--text3);font-weight:600">sin Rank Math</span>'}</div>
       </td>
       <td>
         <div style="display:flex;flex-wrap:wrap;gap:3px;align-items:center">
@@ -25602,12 +25615,14 @@ async function fbmpEnsureFull(p){
   if(_fbmpWork[p.id] && Array.isArray(_fbmpWork[p.id].images)) return _fbmpWork[p.id];
   if(Array.isArray(p.images) && p.images.length){ _fbmpWork[p.id] = p; return p; }
   const term = (p.sku && p.sku.trim()) ? p.sku.trim() : (p.name||'').slice(0,48);
-  const url = WORKER + '/woo/products?images=1&status=any&per_page=10&search=' + encodeURIComponent(term);
+  // v151: traer por ID exacto (Worker v83). La búsqueda por SKU a veces no devolvía el
+  // producto y caíamos al thumbnail (1 sola foto). Por id viene SIEMPRE con todas.
+  const url = WORKER + '/woo/products?images=1&status=any&id=' + encodeURIComponent(p.id);
   const r = await fetch(url, { headers:{ Authorization:'Bearer '+token } });
   const d = await r.json();
   if(d.error) throw new Error(d.error);
   const list = d.products || [];
-  let full = list.find(x => Number(x.id) === Number(p.id)) || (list.length===1 ? list[0] : null);
+  let full = list.find(x => Number(x.id) === Number(p.id)) || list[0] || null;
   if(!full){
     // último intento: si el producto base ya tenía thumbnail, lo usamos como única foto
     full = Object.assign({}, p, { images: p.thumbnail ? [{src:p.thumbnail, alt:p.img_alt||''}] : [], short_desc: '' });
@@ -25752,15 +25767,90 @@ function fbmpTogglePublished(id, on){
 }
 
 // ── Descarga de imágenes (ZIP) ───────────────────────────────
-function _fbmpLoadFflate(){
-  return new Promise((resolve, reject)=>{
-    if(window.fflate) return resolve(window.fflate);
-    const s = document.createElement('script');
-    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/fflate/0.8.2/umd/index.min.js';
-    s.onload = () => window.fflate ? resolve(window.fflate) : reject(new Error('fflate no disponible'));
-    s.onerror = () => reject(new Error('No se pudo cargar fflate (CDN)'));
-    document.head.appendChild(s);
+// v151: ZIP armado en JS puro (método "store", sin compresión) — las imágenes ya vienen
+// comprimidas (jpg/webp/png), así que no hace falta deflate ni librerías de CDN. Esto
+// elimina la falla "No se pudo cargar fflate (CDN)".
+const _FBMP_CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++){ c = (c&1) ? (0xEDB88320 ^ (c>>>1)) : (c>>>1); } t[n]=c>>>0; }
+  return t;
+})();
+function _fbmpCrc32(bytes){
+  let c = 0xFFFFFFFF;
+  for(let i=0;i<bytes.length;i++){ c = _FBMP_CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c>>>8); }
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+function _fbmpZip(files){
+  // files: { name: Uint8Array }
+  const enc = new TextEncoder();
+  const chunks = [];      // partes del archivo final
+  const central = [];     // entradas del directorio central
+  let offset = 0;
+  const u16 = v => new Uint8Array([v&0xFF,(v>>>8)&0xFF]);
+  const u32 = v => new Uint8Array([v&0xFF,(v>>>8)&0xFF,(v>>>16)&0xFF,(v>>>24)&0xFF]);
+  const push = (arr, bytes) => { arr.push(bytes); return bytes.length; };
+
+  const names = Object.keys(files);
+  names.forEach(name => {
+    const data = files[name];
+    const nameBytes = enc.encode(name);
+    const crc = _fbmpCrc32(data);
+    const size = data.length;
+    // Local file header
+    const local = [];
+    push(local, u32(0x04034b50));      // signature
+    push(local, u16(20));              // version needed
+    push(local, u16(0));               // flags
+    push(local, u16(0));               // method 0 = store
+    push(local, u16(0)); push(local, u16(0)); // time, date
+    push(local, u32(crc));
+    push(local, u32(size));            // compressed size
+    push(local, u32(size));            // uncompressed size
+    push(local, u16(nameBytes.length));
+    push(local, u16(0));               // extra len
+    push(local, nameBytes);
+    local.forEach(b => chunks.push(b));
+    chunks.push(data);
+    const localLen = local.reduce((a,b)=>a+b.length,0) + size;
+
+    // Central directory entry
+    const c = [];
+    push(c, u32(0x02014b50));
+    push(c, u16(20)); push(c, u16(20));
+    push(c, u16(0)); push(c, u16(0));
+    push(c, u16(0)); push(c, u16(0));
+    push(c, u32(crc));
+    push(c, u32(size)); push(c, u32(size));
+    push(c, u16(nameBytes.length));
+    push(c, u16(0)); push(c, u16(0));
+    push(c, u16(0)); push(c, u16(0));
+    push(c, u32(0));                   // external attrs
+    push(c, u32(offset));              // offset of local header
+    push(c, nameBytes);
+    central.push(c);
+    offset += localLen;
   });
+
+  const centralStart = offset;
+  let centralLen = 0;
+  central.forEach(c => { c.forEach(b => chunks.push(b)); centralLen += c.reduce((a,b)=>a+b.length,0); });
+
+  // End of central directory
+  const end = [];
+  push(end, u32(0x06054b50));
+  push(end, u16(0)); push(end, u16(0));
+  push(end, u16(names.length)); push(end, u16(names.length));
+  push(end, u32(centralLen));
+  push(end, u32(centralStart));
+  push(end, u16(0));
+  end.forEach(b => chunks.push(b));
+
+  // Concatenar
+  const totalLen = chunks.reduce((a,b)=>a+b.length,0);
+  const out = new Uint8Array(totalLen);
+  let pos = 0;
+  chunks.forEach(b => { out.set(b, pos); pos += b.length; });
+  return out;
 }
 // Descarga bytes de una imagen. Intenta directo; si CORS bloquea, usa corsproxy.io
 // (mismo relay que ya usás para ML en COMPETENCIA / repricing).
@@ -25783,7 +25873,6 @@ async function fbmpDownloadZip(id, btn){
   const orig = btn ? btn.innerHTML : '';
   if(btn){ btn.disabled=true; btn.innerHTML='⏳ Descargando…'; }
   try{
-    const fflate = await _fbmpLoadFflate();
     const files = {};
     const base = ((p.sku||p.name||('prod-'+id)).toString().trim().replace(/[^\w\-]+/g,'-').replace(/^-+|-+$/g,'').slice(0,40)) || ('prod-'+id);
     let ok = 0;
@@ -25797,7 +25886,7 @@ async function fbmpDownloadZip(id, btn){
       }catch(e){ console.warn('[fbmp] foto '+(i+1)+' fallo:', e.message); }
     }
     if(!ok) throw new Error('No se pudo descargar ninguna foto (CORS).');
-    const zipped = fflate.zipSync(files, { level: 6 });
+    const zipped = _fbmpZip(files);
     const blob = new Blob([zipped], { type:'application/zip' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
