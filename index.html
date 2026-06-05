@@ -769,7 +769,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v152 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v153 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -3597,7 +3597,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <input type="number" id="fbmp-cfg-limit" min="1" max="50" style="width:100%;font-size:12px;padding:6px 9px" placeholder="5">
         </div>
       </div>
-      <label style="font-size:11px;color:var(--text3);font-weight:600;display:block;margin-bottom:4px">📝 Pie de descripción (se agrega al final de cada aviso)</label>
+      <label style="font-size:11px;color:var(--text3);font-weight:600;display:block;margin-bottom:4px">📝 Descripción por defecto (mensaje para copiar/pegar en cada aviso)</label>
       <textarea id="fbmp-cfg-footer" rows="4" style="width:100%;font-size:12px;padding:8px 10px;font-family:inherit;resize:vertical"></textarea>
       <div style="margin-top:8px;font-size:11px;color:var(--text3)">🗂️ <strong>Categoría Facebook por categoría WooCommerce:</strong> es solo una sugerencia que te recuerda cuál elegir en el desplegable de Facebook (FB no permite pegar la categoría).</div>
       <div id="fbmp-catmap" style="margin-top:6px"></div>
@@ -25412,7 +25412,17 @@ const FBMP_CFG_KEY = 'mlp_fbmp_config_v1';
 const FBMP_MAP_KEY = 'mlp_fbmp_catmap_v1';
 const FBMP_PUB_KEY = 'mlp_fbmp_published_v1';
 const FBMP_CREATE_URL = 'https://www.facebook.com/marketplace/create/item';
+// v153: descripción por defecto (mensaje listo para copiar/pegar en Marketplace)
 const FBMP_DEFAULT_FOOTER =
+  '🛒 Comprá fácil, rápido y seguro en nuestra web:\n\n' +
+  '👉 tiendaimpala.com.ar\n\n' +
+  '💳 Pagos: Todos los métodos disponibles.\n' +
+  '🚚 Retiros: Centro de Mendoza (Las Heras y 25 de Mayo) al día hábil siguiente.\n' +
+  '📦 Envíos: A todo el país, nuestra web lo calcula.\n' +
+  '🎁 Diseños únicos y personalizados.\n' +
+  '📲 Consultas por WhatsApp: 2616267166';
+// Default anterior — si quedó guardado en localStorage lo migramos al nuevo automáticamente
+const FBMP_OLD_FOOTER_V1 =
   '✅ Envíos a todo el país.\n' +
   '📍 Retiro sin cargo en Mendoza Capital.\n' +
   '💬 Consultá por más diseños, modelos y combos.\n' +
@@ -25421,9 +25431,15 @@ const FBMP_DEFAULT_FOOTER =
 function fbmpGetConfig(){
   let c = {};
   try { c = JSON.parse(localStorage.getItem(FBMP_CFG_KEY) || '{}') || {}; } catch(e){}
+  // Si hay un footer personalizado (distinto del default viejo) se respeta; si está
+  // vacío o es el default anterior, se usa el mensaje nuevo.
+  let footer = FBMP_DEFAULT_FOOTER;
+  if(typeof c.footer === 'string' && c.footer.trim() && c.footer.trim() !== FBMP_OLD_FOOTER_V1.trim()){
+    footer = c.footer;
+  }
   return {
     location: c.location || 'Mendoza, Mendoza',
-    footer:   (typeof c.footer === 'string') ? c.footer : FBMP_DEFAULT_FOOTER,
+    footer:   footer,
     limit:    parseInt(c.limit, 10) > 0 ? parseInt(c.limit, 10) : 5,
   };
 }
@@ -25650,10 +25666,20 @@ function fbmpBuildTitle(p){
 }
 function fbmpBuildDesc(p){
   const cfg = fbmpGetConfig();
+  const footer = (cfg.footer||'').trim();
+  // La descripción por defecto es el mensaje configurado (listo para copiar/pegar).
+  // Editable por producto en el modal. Si no hubiera mensaje, cae a la descripción corta.
+  if(footer) return footer;
   let body = fbmpStripHtml(p.short_desc);
   if(!body || body.length < 8) body = (p.name||'').trim();
-  const footer = (cfg.footer||'').trim();
-  return footer ? (body + '\n\n' + footer) : body;
+  return body;
+}
+// v153: etiquetas = cada palabra del título seguida de coma. No deduplica (respeta
+// repeticiones como "Messi ... Messi"). Ej: "Taza, Messi, Cerámica, ... Argentina,"
+function fbmpBuildTags(p){
+  const t = fbmpBuildTitle(p);
+  const words = (t||'').split(/\s+/).filter(Boolean);
+  return words.map(w => w + ',').join(' ');
 }
 function fbmpSuggestCategory(p){
   const map = fbmpGetCatMap();
@@ -25683,6 +25709,8 @@ function fbmpRenderModal(p){
   const pub = fbmpGetPublished();
   const isPub = !!pub[p.id];
   const title = fbmpBuildTitle(p);
+  const tags  = fbmpBuildTags(p);
+  const sku   = p.sku || '';
   const desc  = fbmpBuildDesc(p);
   const priceNum = Math.round(p.price||0);
   const cat = fbmpSuggestCategory(p);
@@ -25710,6 +25738,10 @@ function fbmpRenderModal(p){
     '<div style="font-size:12px;color:var(--text3);margin-bottom:12px">Pegá cada campo en el formulario de Marketplace y arrastrá las fotos. Podés editar los textos antes de copiar.</div>' +
 
     fieldRow({t:'📌 Título', id:'title'}, title, false) +
+
+    fieldRow({t:'🏷️ Etiquetas de producto', id:'tags', rows:2}, tags, true) +
+
+    fieldRow({t:'🔖 SKU', id:'sku'}, sku, false) +
 
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
       fieldRow({t:'💵 Precio (solo número)', id:'price'}, String(priceNum), false) +
