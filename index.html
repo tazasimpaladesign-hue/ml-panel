@@ -769,7 +769,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v153 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v154 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4649,7 +4649,7 @@ async function _pollPendingShipments(){
 // v93 [P5]: detector de versión del Worker. Si el Worker está desactualizado (no v55+),
 // significa que el header `x-format-new: true` no está siendo aplicado y el bug de
 // envíos sigue activo. Mostramos un banner amarillo al usuario.
-const _MIN_WORKER_VERSION = 84; // v152: proxy de imagenes /img
+const _MIN_WORKER_VERSION = 85; // v154: sync publicado Face Marketplace
 async function _checkWorkerVersion(){
   try {
     const r = await fetch(WORKER + '/');
@@ -9783,6 +9783,16 @@ async function seoImportRun(){
             if(sa) sa.value_name = skuVal; else local.attributes.push({ id:'SELLER_SKU', value_name: skuVal });
             local.seller_custom_field = skuVal; // legacy sync por las dudas
           }
+          // v154: sincronizar tiempo de disponibilidad (MANUFACTURING_TIME) en cache local
+          if(Array.isArray(body.sale_terms)){
+            const mtNew = body.sale_terms.find(t=>t.id==='MANUFACTURING_TIME');
+            if(mtNew){
+              local.sale_terms = (local.sale_terms||[]).filter(t=>t.id!=='MANUFACTURING_TIME');
+              if(mtNew.value_name && mtNew.value_name.trim()){
+                local.sale_terms.push({ id:'MANUFACTURING_TIME', value_name: mtNew.value_name });
+              }
+            }
+          }
         }
       }catch(e){}
     }catch(e){
@@ -9820,6 +9830,10 @@ async function seoImportRun(){
 
   // Refrescar la tabla SEO para mostrar los valores nuevos
   if(typeof renderSEOTable === 'function') renderSEOTable();
+  // v154: persistir cache local (sobrevive recargas, sin pedir nada a ML) y refrescar
+  // la tabla de Publicaciones para que el ⏳ de tiempo de disponibilidad quede al día.
+  try{ if(typeof _saveDataCache==='function') _saveDataCache(); }catch(e){}
+  if(typeof renderPubs === 'function') renderPubs();
   if(typeof showToast==='function') showToast('📤 Importación finalizada: '+results.ok.length+' OK / '+results.err.length+' error(es)', results.err.length?'warn':'success', 5000);
 }
 
@@ -10903,111 +10917,48 @@ function seoHotnessScore(item){
   if(!m) return null;
 
   // Datos base
-  const recent   = m.visits || 0;
-  const previous = m.visitsPrev || 0;
+  const recent   = m.visits || 0;        // visits7d
+  const previous = m.visitsPrev || 0;    // visitas semana previa
   const sales60  = m.sales60 || 0;
-  const sales7   = m.sales || 0;
+  const sales7   = m.sales || 0;          // ventas 7d
   const visits30 = m.visits30 || 0;
+  const conv     = m.conv || 0;           // conversion % (7d) que muestra el panel
   const stock    = (typeof item.available_quantity === 'number') ? item.available_quantity : 0;
 
   // ════════════════════════════════════════════════════════════════════════
-  // v147: MODELO COMBINADO v2 (Gemini + Sonnet). Threshold 55.
-  // Cambios clave vs v1:
-  //  - Momentum 40→20% y CONDICIONADO a mín. de visitas (era el principal
-  //    generador de falsos positivos: 3→6 visitas disparaba el ratio sin
-  //    significancia estadística).
-  //  - NUEVO Volumen de tráfico absoluto 25% (capta best-sellers estables que
-  //    no aceleran pero tienen tráfico sostenido).
-  //  - Conversión 25% con umbral sales60>=1 (antes >=2: descartaba items con
-  //    1 venta y conversión altísima).
-  //  - NUEVO Ventas 60d explícito 15% (demanda real comprobada).
-  //  - Velocidad 7d 8% · Preguntas 4% (señal menor) · Stock 3% (gate).
+  // v154: MODELO PREDICTIVO v2.1 (calibracion aprobada). Threshold 55.
+  // Pesos BINARIOS (cada factor suma su peso completo si cumple su condicion):
+  //   25  Trafico absoluto sostenido       visits7d >= 12
+  //   25  Conversion historica flexible     sales60 >= 1 AND conv >= 1.2%
+  //   20  Momentum acelerado condicionado   (visits7d/visitsPrev > 1.3) AND visits7d >= 8
+  //   20  Velocidad / venta reciente        sales7d > 0   (predictor mas fuerte a corto plazo)
+  //   10  Stock disponible                  stock > 0
+  // Cambios vs v2 (v147): velocidad 8->20%, stock 3->10%, se eliminan "Preguntas"
+  // (estaban muertas: 0 en todos los items clave) y el factor explicito "Ventas 60d"
+  // (queda absorbido dentro de Conversion). Esto sube el RECALL: rescata items con una
+  // venta fresca o conversion alta aunque no tengan momentum ni mucho volumen.
   // ════════════════════════════════════════════════════════════════════════
+  const W = { traffic:25, conv:25, momentum:20, velocity:20, stock:10 };
 
-  // ── Factor 1: Momentum acelerado CONDICIONADO (20%) ──
-  // Solo cuenta si hay un volumen mínimo de visitas (>=10), para no premiar
-  // crecimientos irrelevantes de micro-tráfico.
-  let momentumScore = 0;
-  let momentumRatio = 0;
-  if(previous > 0){
-    momentumRatio = recent / previous;
-    if(recent >= 10){
-      if(momentumRatio >= 1.5)      momentumScore = 20;  // explotó (+50%)
-      else if(momentumRatio >= 1.3) momentumScore = 17;  // acelerando (+30%)
-      else if(momentumRatio >= 1.1) momentumScore = 12;  // subiendo (+10%)
-      else if(momentumRatio >= 0.9) momentumScore = 7;   // estable
-      else if(momentumRatio >= 0.7) momentumScore = 2;   // bajando
-      else                          momentumScore = 0;   // crash
-    } else {
-      // Pocas visitas: el ratio no es confiable, damos crédito mínimo
-      if(momentumRatio >= 1.3) momentumScore = 6;
-      else if(momentumRatio >= 0.9) momentumScore = 3;
-    }
-  } else if(recent >= 10){
-    momentumScore = 14; // arrancó de cero con volumen real
-    momentumRatio = 2;
-  } else if(recent > 0){
-    momentumScore = 4;
-    momentumRatio = 2;
-  }
+  const momentumRatio = previous > 0 ? (recent / previous) : (recent > 0 ? 2 : 0);
 
-  // ── Factor 2: Volumen de tráfico absoluto (25%) — NUEVO ──
-  // Premia tráfico real sostenido aunque no esté acelerando.
-  let volumeScore = 0;
-  if(recent >= 40)      volumeScore = 25;  // tráfico muy alto
-  else if(recent >= 25) volumeScore = 20;
-  else if(recent >= 15) volumeScore = 14;
-  else if(recent >= 8)  volumeScore = 8;
-  else if(recent >= 3)  volumeScore = 3;
+  const trafficOk  = recent >= 12;
+  const convOk     = (sales60 >= 1) && (conv >= 1.2);
+  const momentumOk = (momentumRatio > 1.3) && (recent >= 8);
+  const velocityOk = sales7 > 0;
+  const stockOk    = stock > 0;
 
-  // ── Factor 3: Conversión histórica validada (25%) — umbral sales60>=1 ──
-  let convScore = 0;
+  const volumeScore   = trafficOk  ? W.traffic  : 0;
+  const convScore     = convOk     ? W.conv     : 0;
+  const momentumScore = momentumOk ? W.momentum : 0;
+  const velScore      = velocityOk ? W.velocity : 0;
+  const stockScore    = stockOk    ? W.stock    : 0;
+
+  // convHist: solo se usa para el trigger especial de "venta inminente"
   let convHist = 0;
-  if(visits30 > 0 && sales60 >= 1){
-    convHist = ((sales60/2) / visits30) * 100;
-    if(convHist >= 4)        convScore = 25;
-    else if(convHist >= 2.5) convScore = 21;
-    else if(convHist >= 1.5) convScore = 17;
-    else if(convHist >= 1)   convScore = 12;
-    else if(convHist >= 0.5) convScore = 6;
-  } else if(sales60 >= 5){
-    convScore = 15; // muchas ventas históricas sin visits30 → conv asumida ok
-  }
+  if(visits30 > 0 && sales60 >= 1) convHist = ((sales60/2) / visits30) * 100;
 
-  // ── Factor 4: Ventas recientes 60d (15%) — NUEVO explícito ──
-  let sales60Score = 0;
-  if(sales60 >= 6)      sales60Score = 15;
-  else if(sales60 >= 3) sales60Score = 11;
-  else if(sales60 >= 1) sales60Score = 6;
-
-  // ── Factor 5: Velocidad reciente 7d (8%) ──
-  let velScore = 0;
-  if(sales7 >= 2)      velScore = 8;
-  else if(sales7 >= 1) velScore = 6;
-  else if(sales60 >= 2 && recent > previous) velScore = 3; // tracción sin venta semanal
-
-  // ── Factor 6: Preguntas recientes 7d (4%) — señal menor ──
-  let questionsScore = 0;
-  let recentQs = 0;
-  try {
-    if(typeof allQuestions !== 'undefined' && Array.isArray(allQuestions)){
-      const cutoff = Date.now() - 7*86400000;
-      recentQs = allQuestions.filter(q =>
-        String(q.item_id) === id &&
-        q.date_created && new Date(q.date_created).getTime() > cutoff
-      ).length;
-      if(recentQs >= 2)      questionsScore = 4;
-      else if(recentQs >= 1) questionsScore = 2;
-    }
-  } catch(e){}
-
-  // ── Factor 7: Stock disponible (3%) — gate binario ──
-  let stockScore = 0;
-  if(stock >= 3)      stockScore = 3;
-  else if(stock >= 1) stockScore = 2;
-  // stock 0 → 0 (no se puede vender)
-
-  const totalScore = momentumScore + volumeScore + convScore + sales60Score + velScore + questionsScore + stockScore;
+  const totalScore = volumeScore + convScore + momentumScore + velScore + stockScore;
 
   // Trigger especial: "Venta inminente por estadística"
   // Mucho tráfico ESTA semana, conversión histórica buena, pero 0 ventas aún.
@@ -11028,13 +10979,11 @@ function seoHotnessScore(item){
     isHot,
     isImminent,
     factors: {
-      momentum:   { score: momentumScore, ratio: momentumRatio.toFixed(2), max: 20 },
-      volume:     { score: volumeScore,   value: recent,                    max: 25 },
-      conversion: { score: convScore,     value: convHist.toFixed(2),       max: 25 },
-      sales60:    { score: sales60Score,  value: sales60,                   max: 15 },
-      velocity:   { score: velScore,      sales7,                           max: 8 },
-      questions:  { score: questionsScore, count: recentQs,                 max: 4 },
-      stock:      { score: stockScore,    value: stock,                     max: 3 },
+      volume:     { score: volumeScore,   value: recent,                   cond: 'visits7d>=12',            max: 25 },
+      conversion: { score: convScore,     value: conv.toFixed(1),          cond: 'sales60>=1 & conv>=1.2%', max: 25 },
+      momentum:   { score: momentumScore, ratio: momentumRatio.toFixed(2), cond: 'ratio>1.3 & visits7d>=8', max: 20 },
+      velocity:   { score: velScore,      sales7,                          cond: 'sales7d>0',               max: 20 },
+      stock:      { score: stockScore,    value: stock,                    cond: 'stock>0',                 max: 10 },
     },
   };
 }
@@ -12626,13 +12575,11 @@ function seoThermoOpenModal(itemId){
       html += '<div style="font-size:13px;font-weight:700;color:'+hotColor+'">'+h.score+'/100 — '+hotLabel+'</div>';
       html += '</div>';
       html += '<div style="font-size:11.5px;color:#374151;line-height:1.7">';
-      html += '<div>Volumen de tráfico: <strong>'+h.factors.volume.score+'/25</strong> ('+h.factors.volume.value+' visitas 7d)</div>';
-      html += '<div>Conversión histórica: <strong>'+h.factors.conversion.score+'/25</strong> ('+h.factors.conversion.value+'%)</div>';
-      html += '<div>Momentum: <strong>'+h.factors.momentum.score+'/20</strong> (ratio '+h.factors.momentum.ratio+'×)</div>';
-      html += '<div>Ventas 60d: <strong>'+h.factors.sales60.score+'/15</strong> ('+h.factors.sales60.value+' ventas)</div>';
-      html += '<div>Velocidad reciente: <strong>'+h.factors.velocity.score+'/8</strong> ('+h.factors.velocity.sales7+' ventas 7d)</div>';
-      html += '<div>Preguntas recientes (7d): <strong>'+h.factors.questions.score+'/4</strong> ('+h.factors.questions.count+' preguntas)</div>';
-      html += '<div>Stock: <strong>'+h.factors.stock.score+'/3</strong> ('+h.factors.stock.value+' unidades)</div>';
+      html += '<div>Tráfico sostenido: <strong>'+h.factors.volume.score+'/25</strong> ('+h.factors.volume.value+' visitas 7d · req. ≥12)</div>';
+      html += '<div>Conversión: <strong>'+h.factors.conversion.score+'/25</strong> ('+h.factors.conversion.value+'% · req. ≥1.2% y ≥1 venta 60d)</div>';
+      html += '<div>Momentum: <strong>'+h.factors.momentum.score+'/20</strong> (ratio '+h.factors.momentum.ratio+'× · req. >1.3 y ≥8 visitas)</div>';
+      html += '<div>Venta reciente (7d): <strong>'+h.factors.velocity.score+'/20</strong> ('+h.factors.velocity.sales7+' ventas 7d)</div>';
+      html += '<div>Stock: <strong>'+h.factors.stock.score+'/10</strong> ('+h.factors.stock.value+' unidades)</div>';
       html += '</div>';
       if(h.isImminent){
         html += '<div style="margin-top:9px;font-size:11.5px;color:#7f1d1d;background:#fff;padding:7px 9px;border-radius:6px;border-left:3px solid #dc2626"><strong>Acción:</strong> tenés mucho tráfico hot y la conversión histórica indica que la venta debería caer en próximas 48h. <em>NO bajes el precio, no toques el listing</em>. Asegurate de tener stock y responder preguntas rápido.</div>';
@@ -17246,6 +17193,12 @@ async function bulkUpdateAvailability(){
     let html = (fail===0?'✅':'⚠️')+' '+ok+' actualizadas'+(fail>0?' · '+fail+' fallaron':'');
     if(errSamples.length) html += '<div style="font-size:10.5px;color:var(--red);margin-top:4px;line-height:1.4">'+errSamples.map(e=>'• '+e).join('<br>')+(fail>errSamples.length?'<br>...':'')+'</div>';
     res.innerHTML = html;
+  }
+  // v154: persistir el cambio en el cache local (sobrevive recargas, sin pedir nada a ML)
+  // y refrescar la tabla de Publicaciones para que el ⏳ se actualice al instante.
+  if(ok>0){
+    try{ if(typeof _saveDataCache==='function') _saveDataCache(); }catch(e){}
+    try{ if(typeof renderPubs==='function') renderPubs(); }catch(e){}
   }
   renderBulkList();
 }
@@ -25457,8 +25410,34 @@ function fbmpTodayCount(){
 }
 
 // ── Init al entrar a la sección ──────────────────────────────
-function fbmpInit(){
+// v154: sync del estado "publicado" entre PCs vía KV del Worker (/api/fbmp-published).
+// La nube es la fuente de verdad: al entrar se carga y sobreescribe el cache local;
+// cada cambio se empuja a la nube. localStorage queda como respaldo offline.
+async function fbmpLoadPublishedFromKV(){
+  try{
+    const r = await fetch(WORKER + '/api/fbmp-published', { headers:{ Authorization:'Bearer '+token } });
+    if(!r.ok) return false;
+    const d = await r.json();
+    if(d && d.published && typeof d.published === 'object'){
+      fbmpSetPublished(d.published);
+      return true;
+    }
+  }catch(e){ /* sin conexión → se usa el cache local */ }
+  return false;
+}
+function fbmpPushPublishedToKV(){
+  try{
+    fetch(WORKER + '/api/fbmp-published', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', Authorization:'Bearer '+token },
+      body: JSON.stringify({ published: fbmpGetPublished() })
+    }).catch(()=>{});
+  }catch(e){}
+}
+
+async function fbmpInit(){
   fbmpRenderConfig();
+  await fbmpLoadPublishedFromKV();   // sincroniza el estado publicado entre PCs
   fbmpRenderCadence();
   // Reusar productos del Analizador SEO. Si no hay nada en memoria, intentar hidratar
   // desde el cache KV (mismo que SEO Tienda Woo) sin gastar requests a WooCommerce.
@@ -25790,6 +25769,7 @@ function fbmpTogglePublished(id, on){
   if(on) pub[id] = { at: Date.now() };
   else delete pub[id];
   fbmpSetPublished(pub);
+  fbmpPushPublishedToKV();   // sincroniza el cambio a la nube (todas las PCs)
   // Refrescar estado en la fila
   const cell = document.getElementById('fbmp-st-'+id);
   if(cell) cell.innerHTML = on
