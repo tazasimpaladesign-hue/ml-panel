@@ -821,6 +821,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   <a class="nav" href="#alertas" id="nav-alertas" onclick="showSection('alertas');return false;"><span class="ni">🔔</span>Alertas<span class="nb nb-red" id="nb-alerts">0</span></a>
 
   <div class="sb-sec">Integraciones</div>
+  <a class="nav" href="#perso-wa" id="nav-perso-wa" onclick="showSection('perso-wa');return false;"><span class="ni">🎨</span>Personalizadas WA<span class="nb nb-amber" id="nb-perso" style="display:none">0</span></a>
   <a class="nav" href="#woo-import" id="nav-woo-import" onclick="showSection('woo-import');return false;"><span class="ni">🛒</span>Importar a Woo</a>
   <a class="nav" href="#woo-seo" id="nav-woo-seo" onclick="showSection('woo-seo');return false;"><span class="ni">🟣</span>SEO Tienda Woo<span class="nb nb-amber" id="nb-woo" style="display:none">0</span></a>
   <a class="nav" href="#facebook-mp" id="nav-facebook-mp" onclick="showSection('facebook-mp');return false;"><span class="ni">🛒</span>Face Marketplace<span class="nb nb-blue" id="nb-fbmp" style="display:none">0</span></a>
@@ -3771,6 +3772,103 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
   <div class="alert a-info" style="margin-top:14px;font-size:11px">
     💡 <strong>Cómo se calcula:</strong> Las "ventas/día" son el promedio de los últimos 60 días sobre las órdenes ya cargadas en el panel. "Días de stock" = stock actual ÷ ventas/día. Todo se calcula <strong>localmente en el navegador</strong> — no consume requests adicionales al Worker.
+  </div>
+
+</div>
+
+<!-- ═══════════════════════ PERSONALIZADAS WA (v155) ═══════════════════════ -->
+<div id="section-perso-wa" class="section fade-in">
+
+  <!-- KPIs -->
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+    <div class="mc c-blue" style="flex:1;min-width:120px;padding:10px 14px;cursor:pointer" onclick="persoFilterEstado(null)">
+      <div class="mc-label">Total pedidos</div>
+      <div style="font-size:20px;font-weight:800" id="perso-kpi-total">—</div>
+    </div>
+    <div class="mc c-blue" style="flex:1;min-width:120px;padding:10px 14px;cursor:pointer" onclick="persoFilterEstado('disenando')">
+      <div class="mc-label">🎨 Diseñando</div>
+      <div style="font-size:20px;font-weight:800" id="perso-kpi-disenando">—</div>
+    </div>
+    <div class="mc c-amber" style="flex:1;min-width:120px;padding:10px 14px;cursor:pointer" onclick="persoFilterEstado('a_cobrar')">
+      <div class="mc-label">💰 A cobrar</div>
+      <div style="font-size:20px;font-weight:800" id="perso-kpi-a_cobrar">—</div>
+    </div>
+    <div class="mc c-green" style="flex:1;min-width:120px;padding:10px 14px;cursor:pointer" onclick="persoFilterEstado('pagada')">
+      <div class="mc-label">✅ Pagadas</div>
+      <div style="font-size:20px;font-weight:800" id="perso-kpi-pagada">—</div>
+    </div>
+    <div class="mc c-purple" style="flex:1;min-width:120px;padding:10px 14px;cursor:pointer" onclick="persoFilterEstado('entregada')">
+      <div class="mc-label">📦 Entregadas</div>
+      <div style="font-size:20px;font-weight:800" id="perso-kpi-entregada">—</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+      <div>
+        <div class="card-title">Pedidos de la guía interactiva</div>
+        <div class="card-sub" id="perso-count">—</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-left:auto;flex-wrap:wrap">
+        <input type="text" id="perso-search" placeholder="🔍 Código, comprador, producto, teléfono..." style="max-width:240px;font-size:12px;padding:5px 9px" oninput="persoRender()">
+        <button class="btn btn-ghost btn-sm" onclick="persoOpenManual()">➕ Carga manual</button>
+        <button class="btn btn-ghost btn-sm" onclick="persoRefresh()" id="perso-refresh-btn">↻ Actualizar</button>
+        <span id="perso-status" style="font-size:11px;color:var(--text3)"></span>
+      </div>
+    </div>
+    <div class="tw">
+      <table id="perso-table">
+        <thead><tr>
+          <th onclick="persoSort('ts')"        style="cursor:pointer;user-select:none;white-space:nowrap">Fecha <span id="perso-sort-ts" style="font-size:10px"></span></th>
+          <th onclick="persoSort('code')"      style="cursor:pointer;user-select:none;white-space:nowrap">Código <span id="perso-sort-code" style="font-size:10px"></span></th>
+          <th style="text-align:center">Mockup</th>
+          <th onclick="persoSort('producto')"  style="cursor:pointer;user-select:none;white-space:nowrap">Producto <span id="perso-sort-producto" style="font-size:10px"></span></th>
+          <th onclick="persoSort('cantidad')"  style="cursor:pointer;user-select:none;white-space:nowrap;text-align:center">Cant. <span id="perso-sort-cantidad" style="font-size:10px"></span></th>
+          <th onclick="persoSort('comprador')" style="cursor:pointer;user-select:none;white-space:nowrap">Comprador <span id="perso-sort-comprador" style="font-size:10px"></span></th>
+          <th onclick="persoSort('provincia')" style="cursor:pointer;user-select:none;white-space:nowrap">Provincia <span id="perso-sort-provincia" style="font-size:10px"></span></th>
+          <th onclick="persoSort('monto')"     style="cursor:pointer;user-select:none;white-space:nowrap;text-align:right">Monto <span id="perso-sort-monto" style="font-size:10px"></span></th>
+          <th style="white-space:nowrap">Teléfono</th>
+          <th onclick="persoSort('estado')"    style="cursor:pointer;user-select:none;white-space:nowrap;text-align:center">Estado <span id="perso-sort-estado" style="font-size:10px"></span></th>
+          <th style="text-align:center;min-width:90px">Acciones</th>
+        </tr></thead>
+        <tbody id="perso-tbody">
+          <tr><td colspan="11" style="text-align:center;padding:32px;color:var(--text3)">Cargando pedidos…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="alert a-info" style="margin-top:14px;font-size:11px">
+    💡 Los pedidos entran solos cuando el cliente envía su diseño desde la guía (tiendaimpala.com.ar/arma-tu-producto). El registro comercial (comprador, monto, estado) queda <strong>para siempre</strong>; los archivos del diseño en la nube vencen a los <strong>60 días</strong> — descargalos con 📥 antes de ese plazo.
+  </div>
+
+  <!-- Mini-modal de carga manual / edición -->
+  <div id="perso-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;align-items:center;justify-content:center">
+    <div class="card" style="max-width:440px;width:92%;margin:0;max-height:90vh;overflow:auto">
+      <div class="card-title" id="perso-modal-title" style="margin-bottom:10px">➕ Carga manual</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <input type="text"   id="perso-f-producto"  placeholder="Producto (ej: Taza mágica)" style="font-size:12px">
+        <div style="display:flex;gap:8px">
+          <input type="number" id="perso-f-cantidad" placeholder="Cantidad" min="1" value="1" style="font-size:12px;flex:1">
+          <input type="number" id="perso-f-monto"    placeholder="Monto $" min="0" style="font-size:12px;flex:1">
+        </div>
+        <input type="text"   id="perso-f-comprador" placeholder="Comprador *" style="font-size:12px">
+        <div style="display:flex;gap:8px">
+          <input type="text" id="perso-f-provincia" placeholder="Provincia" style="font-size:12px;flex:1">
+          <input type="tel"  id="perso-f-telefono"  placeholder="Teléfono (ej: 2615123456)" style="font-size:12px;flex:1">
+        </div>
+        <select id="perso-f-estado" style="font-size:12px">
+          <option value="disenando">🎨 Diseñando</option>
+          <option value="a_cobrar">💰 A cobrar</option>
+          <option value="pagada">✅ Pagada</option>
+          <option value="entregada">📦 Entregada</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
+        <button class="btn btn-ghost btn-sm" onclick="persoCloseModal()">Cancelar</button>
+        <button class="btn btn-sm" style="background:var(--accent);color:#fff" onclick="persoSaveModal()" id="perso-modal-save">💾 Guardar</button>
+      </div>
+    </div>
   </div>
 
 </div>
@@ -20838,8 +20936,268 @@ async function callClaude(prompt, history, maxTokens){
 // ═══════════════════════════════════════════════════════════
 // NAVIGATION
 // ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// v155 · PERSONALIZADAS WA — pedidos de la guía interactiva
+// Fuente: GET {WORKER}/api/guia-pedido (índice KV del Worker v87).
+// Estado editable inline; carga manual y edición vía mini-modal.
+// ═══════════════════════════════════════════════════════════════
+const PERSO_ESTADOS = {
+  disenando:  ['🎨 Diseñando', '#3b82f6'],
+  a_cobrar:   ['💰 A cobrar',  '#f59e0b'],
+  pagada:     ['✅ Pagada',     '#22c55e'],
+  entregada:  ['📦 Entregada',  '#8b5cf6'],
+};
+let _persoState = {
+  pedidos: [], loaded: false, loading: false,
+  sortCol: 'ts', sortDir: -1,
+  estadoFilter: null,        // filtro por chip KPI
+  editCode: null,            // código en edición (null = carga manual)
+};
+
+function persoInit() {
+  if (!_persoState.loaded && !_persoState.loading) persoRefresh();
+  else persoRender();
+}
+
+async function persoRefresh() {
+  _persoState.loading = true;
+  const st = document.getElementById('perso-status');
+  if (st) st.textContent = 'Cargando…';
+  try {
+    const r = await fetch(WORKER + '/api/guia-pedido');
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'respuesta inválida');
+    _persoState.pedidos = Array.isArray(d.pedidos) ? d.pedidos : [];
+    _persoState.loaded = true;
+    if (st) st.textContent = '✓ ' + new Date().toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'});
+  } catch (e) {
+    console.error('[perso]', e);
+    if (st) st.textContent = '⚠ Error: ' + e.message;
+  } finally {
+    _persoState.loading = false;
+    persoRender();
+    persoUpdateBadge();
+  }
+}
+
+function persoUpdateBadge() {
+  const pend = _persoState.pedidos.filter(p => p.estado !== 'entregada').length;
+  const nb = document.getElementById('nb-perso');
+  if (!nb) return;
+  nb.textContent = pend;
+  nb.style.display = pend > 0 ? '' : 'none';
+}
+
+function persoFilterEstado(estado) {
+  _persoState.estadoFilter = (_persoState.estadoFilter === estado) ? null : estado;
+  persoRender();
+}
+
+function persoSort(col) {
+  if (_persoState.sortCol === col) _persoState.sortDir *= -1;
+  else { _persoState.sortCol = col; _persoState.sortDir = (col === 'ts' || col === 'monto' || col === 'cantidad') ? -1 : 1; }
+  ['ts','code','producto','cantidad','comprador','provincia','monto','estado'].forEach(c => {
+    const el = document.getElementById('perso-sort-' + c);
+    if (el) el.innerHTML = sortArrow(c, _persoState.sortCol, _persoState.sortDir);
+  });
+  persoRender();
+}
+
+function _persoWaNum(tel) {
+  const d = String(tel || '').replace(/\D/g, '');
+  if (!d) return '';
+  return d.startsWith('54') ? d : '549' + d;
+}
+
+function _persoEsc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+
+function persoRender() {
+  const tb = document.getElementById('perso-tbody');
+  if (!tb) return;
+  const q = (document.getElementById('perso-search').value || '').toLowerCase().trim();
+
+  // KPIs
+  const all = _persoState.pedidos;
+  const kpi = { total: all.length, disenando: 0, a_cobrar: 0, pagada: 0, entregada: 0 };
+  all.forEach(p => { if (kpi[p.estado] !== undefined) kpi[p.estado]++; });
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  set('perso-kpi-total', kpi.total);
+  set('perso-kpi-disenando', kpi.disenando);
+  set('perso-kpi-a_cobrar', kpi.a_cobrar);
+  set('perso-kpi-pagada', kpi.pagada);
+  set('perso-kpi-entregada', kpi.entregada);
+
+  // Filtro + búsqueda
+  let rows = all.slice();
+  if (_persoState.estadoFilter) rows = rows.filter(p => p.estado === _persoState.estadoFilter);
+  if (q) rows = rows.filter(p =>
+    (p.code || '').toLowerCase().includes(q) ||
+    (p.comprador || '').toLowerCase().includes(q) ||
+    (p.producto || '').toLowerCase().includes(q) ||
+    String(p.telefono || '').includes(q) ||
+    (p.provincia || '').toLowerCase().includes(q));
+
+  // Orden
+  const col = _persoState.sortCol, dir = _persoState.sortDir;
+  rows.sort((a, b) => {
+    let va = a[col], vb = b[col];
+    if (col === 'ts' || col === 'monto' || col === 'cantidad') { va = +va || 0; vb = +vb || 0; }
+    else { va = String(va || '').toLowerCase(); vb = String(vb || '').toLowerCase(); }
+    return va < vb ? -dir : va > vb ? dir : 0;
+  });
+
+  const cnt = document.getElementById('perso-count');
+  if (cnt) cnt.textContent = rows.length + ' pedido(s)' +
+    (_persoState.estadoFilter ? ' · filtro: ' + (PERSO_ESTADOS[_persoState.estadoFilter] || ['?'])[0] : '');
+
+  if (!rows.length) {
+    tb.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:32px;color:var(--text3)">' +
+      (all.length ? 'Sin resultados para el filtro actual.' :
+       'Todavía no hay pedidos. Entran solos cuando un cliente envía su diseño desde la guía 🎨') + '</td></tr>';
+    return;
+  }
+
+  tb.innerHTML = rows.map(p => {
+    const f = new Date(p.ts);
+    const fecha = f.toLocaleDateString('es-AR', {day:'2-digit',month:'2-digit',year:'2-digit'}) +
+      ' ' + f.toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'});
+    const mock = (p.hasMockup && p.secret)
+      ? '<img src="' + WORKER + '/api/guia-pedido/' + p.code + '/file/MOCKUP_vista_previa.png?k=' + p.secret +
+        '" loading="lazy" style="width:42px;height:42px;object-fit:contain;border-radius:6px;background:var(--bg2);cursor:zoom-in" ' +
+        'onclick="window.open(this.src,\'_blank\')" onerror="this.outerHTML=\'<span style=&quot;font-size:10px;color:var(--text3)&quot;>vencido</span>\'">'
+      : '<span style="font-size:10px;color:var(--text3)">—</span>';
+    const wa = _persoWaNum(p.telefono);
+    const tel = p.telefono
+      ? '<a href="https://wa.me/' + wa + '" target="_blank" style="color:#22c55e;font-weight:600;text-decoration:none" title="Abrir chat de WhatsApp">📱 ' + _persoEsc(p.telefono) + '</a>'
+      : '<span style="color:var(--text3)">—</span>';
+    const est = PERSO_ESTADOS[p.estado] || ['?', '#9ca3af'];
+    const opts = Object.keys(PERSO_ESTADOS).map(k =>
+      '<option value="' + k + '"' + (k === p.estado ? ' selected' : '') + '>' + PERSO_ESTADOS[k][0] + '</option>').join('');
+    const sel = '<select onchange="persoSetEstado(\'' + p.code + '\', this.value)" ' +
+      'style="font-size:11px;padding:3px 6px;border-radius:6px;border:1.5px solid ' + est[1] + ';color:' + est[1] + ';font-weight:700;background:var(--bg1)">' + opts + '</select>';
+    const verBtn = p.secret
+      ? '<button class="btn btn-ghost btn-sm" style="padding:3px 7px" title="Ver pedido y descargar archivos (disponibles 60 días)" ' +
+        'onclick="window.open(\'' + WORKER + '/api/guia-pedido/' + p.code + '?k=' + p.secret + '\',\'_blank\')">📥</button>'
+      : '';
+    const editBtn = '<button class="btn btn-ghost btn-sm" style="padding:3px 7px" title="Editar pedido" onclick="persoOpenEdit(\'' + p.code + '\')">✏️</button>';
+    return '<tr>' +
+      '<td style="white-space:nowrap;font-size:11px">' + fecha + '</td>' +
+      '<td style="white-space:nowrap;font-weight:700;font-family:monospace">' + _persoEsc(p.code) + '</td>' +
+      '<td style="text-align:center">' + mock + '</td>' +
+      '<td>' + _persoEsc(p.producto) + (p.color ? ' <span style="color:var(--text3);font-size:11px">· ' + _persoEsc(p.color) + '</span>' : '') + '</td>' +
+      '<td style="text-align:center">' + (p.cantidad || 1) + '</td>' +
+      '<td>' + _persoEsc(p.comprador) + '</td>' +
+      '<td>' + _persoEsc(p.provincia) + '</td>' +
+      '<td style="text-align:right;white-space:nowrap">' + (p.monto ? '$ ' + Number(p.monto).toLocaleString('es-AR') : '—') + '</td>' +
+      '<td style="white-space:nowrap">' + tel + '</td>' +
+      '<td style="text-align:center">' + sel + '</td>' +
+      '<td style="text-align:center;white-space:nowrap">' + verBtn + editBtn + '</td>' +
+      '</tr>';
+  }).join('');
+}
+
+async function persoSetEstado(code, estado) {
+  const p = _persoState.pedidos.find(x => x.code === code);
+  if (p) p.estado = estado;
+  persoRender();
+  persoUpdateBadge();
+  try {
+    const r = await fetch(WORKER + '/api/guia-pedido/' + code, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ estado })
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'error');
+  } catch (e) {
+    console.error('[perso] estado', e);
+    alert('⚠ No se pudo guardar el estado: ' + e.message);
+    persoRefresh();
+  }
+}
+
+// ── Mini-modal: carga manual / edición ───────────────────────────
+function persoOpenManual() {
+  _persoState.editCode = null;
+  document.getElementById('perso-modal-title').textContent = '➕ Carga manual';
+  ['producto','comprador','provincia','telefono'].forEach(f => document.getElementById('perso-f-' + f).value = '');
+  document.getElementById('perso-f-cantidad').value = 1;
+  document.getElementById('perso-f-monto').value = '';
+  document.getElementById('perso-f-estado').value = 'disenando';
+  document.getElementById('perso-modal').style.display = 'flex';
+}
+
+function persoOpenEdit(code) {
+  const p = _persoState.pedidos.find(x => x.code === code);
+  if (!p) return;
+  _persoState.editCode = code;
+  document.getElementById('perso-modal-title').textContent = '✏️ Editar ' + code;
+  document.getElementById('perso-f-producto').value  = p.producto || '';
+  document.getElementById('perso-f-cantidad').value  = p.cantidad || 1;
+  document.getElementById('perso-f-monto').value     = p.monto || '';
+  document.getElementById('perso-f-comprador').value = p.comprador || '';
+  document.getElementById('perso-f-provincia').value = p.provincia || '';
+  document.getElementById('perso-f-telefono').value  = p.telefono || '';
+  document.getElementById('perso-f-estado').value    = p.estado || 'disenando';
+  document.getElementById('perso-modal').style.display = 'flex';
+}
+
+function persoCloseModal() {
+  document.getElementById('perso-modal').style.display = 'none';
+}
+
+async function persoSaveModal() {
+  const v = id => document.getElementById('perso-f-' + id).value.trim();
+  const campos = {
+    producto: v('producto'),
+    cantidad: parseInt(v('cantidad'), 10) || 1,
+    monto: parseFloat(v('monto')) || 0,
+    comprador: v('comprador'),
+    provincia: v('provincia'),
+    telefono: v('telefono'),
+    estado: v('estado'),
+  };
+  if (!campos.comprador) { alert('El comprador es obligatorio.'); return; }
+  const btn = document.getElementById('perso-modal-save');
+  btn.disabled = true; btn.textContent = '…';
+  try {
+    let r;
+    if (_persoState.editCode) {
+      r = await fetch(WORKER + '/api/guia-pedido/' + _persoState.editCode, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(campos)
+      });
+    } else {
+      r = await fetch(WORKER + '/api/guia-pedido', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          manual: true,
+          meta: { producto: campos.producto },
+          cliente: { nombre: campos.comprador, telefono: campos.telefono },
+          gestion: campos
+        })
+      });
+    }
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'error');
+    persoCloseModal();
+    await persoRefresh();
+  } catch (e) {
+    console.error('[perso] guardar', e);
+    alert('⚠ No se pudo guardar: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = '💾 Guardar';
+  }
+}
+// ═══════════════ /v155 PERSONALIZADAS WA ════════════════════════
+
 const titles={
   dashboard:['Dashboard','Resumen general de tu tienda'],
+  'perso-wa':['🎨 Personalizadas WA','Pedidos de diseño de la guía interactiva · clientes por WhatsApp'],
   publicaciones:['📦 Publicaciones','Gestión de tu catálogo'],
   bulk:['✏️ Edición masiva','Modificá múltiples publicaciones a la vez'],
   seo:['🔍 Analizador SEO','Score y optimización de títulos'],
@@ -20923,6 +21281,7 @@ function showSection(id){
   }
   if(id==='quiebre-stock') qsInit();
   if(id==='facebook-mp') fbmpInit();
+  if(id==='perso-wa') persoInit();
 }
 
 // ═══════════════════════════════════════════════════════════
