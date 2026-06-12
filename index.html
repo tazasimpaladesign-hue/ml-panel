@@ -3783,13 +3783,23 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   <div class="card mb">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
       <div class="card-title" style="margin:0">📈 Evolución de pedidos personalizados</div>
-      <select id="perso-chart-mode" onchange="persoRenderChart()" style="margin-left:auto;font-size:12px;padding:4px 8px">
+      <div style="display:flex;gap:16px;margin-left:auto;align-items:center;flex-wrap:wrap">
+        <div style="text-align:right">
+          <div style="font-size:9.5px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;font-weight:700">Pedidos</div>
+          <div style="font-size:17px;font-weight:800;color:#6366f1;line-height:1.1" id="perso-chart-tot-c">—</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:9.5px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;font-weight:700">Facturación</div>
+          <div style="font-size:17px;font-weight:800;color:#10b981;line-height:1.1" id="perso-chart-tot-m">—</div>
+        </div>
+        <select id="perso-chart-mode" onchange="persoRenderChart()" style="font-size:12px;padding:5px 9px;border-radius:8px">
         <option value="mes">Por mes</option>
         <option value="anio">Por año</option>
         <option value="producto">Por producto</option>
         <option value="provincia">Por provincia</option>
         <option value="estado">Por estado</option>
-      </select>
+        </select>
+      </div>
     </div>
     <div style="height:220px;position:relative"><canvas id="perso-chart"></canvas></div>
   </div>
@@ -3825,7 +3835,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <div class="card-sub" id="perso-count">—</div>
       </div>
       <div style="display:flex;gap:8px;align-items:center;margin-left:auto;flex-wrap:wrap">
-        <input type="text" id="perso-search" placeholder="🔍 Código, comprador, producto, teléfono..." style="max-width:240px;font-size:12px;padding:5px 9px" oninput="persoRender()">
+        <input type="text" id="perso-search" placeholder="🔍 Código, comprador, producto, teléfono, estado..." style="max-width:240px;font-size:12px;padding:5px 9px" oninput="persoRender()">
         <button class="btn btn-ghost btn-sm" onclick="persoOpenManual()">➕ Carga manual</button>
         <button class="btn btn-sm" style="background:#22c55e;color:#fff" onclick="persoToggleMsgs()">💬 Mensajes WhatsApp</button>
         <button class="btn btn-ghost btn-sm" onclick="persoRefresh()" id="perso-refresh-btn">↻ Actualizar</button>
@@ -21100,7 +21110,9 @@ function persoRender() {
     (p.comprador || '').toLowerCase().includes(q) ||
     (p.producto || '').toLowerCase().includes(q) ||
     String(p.telefono || '').includes(q) ||
-    (p.provincia || '').toLowerCase().includes(q));
+    (p.provincia || '').toLowerCase().includes(q) ||
+    (p.estado || '').toLowerCase().includes(q) ||
+    ((PERSO_ESTADOS[p.estado] || [''])[0] || '').toLowerCase().includes(q));
 
   const col = _persoState.sortCol, dir = _persoState.sortDir;
   rows.sort((a, b) => {
@@ -21167,29 +21179,98 @@ function persoRender() {
   persoRenderChart();
 }
 
-// ── Gráfico de evolución (Chart.js via makeChart) ────────────────
-function persoRenderChart() {
-  if (typeof Chart === 'undefined' || typeof makeChart !== 'function') return;
-  if (!document.getElementById('perso-chart')) return;
-  const modeEl = document.getElementById('perso-chart-mode');
-  const mode = modeEl ? modeEl.value : 'mes';
+// ── Gráfico de evolución · v157 rediseño SaaS premium ────────────
+// Tiempo (mes/año)  → área con curvas monotone + gradiente vertical
+// Categorías        → barras redondeadas con gradiente
+// Paleta: índigo #6366f1 (pedidos) · esmeralda #10b981 (monto)
+// Tooltip HTML custom con desglose y ticket promedio.
+const PERSO_FMT_MONEY = v => '$ ' + Math.round(Number(v) || 0).toLocaleString('es-AR');
+
+function _persoGrad(ctx2, area, hex, aTop, aBottom) {
+  const g = ctx2.createLinearGradient(0, area.top, 0, area.bottom);
+  g.addColorStop(0, hex + aTop);
+  g.addColorStop(1, hex + aBottom);
+  return g;
+}
+
+// Tooltip externo (HTML) — elegante, respeta el tema claro/oscuro del panel
+function _persoChartTooltip(context) {
+  let el = document.getElementById('perso-chart-tooltip');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'perso-chart-tooltip';
+    el.style.cssText = 'position:absolute;pointer-events:none;z-index:60;opacity:0;' +
+      'transition:opacity .12s ease, transform .12s ease;min-width:175px;' +
+      'background:var(--bg1);border:1px solid var(--border);border-radius:12px;' +
+      'box-shadow:0 14px 32px rgba(0,0,0,.22);padding:10px 12px;font-size:12px';
+    document.body.appendChild(el);
+  }
+  const tt = context.tooltip;
+  if (!tt || tt.opacity === 0) { el.style.opacity = '0'; return; }
+
+  const title = (tt.title && tt.title[0]) || '';
+  let rows = '';
+  (tt.dataPoints || []).forEach(dp => {
+    const isMonto = dp.dataset.yAxisID === 'y1';
+    const color = isMonto ? '#10b981' : '#6366f1';
+    const val = isMonto ? PERSO_FMT_MONEY(dp.parsed.y)
+                        : dp.parsed.y + ' pedido' + (dp.parsed.y === 1 ? '' : 's');
+    rows += '<div style="display:flex;align-items:center;gap:7px;margin-top:6px">' +
+      '<span style="width:8px;height:8px;border-radius:99px;background:' + color + ';box-shadow:0 0 0 3px ' + color + '22"></span>' +
+      '<span style="color:var(--text3);flex:1">' + dp.dataset.label + '</span>' +
+      '<strong style="color:var(--text1);font-variant-numeric:tabular-nums">' + val + '</strong></div>';
+  });
+  const dC = (tt.dataPoints || []).find(d => d.dataset.yAxisID !== 'y1');
+  const dM = (tt.dataPoints || []).find(d => d.dataset.yAxisID === 'y1');
+  if (dC && dM && dC.parsed.y > 0) {
+    rows += '<div style="margin-top:8px;padding-top:7px;border-top:1px dashed var(--border);' +
+      'display:flex;justify-content:space-between;color:var(--text3);font-size:11px">' +
+      '<span>Ticket promedio</span><strong style="color:var(--text2)">' +
+      PERSO_FMT_MONEY(dM.parsed.y / dC.parsed.y) + '</strong></div>';
+  }
+  el.innerHTML = '<div style="font-weight:800;color:var(--text1);font-size:12.5px">' + title + '</div>' + rows;
+
+  const rect = context.chart.canvas.getBoundingClientRect();
+  el.style.left = Math.max(8, rect.left + window.scrollX + tt.caretX - el.offsetWidth / 2) + 'px';
+  el.style.top = (rect.top + window.scrollY + tt.caretY - el.offsetHeight - 14) + 'px';
+  el.style.opacity = '1';
+  el.style.transform = 'translateY(-2px)';
+}
+
+// Agrupación matemáticamente correcta según el modo del <select>
+function _persoChartData(mode) {
   const peds = _persoState.pedidos;
   const labels = [], counts = [], montos = [];
 
   if (mode === 'mes' || mode === 'anio') {
-    const fmt  = mode === 'mes' ? (d => d.toLocaleDateString('es-AR', {month:'short', year:'2-digit'}))
-                                : (d => String(d.getFullYear()));
-    const keyf = mode === 'mes' ? (d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'))
-                                : (d => String(d.getFullYear()));
+    const keyf = mode === 'mes'
+      ? (d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'))
+      : (d => String(d.getFullYear()));
     const map = new Map();
+    let minD = null, maxD = null;
     peds.forEach(p => {
-      const d = new Date(p.ts); const k = keyf(d);
-      if (!map.has(k)) map.set(k, { label: fmt(d), c: 0, m: 0 });
+      const d = new Date(p.ts);
+      if (!minD || d < minD) minD = d;
+      if (!maxD || d > maxD) maxD = d;
+      const k = keyf(d);
+      if (!map.has(k)) map.set(k, { c: 0, m: 0 });
       const e = map.get(k); e.c++; e.m += _persoTotalDe(p);
     });
-    [...map.keys()].sort().forEach(k => {
-      const e = map.get(k); labels.push(e.label); counts.push(e.c); montos.push(e.m);
-    });
+    if (minD) {
+      // Rellenar períodos vacíos para una curva temporal continua
+      const cur = new Date(minD.getFullYear(), mode === 'mes' ? minD.getMonth() : 0, 1);
+      const end = new Date(maxD.getFullYear(), mode === 'mes' ? maxD.getMonth() : 0, 1);
+      while (cur <= end) {
+        const k = keyf(cur);
+        const e = map.get(k) || { c: 0, m: 0 };
+        labels.push(mode === 'mes'
+          ? cur.toLocaleDateString('es-AR', { month: 'short', year: '2-digit' })
+          : String(cur.getFullYear()));
+        counts.push(e.c); montos.push(e.m);
+        if (mode === 'mes') cur.setMonth(cur.getMonth() + 1);
+        else cur.setFullYear(cur.getFullYear() + 1);
+      }
+    }
   } else {
     const map = new Map();
     peds.forEach(p => {
@@ -21202,25 +21283,103 @@ function persoRenderChart() {
       labels.push(k); counts.push(e.c); montos.push(e.m);
     });
   }
+  return { labels, counts, montos };
+}
 
-  makeChart('perso-chart', {
-    type: 'bar',
-    data: { labels, datasets: [
-      { label: 'Pedidos', data: counts, backgroundColor: '#3b82f6aa', yAxisID: 'y', borderRadius: 4 },
-      { label: 'Monto $', data: montos, type: 'line', borderColor: '#22c55e', backgroundColor: '#22c55e22',
-        yAxisID: 'y1', tension: .3, fill: true, pointRadius: 3 }
-    ]},
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { labels: { boxWidth: 10, font: { size: 10 } } } },
-      scales: {
-        y:  { beginAtZero: true, ticks: { precision: 0, font: { size: 10 } } },
-        y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false },
-              ticks: { font: { size: 10 }, callback: v => '$' + (v >= 1000 ? Math.round(v/1000) + 'k' : v) } },
-        x:  { ticks: { font: { size: 10 } } }
-      }
+function persoRenderChart() {
+  if (typeof Chart === 'undefined' || typeof makeChart !== 'function') return;
+  if (!document.getElementById('perso-chart')) return;
+  const modeEl = document.getElementById('perso-chart-mode');
+  const mode = modeEl ? modeEl.value : 'mes';
+  const isTime = (mode === 'mes' || mode === 'anio');
+  const { labels, counts, montos } = _persoChartData(mode);
+
+  // Chips de totales del header
+  const totC = counts.reduce((a, b) => a + b, 0);
+  const totM = montos.reduce((a, b) => a + b, 0);
+  const ec = document.getElementById('perso-chart-tot-c');
+  const em = document.getElementById('perso-chart-tot-m');
+  if (ec) ec.textContent = totC.toLocaleString('es-AR');
+  if (em) em.textContent = PERSO_FMT_MONEY(totM);
+
+  const axisColor = '#94a3b8';
+  const baseOpts = {
+    responsive: true, maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: {
+        position: 'top', align: 'end',
+        labels: { usePointStyle: true, pointStyle: 'circle', boxWidth: 6, boxHeight: 6,
+                  font: { size: 10.5, weight: '600' }, color: axisColor, padding: 14 }
+      },
+      tooltip: { enabled: false, external: _persoChartTooltip },
+    },
+    scales: {
+      x: { grid: { display: false }, border: { display: false },
+           ticks: { font: { size: 10 }, color: axisColor, maxRotation: isTime ? 0 : 35 } },
+      y: { beginAtZero: true, border: { display: false },
+           grid: { color: 'rgba(148,163,184,.10)', drawTicks: false },
+           ticks: { precision: 0, font: { size: 10 }, color: axisColor, padding: 8 } },
+      y1: { beginAtZero: true, position: 'right', border: { display: false },
+            grid: { drawOnChartArea: false },
+            ticks: { font: { size: 10 }, color: axisColor, padding: 8,
+              callback: v => '$' + (v >= 1000000 ? (v / 1000000).toFixed(1) + 'M'
+                                  : v >= 1000 ? Math.round(v / 1000) + 'k' : v) } },
     }
-  });
+  };
+
+  let config;
+  if (isTime) {
+    // ÁREA con curvas monotone y gradiente — evolución temporal
+    config = {
+      type: 'line',
+      data: { labels, datasets: [
+        { label: 'Pedidos', data: counts, yAxisID: 'y',
+          borderColor: '#6366f1', borderWidth: 2.5,
+          pointRadius: 3, pointHoverRadius: 6,
+          pointBackgroundColor: '#6366f1', pointBorderColor: '#fff', pointBorderWidth: 1.5,
+          cubicInterpolationMode: 'monotone', fill: true,
+          backgroundColor: c => {
+            const { ctx, chartArea } = c.chart;
+            return chartArea ? _persoGrad(ctx, chartArea, '#6366f1', '3d', '03') : '#6366f120';
+          } },
+        { label: 'Monto', data: montos, yAxisID: 'y1',
+          borderColor: '#10b981', borderWidth: 2.5,
+          pointRadius: 3, pointHoverRadius: 6,
+          pointBackgroundColor: '#10b981', pointBorderColor: '#fff', pointBorderWidth: 1.5,
+          cubicInterpolationMode: 'monotone', fill: true,
+          backgroundColor: c => {
+            const { ctx, chartArea } = c.chart;
+            return chartArea ? _persoGrad(ctx, chartArea, '#10b981', '30', '03') : '#10b98118';
+          } },
+      ]},
+      options: baseOpts
+    };
+  } else {
+    // BARRAS redondeadas con gradiente — comparación por categoría
+    config = {
+      type: 'bar',
+      data: { labels, datasets: [
+        { label: 'Pedidos', data: counts, yAxisID: 'y',
+          borderRadius: 8, borderSkipped: false, maxBarThickness: 34,
+          backgroundColor: c => {
+            const { ctx, chartArea } = c.chart;
+            return chartArea ? _persoGrad(ctx, chartArea, '#6366f1', 'e8', '78') : '#6366f1cc';
+          },
+          hoverBackgroundColor: '#6366f1' },
+        { label: 'Monto', data: montos, yAxisID: 'y1',
+          borderRadius: 8, borderSkipped: false, maxBarThickness: 34,
+          backgroundColor: c => {
+            const { ctx, chartArea } = c.chart;
+            return chartArea ? _persoGrad(ctx, chartArea, '#10b981', 'e8', '78') : '#10b981cc';
+          },
+          hoverBackgroundColor: '#10b981' },
+      ]},
+      options: baseOpts
+    };
+  }
+
+  makeChart('perso-chart', config);
 }
 
 // ── Acciones por fila ─────────────────────────────────────────────
@@ -24296,6 +24455,16 @@ const BKP_SECTIONS = {
     icon: '📊',
     get: () => { try { return JSON.parse(localStorage.getItem('impala_calc_history') || '[]'); } catch { return []; } },
   },
+  persoPedidos: {
+    label: 'Personalizadas WA — pedidos',
+    icon: '🎨',
+    get: () => (typeof _persoState !== 'undefined' && Array.isArray(_persoState.pedidos)) ? _persoState.pedidos : [],
+  },
+  persoMsgs: {
+    label: 'Personalizadas WA — mensajes WhatsApp',
+    icon: '💬',
+    get: () => typeof persoGetMsgs === 'function' ? (persoGetMsgs() || []) : [],
+  },
   // v118: 'seoKeywords' eliminado del backup — el SEO Tracker viejo fue descontinuado
   // por bloqueo de ML a /sites/MLA/search. Reemplazado por Termómetro SEO que
   // calcula todo client-side desde visitas (sin estado persistido).
@@ -24448,6 +24617,26 @@ async function bkpApplyImport(data, selection){
     if(selection.calCustom && Array.isArray(data.calCustom))       localStorage.setItem('impala_cal_custom', JSON.stringify(data.calCustom));
     if(selection.bdays && Array.isArray(data.bdays))               localStorage.setItem('impala_cal_birthdays', JSON.stringify(data.bdays));
     if(selection.pcHistory && Array.isArray(data.pcHistory))       localStorage.setItem('impala_calc_history', JSON.stringify(data.pcHistory));
+    // v157: Personalizadas WA — mensajes (localStorage) y pedidos (índice KV del Worker)
+    if(selection.persoMsgs && Array.isArray(data.persoMsgs) && typeof persoSaveMsgs === 'function'){
+      persoSaveMsgs(data.persoMsgs);
+      if(typeof persoRenderMsgs === 'function') persoRenderMsgs();
+    }
+    if(selection.persoPedidos && Array.isArray(data.persoPedidos)){
+      _persoState.pedidos = data.persoPedidos;
+      _persoState.loaded = true;
+      try{
+        const rIdx = await fetch(WORKER + '/api/guia-pedido-index', {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pedidos: data.persoPedidos })
+        });
+        const dIdx = await rIdx.json();
+        if(!dIdx.ok) console.warn('[Backup] índice perso no restaurado en Worker:', dIdx.error);
+      }catch(e){ console.warn('[Backup] índice perso → Worker falló:', e.message); }
+      if(typeof _persoSyncKnown === 'function') _persoSyncKnown();
+      if(typeof persoRender === 'function') persoRender();
+      if(typeof persoUpdateBadge === 'function') persoUpdateBadge();
+    }
     // v118: bloque de seoKeywords removido — el SEO Tracker viejo fue descontinuado.
     // Backups antiguos con seoKeywords se ignoran silenciosamente.
 
