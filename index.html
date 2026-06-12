@@ -3776,8 +3776,23 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
 </div>
 
-<!-- ═══════════════════════ PERSONALIZADAS WA (v155) ═══════════════════════ -->
+<!-- ═══════════════════════ PERSONALIZADAS WA (v156) ═══════════════════════ -->
 <div id="section-perso-wa" class="section fade-in">
+
+  <!-- Gráfico de evolución -->
+  <div class="card mb">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+      <div class="card-title" style="margin:0">📈 Evolución de pedidos personalizados</div>
+      <select id="perso-chart-mode" onchange="persoRenderChart()" style="margin-left:auto;font-size:12px;padding:4px 8px">
+        <option value="mes">Por mes</option>
+        <option value="anio">Por año</option>
+        <option value="producto">Por producto</option>
+        <option value="provincia">Por provincia</option>
+        <option value="estado">Por estado</option>
+      </select>
+    </div>
+    <div style="height:220px;position:relative"><canvas id="perso-chart"></canvas></div>
+  </div>
 
   <!-- KPIs -->
   <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
@@ -3812,10 +3827,22 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <div style="display:flex;gap:8px;align-items:center;margin-left:auto;flex-wrap:wrap">
         <input type="text" id="perso-search" placeholder="🔍 Código, comprador, producto, teléfono..." style="max-width:240px;font-size:12px;padding:5px 9px" oninput="persoRender()">
         <button class="btn btn-ghost btn-sm" onclick="persoOpenManual()">➕ Carga manual</button>
+        <button class="btn btn-sm" style="background:#22c55e;color:#fff" onclick="persoToggleMsgs()">💬 Mensajes WhatsApp</button>
         <button class="btn btn-ghost btn-sm" onclick="persoRefresh()" id="perso-refresh-btn">↻ Actualizar</button>
         <span id="perso-status" style="font-size:11px;color:var(--text3)"></span>
       </div>
     </div>
+
+    <!-- Botonera de mensajes para WhatsApp (estilo Respuestas rápidas de Preguntas) -->
+    <div id="perso-msgs-card" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <div style="font-size:12.5px;font-weight:700">💬 Mensajes para WhatsApp</div>
+        <span style="font-size:10.5px;color:var(--text3)">Tocá 📋 para copiar y pegalo en el chat del cliente</span>
+        <button class="btn btn-ghost btn-xs" style="margin-left:auto;font-size:10.5px" onclick="persoOpenMsgEditor()">⚙️ Editar</button>
+      </div>
+      <div id="perso-msgs-list" style="display:flex;flex-direction:column;gap:6px"></div>
+    </div>
+
     <div class="tw">
       <table id="perso-table">
         <thead><tr>
@@ -3827,19 +3854,20 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <th onclick="persoSort('comprador')" style="cursor:pointer;user-select:none;white-space:nowrap">Comprador <span id="perso-sort-comprador" style="font-size:10px"></span></th>
           <th onclick="persoSort('provincia')" style="cursor:pointer;user-select:none;white-space:nowrap">Provincia <span id="perso-sort-provincia" style="font-size:10px"></span></th>
           <th onclick="persoSort('monto')"     style="cursor:pointer;user-select:none;white-space:nowrap;text-align:right">Monto <span id="perso-sort-monto" style="font-size:10px"></span></th>
+          <th onclick="persoSort('envio')"     style="cursor:pointer;user-select:none;white-space:nowrap;text-align:right" title="Costo de envío. Editable con el lápiz.">Envío <span id="perso-sort-envio" style="font-size:10px"></span></th>
           <th style="white-space:nowrap">Teléfono</th>
           <th onclick="persoSort('estado')"    style="cursor:pointer;user-select:none;white-space:nowrap;text-align:center">Estado <span id="perso-sort-estado" style="font-size:10px"></span></th>
-          <th style="text-align:center;min-width:90px">Acciones</th>
+          <th style="text-align:center;min-width:110px">Acciones</th>
         </tr></thead>
         <tbody id="perso-tbody">
-          <tr><td colspan="11" style="text-align:center;padding:32px;color:var(--text3)">Cargando pedidos…</td></tr>
+          <tr><td colspan="12" style="text-align:center;padding:32px;color:var(--text3)">Cargando pedidos…</td></tr>
         </tbody>
       </table>
     </div>
   </div>
 
   <div class="alert a-info" style="margin-top:14px;font-size:11px">
-    💡 Los pedidos entran solos cuando el cliente envía su diseño desde la guía (tiendaimpala.com.ar/arma-tu-producto). El registro comercial (comprador, monto, estado) queda <strong>para siempre</strong>; los archivos del diseño en la nube vencen a los <strong>60 días</strong> — descargalos con 📥 antes de ese plazo.
+    💡 Los pedidos entran solos cuando el cliente envía su diseño desde la guía. El <strong>Monto</strong> se carga automáticamente con el precio del producto del paso 1 (ajustalo con ✏️ si corresponde). El registro comercial queda <strong>para siempre</strong>; los archivos del diseño vencen a los <strong>60 días</strong> — descargalos con 📥 antes.
   </div>
 
   <!-- Mini-modal de carga manual / edición -->
@@ -3851,10 +3879,11 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <div style="display:flex;gap:8px">
           <input type="number" id="perso-f-cantidad" placeholder="Cantidad" min="1" value="1" style="font-size:12px;flex:1">
           <input type="number" id="perso-f-monto"    placeholder="Monto $" min="0" style="font-size:12px;flex:1">
+          <input type="number" id="perso-f-envio"    placeholder="Envío $" min="0" style="font-size:12px;flex:1">
         </div>
         <input type="text"   id="perso-f-comprador" placeholder="Comprador *" style="font-size:12px">
         <div style="display:flex;gap:8px">
-          <input type="text" id="perso-f-provincia" placeholder="Provincia" style="font-size:12px;flex:1">
+          <select id="perso-f-provincia" style="font-size:12px;flex:1"></select>
           <input type="tel"  id="perso-f-telefono"  placeholder="Teléfono (ej: 2615123456)" style="font-size:12px;flex:1">
         </div>
         <select id="perso-f-estado" style="font-size:12px">
@@ -3867,6 +3896,22 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
         <button class="btn btn-ghost btn-sm" onclick="persoCloseModal()">Cancelar</button>
         <button class="btn btn-sm" style="background:var(--accent);color:#fff" onclick="persoSaveModal()" id="perso-modal-save">💾 Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mini-modal editor de mensajes WhatsApp -->
+  <div id="perso-msg-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1001;align-items:center;justify-content:center">
+    <div class="card" style="max-width:560px;width:94%;margin:0;max-height:90vh;overflow:auto">
+      <div class="card-title" style="margin-bottom:4px">⚙️ Editar mensajes para WhatsApp</div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Nombre, color y texto de cada mensaje. Se guardan en este navegador.</div>
+      <div id="perso-msg-rows" style="display:flex;flex-direction:column;gap:10px"></div>
+      <div style="display:flex;gap:8px;margin-top:14px">
+        <button class="btn btn-ghost btn-sm" onclick="persoMsgAddRow()">➕ Agregar mensaje</button>
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <button class="btn btn-ghost btn-sm" onclick="persoCloseMsgEditor()">Cancelar</button>
+          <button class="btn btn-sm" style="background:var(--accent);color:#fff" onclick="persoSaveMsgEditor()">💾 Guardar</button>
+        </div>
       </div>
     </div>
   </div>
@@ -4447,6 +4492,7 @@ async function initApp(){
   if(typeof tStickyInit === 'function') tStickyInit();
   // v97 [Tema 2]: POLLING WOO: chequear ventas nuevas en tu tienda web cada 5 min
   if(typeof startWooPolling === 'function') startWooPolling();
+  if(typeof startPersoPolling === 'function') startPersoPolling(); // v156: pedidos de la guía
   // v103 [Tema 2]: pre-cargar cache de productos Woo en segundo plano para que
   // el lookup de imágenes en el listado de pedidos pendientes funcione desde el
   // primer render, sin esperar a que el usuario entre a la sección SEO Tienda Woo.
@@ -20937,9 +20983,10 @@ async function callClaude(prompt, history, maxTokens){
 // NAVIGATION
 // ═══════════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════════
-// v155 · PERSONALIZADAS WA — pedidos de la guía interactiva
-// Fuente: GET {WORKER}/api/guia-pedido (índice KV del Worker v87).
-// Estado editable inline; carga manual y edición vía mini-modal.
+// v156 · PERSONALIZADAS WA — pedidos de la guía interactiva
+// Fuente: GET {WORKER}/api/guia-pedido (índice KV, Worker v88).
+// Gráfico de evolución + envío editable + delete + mensajes WA +
+// polling cada 5 min (1 lectura KV) con toast y sonido como ML.
 // ═══════════════════════════════════════════════════════════════
 const PERSO_ESTADOS = {
   disenando:  ['🎨 Diseñando', '#3b82f6'],
@@ -20947,14 +20994,25 @@ const PERSO_ESTADOS = {
   pagada:     ['✅ Pagada',     '#22c55e'],
   entregada:  ['📦 Entregada',  '#8b5cf6'],
 };
+const PERSO_PROVINCIAS = ['Buenos Aires','CABA','Catamarca','Chaco','Chubut','Córdoba','Corrientes',
+  'Entre Ríos','Formosa','Jujuy','La Pampa','La Rioja','Mendoza','Misiones','Neuquén','Río Negro',
+  'Salta','San Juan','San Luis','Santa Cruz','Santa Fe','Santiago del Estero','Tierra del Fuego','Tucumán'];
+
 let _persoState = {
   pedidos: [], loaded: false, loading: false,
   sortCol: 'ts', sortDir: -1,
-  estadoFilter: null,        // filtro por chip KPI
-  editCode: null,            // código en edición (null = carga manual)
+  estadoFilter: null,
+  editCode: null,
 };
 
 function persoInit() {
+  // Poblar select de provincias del modal (una sola vez)
+  const sel = document.getElementById('perso-f-provincia');
+  if (sel && !sel.options.length) {
+    sel.innerHTML = '<option value="">Provincia…</option>' +
+      PERSO_PROVINCIAS.map(p => '<option value="' + p + '">' + p + '</option>').join('');
+  }
+  persoRenderMsgs();
   if (!_persoState.loaded && !_persoState.loading) persoRefresh();
   else persoRender();
 }
@@ -20969,6 +21027,7 @@ async function persoRefresh() {
     if (!d.ok) throw new Error(d.error || 'respuesta inválida');
     _persoState.pedidos = Array.isArray(d.pedidos) ? d.pedidos : [];
     _persoState.loaded = true;
+    _persoSyncKnown(); // que el polling no re-toastee lo ya visto
     if (st) st.textContent = '✓ ' + new Date().toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'});
   } catch (e) {
     console.error('[perso]', e);
@@ -20995,8 +21054,8 @@ function persoFilterEstado(estado) {
 
 function persoSort(col) {
   if (_persoState.sortCol === col) _persoState.sortDir *= -1;
-  else { _persoState.sortCol = col; _persoState.sortDir = (col === 'ts' || col === 'monto' || col === 'cantidad') ? -1 : 1; }
-  ['ts','code','producto','cantidad','comprador','provincia','monto','estado'].forEach(c => {
+  else { _persoState.sortCol = col; _persoState.sortDir = (col === 'ts' || col === 'monto' || col === 'cantidad' || col === 'envio') ? -1 : 1; }
+  ['ts','code','producto','cantidad','comprador','provincia','monto','envio','estado'].forEach(c => {
     const el = document.getElementById('perso-sort-' + c);
     if (el) el.innerHTML = sortArrow(c, _persoState.sortCol, _persoState.sortDir);
   });
@@ -21015,12 +21074,15 @@ function _persoEsc(s) {
   }[c]));
 }
 
+function _persoTotalDe(p) {
+  return (Number(p.monto) || 0) * (Number(p.cantidad) || 1) + (Number(p.envio) || 0);
+}
+
 function persoRender() {
   const tb = document.getElementById('perso-tbody');
   if (!tb) return;
   const q = (document.getElementById('perso-search').value || '').toLowerCase().trim();
 
-  // KPIs
   const all = _persoState.pedidos;
   const kpi = { total: all.length, disenando: 0, a_cobrar: 0, pagada: 0, entregada: 0 };
   all.forEach(p => { if (kpi[p.estado] !== undefined) kpi[p.estado]++; });
@@ -21031,7 +21093,6 @@ function persoRender() {
   set('perso-kpi-pagada', kpi.pagada);
   set('perso-kpi-entregada', kpi.entregada);
 
-  // Filtro + búsqueda
   let rows = all.slice();
   if (_persoState.estadoFilter) rows = rows.filter(p => p.estado === _persoState.estadoFilter);
   if (q) rows = rows.filter(p =>
@@ -21041,11 +21102,10 @@ function persoRender() {
     String(p.telefono || '').includes(q) ||
     (p.provincia || '').toLowerCase().includes(q));
 
-  // Orden
   const col = _persoState.sortCol, dir = _persoState.sortDir;
   rows.sort((a, b) => {
     let va = a[col], vb = b[col];
-    if (col === 'ts' || col === 'monto' || col === 'cantidad') { va = +va || 0; vb = +vb || 0; }
+    if (col === 'ts' || col === 'monto' || col === 'cantidad' || col === 'envio') { va = +va || 0; vb = +vb || 0; }
     else { va = String(va || '').toLowerCase(); vb = String(vb || '').toLowerCase(); }
     return va < vb ? -dir : va > vb ? dir : 0;
   });
@@ -21055,9 +21115,10 @@ function persoRender() {
     (_persoState.estadoFilter ? ' · filtro: ' + (PERSO_ESTADOS[_persoState.estadoFilter] || ['?'])[0] : '');
 
   if (!rows.length) {
-    tb.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:32px;color:var(--text3)">' +
+    tb.innerHTML = '<tr><td colspan="12" style="text-align:center;padding:32px;color:var(--text3)">' +
       (all.length ? 'Sin resultados para el filtro actual.' :
        'Todavía no hay pedidos. Entran solos cuando un cliente envía su diseño desde la guía 🎨') + '</td></tr>';
+    persoRenderChart();
     return;
   }
 
@@ -21084,6 +21145,9 @@ function persoRender() {
         'onclick="window.open(\'' + WORKER + '/api/guia-pedido/' + p.code + '?k=' + p.secret + '\',\'_blank\')">📥</button>'
       : '';
     const editBtn = '<button class="btn btn-ghost btn-sm" style="padding:3px 7px" title="Editar pedido" onclick="persoOpenEdit(\'' + p.code + '\')">✏️</button>';
+    const delBtn = '<button class="btn btn-ghost btn-sm" style="padding:3px 7px;color:#ef4444" title="Eliminar pedido (cliente arrepentido)" onclick="persoDelete(\'' + p.code + '\')">🗑️</button>';
+    const envioCell = '$ ' + (Number(p.envio) || 0).toLocaleString('es-AR') +
+      ' <span style="cursor:pointer;opacity:.7" title="Editar costo de envío" onclick="persoEditEnvio(\'' + p.code + '\')">✏️</span>';
     return '<tr>' +
       '<td style="white-space:nowrap;font-size:11px">' + fecha + '</td>' +
       '<td style="white-space:nowrap;font-weight:700;font-family:monospace">' + _persoEsc(p.code) + '</td>' +
@@ -21093,40 +21157,129 @@ function persoRender() {
       '<td>' + _persoEsc(p.comprador) + '</td>' +
       '<td>' + _persoEsc(p.provincia) + '</td>' +
       '<td style="text-align:right;white-space:nowrap">' + (p.monto ? '$ ' + Number(p.monto).toLocaleString('es-AR') : '—') + '</td>' +
+      '<td style="text-align:right;white-space:nowrap">' + envioCell + '</td>' +
       '<td style="white-space:nowrap">' + tel + '</td>' +
       '<td style="text-align:center">' + sel + '</td>' +
-      '<td style="text-align:center;white-space:nowrap">' + verBtn + editBtn + '</td>' +
+      '<td style="text-align:center;white-space:nowrap">' + verBtn + editBtn + delBtn + '</td>' +
       '</tr>';
   }).join('');
+
+  persoRenderChart();
+}
+
+// ── Gráfico de evolución (Chart.js via makeChart) ────────────────
+function persoRenderChart() {
+  if (typeof Chart === 'undefined' || typeof makeChart !== 'function') return;
+  if (!document.getElementById('perso-chart')) return;
+  const modeEl = document.getElementById('perso-chart-mode');
+  const mode = modeEl ? modeEl.value : 'mes';
+  const peds = _persoState.pedidos;
+  const labels = [], counts = [], montos = [];
+
+  if (mode === 'mes' || mode === 'anio') {
+    const fmt  = mode === 'mes' ? (d => d.toLocaleDateString('es-AR', {month:'short', year:'2-digit'}))
+                                : (d => String(d.getFullYear()));
+    const keyf = mode === 'mes' ? (d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'))
+                                : (d => String(d.getFullYear()));
+    const map = new Map();
+    peds.forEach(p => {
+      const d = new Date(p.ts); const k = keyf(d);
+      if (!map.has(k)) map.set(k, { label: fmt(d), c: 0, m: 0 });
+      const e = map.get(k); e.c++; e.m += _persoTotalDe(p);
+    });
+    [...map.keys()].sort().forEach(k => {
+      const e = map.get(k); labels.push(e.label); counts.push(e.c); montos.push(e.m);
+    });
+  } else {
+    const map = new Map();
+    peds.forEach(p => {
+      let k = p[mode] || '(sin dato)';
+      if (mode === 'estado') k = (PERSO_ESTADOS[k] || [k])[0];
+      if (!map.has(k)) map.set(k, { c: 0, m: 0 });
+      const e = map.get(k); e.c++; e.m += _persoTotalDe(p);
+    });
+    [...map.entries()].sort((a, b) => b[1].c - a[1].c).slice(0, 12).forEach(([k, e]) => {
+      labels.push(k); counts.push(e.c); montos.push(e.m);
+    });
+  }
+
+  makeChart('perso-chart', {
+    type: 'bar',
+    data: { labels, datasets: [
+      { label: 'Pedidos', data: counts, backgroundColor: '#3b82f6aa', yAxisID: 'y', borderRadius: 4 },
+      { label: 'Monto $', data: montos, type: 'line', borderColor: '#22c55e', backgroundColor: '#22c55e22',
+        yAxisID: 'y1', tension: .3, fill: true, pointRadius: 3 }
+    ]},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { boxWidth: 10, font: { size: 10 } } } },
+      scales: {
+        y:  { beginAtZero: true, ticks: { precision: 0, font: { size: 10 } } },
+        y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false },
+              ticks: { font: { size: 10 }, callback: v => '$' + (v >= 1000 ? Math.round(v/1000) + 'k' : v) } },
+        x:  { ticks: { font: { size: 10 } } }
+      }
+    }
+  });
+}
+
+// ── Acciones por fila ─────────────────────────────────────────────
+async function _persoPut(code, payload) {
+  const r = await fetch(WORKER + '/api/guia-pedido/' + code, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const d = await r.json();
+  if (!d.ok) throw new Error(d.error || 'error');
 }
 
 async function persoSetEstado(code, estado) {
   const p = _persoState.pedidos.find(x => x.code === code);
   if (p) p.estado = estado;
+  persoRender(); persoUpdateBadge();
+  try { await _persoPut(code, { estado }); }
+  catch (e) { console.error('[perso] estado', e); alert('⚠ No se pudo guardar el estado: ' + e.message); persoRefresh(); }
+}
+
+async function persoEditEnvio(code) {
+  const p = _persoState.pedidos.find(x => x.code === code);
+  if (!p) return;
+  const v = prompt('💲 Costo de envío para ' + code + ':', p.envio || 0);
+  if (v === null) return;
+  const envio = parseFloat(String(v).replace(',', '.')) || 0;
+  p.envio = envio;
   persoRender();
-  persoUpdateBadge();
+  try { await _persoPut(code, { envio }); }
+  catch (e) { console.error('[perso] envio', e); alert('⚠ No se pudo guardar el envío: ' + e.message); persoRefresh(); }
+}
+
+async function persoDelete(code) {
+  const p = _persoState.pedidos.find(x => x.code === code);
+  const quien = p && p.comprador ? ' de ' + p.comprador : '';
+  if (!confirm('🗑️ ¿Eliminar el pedido ' + code + quien + '?\n\nSe borra de la tabla y también sus archivos en la nube. Esta acción no se puede deshacer.')) return;
+  _persoState.pedidos = _persoState.pedidos.filter(x => x.code !== code);
+  persoRender(); persoUpdateBadge();
   try {
-    const r = await fetch(WORKER + '/api/guia-pedido/' + code, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ estado })
-    });
+    const r = await fetch(WORKER + '/api/guia-pedido/' + code, { method: 'DELETE' });
     const d = await r.json();
     if (!d.ok) throw new Error(d.error || 'error');
+    if (typeof showToast === 'function') showToast('🗑️ Pedido ' + code + ' eliminado', 'success');
   } catch (e) {
-    console.error('[perso] estado', e);
-    alert('⚠ No se pudo guardar el estado: ' + e.message);
+    console.error('[perso] delete', e);
+    alert('⚠ No se pudo eliminar: ' + e.message);
     persoRefresh();
   }
 }
 
-// ── Mini-modal: carga manual / edición ───────────────────────────
+// ── Mini-modal: carga manual / edición ────────────────────────────
 function persoOpenManual() {
   _persoState.editCode = null;
   document.getElementById('perso-modal-title').textContent = '➕ Carga manual';
-  ['producto','comprador','provincia','telefono'].forEach(f => document.getElementById('perso-f-' + f).value = '');
+  ['producto','comprador','telefono'].forEach(f => document.getElementById('perso-f-' + f).value = '');
   document.getElementById('perso-f-cantidad').value = 1;
   document.getElementById('perso-f-monto').value = '';
+  document.getElementById('perso-f-envio').value = '';
+  document.getElementById('perso-f-provincia').value = '';
   document.getElementById('perso-f-estado').value = 'disenando';
   document.getElementById('perso-modal').style.display = 'flex';
 }
@@ -21139,6 +21292,7 @@ function persoOpenEdit(code) {
   document.getElementById('perso-f-producto').value  = p.producto || '';
   document.getElementById('perso-f-cantidad').value  = p.cantidad || 1;
   document.getElementById('perso-f-monto').value     = p.monto || '';
+  document.getElementById('perso-f-envio').value     = p.envio || '';
   document.getElementById('perso-f-comprador').value = p.comprador || '';
   document.getElementById('perso-f-provincia').value = p.provincia || '';
   document.getElementById('perso-f-telefono').value  = p.telefono || '';
@@ -21156,6 +21310,7 @@ async function persoSaveModal() {
     producto: v('producto'),
     cantidad: parseInt(v('cantidad'), 10) || 1,
     monto: parseFloat(v('monto')) || 0,
+    envio: parseFloat(v('envio')) || 0,
     comprador: v('comprador'),
     provincia: v('provincia'),
     telefono: v('telefono'),
@@ -21165,25 +21320,21 @@ async function persoSaveModal() {
   const btn = document.getElementById('perso-modal-save');
   btn.disabled = true; btn.textContent = '…';
   try {
-    let r;
     if (_persoState.editCode) {
-      r = await fetch(WORKER + '/api/guia-pedido/' + _persoState.editCode, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(campos)
-      });
+      await _persoPut(_persoState.editCode, campos);
     } else {
-      r = await fetch(WORKER + '/api/guia-pedido', {
+      const r = await fetch(WORKER + '/api/guia-pedido', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           manual: true,
           meta: { producto: campos.producto },
-          cliente: { nombre: campos.comprador, telefono: campos.telefono },
+          cliente: { nombre: campos.comprador, telefono: campos.telefono, provincia: campos.provincia },
           gestion: campos
         })
       });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'error');
     }
-    const d = await r.json();
-    if (!d.ok) throw new Error(d.error || 'error');
     persoCloseModal();
     await persoRefresh();
   } catch (e) {
@@ -21193,7 +21344,142 @@ async function persoSaveModal() {
     btn.disabled = false; btn.textContent = '💾 Guardar';
   }
 }
-// ═══════════════ /v155 PERSONALIZADAS WA ════════════════════════
+
+// ── Mensajes para WhatsApp (estilo Respuestas rápidas) ───────────
+const PERSO_MSG_KEY = 'perso_wa_msgs';
+const PERSO_MSG_DEFAULT = [
+  { label: '👋 Bienvenida',        color: '#22c55e', text: '¡Hola! 😊 Recibimos tu diseño perfecto. Te confirmo el total y coordinamos el pago así arrancamos con la producción.' },
+  { label: '💰 Datos de pago',     color: '#f59e0b', text: 'Te paso los datos para la transferencia:\nAlias: tiendaimpala\nCBU: 4530000800012068613371\nTitular: Cristian Diaz\nCuando la hagas, mandanos el comprobante y arrancamos 🙌' },
+  { label: '📦 Listo para retirar', color: '#3b82f6', text: 'Tu pedido ya está listo 🎉 Podés retirarlo por zona plaza Chile, Mendoza, en el horario que te quede cómodo. Avisanos cuando vengas.' },
+  { label: '🚚 Despachado',        color: '#8b5cf6', text: 'Tu pedido ya fue despachado 🚚 En cuanto tengas novedades del correo te llega el aviso. ¡Gracias por tu compra!' },
+];
+
+function persoGetMsgs() {
+  try { return JSON.parse(localStorage.getItem(PERSO_MSG_KEY) || 'null') || PERSO_MSG_DEFAULT; }
+  catch (e) { return PERSO_MSG_DEFAULT; }
+}
+function persoSaveMsgs(arr) { localStorage.setItem(PERSO_MSG_KEY, JSON.stringify(arr)); }
+
+function persoToggleMsgs() {
+  const card = document.getElementById('perso-msgs-card');
+  const show = card.style.display === 'none';
+  card.style.display = show ? 'block' : 'none';
+  if (show) persoRenderMsgs();
+}
+
+function persoRenderMsgs() {
+  const list = document.getElementById('perso-msgs-list');
+  if (!list) return;
+  const msgs = persoGetMsgs();
+  list.innerHTML = msgs.map((m, i) =>
+    '<div style="display:flex;align-items:center;gap:8px">' +
+      '<span style="flex-shrink:0;min-width:140px;font-size:11.5px;font-weight:700;color:#fff;background:' + _persoEsc(m.color || '#6b7280') + ';padding:5px 10px;border-radius:8px;text-align:center">' + _persoEsc(m.label) + '</span>' +
+      '<span style="flex:1;font-size:11px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + _persoEsc(m.text) + '">' + _persoEsc((m.text || '').replace(/\n/g, ' ')) + '</span>' +
+      '<button class="btn btn-ghost btn-sm" style="padding:4px 9px;flex-shrink:0" title="Copiar mensaje" onclick="persoCopyMsg(' + i + ')">📋 Copiar</button>' +
+    '</div>').join('');
+}
+
+async function persoCopyMsg(i) {
+  const m = persoGetMsgs()[i];
+  if (!m) return;
+  try {
+    await navigator.clipboard.writeText(m.text || '');
+    if (typeof showToast === 'function') showToast('📋 Copiado: ' + m.label, 'success');
+  } catch (e) {
+    // Fallback para contextos sin clipboard API
+    const ta = document.createElement('textarea');
+    ta.value = m.text || ''; document.body.appendChild(ta);
+    ta.select(); document.execCommand('copy'); ta.remove();
+    if (typeof showToast === 'function') showToast('📋 Copiado: ' + m.label, 'success');
+  }
+}
+
+function persoOpenMsgEditor() {
+  const rows = document.getElementById('perso-msg-rows');
+  rows.innerHTML = '';
+  persoGetMsgs().forEach(m => persoMsgAddRow(m));
+  document.getElementById('perso-msg-modal').style.display = 'flex';
+}
+
+function persoMsgAddRow(m) {
+  m = m || { label: '', color: '#22c55e', text: '' };
+  const rows = document.getElementById('perso-msg-rows');
+  const div = document.createElement('div');
+  div.className = 'perso-msg-row';
+  div.style.cssText = 'border:1px solid var(--border);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:6px;background:var(--bg2)';
+  div.innerHTML =
+    '<div style="display:flex;gap:8px;align-items:center">' +
+      '<input type="text" class="pm-label" placeholder="Nombre del botón" value="' + _persoEsc(m.label) + '" style="flex:1;font-size:12px">' +
+      '<input type="color" class="pm-color" value="' + _persoEsc(m.color || '#22c55e') + '" style="width:40px;height:30px;padding:1px;border:1px solid var(--border);border-radius:6px;cursor:pointer" title="Color del botón">' +
+      '<button class="btn btn-ghost btn-sm" style="color:#ef4444;padding:3px 8px" title="Quitar" onclick="this.closest(\'.perso-msg-row\').remove()">✕</button>' +
+    '</div>' +
+    '<textarea class="pm-text" rows="3" placeholder="Texto del mensaje para WhatsApp…" style="font-size:12px;resize:vertical"></textarea>';
+  div.querySelector('.pm-text').value = m.text || '';
+  rows.appendChild(div);
+}
+
+function persoCloseMsgEditor() {
+  document.getElementById('perso-msg-modal').style.display = 'none';
+}
+
+function persoSaveMsgEditor() {
+  const arr = [];
+  document.querySelectorAll('#perso-msg-rows .perso-msg-row').forEach(div => {
+    const label = div.querySelector('.pm-label').value.trim();
+    const color = div.querySelector('.pm-color').value;
+    const text = div.querySelector('.pm-text').value.trim();
+    if (label && text) arr.push({ label, color, text });
+  });
+  persoSaveMsgs(arr);
+  persoCloseMsgEditor();
+  persoRenderMsgs();
+  if (typeof showToast === 'function') showToast('💾 Mensajes guardados', 'success');
+}
+
+// ── Polling liviano (1 lectura KV cada 5 min) ────────────────────
+// Notificación al instante en el panel — como las ventas de ML —
+// con toast + sonido cuando entra un pedido nuevo de la guía.
+let _persoPollTimer = null;
+let _persoKnown = null; // { count, maxTs }
+
+function _persoSyncKnown() {
+  const peds = _persoState.pedidos;
+  _persoKnown = { count: peds.length, maxTs: peds.reduce((a, p) => Math.max(a, p.ts || 0), 0) };
+}
+
+async function _persoPoll() {
+  try {
+    const r = await fetch(WORKER + '/api/guia-pedido');
+    const d = await r.json();
+    if (!d.ok || !Array.isArray(d.pedidos)) return;
+    const peds = d.pedidos;
+    const maxTs = peds.reduce((a, p) => Math.max(a, p.ts || 0), 0);
+    const isNew = _persoKnown && (maxTs > _persoKnown.maxTs || peds.length > _persoKnown.count);
+    _persoState.pedidos = peds;
+    _persoState.loaded = true;
+    if (isNew) {
+      const nuevo = peds.find(p => p.ts === maxTs) || {};
+      if (typeof showToast === 'function') {
+        showToast('🎨 Nuevo pedido personalizado: ' + (nuevo.comprador || nuevo.code || '') +
+          (nuevo.producto ? ' · ' + nuevo.producto : ''), 'success', 'sale');
+      }
+    }
+    _persoKnown = { count: peds.length, maxTs };
+    persoUpdateBadge();
+    const sec = document.getElementById('section-perso-wa');
+    if (sec && sec.classList.contains('active')) persoRender();
+  } catch (e) { console.warn('[persoPoll]', e.message); }
+}
+
+function startPersoPolling() {
+  if (_persoPollTimer) clearInterval(_persoPollTimer);
+  // Primer chequeo a los 20s del boot (establece línea base sin toast),
+  // luego cada 5 min — 1 lectura KV por ciclo, costo despreciable.
+  setTimeout(_persoPoll, 20 * 1000);
+  _persoPollTimer = setInterval(_persoPoll, 5 * 60 * 1000);
+  console.log('[PersoPoll] Iniciado — cada 5 min');
+}
+// ═══════════════ /v156 PERSONALIZADAS WA ════════════════════════
 
 const titles={
   dashboard:['Dashboard','Resumen general de tu tienda'],
