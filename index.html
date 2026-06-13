@@ -769,7 +769,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v160 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v161 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -3952,6 +3952,9 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <span id="cta-periodo-label" style="font-size:11px;color:var(--text3);margin-left:4px"></span>
   </div>
 
+  <!-- Alertas de stock bajo -->
+  <div id="cta-stock-alerts" style="display:none;margin-bottom:14px"></div>
+
   <!-- KPIs del período -->
   <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
     <div class="mc c-green" style="flex:1;min-width:140px;padding:10px 14px">
@@ -4012,10 +4015,12 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <input type="text" id="cta-search" placeholder="🔍 Cliente, producto, detalle, origen..." style="max-width:220px;font-size:12px;padding:5px 9px" oninput="_ctaState.page=1;ctaRenderTable()">
         <button class="btn btn-sm" style="background:var(--accent);color:#fff" onclick="ctaOpenOp(null)">➕ Nueva operación</button>
         <button class="btn btn-ghost btn-sm" onclick="ctaSyncAll()" title="Trae ventas nuevas de ML y Personalizadas WA">⬇️ Sincronizar</button>
+        <button class="btn btn-ghost btn-sm" onclick="ctaEnrichML()" id="cta-enrich-btn" title="Trae el monto NETO acreditado y el nombre real del comprador de cada venta de ML (en lotes, cacheado)">💰 Montos netos ML</button>
         <button class="btn btn-ghost btn-sm" onclick="ctaExportExcel()" title="Exporta a .xlsx las operaciones filtradas">📥 Exportar Excel</button>
         <button class="btn btn-ghost btn-sm" onclick="document.getElementById('cta-xlsx-file').click()" title="Importar un .xlsx exportado previamente para aplicar cambios masivos">📤 Importar Excel</button>
         <input type="file" id="cta-xlsx-file" accept=".xlsx,.xls,.csv" style="display:none" onchange="ctaImportExcel(this.files[0])">
-        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('cta-import-file').click()" title="Importar el histórico del Excel (cta-import-historico.json)">📦 Importar histórico</button>
+        <button class="btn btn-ghost btn-sm" onclick="ctaOpenStock()" title="Ver y administrar stock + catálogo de productos">📦 Stock y catálogo</button>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('cta-import-file').click()" title="Importar el histórico del Excel (cta-import-historico.json)">📥 Importar histórico</button>
         <input type="file" id="cta-import-file" accept=".json" style="display:none" onchange="ctaImportFile(this.files[0])">
         <span id="cta-status" style="font-size:11px;color:var(--text3)"></span>
       </div>
@@ -4045,6 +4050,38 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
   <div class="alert a-info" style="margin-top:14px;font-size:11px">
     💡 Las ventas de <strong>ML</strong> y <strong>Personalizadas WA</strong> entran solas con "Sincronizar" (y al abrir la sección). Las de ML quedan asentadas <strong>para siempre</strong> aunque ML solo conserve 12 meses. Los meses cerrados del histórico usan los <strong>totales oficiales</strong> de tu Excel en KPIs y gráficos.
+  </div>
+
+  <!-- Modal Stock y catálogo -->
+  <div id="cta-stock-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;align-items:center;justify-content:center">
+    <div class="card" style="max-width:680px;width:95%;margin:0;max-height:92vh;overflow:auto">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+        <div class="card-title" style="margin:0">📦 Stock y catálogo de productos</div>
+        <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="ctaStockAddRow()">➕ Producto</button>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:10px">
+        El stock se descuenta solo con cada venta (ML/WA/manual) y se suma con los egresos de insumos. Configurá el <b>mínimo</b> y la <b>compra sugerida</b> para recibir alertas arriba.
+      </div>
+      <div class="tw" style="max-height:52vh;overflow:auto">
+        <table style="font-size:12px">
+          <thead><tr style="position:sticky;top:0;background:var(--bg2);z-index:1">
+            <th style="width:42px"></th>
+            <th>Producto</th>
+            <th style="text-align:center;width:90px" title="Stock actual">Stock</th>
+            <th style="text-align:center;width:80px" title="Avisar cuando el stock baje de este número">Mínimo</th>
+            <th style="text-align:center;width:90px" title="Cantidad a comprar cuando se llega al mínimo">Comprar</th>
+            <th style="text-align:center;width:80px" title="Costo unitario (para rentabilidad)">Costo $</th>
+            <th style="width:40px"></th>
+          </tr></thead>
+          <tbody id="cta-stock-rows"></tbody>
+        </table>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end;align-items:center">
+        <span id="cta-stock-status" style="font-size:11px;color:var(--text3);margin-right:auto"></span>
+        <button class="btn btn-ghost btn-sm" onclick="ctaCloseStock()">Cerrar</button>
+        <button class="btn btn-sm" style="background:var(--accent);color:#fff" onclick="ctaSaveStock()">💾 Guardar catálogo</button>
+      </div>
+    </div>
   </div>
 
   <!-- Modal operación -->
@@ -21826,17 +21863,19 @@ const CTA_PAGE = 100;
 
 const CTA_ESTADOS = {
   '':          ['—', '#9ca3af'],
-  disenando:   ['🎨 Diseñando', '#ef4444'],   // fila rojo claro
-  a_cobrar:    ['💰 A cobrar',  '#f59e0b'],
+  disenando:   ['🎨 Diseñando', '#eab308'],   // amarillo (fila amarilla)
+  a_cobrar:    ['💰 A cobrar',  '#ef4444'],   // rojo (fila roja)
   pagada:      ['✅ Pagada',     '#22c55e'],
-  entregada:   ['📦 Entregada',  '#22c55e'],   // fila verde
+  entregada:   ['📦 Entregada',  '#16a34a'],   // verde
 };
 // Estados que se TOMAN de Mercado Libre (no editables, color de fila propio)
 const CTA_ML_ESTADOS = {
-  imprimir:  ['🖨️ Imprimir',  '#ef4444'],   // rojo claro
-  en_camino: ['🚚 En camino', '#a16207'],   // marrón claro
-  entregado: ['✅ Entregado',  '#22c55e'],   // verde
+  imprimir:  ['🖨️ Imprimir',  '#ef4444'],   // rojo
+  en_camino: ['🚚 En camino', '#92400e'],   // marrón
+  entregado: ['✅ Entregado',  '#16a34a'],   // verde
 };
+// Tinte de fila: alpha mas notorio (no tan claro). Se concatena al hex del estado.
+const CTA_ROW_ALPHA = '2b';
 // Deriva el estado ML desde el shipping de la orden cacheada en allOrders
 function _ctaMLEstado(op) {
   if (op.src !== 'ml') return null;
@@ -21860,6 +21899,7 @@ let _ctaState = {
 };
 let _ctaSaveTimer = null;
 let _ctaMLSynced = false;
+let _ctaCatDirty = false;
 
 function _ctaYmNow() { return new Date().toISOString().slice(0, 7); }
 function _ctaStatus(t) { const el = document.getElementById('cta-status'); if (el) el.textContent = t || ''; }
@@ -22043,7 +22083,7 @@ async function ctaFlushDirty() {
 }
 
 // ── Render maestro ───────────────────────────────────────────────
-function ctaRenderAll() { ctaRenderKPIs(); ctaRenderChart(); ctaRenderTable(); }
+function ctaRenderAll() { ctaRenderStockAlerts(); ctaRenderKPIs(); ctaRenderChart(); ctaRenderTable(); }
 
 function _ctaResumenMes(ym) {
   const r = _ctaState.resumen[ym];
@@ -22283,10 +22323,10 @@ function ctaRenderTable() {
         'style="font-size:11px;padding:3px 6px;border-radius:6px;border:1.5px solid ' + est[1] + ';color:' + est[1] + ';font-weight:700;background:var(--bg1)">' + opts + '</select>';
       if (o.estado) rowColor = est[1];
     }
-    const rowBg = rowColor ? ' style="background:' + rowColor + '14"' : '';
+    const rowBg = rowColor ? ' style="background:' + rowColor + CTA_ROW_ALPHA + '"' : '';
     return '<tr id="cta-row-' + o.id + '"' + rowBg + '>' +
       '<td style="white-space:nowrap;font-size:11px">' + f + '</td>' +
-      '<td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" title="' + _persoEsc(o.detalle) + ' (clic para editar)" onclick="ctaInlineEdit(\'' + o.id + '\',\'detalle\')">' + _persoEsc(o.detalle) + '</td>' +
+      '<td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;color:' + (o.facturaColor || 'var(--text1)') + ';font-weight:' + (o.facturaColor === '#ef4444' ? '600' : '400') + '" title="' + _persoEsc(o.detalle) + ' (clic para editar texto y color factura)" onclick="ctaInlineEdit(\'' + o.id + '\',\'detalle\')">' + _persoEsc(o.detalle) + '</td>' +
       '<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" title="Editar cliente" onclick="ctaInlineEdit(\'' + o.id + '\',\'cliente\')">' + _persoEsc(o.cliente) + '</td>' +
       '<td>' + tel + '</td>' +
       '<td>' + prodBadge + '</td>' +
@@ -22351,9 +22391,11 @@ function ctaDeleteOp(id) {
   const found = _ctaFind(id);
   if (!found) return;
   if (!confirm('🗑️ ¿Eliminar la operación "' + (found.op.detalle || id) + '"?\n\nNo se puede deshacer.')) return;
+  // v161: revertir el efecto en stock antes de borrar
+  if (_ctaAplicarStock(found.op, -1)) _ctaPersistCatalogo();
   _ctaState.chunks[found.ym] = _ctaState.chunks[found.ym].filter(o => o.id !== id);
   ctaMarkDirty(found.ym);
-  ctaRenderTable();
+  ctaRenderAll();
 }
 
 // ── Modal de operación ───────────────────────────────────────────
@@ -22371,7 +22413,7 @@ function ctaAddItemRow(it) {
   let opts = '<option value="">Producto…</option>';
   if (it.nombre && !enCat) opts += '<option value="' + _persoEsc(it.nombre) + '" selected>' + _persoEsc(it.nombre) + ' (de ML)</option>';
   opts += _ctaState.catalogo.map(p =>
-    '<option value="' + _persoEsc(p.nombre) + '"' + (p.nombre === it.nombre ? ' selected' : '') + '>' + _persoEsc(p.nombre) + '</option>').join('');
+    '<option value="' + _persoEsc(p.nombre) + '"' + (p.nombre === it.nombre ? ' selected' : '') + '>' + (p.emoji ? p.emoji + ' ' : '') + _persoEsc(p.nombre) + (p.stock != null ? ' (stock: ' + p.stock + ')' : '') + '</option>').join('');
   const div = document.createElement('div');
   div.className = 'cta-item-row';
   div.style.cssText = 'display:flex;gap:6px;align-items:center';
@@ -22484,9 +22526,11 @@ function ctaSaveOp() {
     }
   }
   _ctaEnsureChunk(ym).push(op);
+  // v161: descontar/sumar stock por la nueva operación (venta resta, insumo suma)
+  if (_ctaAplicarStock(op, 1)) _ctaPersistCatalogo();
   ctaMarkDirty(ym);
   ctaCloseOp();
-  ctaRenderTable();
+  ctaRenderAll();
 }
 
 // ── Sincronización: Personalizadas WA + Mercado Libre ────────────
@@ -22540,6 +22584,7 @@ async function ctaSyncWA() {
         items: p.producto ? [{ nombre: p.producto, cant: Number(p.cantidad) || 1, unit: Number(p.monto) || 0 }] : [],
         envio: Number(p.envio) || 0, monto, src: 'wa'
       });
+      if (_ctaAplicarStock(chunk[chunk.length - 1], 1)) _ctaPersistCatalogo();
       ctaMarkDirty(ym); nuevos++;
     } else if (!op.manualEdit) {
       // El pedido se editó en Personalizadas WA → reflejar acá
@@ -22616,15 +22661,19 @@ async function ctaSyncML() {
         id, ts: d.getTime(), fecha: d.toISOString().slice(0, 10),
         tipo: 'ingreso', origen: 'ML', categoria: 'ventas',
         detalle: 'Venta MercadoLibre' + (titulo ? ' ' + titulo : ''),
-        cliente: [buyer.first_name, buyer.last_name].filter(Boolean).join(' ') || buyer.nickname || '',
+        cliente: [buyer.first_name, buyer.last_name].filter(Boolean).join(' ')
+          || [buyer.billing_info && buyer.billing_info.first_name, buyer.billing_info && buyer.billing_info.last_name].filter(Boolean).join(' ')
+          || buyer.nickname || '',
         telefono: '', provincia,
         items, envio: 0,
         monto: Number(o.paid_amount) || Number(o.total_amount) || 0,
         src: 'ml'
       });
       ids.add(id); ctaMarkDirty(ym); nuevos++;
+      if (_ctaAplicarStock(chunk[chunk.length - 1], 1)) _ctaCatDirty = true;
     }
   }
+  if (_ctaCatDirty) { _ctaPersistCatalogo(); _ctaCatDirty = false; }
   _ctaMLSynced = true;
   return nuevos;
 }
@@ -22658,6 +22707,58 @@ async function ctaImportFile(file) {
   }
   document.getElementById('cta-import-file').value = '';
 }
+// ── Enriquecimiento ML: monto neto acreditado + nombre real ──────
+// Procesa en lotes pequeños con pausa (respeta rate-limit de ML y cuota
+// de Cloudflare). El Worker cachea cada orden, así corridas siguientes
+// solo piden las nuevas. Las ops manuales no se tocan.
+let _ctaEnriching = false;
+async function ctaEnrichML() {
+  if (_ctaEnriching) return;
+  if (typeof userId === 'undefined' || !userId) { alert('Conectá Mercado Libre primero.'); return; }
+  // Ops ML del rango actual que aún no tienen neto aplicado
+  const pend = [];
+  Object.values(_ctaState.chunks).forEach(ch => (ch || []).forEach(o => {
+    if (o.src === 'ml' && !o.netoML && !o.manualEdit) pend.push(o);
+  }));
+  if (!pend.length) { alert('No hay ventas de ML pendientes de enriquecer en lo cargado.\n\nTip: poné el rango en "Todo el histórico" para procesarlas todas.'); return; }
+  if (!confirm('💰 Traer monto neto + nombre real de ' + pend.length + ' venta(s) de ML.\n\nSe procesa en lotes (puede tardar). ¿Continuar?')) return;
+
+  _ctaEnriching = true;
+  const btn = document.getElementById('cta-enrich-btn');
+  if (btn) { btn.disabled = true; }
+  let done = 0, okc = 0;
+  const dirtyYm = new Set();
+  try {
+    for (const o of pend) {
+      const oid = (o.id || '').replace('ml_', '');
+      try {
+        const r = await fetch(WORKER + '/api/cta/ml-net/' + oid + '?user=' + userId);
+        const d = await r.json();
+        if (d.ok) {
+          if (d.neto) { o.monto = d.neto; o.netoML = true; }
+          if (d.nombre) o.cliente = d.nombre;
+          if (d.provincia && !o.provincia) o.provincia = d.provincia;
+          const ym = o.fecha.slice(0, 7); dirtyYm.add(ym); _ctaState.dirty.add(ym);
+          okc++;
+        }
+      } catch (e) { console.warn('[cta enrich]', oid, e.message); }
+      done++;
+      if (btn) btn.textContent = '💰 ' + done + '/' + pend.length;
+      // pausa entre llamadas para no saturar (300ms); cada 15, respiro mayor
+      await new Promise(res => setTimeout(res, 300));
+      if (done % 15 === 0) await new Promise(res => setTimeout(res, 1200));
+    }
+    await ctaFlushDirty();
+    ctaRenderAll();
+    if (typeof showToast === 'function') showToast('💰 ' + okc + '/' + pend.length + ' ventas ML con monto neto', 'success');
+  } catch (e) {
+    console.error('[cta enrich]', e);
+  } finally {
+    _ctaEnriching = false;
+    if (btn) { btn.disabled = false; btn.textContent = '💰 Montos netos ML'; }
+  }
+}
+
 // ── Estado de la operación (tiñe la fila) ────────────────────────
 function ctaSetEstado(id, estado) {
   const found = _ctaFind(id);
@@ -22691,6 +22792,15 @@ function ctaInlineEdit(id, campo) {
       if (c === 'r' || c === 'rojo') o.montoColor = '#ef4444';
       else if (c === 'v' || c === 'verde') o.montoColor = '#22c55e';
       else delete o.montoColor;
+    }
+  }
+  else if (campo === 'detalle') {
+    o.detalle = String(nuevo).trim();
+    const col = prompt('Color del detalle (marca de facturación):\n  r = rojo (falta facturar)\n  n = negro (ya facturado / normal)', o.facturaColor === '#ef4444' ? 'r' : 'n');
+    if (col !== null) {
+      const c = col.trim().toLowerCase();
+      if (c === 'r' || c === 'rojo') o.facturaColor = '#ef4444';
+      else delete o.facturaColor;
     }
   }
   else o[campo] = String(nuevo).trim();
@@ -22758,6 +22868,139 @@ async function ctaExportExcel() {
     _ctaStatus('⚠ ' + e.message);
   }
 }
+
+// Persistir catálogo (fire-and-forget) tras cambios de stock automáticos
+let _ctaCatTimer = null;
+function _ctaPersistCatalogo() {
+  clearTimeout(_ctaCatTimer);
+  _ctaCatTimer = setTimeout(() => {
+    fetch(WORKER + '/api/cta/catalogo', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ catalogo: _ctaState.catalogo })
+    }).catch(e => console.warn('[cta cat persist]', e.message));
+  }, 2000);
+}
+
+// ── STOCK: cálculo de alertas + render del insight superior ──────
+// Lista de emojis sugeridos para identificar productos
+const CTA_EMOJIS = ['☕','🍵','🧉','🍺','🏺','🎨','🎁','📦','🥤','🍶','⚽','🐟','🎣','🏕️','💧','🔥','⭐','🖼️'];
+
+function ctaRenderStockAlerts() {
+  const box = document.getElementById('cta-stock-alerts');
+  if (!box) return;
+  const bajos = (_ctaState.catalogo || []).filter(c => c.activo !== false &&
+    (c.stockMin || 0) > 0 && (c.stock || 0) <= (c.stockMin || 0));
+  if (!bajos.length) { box.style.display = 'none'; return; }
+  box.style.display = 'block';
+  box.innerHTML =
+    '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:10px 14px">' +
+    '<div style="font-size:12.5px;font-weight:700;color:#991b1b;margin-bottom:6px">⚠️ Stock bajo — hay que reponer ' + bajos.length + ' producto(s)</div>' +
+    '<div style="display:flex;flex-wrap:wrap;gap:8px">' +
+    bajos.map(c =>
+      '<span style="background:#fff;border:1px solid #fecaca;border-radius:8px;padding:5px 10px;font-size:11.5px">' +
+      (c.emoji || '📦') + ' <b>' + _persoEsc(c.nombre) + '</b>: ' +
+      '<span style="color:#dc2626;font-weight:700">' + (c.stock || 0) + '</span> ' +
+      '<span style="color:var(--text3)">(mín ' + (c.stockMin || 0) + ')</span>' +
+      (c.comprar ? ' → <b style="color:#16a34a">comprar ' + c.comprar + '</b>' : '') +
+      '</span>').join('') +
+    '</div></div>';
+}
+
+// Aplica el delta de stock de una operación (venta resta, insumo suma)
+function _ctaAplicarStock(op, signo) {
+  // signo: -1 al crear venta / +1 al crear compra insumo (o revertir)
+  const esVenta = op.tipo === 'ingreso';
+  const esInsumo = op.tipo === 'egreso' && op.categoria === 'insumos';
+  if (!esVenta && !esInsumo) return false;
+  const dir = esVenta ? -1 : 1;
+  let cambio = false;
+  (op.items || []).forEach(it => {
+    const cat = _ctaState.catalogo.find(c => c.nombre === it.nombre);
+    if (cat) { cat.stock = (cat.stock || 0) + dir * signo * (Number(it.cant) || 0); cambio = true; }
+  });
+  return cambio;
+}
+
+// Recalcula TODO el stock desde cero recorriendo las operaciones (para el botón recalcular)
+function ctaRecalcStock() {
+  _ctaState.catalogo.forEach(c => { c.stock = c.stockBase || 0; });
+  Object.values(_ctaState.chunks).forEach(ch => (ch || []).forEach(op => {
+    const esVenta = op.tipo === 'ingreso';
+    const esInsumo = op.tipo === 'egreso' && op.categoria === 'insumos';
+    if (!esVenta && !esInsumo) return;
+    const dir = esVenta ? -1 : 1;
+    (op.items || []).forEach(it => {
+      const cat = _ctaState.catalogo.find(c => c.nombre === it.nombre);
+      if (cat) cat.stock = (cat.stock || 0) + dir * (Number(it.cant) || 0);
+    });
+  }));
+}
+
+// ── Modal Stock y catálogo (visual) ──────────────────────────────
+function ctaOpenStock() {
+  const tb = document.getElementById('cta-stock-rows');
+  tb.innerHTML = '';
+  (_ctaState.catalogo || []).forEach(c => ctaStockAddRow(c));
+  if (!_ctaState.catalogo.length) ctaStockAddRow();
+  document.getElementById('cta-stock-modal').style.display = 'flex';
+}
+
+function ctaStockAddRow(c) {
+  c = c || { emoji: '📦', nombre: '', stock: 0, stockMin: 0, comprar: 0, costo: 0 };
+  const tb = document.getElementById('cta-stock-rows');
+  const tr = document.createElement('tr');
+  tr.className = 'cta-stock-row';
+  const emojiOpts = CTA_EMOJIS.map(e => '<option value="' + e + '"' + (e === c.emoji ? ' selected' : '') + '>' + e + '</option>').join('');
+  tr.innerHTML =
+    '<td><select class="cs-emoji" style="font-size:16px;padding:2px;border:none;background:transparent;cursor:pointer">' + emojiOpts + '</select></td>' +
+    '<td><input class="cs-nombre" value="' + _persoEsc(c.nombre) + '" style="font-size:12px;width:100%" placeholder="Nombre del producto"></td>' +
+    '<td><input class="cs-stock" type="number" value="' + (c.stock || 0) + '" style="font-size:12px;width:100%;text-align:center;font-weight:700"></td>' +
+    '<td><input class="cs-min" type="number" value="' + (c.stockMin || 0) + '" min="0" style="font-size:12px;width:100%;text-align:center"></td>' +
+    '<td><input class="cs-comprar" type="number" value="' + (c.comprar || 0) + '" min="0" style="font-size:12px;width:100%;text-align:center"></td>' +
+    '<td><input class="cs-costo" type="number" value="' + (c.costo || 0) + '" min="0" style="font-size:12px;width:100%;text-align:center"></td>' +
+    '<td style="text-align:center"><button class="btn btn-ghost btn-xs" style="color:#ef4444;padding:2px 7px" onclick="this.closest(\'tr\').remove()">✕</button></td>';
+  tb.appendChild(tr);
+}
+
+async function ctaSaveStock() {
+  const cat = [];
+  document.querySelectorAll('#cta-stock-rows .cta-stock-row').forEach(tr => {
+    const nombre = tr.querySelector('.cs-nombre').value.trim();
+    if (!nombre) return;
+    const prev = _ctaState.catalogo.find(c => c.nombre === nombre) || {};
+    cat.push({
+      id: prev.id || nombre.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''),
+      nombre,
+      emoji: tr.querySelector('.cs-emoji').value || '📦',
+      stockBase: parseFloat(tr.querySelector('.cs-stock').value) || 0,
+      stock: parseFloat(tr.querySelector('.cs-stock').value) || 0,
+      stockMin: parseFloat(tr.querySelector('.cs-min').value) || 0,
+      comprar: parseFloat(tr.querySelector('.cs-comprar').value) || 0,
+      costo: parseFloat(tr.querySelector('.cs-costo').value) || 0,
+      activo: true
+    });
+  });
+  _ctaState.catalogo = cat;
+  const st = document.getElementById('cta-stock-status');
+  if (st) st.textContent = 'Guardando…';
+  try {
+    const r = await fetch(WORKER + '/api/cta/catalogo', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ catalogo: cat })
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'error');
+    if (st) st.textContent = '✓ Guardado (' + cat.length + ')';
+    ctaRenderStockAlerts();
+    if (typeof showToast === 'function') showToast('📦 Catálogo guardado (' + cat.length + ' productos)', 'success');
+    setTimeout(ctaCloseStock, 600);
+  } catch (e) {
+    console.error('[cta stock]', e);
+    if (st) st.textContent = '⚠ ' + e.message;
+  }
+}
+
+function ctaCloseStock() { document.getElementById('cta-stock-modal').style.display = 'none'; }
 
 // ── Importar Excel (edición masiva del exportado) ────────────────
 // Mismo sistema que el Analizador SEO: matchea por columna clave y
