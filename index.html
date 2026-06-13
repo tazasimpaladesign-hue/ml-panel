@@ -3932,25 +3932,42 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <!-- ═══════════════════════ CUENTA IMPALA (v158) ═══════════════════════ -->
 <div id="section-cta" class="section fade-in">
 
-  <!-- KPIs del mes -->
+  <!-- Filtro de período del dashboard -->
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+    <span style="font-size:12px;color:var(--text3);font-weight:600">📅 Período:</span>
+    <select id="cta-periodo" onchange="ctaSetPeriodo(this.value)" style="font-size:12px;padding:5px 9px;border-radius:8px">
+      <option value="hoy">Hoy</option>
+      <option value="mes" selected>Mes actual</option>
+      <option value="mesant">Mes anterior</option>
+      <option value="custom">Rango personalizado</option>
+    </select>
+    <span id="cta-periodo-custom" style="display:none;gap:6px;align-items:center">
+      <input type="date" id="cta-per-desde" style="font-size:12px;padding:4px 7px" onchange="ctaRenderKPIs()">
+      <span style="font-size:12px;color:var(--text3)">a</span>
+      <input type="date" id="cta-per-hasta" style="font-size:12px;padding:4px 7px" onchange="ctaRenderKPIs()">
+    </span>
+    <span id="cta-periodo-label" style="font-size:11px;color:var(--text3);margin-left:4px"></span>
+  </div>
+
+  <!-- KPIs del período -->
   <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
     <div class="mc c-green" style="flex:1;min-width:140px;padding:10px 14px">
-      <div class="mc-label">💵 Ingresos del mes</div>
+      <div class="mc-label">💵 Ingresos</div>
       <div style="font-size:18px;font-weight:800" id="cta-kpi-ing">—</div>
       <div style="font-size:10px;color:var(--text3)" id="cta-kpi-ing-vs"></div>
     </div>
     <div class="mc c-red" style="flex:1;min-width:140px;padding:10px 14px">
-      <div class="mc-label">💸 Egresos del mes</div>
+      <div class="mc-label">💸 Egresos</div>
       <div style="font-size:18px;font-weight:800" id="cta-kpi-eg">—</div>
       <div style="font-size:10px;color:var(--text3)" id="cta-kpi-eg-vs"></div>
     </div>
     <div class="mc c-blue" style="flex:1;min-width:140px;padding:10px 14px">
-      <div class="mc-label">⚖️ Neto del mes</div>
+      <div class="mc-label">⚖️ Neto</div>
       <div style="font-size:18px;font-weight:800" id="cta-kpi-neto">—</div>
       <div style="font-size:10px;color:var(--text3)" id="cta-kpi-neto-vs"></div>
     </div>
     <div class="mc c-amber" style="flex:1;min-width:120px;padding:10px 14px">
-      <div class="mc-label">📦 Unidades mes</div>
+      <div class="mc-label">📦 Unidades</div>
       <div style="font-size:18px;font-weight:800" id="cta-kpi-uni">—</div>
       <div style="font-size:10px;color:var(--text3)" id="cta-kpi-uni-vs"></div>
     </div>
@@ -3989,14 +4006,10 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <div class="card-sub" id="cta-count">—</div>
       </div>
       <div style="display:flex;gap:8px;align-items:center;margin-left:auto;flex-wrap:wrap">
-        <input type="text" id="cta-search" placeholder="🔍 Cliente, producto, detalle, origen..." style="max-width:230px;font-size:12px;padding:5px 9px" oninput="_ctaState.page=1;ctaRenderTable()">
-        <select id="cta-rango" onchange="ctaSetRango(this.value)" style="font-size:12px;padding:5px 8px">
-          <option value="3m">Últimos 3 meses</option>
-          <option value="12m">Últimos 12 meses</option>
-          <option value="todo">Todo el histórico</option>
-        </select>
+        <input type="text" id="cta-search" placeholder="🔍 Cliente, producto, detalle, origen..." style="max-width:220px;font-size:12px;padding:5px 9px" oninput="_ctaState.page=1;ctaRenderTable()">
         <button class="btn btn-sm" style="background:var(--accent);color:#fff" onclick="ctaOpenOp(null)">➕ Nueva operación</button>
-        <button class="btn btn-ghost btn-sm" onclick="ctaSyncAll()" title="Trae ventas nuevas de ML y Personalizadas WA">⬇️ Sincronizar ventas</button>
+        <button class="btn btn-ghost btn-sm" onclick="ctaSyncAll()" title="Trae ventas nuevas de ML y Personalizadas WA">⬇️ Sincronizar</button>
+        <button class="btn btn-ghost btn-sm" onclick="ctaExportExcel()" title="Exporta a .xlsx las operaciones filtradas">📥 Exportar Excel</button>
         <button class="btn btn-ghost btn-sm" onclick="document.getElementById('cta-import-file').click()" title="Importar el histórico del Excel (cta-import-historico.json)">📦 Importar histórico</button>
         <input type="file" id="cta-import-file" accept=".json" style="display:none" onchange="ctaImportFile(this.files[0])">
         <span id="cta-status" style="font-size:11px;color:var(--text3)"></span>
@@ -4005,18 +4018,20 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <div class="tw">
       <table>
         <thead><tr>
-          <th style="white-space:nowrap;cursor:pointer;user-select:none" onclick="_ctaState.sortDir*=-1;ctaRenderTable()">Fecha ⇅</th>
-          <th>Detalle</th>
-          <th>Cliente</th>
+          <th style="white-space:nowrap;cursor:pointer;user-select:none" onclick="ctaSort('ts')">Fecha <span id="cta-sort-ts" style="font-size:10px"></span></th>
+          <th style="cursor:pointer;user-select:none" onclick="ctaSort('detalle')">Detalle <span id="cta-sort-detalle" style="font-size:10px"></span></th>
+          <th style="cursor:pointer;user-select:none" onclick="ctaSort('cliente')">Cliente <span id="cta-sort-cliente" style="font-size:10px"></span></th>
+          <th style="white-space:nowrap">Teléfono</th>
           <th style="white-space:nowrap">Productos</th>
-          <th>Origen</th>
-          <th>Provincia</th>
+          <th style="cursor:pointer;user-select:none" onclick="ctaSort('origen')">Origen <span id="cta-sort-origen" style="font-size:10px"></span></th>
+          <th style="cursor:pointer;user-select:none" onclick="ctaSort('provincia')">Provincia <span id="cta-sort-provincia" style="font-size:10px"></span></th>
           <th style="text-align:right;white-space:nowrap" title="Costo de envío, editable con ✏️">Envío</th>
-          <th style="text-align:right">Monto</th>
-          <th style="text-align:center;min-width:80px">Acciones</th>
+          <th style="text-align:right;cursor:pointer;user-select:none" onclick="ctaSort('monto')">Monto <span id="cta-sort-monto" style="font-size:10px"></span></th>
+          <th style="text-align:center;cursor:pointer;user-select:none;white-space:nowrap" onclick="ctaSort('estado')">Estado <span id="cta-sort-estado" style="font-size:10px"></span></th>
+          <th style="text-align:center;min-width:96px">Acciones</th>
         </tr></thead>
         <tbody id="cta-tbody">
-          <tr><td colspan="9" style="text-align:center;padding:32px;color:var(--text3)">Cargando…</td></tr>
+          <tr><td colspan="11" style="text-align:center;padding:32px;color:var(--text3)">Cargando…</td></tr>
         </tbody>
       </table>
     </div>
@@ -4053,13 +4068,16 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         </div>
         <input type="text" id="cta-f-detalle" placeholder="Detalle (ej: Venta 2 mg Boca / Pago monotributo)" style="font-size:12px">
         <div style="display:flex;gap:8px" id="cta-f-cli-row">
-          <input type="text" id="cta-f-cliente" placeholder="Cliente / Proveedor" style="font-size:12px;flex:1.4">
+          <input type="text" id="cta-f-cliente" placeholder="Cliente / Proveedor" style="font-size:12px;flex:1.4" list="cta-clientes-list" autocomplete="off">
+          <datalist id="cta-clientes-list"></datalist>
+          <input type="tel" id="cta-f-telefono" placeholder="Teléfono" style="font-size:12px;flex:1">
           <select id="cta-f-provincia" style="font-size:12px;flex:1"></select>
         </div>
         <div id="cta-items-box" style="border:1px solid var(--border);border-radius:8px;padding:8px;background:var(--bg2)">
-          <div style="display:flex;align-items:center;margin-bottom:6px">
+          <div style="display:flex;align-items:center;margin-bottom:6px;gap:8px">
             <span style="font-size:11px;font-weight:700">🛒 Productos</span>
-            <button class="btn btn-ghost btn-xs" style="margin-left:auto;font-size:10.5px" onclick="ctaAddItemRow()">➕ Ítem</button>
+            <button class="btn btn-ghost btn-xs" style="margin-left:auto;font-size:10.5px" onclick="ctaManageCatalog()">⚙️ Editar lista</button>
+            <button class="btn btn-ghost btn-xs" style="font-size:10.5px" onclick="ctaAddItemRow()">➕ Ítem</button>
           </div>
           <div id="cta-items-rows" style="display:flex;flex-direction:column;gap:6px"></div>
           <div style="font-size:10px;color:var(--text3);margin-top:6px">En egresos de insumos, los ítems SUMAN stock.</div>
@@ -21801,10 +21819,17 @@ function startPersoPolling() {
 const CTA_ORIGENES = ['ML','ML Cris','Cris Wsp','Wsp Tienda','WA','Woo','Presta','Shopee','Instagram','Facebook','Mercadoshop','Manual'];
 const CTA_PAGE = 100;
 
+const CTA_ESTADOS = {
+  '':          ['—', '#9ca3af'],
+  disenando:   ['🎨 Diseñando', '#3b82f6'],
+  a_cobrar:    ['💰 A cobrar',  '#f59e0b'],
+  pagada:      ['✅ Pagada',     '#22c55e'],
+};
 let _ctaState = {
   boot: false, months: [], resumen: {}, catalogo: [],
   chunks: {}, loaded: new Set(), dirty: new Set(),
-  rango: '3m', page: 1, sortDir: -1,
+  rango: 'todo', page: 1, sortCol: 'ts', sortDir: -1,
+  periodo: 'mes',
   editId: null, saving: false, syncing: false,
 };
 let _ctaSaveTimer = null;
@@ -21846,14 +21871,72 @@ async function ctaInit() {
   ctaSyncAll(true); // silencioso: WA apenas ingresa + ML asentado por siempre
 }
 
+// Conjunto de clientes únicos (para autocompletado) + su último teléfono/provincia
+function _ctaClientes() {
+  const map = new Map();
+  Object.values(_ctaState.chunks).forEach(ch => (ch || []).forEach(o => {
+    const n = (o.cliente || '').trim();
+    if (!n) return;
+    if (!map.has(n) || (o.ts || 0) > map.get(n).ts) {
+      map.set(n, { ts: o.ts || 0, telefono: o.telefono || '', provincia: o.provincia || '' });
+    }
+  }));
+  return map;
+}
+
+function _ctaFillClientesList() {
+  const dl = document.getElementById('cta-clientes-list');
+  if (!dl) return;
+  const nombres = [..._ctaClientes().keys()].sort();
+  dl.innerHTML = nombres.map(n => '<option value="' + _persoEsc(n) + '">').join('');
+}
+
 function _ctaRangeMonths() {
   const all = _ctaState.months.slice().sort();
   if (_ctaState.rango === 'todo') return all;
   const n = _ctaState.rango === '12m' ? 12 : 3;
-  // siempre incluir el mes actual aunque no tenga chunk todavía
   const cur = _ctaYmNow();
   const set = new Set(all.slice(-n)); set.add(cur);
   return [...set].sort();
+}
+
+// Rango [desde,hasta] en ms del período del dashboard
+function _ctaPeriodoRango() {
+  const now = new Date();
+  const p = _ctaState.periodo;
+  if (p === 'hoy') {
+    const d0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return [d0.getTime(), d0.getTime() + 86400000 - 1, 'Hoy ' + d0.toLocaleDateString('es-AR')];
+  }
+  if (p === 'mes') {
+    const d0 = new Date(now.getFullYear(), now.getMonth(), 1);
+    const d1 = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    return [d0.getTime(), d1.getTime() - 1, d0.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })];
+  }
+  if (p === 'mesant') {
+    const d0 = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const d1 = new Date(now.getFullYear(), now.getMonth(), 1);
+    return [d0.getTime(), d1.getTime() - 1, d0.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })];
+  }
+  // custom
+  const dv = document.getElementById('cta-per-desde').value;
+  const hv = document.getElementById('cta-per-hasta').value;
+  const d0 = dv ? new Date(dv + 'T00:00:00').getTime() : 0;
+  const d1 = hv ? new Date(hv + 'T23:59:59').getTime() : Date.now();
+  return [d0, d1, (dv || '...') + ' a ' + (hv || '...')];
+}
+
+async function ctaSetPeriodo(v) {
+  _ctaState.periodo = v;
+  document.getElementById('cta-periodo-custom').style.display = (v === 'custom') ? 'inline-flex' : 'none';
+  if (v === 'custom' && !document.getElementById('cta-per-desde').value) {
+    const now = new Date();
+    document.getElementById('cta-per-desde').value = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+    document.getElementById('cta-per-hasta').value = now.toISOString().slice(0, 10);
+  }
+  // custom/histórico puede requerir meses no cargados
+  if (v === 'custom' || v === 'mesant') { _ctaState.rango = 'todo'; await ctaLoadRange(); }
+  ctaRenderKPIs();
 }
 
 async function ctaLoadRange() {
@@ -21932,23 +22015,44 @@ function _ctaResumenMes(ym) {
   return { ing, eg, uni };
 }
 
+// Suma ingresos/egresos/unidades de las operaciones en [d0,d1]
+function _ctaSumaRango(d0, d1) {
+  let ing = 0, eg = 0, uni = 0, ops = 0;
+  Object.values(_ctaState.chunks).forEach(ch => (ch || []).forEach(o => {
+    const t = o.ts || 0;
+    if (t < d0 || t > d1) return;
+    ops++;
+    if (o.tipo === 'ingreso') { ing += (+o.monto || 0) + (+o.envio || 0); (o.items || []).forEach(it => uni += +it.cant || 0); }
+    else eg += (+o.monto || 0);
+  }));
+  return { ing, eg, uni, ops };
+}
+
 function ctaRenderKPIs() {
-  const cur = _ctaYmNow();
-  const prev = (() => { const d = new Date(); d.setMonth(d.getMonth() - 1); return d.toISOString().slice(0, 7); })();
-  const a = _ctaResumenMes(cur), b = _ctaResumenMes(prev);
+  const [d0, d1, label] = _ctaPeriodoRango();
+  const lblEl = document.getElementById('cta-periodo-label');
+  if (lblEl) lblEl.textContent = '· ' + label;
+
+  // Período anterior equivalente (misma duración, justo antes) para el %
+  const dur = d1 - d0;
+  const a = _ctaSumaRango(d0, d1);
+  const b = _ctaSumaRango(d0 - dur - 1, d0 - 1);
+
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.innerHTML = v; };
   const vs = (now, before) => {
     if (!before) return '';
     const p = ((now - before) / Math.abs(before)) * 100;
     const up = p >= 0;
     return '<span style="color:' + (up ? '#22c55e' : '#ef4444') + '">' + (up ? '▲' : '▼') + ' ' +
-      Math.abs(p).toFixed(0) + '%</span> vs mes anterior';
+      Math.abs(p).toFixed(0) + '%</span> vs período anterior';
   };
   set('cta-kpi-ing', PERSO_FMT_MONEY(a.ing)); set('cta-kpi-ing-vs', vs(a.ing, b.ing));
   set('cta-kpi-eg', PERSO_FMT_MONEY(a.eg)); set('cta-kpi-eg-vs', vs(a.eg, b.eg));
   const netoA = a.ing - a.eg, netoB = b.ing - b.eg;
   set('cta-kpi-neto', PERSO_FMT_MONEY(netoA)); set('cta-kpi-neto-vs', vs(netoA, netoB));
   set('cta-kpi-uni', (a.uni || 0).toLocaleString('es-AR')); set('cta-kpi-uni-vs', vs(a.uni || 0, b.uni || 0));
+
+  // Saldo histórico: resumen oficial-aware completo (no depende del período)
   let saldo = 0, meses = 0;
   Object.values(_ctaState.resumen).forEach(r => { saldo += (r.ing || 0) - (r.eg || 0); meses++; });
   set('cta-kpi-saldo', PERSO_FMT_MONEY(saldo));
@@ -22046,6 +22150,17 @@ function _ctaChartOpts(moneyY) {
 }
 
 // ── Tabla ────────────────────────────────────────────────────────
+function ctaSort(col) {
+  if (_ctaState.sortCol === col) _ctaState.sortDir *= -1;
+  else { _ctaState.sortCol = col; _ctaState.sortDir = (col === 'ts' || col === 'monto') ? -1 : 1; }
+  ['ts','detalle','cliente','origen','provincia','monto','estado'].forEach(c => {
+    const el = document.getElementById('cta-sort-' + c);
+    if (el) el.innerHTML = (typeof sortArrow === 'function') ? sortArrow(c, _ctaState.sortCol, _ctaState.sortDir) : '';
+  });
+  _ctaState.page = 1;
+  ctaRenderTable();
+}
+
 function _ctaOpsFiltradas() {
   const q = (document.getElementById('cta-search').value || '').toLowerCase().trim();
   let ops = [];
@@ -22055,9 +22170,18 @@ function _ctaOpsFiltradas() {
     (o.detalle || '').toLowerCase().includes(q) ||
     (o.origen || '').toLowerCase().includes(q) ||
     (o.provincia || '').toLowerCase().includes(q) ||
+    (o.telefono || '').toLowerCase().includes(q) ||
+    ((CTA_ESTADOS[o.estado || ''] || [''])[0] || '').toLowerCase().includes(q) ||
     (o.id || '').toLowerCase().includes(q) ||
     (o.items || []).some(it => (it.nombre || '').toLowerCase().includes(q)));
-  ops.sort((a, b) => _ctaState.sortDir === -1 ? (b.ts || 0) - (a.ts || 0) : (a.ts || 0) - (b.ts || 0));
+  const col = _ctaState.sortCol, dir = _ctaState.sortDir;
+  ops.sort((a, b) => {
+    let va, vb;
+    if (col === 'ts') { va = a.ts || 0; vb = b.ts || 0; }
+    else if (col === 'monto') { va = +a.monto || 0; vb = +b.monto || 0; }
+    else { va = String(a[col] || '').toLowerCase(); vb = String(b[col] || '').toLowerCase(); }
+    return va < vb ? -dir : va > vb ? dir : 0;
+  });
   return ops;
 }
 
@@ -22068,7 +22192,7 @@ function ctaRenderTable() {
   const cnt = document.getElementById('cta-count');
   if (cnt) cnt.textContent = ops.length.toLocaleString('es-AR') + ' operación(es) en el rango';
   if (!ops.length) {
-    tb.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--text3)">Sin operaciones. Cargá una con ➕ o importá el histórico 📦</td></tr>';
+    tb.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:32px;color:var(--text3)">Sin operaciones. Cargá una con ➕ o importá el histórico 📦</td></tr>';
     document.getElementById('cta-pager').innerHTML = '';
     return;
   }
@@ -22086,21 +22210,38 @@ function ctaRenderTable() {
       : '<span style="color:var(--text3);font-size:11px">—</span>';
     const envioCell = '$ ' + (+o.envio || 0).toLocaleString('es-AR') +
       ' <span style="cursor:pointer;opacity:.7" title="Editar envío" onclick="ctaEditEnvio(\'' + o.id + '\')">✏️</span>';
-    const montoCell = '<span style="font-weight:700;color:' + (esIng ? '#22c55e' : '#ef4444') + '">' +
-      (esIng ? '+' : '−') + PERSO_FMT_MONEY(o.monto) + '</span>';
-    const orig = o.origen || (esIng ? '—' : '<span style="font-size:10px">' + _persoEsc(o.categoria || 'egreso') + '</span>');
-    return '<tr id="cta-row-' + o.id + '">' +
+    const montoCell = '<span style="font-weight:700;color:' + (esIng ? '#22c55e' : '#ef4444') + ';cursor:pointer" ' +
+      'title="Editar monto" onclick="ctaInlineEdit(\'' + o.id + '\',\'monto\')">' + (esIng ? '+' : '−') + PERSO_FMT_MONEY(o.monto) + '</span>';
+    const orig = (o.origen || (esIng ? '—' : (o.categoria || 'egreso')));
+    // Teléfono con link WhatsApp (mismo sistema que Personalizadas)
+    const wa = _persoWaNum(o.telefono);
+    const tel = o.telefono
+      ? '<a href="https://wa.me/' + wa + '" target="_blank" style="color:#22c55e;font-weight:600;text-decoration:none" title="WhatsApp">📱 ' + _persoEsc(o.telefono) + '</a>'
+      : '<span style="color:var(--text3);font-size:11px;cursor:pointer" onclick="ctaInlineEdit(\'' + o.id + '\',\'telefono\')" title="Agregar teléfono">+ tel</span>';
+    // Estado (solo ingresos) con select + tinte de fila
+    const est = CTA_ESTADOS[o.estado || ''] || CTA_ESTADOS[''];
+    let estCell = '<span style="color:var(--text3)">—</span>';
+    if (esIng) {
+      const opts = Object.keys(CTA_ESTADOS).map(k =>
+        '<option value="' + k + '"' + (k === (o.estado || '') ? ' selected' : '') + '>' + CTA_ESTADOS[k][0] + '</option>').join('');
+      estCell = '<select onchange="ctaSetEstado(\'' + o.id + '\', this.value)" ' +
+        'style="font-size:11px;padding:3px 6px;border-radius:6px;border:1.5px solid ' + est[1] + ';color:' + est[1] + ';font-weight:700;background:var(--bg1)">' + opts + '</select>';
+    }
+    const rowBg = (esIng && o.estado) ? ' style="background:' + est[1] + '14"' : '';
+    return '<tr id="cta-row-' + o.id + '"' + rowBg + '>' +
       '<td style="white-space:nowrap;font-size:11px">' + f + '</td>' +
-      '<td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + _persoEsc(o.detalle) + '">' + _persoEsc(o.detalle) + '</td>' +
-      '<td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + _persoEsc(o.cliente) + '</td>' +
+      '<td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" title="' + _persoEsc(o.detalle) + ' (clic para editar)" onclick="ctaInlineEdit(\'' + o.id + '\',\'detalle\')">' + _persoEsc(o.detalle) + '</td>' +
+      '<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" title="Editar cliente" onclick="ctaInlineEdit(\'' + o.id + '\',\'cliente\')">' + _persoEsc(o.cliente) + '</td>' +
+      '<td>' + tel + '</td>' +
       '<td>' + prodBadge + '</td>' +
-      '<td style="font-size:11px;white-space:nowrap">' + orig + '</td>' +
-      '<td style="font-size:11px">' + _persoEsc(o.provincia) + '</td>' +
+      '<td style="font-size:11px;white-space:nowrap;cursor:pointer" title="Editar origen" onclick="ctaInlineEdit(\'' + o.id + '\',\'origen\')">' + _persoEsc(orig) + '</td>' +
+      '<td style="font-size:11px;cursor:pointer" title="Editar provincia" onclick="ctaInlineEdit(\'' + o.id + '\',\'provincia\')">' + (_persoEsc(o.provincia) || '<span style="color:var(--text3)">—</span>') + '</td>' +
       '<td style="text-align:right;white-space:nowrap;font-size:11px">' + envioCell + '</td>' +
       '<td style="text-align:right;white-space:nowrap">' + montoCell + '</td>' +
-      '<td style="text-align:center;white-space:nowrap">' +
-        '<button class="btn btn-ghost btn-sm" style="padding:3px 7px" title="Editar" onclick="ctaOpenOp(\'' + o.id + '\')">✏️</button>' +
-        '<button class="btn btn-ghost btn-sm" style="padding:3px 7px;color:#ef4444" title="Eliminar" onclick="ctaDeleteOp(\'' + o.id + '\')">🗑️</button>' +
+      '<td style="text-align:center">' + estCell + '</td>' +
+      '<td style="text-align:center;white-space:nowrap">' + _ctaLinkBtns(o) +
+        '<button class="btn btn-ghost btn-sm" style="padding:3px 6px" title="Editar todo" onclick="ctaOpenOp(\'' + o.id + '\')">✏️</button>' +
+        '<button class="btn btn-ghost btn-sm" style="padding:3px 6px;color:#ef4444" title="Eliminar" onclick="ctaDeleteOp(\'' + o.id + '\')">🗑️</button>' +
       '</td></tr>';
   }).join('');
 
@@ -22131,7 +22272,7 @@ function ctaToggleItems(id) {
   if (!found || !row) return;
   const tr = document.createElement('tr');
   tr.id = 'cta-items-' + id;
-  tr.innerHTML = '<td colspan="9" style="background:var(--bg2);font-size:11.5px;padding:8px 16px">' +
+  tr.innerHTML = '<td colspan="11" style="background:var(--bg2);font-size:11.5px;padding:8px 16px">' +
     (found.op.items || []).map(it =>
       '• <strong>' + _persoEsc(it.nombre) + '</strong> × ' + it.cant +
       (it.unit ? ' <span style="color:var(--text3)">(' + PERSO_FMT_MONEY(it.unit) + ' c/u)</span>' : '')
@@ -22191,6 +22332,7 @@ function ctaRecalcMonto() {
 
 function ctaOpenOp(id) {
   _ctaState.editId = id;
+  _ctaFillClientesList();
   const get = i => document.getElementById('cta-f-' + i);
   document.getElementById('cta-items-rows').innerHTML = '';
   if (id) {
@@ -22202,6 +22344,7 @@ function ctaOpenOp(id) {
     get('origen').value = CTA_ORIGENES.includes(o.origen) ? o.origen : 'Manual';
     get('categoria').value = o.categoria && o.categoria !== 'ventas' ? o.categoria : 'insumos';
     get('detalle').value = o.detalle || ''; get('cliente').value = o.cliente || '';
+    get('telefono').value = o.telefono || '';
     get('provincia').value = o.provincia || '';
     get('envio').value = o.envio || 0; get('monto').value = o.monto || 0;
     (o.items || []).forEach(it => ctaAddItemRow(it));
@@ -22210,11 +22353,26 @@ function ctaOpenOp(id) {
     get('tipo').value = 'ingreso';
     get('fecha').value = new Date().toISOString().slice(0, 10);
     get('origen').value = 'Manual'; get('categoria').value = 'insumos';
-    get('detalle').value = ''; get('cliente').value = ''; get('provincia').value = '';
+    get('detalle').value = ''; get('cliente').value = ''; get('telefono').value = '';
+    get('provincia').value = '';
     get('envio').value = 0; get('monto').value = '';
     ctaAddItemRow();
   }
   ctaOpTipoChanged();
+  // Autocompletar teléfono/provincia al tipear un cliente conocido
+  const cliInput = document.getElementById('cta-f-cliente');
+  if (cliInput && !cliInput._ctaBound) {
+    cliInput._ctaBound = true;
+    cliInput.addEventListener('change', () => {
+      const info = _ctaClientes().get(cliInput.value.trim());
+      if (info) {
+        const tEl = document.getElementById('cta-f-telefono');
+        const pEl = document.getElementById('cta-f-provincia');
+        if (tEl && !tEl.value && info.telefono) tEl.value = info.telefono;
+        if (pEl && !pEl.value && info.provincia) pEl.value = info.provincia;
+      }
+    });
+  }
   document.getElementById('cta-op-modal').style.display = 'flex';
 }
 
@@ -22241,7 +22399,8 @@ function ctaSaveOp() {
     origen: tipo === 'ingreso' ? get('origen') : '',
     categoria: tipo === 'ingreso' ? 'ventas' : get('categoria'),
     detalle: get('detalle').trim(), cliente: get('cliente').trim(),
-    telefono: '', provincia: get('provincia'),
+    telefono: get('telefono').trim(), provincia: get('provincia'),
+    estado: (_ctaState.editId && _ctaFind(_ctaState.editId)) ? (_ctaFind(_ctaState.editId).op.estado || '') : '',
     items, envio: parseFloat(get('envio')) || 0, monto,
     src: 'manual', manualEdit: true
   };
@@ -22357,7 +22516,21 @@ async function ctaSyncML() {
     const ids = new Set(chunk.map(x => x.id));
     for (const { o, d } of lista) {
       const id = 'ml_' + o.id;
-      if (ids.has(id)) continue;
+      if (ids.has(id)) {
+        // Completar provincia/título en ops ML viejas (no manuales)
+        const ex = chunk.find(x => x.id === id);
+        if (ex && !ex.manualEdit) {
+          let chg = false;
+          const prov = (o.shipping && o.shipping.provincia) || '';
+          if (prov && !ex.provincia) { ex.provincia = prov; chg = true; }
+          if (/^Venta ML #/.test(ex.detalle || '')) {
+            const t = (ex.items && ex.items[0]) ? String(ex.items[0].nombre).slice(0, 70) : '';
+            ex.detalle = 'Venta MercadoLibre' + (t ? ' ' + t : ''); chg = true;
+          }
+          if (chg) { ctaMarkDirty(ym); nuevos++; }
+        }
+        continue;
+      }
       const items = (o.order_items || []).map(oi => ({
         nombre: (oi.item && oi.item.title) || 'Publicación ML',
         cant: Number(oi.quantity) || 1,
@@ -22365,12 +22538,16 @@ async function ctaSyncML() {
         sku: (oi.item && oi.item.seller_sku) || ''
       }));
       const buyer = o.buyer || {};
+      // Fix v159: provincia desde el shipping enriquecido (loadShippingStatuses)
+      const provincia = (o.shipping && o.shipping.provincia) || '';
+      // Fix v159: título limpio sin "#id" → "Venta MercadoLibre <producto>"
+      const titulo = items[0] ? String(items[0].nombre).slice(0, 70) : '';
       chunk.push({
         id, ts: d.getTime(), fecha: d.toISOString().slice(0, 10),
         tipo: 'ingreso', origen: 'ML', categoria: 'ventas',
-        detalle: 'Venta ML #' + o.id + (items[0] ? ' · ' + String(items[0].nombre).slice(0, 60) : ''),
+        detalle: 'Venta MercadoLibre' + (titulo ? ' ' + titulo : ''),
         cliente: [buyer.first_name, buyer.last_name].filter(Boolean).join(' ') || buyer.nickname || '',
-        telefono: '', provincia: '',
+        telefono: '', provincia,
         items, envio: 0,
         monto: Number(o.paid_amount) || Number(o.total_amount) || 0,
         src: 'ml'
@@ -22411,6 +22588,124 @@ async function ctaImportFile(file) {
   }
   document.getElementById('cta-import-file').value = '';
 }
+// ── Estado de la operación (tiñe la fila) ────────────────────────
+function ctaSetEstado(id, estado) {
+  const found = _ctaFind(id);
+  if (!found) return;
+  found.op.estado = estado;
+  found.op.manualEdit = true;
+  ctaMarkDirty(found.ym);
+  ctaRenderTable();
+}
+
+// ── Edición inline de una celda (detalle/cliente/monto/origen/provincia/telefono) ──
+function ctaInlineEdit(id, campo) {
+  const found = _ctaFind(id);
+  if (!found) return;
+  const o = found.op;
+  const actual = o[campo] != null ? o[campo] : '';
+  let nuevo;
+  if (campo === 'provincia') {
+    nuevo = prompt('Provincia (' + PERSO_PROVINCIAS.join(', ').slice(0, 60) + '...):', actual);
+  } else if (campo === 'origen') {
+    nuevo = prompt('Origen (' + CTA_ORIGENES.join(' / ') + '):', actual);
+  } else {
+    nuevo = prompt('Editar ' + campo + ':', actual);
+  }
+  if (nuevo === null) return;
+  if (campo === 'monto') o.monto = parseFloat(String(nuevo).replace(',', '.')) || 0;
+  else o[campo] = String(nuevo).trim();
+  o.manualEdit = true;
+  ctaMarkDirty(found.ym);
+  ctaRenderTable();
+}
+
+// ── Botones de link a la plataforma de origen ────────────────────
+function _ctaLinkBtns(o) {
+  const id = o.id || '';
+  if (o.src === 'ml' || id.indexOf('ml_') === 0) {
+    const oid = id.replace('ml_', '');
+    return '<a class="btn btn-ghost btn-sm" style="padding:3px 6px;text-decoration:none" target="_blank" rel="noopener" ' +
+      'href="https://www.mercadolibre.com.ar/ventas/' + oid + '/detalle" title="Ver venta en Mercado Libre">🛒</a>';
+  }
+  if (o.src === 'wa' || id.indexOf('wa_') === 0) {
+    return '<button class="btn btn-ghost btn-sm" style="padding:3px 6px" title="Ver en Personalizadas WA" ' +
+      'onclick="showSection(\'perso-wa\')">🎨</button>';
+  }
+  if (o.src === 'woo' || id.indexOf('woo_') === 0) {
+    const oid = id.replace('woo_', '');
+    const base = (window._wooWpBaseUrl || 'https://tiendaimpala.com.ar');
+    return '<a class="btn btn-ghost btn-sm" style="padding:3px 6px;text-decoration:none" target="_blank" rel="noopener" ' +
+      'href="' + base + '/wp-admin/post.php?post=' + oid + '&action=edit" title="Ver pedido en WooCommerce">🛍️</a>';
+  }
+  return '';
+}
+
+// ── Exportar a Excel (operaciones filtradas) — patrón del Analizador SEO ──
+async function ctaExportExcel() {
+  const ops = _ctaOpsFiltradas();
+  if (!ops.length) { alert('No hay operaciones para exportar con el filtro actual.'); return; }
+  _ctaStatus('⏳ Generando Excel…');
+  try {
+    const XLSX = await _seoLoadSheetJS();
+    const header = ['Fecha','Tipo','Detalle','Cliente','Teléfono','Provincia','Origen','Categoría','Productos','Envío','Monto','Estado'];
+    const aoa = [header];
+    ops.forEach(o => {
+      const prods = (o.items || []).map(it => it.nombre + ' x' + it.cant).join(' | ');
+      aoa.push([
+        o.fecha || '', o.tipo || '', o.detalle || '', o.cliente || '', o.telefono || '',
+        o.provincia || '', o.origen || '', o.categoria || '', prods,
+        +o.envio || 0, +o.monto || 0, (CTA_ESTADOS[o.estado || ''] || [''])[0]
+      ]);
+    });
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = [{wch:11},{wch:9},{wch:34},{wch:22},{wch:14},{wch:16},{wch:11},{wch:13},{wch:30},{wch:10},{wch:12},{wch:13}];
+    const totIng = ops.filter(o=>o.tipo==='ingreso').reduce((a,o)=>a+(+o.monto||0)+(+o.envio||0),0);
+    const totEg = ops.filter(o=>o.tipo==='egreso').reduce((a,o)=>a+(+o.monto||0),0);
+    const resumen = XLSX.utils.aoa_to_sheet([
+      ['Resumen de operaciones exportadas'],[''],
+      ['Operaciones', ops.length],
+      ['Ingresos', totIng],['Egresos', totEg],['Neto', totIng-totEg],
+      ['Generado', new Date().toLocaleString('es-AR')]
+    ]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Operaciones');
+    XLSX.utils.book_append_sheet(wb, resumen, 'Resumen');
+    XLSX.writeFile(wb, 'cuenta-impala-' + new Date().toISOString().slice(0,10) + '.xlsx');
+    _ctaStatus('✓ Exportado (' + ops.length + ')');
+  } catch (e) {
+    console.error('[cta export]', e);
+    alert('⚠ No se pudo exportar: ' + e.message);
+    _ctaStatus('⚠ ' + e.message);
+  }
+}
+
+// ── Gestión del catálogo de productos (agregar/quitar) ───────────
+function ctaManageCatalog() {
+  const lista = _ctaState.catalogo.map(c => c.nombre).join('\n');
+  const txt = prompt('🛒 PRODUCTOS DEL CATÁLOGO\n\nUno por línea. Agregá o borrá líneas y aceptá para guardar:', lista);
+  if (txt === null) return;
+  const nombres = txt.split('\n').map(s => s.trim()).filter(Boolean);
+  const prev = {};
+  _ctaState.catalogo.forEach(c => { prev[c.nombre] = c; });
+  _ctaState.catalogo = nombres.map(n => prev[n] || {
+    id: n.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''),
+    nombre: n, costo: 0, stock: 0, stockMin: 0, activo: true
+  });
+  fetch(WORKER + '/api/cta/catalogo', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ catalogo: _ctaState.catalogo })
+  }).then(r => r.json()).then(d => {
+    if (typeof showToast === 'function') showToast(d.ok ? '🛒 Catálogo guardado (' + nombres.length + ')' : '⚠ Error al guardar', d.ok ? 'success' : 'warn');
+  }).catch(e => console.error('[cta catalogo]', e));
+  // refrescar los selects de ítems abiertos
+  document.querySelectorAll('#cta-items-rows .cta-item-row .ci-prod').forEach(sel => {
+    const val = sel.value;
+    sel.innerHTML = '<option value="">Producto…</option>' + _ctaState.catalogo.map(p =>
+      '<option value="' + _persoEsc(p.nombre) + '"' + (p.nombre === val ? ' selected' : '') + '>' + _persoEsc(p.nombre) + '</option>').join('');
+  });
+}
+
 // ═══════════════ /v158 CUENTA IMPALA ════════════════════════════
 
 const titles={
@@ -25235,6 +25530,16 @@ const BKP_SECTIONS = {
     icon: '🎨',
     get: () => (typeof _persoState !== 'undefined' && Array.isArray(_persoState.pedidos)) ? _persoState.pedidos : [],
   },
+  ctaImpala: {
+    label: 'Cuenta Impala — contabilidad',
+    icon: '💼',
+    get: () => {
+      if (typeof _ctaState === 'undefined') return null;
+      const chunks = {};
+      Object.keys(_ctaState.chunks).forEach(ym => { chunks[ym] = _ctaState.chunks[ym]; });
+      return { chunks, catalogo: _ctaState.catalogo, resumen: _ctaState.resumen };
+    },
+  },
   persoMsgs: {
     label: 'Personalizadas WA — mensajes WhatsApp',
     icon: '💬',
@@ -25396,6 +25701,18 @@ async function bkpApplyImport(data, selection){
     if(selection.persoMsgs && Array.isArray(data.persoMsgs) && typeof persoSaveMsgs === 'function'){
       persoSaveMsgs(data.persoMsgs);
       if(typeof persoRenderMsgs === 'function') persoRenderMsgs();
+    }
+    if(selection.ctaImpala && data.ctaImpala && data.ctaImpala.chunks){
+      try{
+        const rImp = await fetch(WORKER + '/api/cta/import', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data.ctaImpala)
+        });
+        const dImp = await rImp.json();
+        if(dImp.ok){
+          _ctaState.boot = false; _ctaState.chunks = {}; _ctaState.loaded = new Set();
+        } else console.warn('[Backup] cta no restaurada:', dImp.error);
+      }catch(e){ console.warn('[Backup] cta → Worker falló:', e.message); }
     }
     if(selection.persoPedidos && Array.isArray(data.persoPedidos)){
       _persoState.pedidos = data.persoPedidos;
