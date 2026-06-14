@@ -769,7 +769,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v162 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v163 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4021,6 +4021,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <button class="btn btn-ghost btn-sm" onclick="document.getElementById('cta-xlsx-file').click()" title="Importar un .xlsx exportado previamente para aplicar cambios masivos">📤 Importar Excel</button>
         <input type="file" id="cta-xlsx-file" accept=".xlsx,.xls,.csv" style="display:none" onchange="ctaImportExcel(this.files[0])">
         <button class="btn btn-ghost btn-sm" onclick="ctaOpenStock()" title="Ver y administrar stock + catálogo de productos">📦 Stock y catálogo</button>
+        <button class="btn btn-ghost btn-sm" onclick="ctaOpenOrigenes()" title="Editar nombres y emojis de los orígenes (renombrar actualiza todas las filas)">⚙️ Orígenes</button>
         <button class="btn btn-ghost btn-sm" onclick="document.getElementById('cta-import-file').click()" title="Importar el histórico del Excel (cta-import-historico.json)">📥 Importar histórico</button>
         <input type="file" id="cta-import-file" accept=".json" style="display:none" onchange="ctaImportFile(this.files[0])">
         <span id="cta-status" style="font-size:11px;color:var(--text3)"></span>
@@ -4067,6 +4068,23 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
   <div class="alert a-info" style="margin-top:14px;font-size:11px">
     💡 Las ventas de <strong>ML</strong> y <strong>Personalizadas WA</strong> entran solas con "Sincronizar" (y al abrir la sección). Las de ML quedan asentadas <strong>para siempre</strong> aunque ML solo conserve 12 meses. Los meses cerrados del histórico usan los <strong>totales oficiales</strong> de tu Excel en KPIs y gráficos.
+  </div>
+
+  <!-- Modal Orígenes -->
+  <div id="cta-origenes-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;align-items:center;justify-content:center">
+    <div class="card" style="max-width:460px;width:94%;margin:0;max-height:90vh;overflow:auto">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+        <div class="card-title" style="margin:0">⚙️ Orígenes de venta</div>
+        <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="ctaOrigAddRow()">➕ Origen</button>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Si renombrás un origen, se actualizan todas las operaciones que lo usan. El emoji aparece en la columna Origen.</div>
+      <div id="cta-orig-rows" style="display:flex;flex-direction:column;gap:6px"></div>
+      <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end;align-items:center">
+        <span id="cta-orig-status" style="font-size:11px;color:var(--text3);margin-right:auto"></span>
+        <button class="btn btn-ghost btn-sm" onclick="ctaCloseOrigenes()">Cerrar</button>
+        <button class="btn btn-sm" style="background:var(--accent);color:#fff" onclick="ctaSaveOrigenes()">💾 Guardar</button>
+      </div>
+    </div>
   </div>
 
   <!-- Modal Stock y catálogo -->
@@ -21877,7 +21895,29 @@ function startPersoPolling() {
 // v158 · CUENTA IMPALA — contabilidad del negocio
 // Datos en KV del Worker v90: chunks mensuales + resumen oficial-aware.
 // ═══════════════════════════════════════════════════════════════
-const CTA_ORIGENES = ['ML','ML Cris','Cris Wsp','Wsp Tienda','WA','Woo','Presta','Shopee','Instagram','Facebook','Mercadoshop','Manual'];
+// Orígenes con emoji, editables. Se guardan en localStorage; el array
+// CTA_ORIGENES se deriva para compatibilidad con el resto del código.
+const CTA_ORIGENES_DEFAULT = [
+  { nombre: 'ML', emoji: '🛒' }, { nombre: 'ML Cris', emoji: '🛒' },
+  { nombre: 'Cris Wsp', emoji: '💬' }, { nombre: 'Wsp Tienda', emoji: '💬' },
+  { nombre: 'Woo', emoji: '🛍️' }, { nombre: 'Presta', emoji: '🏪' },
+  { nombre: 'Shopee', emoji: '🧡' }, { nombre: 'Instagram', emoji: '📸' },
+  { nombre: 'Facebook', emoji: '📘' }, { nombre: 'Mercadoshop', emoji: '🟡' },
+  { nombre: 'Manual', emoji: '✍️' },
+];
+function ctaGetOrigenes() {
+  try {
+    const s = JSON.parse(localStorage.getItem('cta_origenes') || 'null');
+    if (Array.isArray(s) && s.length) return s;
+  } catch (e) {}
+  return CTA_ORIGENES_DEFAULT.slice();
+}
+function ctaSaveOrigenesLS(arr) { localStorage.setItem('cta_origenes', JSON.stringify(arr)); }
+function ctaOrigenEmoji(nombre) {
+  const o = ctaGetOrigenes().find(x => x.nombre === nombre);
+  return o ? (o.emoji || '') : '';
+}
+let CTA_ORIGENES = ctaGetOrigenes().map(o => o.nombre);
 const CTA_PAGE = 100;
 
 const CTA_ESTADOS = {
@@ -22317,8 +22357,15 @@ function ctaRenderTable() {
       ? '<span style="cursor:pointer;background:var(--bg2);border:1px solid var(--border);border-radius:7px;padding:2px 8px;font-size:11px;white-space:nowrap" ' +
         'onclick="ctaToggleItems(\'' + o.id + '\')" title="Ver productos">🛒 ' + items.length + ' ▾</span>'
       : '<span style="color:var(--text3);font-size:11px">—</span>';
-    const envioCell = '$ ' + (+o.envio || 0).toLocaleString('es-AR') +
-      ' <span style="cursor:pointer;opacity:.7" title="Editar envío" onclick="ctaEditEnvio(\'' + o.id + '\')">✏️</span>';
+    // Envío: si hay envioInfo (lo que paga el cliente en ML) se muestra como
+    // dato informativo (gris, no suma); si no, el envío contable editable.
+    let envioCell;
+    if (o.envioInfo != null && o.envioInfo > 0) {
+      envioCell = '<span style="color:var(--text3)" title="Lo que paga el cliente por envío en ML (informativo, no entra en la contabilidad)">📦 $' + (+o.envioInfo).toLocaleString('es-AR') + '</span>';
+    } else {
+      envioCell = '$ ' + (+o.envio || 0).toLocaleString('es-AR') +
+        ' <span style="cursor:pointer;opacity:.7" title="Editar envío" onclick="ctaEditEnvio(\'' + o.id + '\')">✏️</span>';
+    }
     // Color del monto: manual (o.montoColor) > rojo si "a cobrar" > verde/rojo por tipo
     let montoColor = o.montoColor || (esIng ? '#22c55e' : '#ef4444');
     if (esIng && o.estado === 'a_cobrar' && !o.montoColor) montoColor = '#ef4444';
@@ -22356,7 +22403,7 @@ function ctaRenderTable() {
       '<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" title="Editar cliente" onclick="ctaInlineEdit(\'' + o.id + '\',\'cliente\')">' + _persoEsc(o.cliente) + '</td>' +
       '<td>' + tel + '</td>' +
       '<td>' + prodBadge + '</td>' +
-      '<td style="font-size:11px;white-space:nowrap;cursor:pointer" title="Editar origen" onclick="ctaInlineEdit(\'' + o.id + '\',\'origen\')">' + _persoEsc(orig) + '</td>' +
+      '<td style="font-size:11px;white-space:nowrap;cursor:pointer" title="Editar origen (o usá ⚙️ Orígenes)" onclick="ctaInlineEdit(\'' + o.id + '\',\'origen\')">' + (ctaOrigenEmoji(o.origen) ? ctaOrigenEmoji(o.origen) + ' ' : '') + _persoEsc(orig) + '</td>' +
       '<td style="font-size:11px;cursor:pointer" title="Editar provincia" onclick="ctaInlineEdit(\'' + o.id + '\',\'provincia\')">' + (_persoEsc(o.provincia) || '<span style="color:var(--text3)">—</span>') + '</td>' +
       '<td style="text-align:right;white-space:nowrap;font-size:11px">' + envioCell + '</td>' +
       '<td style="text-align:right;white-space:nowrap">' + montoCell + '</td>' +
@@ -22396,14 +22443,59 @@ function ctaToggleItems(id) {
   const found = _ctaFind(id);
   const row = document.getElementById('cta-row-' + id);
   if (!found || !row) return;
+  const o = found.op;
+  const esVenta = o.tipo === 'ingreso';
+  const signo = esVenta ? '−' : '+';        // venta descuenta, egreso suma
+  const color = esVenta ? '#ef4444' : '#16a34a';
   const tr = document.createElement('tr');
   tr.id = 'cta-items-' + id;
+  // Por cada ítem: muestra el movimiento de stock (-1 Mágica / +36 Mágica) y
+  // permite editar cantidad y producto (útil hasta tener los SKU mapeados).
+  const catOpts = (sel) => '<option value="">(producto)…</option>' +
+    _ctaState.catalogo.map(p => '<option value="' + _persoEsc(p.nombre) + '"' +
+      (p.nombre === sel ? ' selected' : '') + '>' + (p.emoji ? p.emoji + ' ' : '') + _persoEsc(p.nombre) + '</option>').join('');
+  let body = (o.items || []).map((it, i) => {
+    const cat = _ctaCatMatch(it);
+    const movTxt = cat
+      ? '<span style="font-weight:800;color:' + color + '">' + signo + it.cant + '</span> ' + (cat.emoji || '') + ' ' + _persoEsc(cat.nombre)
+      : '<span style="color:#d97706" title="No mapea a ningún producto del catálogo (revisá el SKU o asigná producto)">⚠ sin mapear</span>';
+    return '<div style="display:flex;align-items:center;gap:8px;padding:3px 0">' +
+      '<span style="min-width:150px">' + movTxt + '</span>' +
+      '<span style="color:var(--text3)">·</span>' +
+      '<input type="number" value="' + it.cant + '" min="1" style="width:60px;font-size:11px" title="Editar cantidad" ' +
+        'onchange="ctaEditItem(\'' + o.id + '\',' + i + ',\'cant\',this.value)">' +
+      '<select style="font-size:11px;max-width:200px" title="Cambiar producto" ' +
+        'onchange="ctaEditItem(\'' + o.id + '\',' + i + ',\'nombre\',this.value)">' + catOpts(it.nombre) + '</select>' +
+      (it.sku ? '<span style="color:var(--text3);font-size:10px">SKU: ' + _persoEsc(it.sku) + '</span>' : '') +
+      '</div>';
+  }).join('');
+  if (!(o.items || []).length) body = '<span style="color:var(--text3)">Sin productos en esta operación.</span>';
   tr.innerHTML = '<td colspan="12" style="background:var(--bg2);font-size:11.5px;padding:8px 16px">' +
-    (found.op.items || []).map(it =>
-      '• <strong>' + _persoEsc(it.nombre) + '</strong> × ' + it.cant +
-      (it.unit ? ' <span style="color:var(--text3)">(' + PERSO_FMT_MONEY(it.unit) + ' c/u)</span>' : '')
-    ).join(' &nbsp;&nbsp; ') + '</td>';
+    '<div style="font-size:10.5px;color:var(--text3);margin-bottom:4px">Movimiento de stock de esta operación (editá cantidad o producto si hace falta):</div>' +
+    body + '</td>';
   row.after(tr);
+}
+
+// Editar un ítem de una operación (cantidad o producto) y reajustar stock
+function ctaEditItem(opId, idx, campo, valor) {
+  const found = _ctaFind(opId);
+  if (!found || !found.op.items || !found.op.items[idx]) return;
+  const op = found.op;
+  // revertir stock con los items actuales
+  if (_ctaAplicarStock(op, -1)) _ctaCatDirty = true;
+  if (campo === 'cant') op.items[idx].cant = parseFloat(valor) || 1;
+  else op.items[idx].nombre = valor;
+  op.manualEdit = true;
+  // re-aplicar stock con los nuevos valores
+  if (_ctaAplicarStock(op, 1)) _ctaCatDirty = true;
+  if (_ctaCatDirty) { _ctaPersistCatalogo(); _ctaCatDirty = false; }
+  _ctaState.dirty.add(found.ym);
+  ctaMarkDirty(found.ym);
+  // refrescar la fila expandida + alertas
+  const exp = document.getElementById('cta-items-' + opId);
+  if (exp) exp.remove();
+  ctaToggleItems(opId);
+  ctaRenderStockAlerts();
 }
 
 async function ctaEditEnvio(id) {
@@ -22613,7 +22705,7 @@ async function ctaSyncWA() {
     if (!op) {
       chunk.push({
         id, ts: p.ts, fecha: new Date(p.ts).toISOString().slice(0, 10),
-        tipo: 'ingreso', origen: 'WA', categoria: 'ventas',
+        tipo: 'ingreso', origen: 'Cris Wsp', categoria: 'ventas',
         detalle: 'Personalizada ' + p.code + (p.producto ? ' · ' + p.producto : ''),
         cliente: p.comprador || '', telefono: p.telefono || '', provincia: p.provincia || '',
         items: p.producto ? [{ nombre: p.producto, cant: Number(p.cantidad) || 1, unit: Number(p.monto) || 0 }] : [],
@@ -22773,6 +22865,8 @@ async function ctaEnrichML() {
           if (d.neto) { o.monto = d.neto; o.netoML = true; }
           if (d.nombre) o.cliente = d.nombre;
           if (d.provincia && !o.provincia) o.provincia = d.provincia;
+          // Envío que paga el cliente en ML: informativo, NO suma a la contabilidad
+          if (d.envioComprador != null) { o.envioInfo = d.envioComprador; o.envio = 0; }
           const ym = o.fecha.slice(0, 7); dirtyYm.add(ym); _ctaState.dirty.add(ym);
           okc++;
         }
@@ -22793,6 +22887,64 @@ async function ctaEnrichML() {
     if (btn) { btn.disabled = false; btn.textContent = '💰 Montos netos ML'; }
   }
 }
+
+// ── Gestión de orígenes (renombrar propaga a todas las filas) ────
+let _ctaOrigBefore = [];
+function ctaOpenOrigenes() {
+  const rows = document.getElementById('cta-orig-rows');
+  rows.innerHTML = '';
+  _ctaOrigBefore = ctaGetOrigenes();
+  _ctaOrigBefore.forEach(o => ctaOrigAddRow(o));
+  document.getElementById('cta-origenes-modal').style.display = 'flex';
+}
+function ctaOrigAddRow(o) {
+  o = o || { nombre: '', emoji: '🏷️' };
+  const rows = document.getElementById('cta-orig-rows');
+  const div = document.createElement('div');
+  div.className = 'cta-orig-row';
+  div.style.cssText = 'display:flex;gap:8px;align-items:center';
+  div.dataset.orig = o.nombre; // nombre original (para detectar rename)
+  div.innerHTML =
+    '<input class="co-emoji" value="' + _persoEsc(o.emoji || '🏷️') + '" list="cta-emoji-list" maxlength="4" style="width:42px;font-size:18px;text-align:center;padding:3px;border:1px solid var(--border);border-radius:6px" title="Pegá o elegí un emoji">' +
+    '<input class="co-nombre" value="' + _persoEsc(o.nombre) + '" style="flex:1;font-size:12px" placeholder="Nombre del origen">' +
+    '<button class="btn btn-ghost btn-xs" style="color:#ef4444;padding:2px 8px" onclick="this.closest(\'.cta-orig-row\').remove()">✕</button>';
+  rows.appendChild(div);
+}
+async function ctaSaveOrigenes() {
+  const arr = [];
+  const renames = []; // {from, to}
+  document.querySelectorAll('#cta-orig-rows .cta-orig-row').forEach(div => {
+    const nombre = div.querySelector('.co-nombre').value.trim();
+    if (!nombre) return;
+    const emoji = div.querySelector('.co-emoji').value.trim() || '🏷️';
+    const orig = div.dataset.orig;
+    if (orig && orig !== nombre) renames.push({ from: orig, to: nombre });
+    arr.push({ nombre, emoji });
+  });
+  if (!arr.length) { alert('Tiene que haber al menos un origen.'); return; }
+  // Aplicar renombres a todas las operaciones
+  let tocadas = 0;
+  if (renames.length) {
+    const mapa = {}; renames.forEach(r => { mapa[r.from] = r.to; });
+    Object.entries(_ctaState.chunks).forEach(([ym, ch]) => (ch || []).forEach(op => {
+      if (mapa[op.origen]) { op.origen = mapa[op.origen]; _ctaState.dirty.add(ym); tocadas++; }
+    }));
+  }
+  ctaSaveOrigenesLS(arr);
+  CTA_ORIGENES = arr.map(o => o.nombre);
+  // refrescar el select del modal de operación y los bulk selects
+  const so = document.getElementById('cta-f-origen');
+  if (so) { const v = so.value; so.innerHTML = CTA_ORIGENES.map(o => '<option value="' + o + '">' + o + '</option>').join(''); so.value = v; }
+  const bo = document.getElementById('cta-bulk-origen');
+  if (bo) { while (bo.options.length > 1) bo.remove(1); CTA_ORIGENES.forEach(o => bo.innerHTML += '<option value="' + o + '">' + o + '</option>'); }
+  const st = document.getElementById('cta-orig-status');
+  if (st) st.textContent = '✓ Guardado' + (tocadas ? ' · ' + tocadas + ' fila(s) actualizada(s)' : '');
+  if (tocadas) await ctaFlushDirty();
+  ctaRenderAll();
+  if (typeof showToast === 'function') showToast('⚙️ Orígenes guardados' + (tocadas ? ' (' + tocadas + ' filas renombradas)' : ''), 'success');
+  setTimeout(ctaCloseOrigenes, 700);
+}
+function ctaCloseOrigenes() { document.getElementById('cta-origenes-modal').style.display = 'none'; }
 
 // ── Selección de filas + acciones masivas ───────────────────────
 function ctaToggleRow(id, on) {
@@ -22891,6 +23043,7 @@ async function ctaBulkEnrich() {
         if (d.neto) { op.monto = d.neto; op.netoML = true; }
         if (d.nombre) op.cliente = d.nombre;
         if (d.provincia && !op.provincia) op.provincia = d.provincia;
+        if (d.envioComprador != null) { op.envioInfo = d.envioComprador; op.envio = 0; }
         _ctaState.dirty.add(ym); okc++;
       }
     } catch (e) { console.warn('[bulk enrich]', oid, e.message); }
