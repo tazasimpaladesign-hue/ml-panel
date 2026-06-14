@@ -769,7 +769,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v163 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v164 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1095,6 +1095,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <thead><tr>
           <th class="th-check"><input type="checkbox" id="check-all" onchange="toggleAll(this)"></th>
           <th>Publicación</th>
+          <th style="white-space:nowrap;text-align:center" title="Medidas y peso del paquete para Mercado Envíos. ML recomienda mantenerlas actualizadas.">📦 Empaque</th>
           <th onclick="pubSort('sku')"   style="cursor:pointer;user-select:none;white-space:nowrap">SKU <span id="pub-sort-sku" style="font-size:10px"></span></th>
           <th onclick="pubSort('price')" style="cursor:pointer;user-select:none;white-space:nowrap;text-align:right">Precio <span id="pub-sort-price" style="font-size:10px"></span></th>
           <th onclick="pubSort('stock')" style="cursor:pointer;user-select:none;white-space:nowrap;text-align:center">Stock <span id="pub-sort-stock" style="font-size:10px"></span></th>
@@ -3509,15 +3510,26 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       </div>
       <div style="display:flex;gap:8px;align-items:center;margin-left:auto;flex-wrap:wrap">
         <span id="wseo-last-update" style="font-size:11px;color:var(--text3);white-space:nowrap"></span>
-        <input type="text" id="wseo-search" placeholder="🔍 Buscar producto..." style="max-width:200px;font-size:12px;padding:5px 9px" oninput="wseoGoPage(1)">
+        <select id="wseo-search-col" onchange="wseoGoPage(1)" style="font-size:11.5px;padding:5px 6px" title="Criterio de búsqueda">
+          <option value="">🔍 Global</option>
+          <option value="sku">Solo SKU</option>
+          <option value="name">Solo Título</option>
+          <option value="id">Solo ID</option>
+          <option value="kw">Solo Palabras clave (SEO)</option>
+        </select>
+        <input type="text" id="wseo-search" placeholder="🔍 Buscar..." style="max-width:180px;font-size:12px;padding:5px 9px" oninput="wseoGoPage(1)">
         <button class="btn btn-primary btn-sm" onclick="wseoLoad(false)" id="wseo-load-btn">📊 Cargar productos</button>
         <button class="btn btn-ghost btn-sm" onclick="wseoLoad(true)" id="wseo-refresh-btn" style="display:none">↻ Actualizar</button>
+        <button class="btn btn-ghost btn-sm" onclick="wseoExportOpen()" id="wseo-export-btn" style="display:none" title="Exportar productos a Excel (elegís columnas)">📥 Exportar</button>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('wseo-import-file').click()" id="wseo-import-btn" style="display:none" title="Importar Excel y actualizar en lote">📤 Importar</button>
+        <input type="file" id="wseo-import-file" accept=".xlsx,.xls,.csv" style="display:none" onchange="wseoImportExcel(this.files[0])">
         <span id="wseo-status" style="font-size:11px;color:var(--text3)"></span>
       </div>
     </div>
     <div class="tw tw-sticky">
       <table id="wseo-table">
         <thead><tr>
+          <th style="width:30px;text-align:center"><input type="checkbox" id="wseo-check-all" onchange="wseoToggleAll(this.checked)" title="Seleccionar todo lo filtrado" style="cursor:pointer"></th>
           <th>Producto</th>
           <th style="min-width:160px;line-height:1.2" title="Palabra clave objetivo de Rank Math (focus_keyword). Editable inline — separá los términos con coma. La coma final no es obligatoria pero se conserva si la ponés.">Palabras<br>claves<br><span style="font-size:9.5px;color:var(--text3);font-weight:400">Rank Math</span></th>
           <th onclick="wseoSort('created')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:80px;max-width:80px" title="Fecha de creación del producto en WooCommerce">Creada<br><span style="font-size:10px">↕</span><span id="wseo-sort-created" style="font-size:10px"></span></th>
@@ -3531,11 +3543,25 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <th style="min-width:120px;text-align:center">Acciones</th>
         </tr></thead>
         <tbody id="wseo-tbody">
-          <tr><td colspan="11" style="text-align:center;padding:32px;color:var(--text3)">Hacé clic en "Cargar productos" para analizar tu tienda WooCommerce.</td></tr>
+          <tr><td colspan="12" style="text-align:center;padding:32px;color:var(--text3)">Hacé clic en "Cargar productos" para analizar tu tienda WooCommerce.</td></tr>
         </tbody>
       </table>
     </div>
     <div id="wseo-pagination" style="display:flex;align-items:center;justify-content:space-between;padding:12px 0 0;gap:8px;flex-wrap:wrap"></div>
+  </div>
+
+  <!-- Modal exportar SEO Woo (selector de columnas) -->
+  <div id="wseo-export-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center">
+    <div class="card" style="max-width:440px;width:94%;margin:0;max-height:88vh;overflow:auto">
+      <div class="card-title" style="margin-bottom:6px">📥 Exportar a Excel</div>
+      <div id="wseo-export-scope" style="font-size:11.5px;color:var(--text3);margin-bottom:10px">—</div>
+      <div style="font-size:12px;font-weight:600;margin-bottom:6px">Elegí las columnas:</div>
+      <div id="wseo-export-fields" style="display:grid;grid-template-columns:1fr 1fr;gap:2px 14px;max-height:46vh;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:10px"></div>
+      <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
+        <button class="btn btn-ghost btn-sm" onclick="wseoCloseExport()">Cancelar</button>
+        <button class="btn btn-sm" style="background:var(--accent);color:#fff" onclick="wseoExportRun()">📥 Descargar .xlsx</button>
+      </div>
+    </div>
   </div>
 
   <!-- Panel detalle SEO (modal) -->
@@ -4013,7 +4039,17 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <div class="card-sub" id="cta-count">—</div>
       </div>
       <div style="display:flex;gap:8px;align-items:center;margin-left:auto;flex-wrap:wrap">
-        <input type="text" id="cta-search" placeholder="🔍 Cliente, producto, detalle, origen..." style="max-width:220px;font-size:12px;padding:5px 9px" oninput="_ctaState.page=1;ctaRenderTable()">
+        <select id="cta-search-col" onchange="_ctaState.page=1;ctaRenderTable()" style="font-size:11.5px;padding:5px 6px" title="Elegí en qué columna buscar">
+          <option value="">🔍 Todo</option>
+          <option value="cliente">Cliente</option>
+          <option value="detalle">Detalle</option>
+          <option value="producto">Producto</option>
+          <option value="origen">Origen</option>
+          <option value="provincia">Provincia</option>
+          <option value="telefono">Teléfono</option>
+          <option value="estado">Estado</option>
+        </select>
+        <input type="text" id="cta-search" placeholder="🔍 Buscar..." style="max-width:200px;font-size:12px;padding:5px 9px" oninput="_ctaState.page=1;ctaRenderTable()">
         <button class="btn btn-sm" style="background:var(--accent);color:#fff" onclick="ctaOpenOp(null)">➕ Nueva operación</button>
         <button class="btn btn-ghost btn-sm" onclick="ctaSyncAll()" title="Trae ventas nuevas de ML y Personalizadas WA">⬇️ Sincronizar</button>
         <button class="btn btn-ghost btn-sm" onclick="ctaEnrichML()" id="cta-enrich-btn" title="Trae el monto NETO acreditado y el nombre real del comprador de cada venta de ML (en lotes, cacheado)">💰 Montos netos ML</button>
@@ -4049,11 +4085,11 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <th style="white-space:nowrap;cursor:pointer;user-select:none" onclick="ctaSort('ts')">Fecha <span id="cta-sort-ts" style="font-size:10px"></span></th>
           <th style="cursor:pointer;user-select:none" onclick="ctaSort('detalle')">Detalle <span id="cta-sort-detalle" style="font-size:10px"></span></th>
           <th style="cursor:pointer;user-select:none" onclick="ctaSort('cliente')">Cliente <span id="cta-sort-cliente" style="font-size:10px"></span></th>
-          <th style="white-space:nowrap">Teléfono</th>
+          <th style="white-space:nowrap;cursor:pointer;user-select:none" onclick="ctaSort('telefono')">Teléfono <span id="cta-sort-telefono" style="font-size:10px"></span></th>
           <th style="white-space:nowrap">Productos</th>
           <th style="cursor:pointer;user-select:none" onclick="ctaSort('origen')">Origen <span id="cta-sort-origen" style="font-size:10px"></span></th>
           <th style="cursor:pointer;user-select:none" onclick="ctaSort('provincia')">Provincia <span id="cta-sort-provincia" style="font-size:10px"></span></th>
-          <th style="text-align:right;white-space:nowrap" title="Costo de envío, editable con ✏️">Envío</th>
+          <th style="text-align:right;white-space:nowrap;cursor:pointer;user-select:none" onclick="ctaSort('envio')" title="Costo de envío. Clic para ordenar.">Envío <span id="cta-sort-envio" style="font-size:10px"></span></th>
           <th style="text-align:right;cursor:pointer;user-select:none" onclick="ctaSort('monto')">Monto <span id="cta-sort-monto" style="font-size:10px"></span></th>
           <th style="text-align:center;cursor:pointer;user-select:none;white-space:nowrap" onclick="ctaSort('estado')">Estado <span id="cta-sort-estado" style="font-size:10px"></span></th>
           <th style="text-align:center;min-width:96px">Acciones</th>
@@ -4099,11 +4135,11 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       </div>
       <datalist id="cta-emoji-list"><option value="☕"><option value="🍵"><option value="🧉"><option value="🍺"><option value="🏺"><option value="🎨"><option value="🎁"><option value="📦"><option value="🥤"><option value="🍶"><option value="⚽"><option value="🐟"><option value="🎣"><option value="🏕️"><option value="💧"><option value="🔥"><option value="⭐"><option value="🖼️"></datalist>
       <div class="tw" style="max-height:52vh;overflow:auto">
-        <table style="font-size:12px">
+        <table style="font-size:12px;min-width:640px;table-layout:fixed">
           <thead><tr style="position:sticky;top:0;background:var(--bg2);z-index:1">
-            <th style="width:42px"></th>
-            <th>Producto</th>
-            <th title="Palabras clave del SKU o título de ML/Woo que descuentan de este producto. Separadas por coma. Ej: MAGICA, mug magico">🔗 Conecta con</th>
+            <th style="width:54px">Emoji</th>
+            <th style="width:150px">Producto</th>
+            <th style="width:150px" title="Palabras clave del SKU o título de ML/Woo que descuentan de este producto. Separadas por coma. Ej: MAGICA, mug magico">🔗 Conecta con</th>
             <th style="text-align:center;width:90px" title="Stock actual">Stock</th>
             <th style="text-align:center;width:80px" title="Avisar cuando el stock baje de este número">Mínimo</th>
             <th style="text-align:center;width:90px" title="Cantidad a comprar cuando se llega al mínimo">Comprar</th>
@@ -5621,6 +5657,7 @@ function _saveDataCache(){
       catalog_listing: i.catalog_listing, catalog_product_id: i.catalog_product_id,
       video_id: i.video_id, date_created: i.date_created,
       seller_custom_field: i.seller_custom_field, tags: i.tags,
+      shipping: i.shipping,  // v164: mode + dimensions para columna Empaque
       // v142: persistir SKU(attr), EAN y tiempo de disponibilidad ya extraídos
       // como atributos mínimos, para que itemGetSKU/itemGetEAN/itemGetManufacturingTime
       // sigan funcionando al renderizar desde el cache de localStorage (sin API).
@@ -7711,7 +7748,7 @@ function renderPubs(){
 
   const tbody=document.getElementById('pubs-tbody');
   if(!tbody) return;
-  if(!items.length){tbody.innerHTML='<tr><td colspan="12" style="text-align:center;color:var(--text3);padding:22px">Sin resultados para los filtros actuales</td></tr>';return;}
+  if(!items.length){tbody.innerHTML='<tr><td colspan="13" style="text-align:center;color:var(--text3);padding:22px">Sin resultados para los filtros actuales</td></tr>';return;}
   const _pubTypeLabel = { catalog:'Catálogo', premium:'Premium', free:'Gratuita', classic:'Clásica' };
   tbody.innerHTML=items.map(item=>{
     const sku = itemGetSKU(item) || '';
@@ -7731,6 +7768,7 @@ function renderPubs(){
           <div style="font-size:10px;color:var(--text3);margin-top:2px">${item.id}</div>
         </div>
       </div></td>
+      <td style="text-align:center;font-size:11px">${_pubEmpaqueCell(item)}</td>
       <td style="font-size:11px;color:var(--text2)">
         <div style="display:flex;align-items:center;gap:4px">
           <span id="sku-val-${item.id}" style="font-family:var(--mono);font-size:11px">${skuDisp}</span>
@@ -7772,6 +7810,87 @@ function renderPubs(){
       </td>
     </tr>`;
   }).join('');
+}
+
+// ─── Empaque de envío ML (dimensiones del paquete) ─────────
+// ML expone shipping.dimensions como "alto x ancho x largo, peso_g".
+// Solo editable en publicaciones con Mercado Envíos (me2). Catálogo/flex
+// no lo aceptan y se muestran deshabilitadas.
+function _pubParseDims(item){
+  const sh = item.shipping || {};
+  const raw = sh.dimensions || (sh.dimensions === 0 ? '' : '');
+  if(!raw || typeof raw !== 'string') return null;
+  // "15x15x15,600" → {h,w,l,p}
+  const m = raw.match(/^\s*(\d+)\s*x\s*(\d+)\s*x\s*(\d+)\s*,\s*(\d+)/i);
+  if(!m) return null;
+  return { h:+m[1], w:+m[2], l:+m[3], p:+m[4] };
+}
+function _pubEmpaqueEditable(item){
+  // me2 = Mercado Envíos. Catálogo no permite editar el ítem directamente.
+  const sh = item.shipping || {};
+  const mode = sh.mode || '';
+  const isCatalog = !!(item.catalog_listing || item.catalog_product_id);
+  return (mode === 'me2' || mode === 'me1') && !isCatalog;
+}
+function _pubEmpaqueCell(item){
+  const d = _pubParseDims(item);
+  const editable = _pubEmpaqueEditable(item);
+  const txt = d ? (d.h+'×'+d.w+'×'+d.l+' · '+d.p+'g') : '<span style="color:var(--text3)">sin datos</span>';
+  if(!editable){
+    return '<span style="color:var(--text3)" title="Solo editable en publicaciones con Mercado Envíos propio (no catálogo)">'+txt+' 🔒</span>';
+  }
+  return '<div style="display:flex;align-items:center;gap:4px;justify-content:center">'+
+    '<span style="font-size:10.5px">'+txt+'</span>'+
+    '<button class="btn btn-ghost btn-xs" style="padding:2px 5px;font-size:10px;opacity:.6" title="Editar empaque" onclick="startEmpaqueEdit(\''+item.id+'\')">✎</button>'+
+    '</div>';
+}
+function startEmpaqueEdit(itemId){
+  const item = allItems.find(i=>i.id===itemId);
+  if(!item) return;
+  const d = _pubParseDims(item) || { h:'', w:'', l:'', p:'' };
+  const cell = document.querySelector('#pubs-tbody tr td:nth-child(3)');
+  // buscamos la celda exacta de esta fila
+  const rows = document.querySelectorAll('#pubs-tbody tr');
+  let target=null;
+  rows.forEach(tr=>{ if(tr.innerHTML.includes("startEmpaqueEdit('"+itemId+"'")) target=tr.children[2]; });
+  if(!target) return;
+  target.innerHTML = '<div style="display:flex;flex-direction:column;gap:3px;align-items:center">'+
+    '<div style="display:flex;gap:2px">'+
+      '<input id="emp-h-'+itemId+'" type="number" value="'+(d.h||'')+'" placeholder="alto" style="width:42px;font-size:10px;padding:2px" title="Alto (cm)">'+
+      '<input id="emp-w-'+itemId+'" type="number" value="'+(d.w||'')+'" placeholder="ancho" style="width:42px;font-size:10px;padding:2px" title="Ancho (cm)">'+
+      '<input id="emp-l-'+itemId+'" type="number" value="'+(d.l||'')+'" placeholder="largo" style="width:42px;font-size:10px;padding:2px" title="Largo (cm)">'+
+    '</div>'+
+    '<div style="display:flex;gap:2px;align-items:center">'+
+      '<input id="emp-p-'+itemId+'" type="number" value="'+(d.p||'')+'" placeholder="peso g" style="width:54px;font-size:10px;padding:2px" title="Peso (gramos)">'+
+      '<button class="btn btn-primary btn-xs" style="padding:2px 6px" onclick="saveEmpaque(\''+itemId+'\')">✓</button>'+
+      '<button class="btn btn-ghost btn-xs" style="padding:2px 5px" onclick="renderPubs()">✕</button>'+
+    '</div>'+
+    '<span id="emp-msg-'+itemId+'" style="font-size:9px"></span>'+
+    '</div>';
+}
+async function saveEmpaque(itemId){
+  const g = s => document.getElementById('emp-'+s+'-'+itemId);
+  const h=parseFloat(g('h').value)||0, w=parseFloat(g('w').value)||0, l=parseFloat(g('l').value)||0, p=parseFloat(g('p').value)||0;
+  const msg = document.getElementById('emp-msg-'+itemId);
+  if(!h||!w||!l||!p){ if(msg){msg.textContent='Completá las 4 medidas'; msg.style.color='var(--red)';} return; }
+  if(typeof userId==='undefined'||!userId){ alert('Conectá Mercado Libre.'); return; }
+  if(msg){ msg.textContent='Guardando…'; msg.style.color='var(--text3)'; }
+  try{
+    const r = await fetch(WORKER+'/api/ml-dimensions/'+itemId+'?user='+userId, {
+      method:'PUT', headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ height:h, width:w, length:l, weight:p })
+    });
+    const d = await r.json();
+    if(!d.ok) throw new Error(d.error||'error');
+    // actualizar el item en memoria
+    const item = allItems.find(i=>i.id===itemId);
+    if(item){ item.shipping = item.shipping||{}; item.shipping.dimensions = d.dimensions; }
+    if(typeof showToast==='function') showToast('📦 Empaque actualizado en ML','success');
+    renderPubs();
+  }catch(e){
+    console.error('[empaque]',e);
+    if(msg){ msg.textContent='⚠ '+e.message; msg.style.color='var(--red)'; }
+  }
 }
 
 // ─── Inline SKU editing ────────────────────────────────────
@@ -22298,8 +22417,8 @@ function _ctaChartOpts(moneyY) {
 // ── Tabla ────────────────────────────────────────────────────────
 function ctaSort(col) {
   if (_ctaState.sortCol === col) _ctaState.sortDir *= -1;
-  else { _ctaState.sortCol = col; _ctaState.sortDir = (col === 'ts' || col === 'monto') ? -1 : 1; }
-  ['ts','detalle','cliente','origen','provincia','monto','estado'].forEach(c => {
+  else { _ctaState.sortCol = col; _ctaState.sortDir = (col === 'ts' || col === 'monto' || col === 'envio') ? -1 : 1; }
+  ['ts','detalle','cliente','telefono','origen','provincia','envio','monto','estado'].forEach(c => {
     const el = document.getElementById('cta-sort-' + c);
     if (el) el.innerHTML = (typeof sortArrow === 'function') ? sortArrow(c, _ctaState.sortCol, _ctaState.sortDir) : '';
   });
@@ -22314,20 +22433,27 @@ function _ctaOpsFiltradas() {
   // v160: limitar al período del dashboard
   const [pd0, pd1] = _ctaPeriodoRango();
   ops = ops.filter(o => { const t = o.ts || 0; return t >= pd0 && t <= pd1; });
-  if (q) ops = ops.filter(o =>
-    (o.cliente || '').toLowerCase().includes(q) ||
-    (o.detalle || '').toLowerCase().includes(q) ||
-    (o.origen || '').toLowerCase().includes(q) ||
-    (o.provincia || '').toLowerCase().includes(q) ||
-    (o.telefono || '').toLowerCase().includes(q) ||
-    ((CTA_ESTADOS[o.estado || ''] || [''])[0] || '').toLowerCase().includes(q) ||
-    (o.id || '').toLowerCase().includes(q) ||
-    (o.items || []).some(it => (it.nombre || '').toLowerCase().includes(q)));
+  if (q) {
+    const colEl = document.getElementById('cta-search-col');
+    const col = colEl ? colEl.value : '';
+    const matchers = {
+      cliente: o => (o.cliente || '').toLowerCase().includes(q),
+      detalle: o => (o.detalle || '').toLowerCase().includes(q),
+      producto: o => (o.items || []).some(it => (it.nombre || '').toLowerCase().includes(q)),
+      origen: o => (o.origen || '').toLowerCase().includes(q),
+      provincia: o => (o.provincia || '').toLowerCase().includes(q),
+      telefono: o => (o.telefono || '').toLowerCase().includes(q),
+      estado: o => ((CTA_ESTADOS[o.estado || ''] || [''])[0] || '').toLowerCase().includes(q),
+    };
+    if (col && matchers[col]) ops = ops.filter(matchers[col]);
+    else ops = ops.filter(o => Object.values(matchers).some(fn => fn(o)) || (o.id || '').toLowerCase().includes(q));
+  }
   const col = _ctaState.sortCol, dir = _ctaState.sortDir;
   ops.sort((a, b) => {
     let va, vb;
     if (col === 'ts') { va = a.ts || 0; vb = b.ts || 0; }
     else if (col === 'monto') { va = +a.monto || 0; vb = +b.monto || 0; }
+    else if (col === 'envio') { va = (+a.envio || 0) + (+a.envioInfo || 0); vb = (+b.envio || 0) + (+b.envioInfo || 0); }
     else { va = String(a[col] || '').toLowerCase(); vb = String(b[col] || '').toLowerCase(); }
     return va < vb ? -dir : va > vb ? dir : 0;
   });
@@ -22369,8 +22495,10 @@ function ctaRenderTable() {
     // Color del monto: manual (o.montoColor) > rojo si "a cobrar" > verde/rojo por tipo
     let montoColor = o.montoColor || (esIng ? '#22c55e' : '#ef4444');
     if (esIng && o.estado === 'a_cobrar' && !o.montoColor) montoColor = '#ef4444';
+    const netoTag = (o.src === 'ml' && o.netoML)
+      ? ' <span style="color:#16a34a;font-size:9px" title="Monto neto real de Mercado Pago (establecido, no reconsume)">✓neto</span>' : '';
     const montoCell = '<span style="font-weight:700;color:' + montoColor + ';cursor:pointer" ' +
-      'title="Editar monto" onclick="ctaInlineEdit(\'' + o.id + '\',\'monto\')">' + (esIng ? '+' : '−') + PERSO_FMT_MONEY(o.monto) + '</span>';
+      'title="Editar monto" onclick="ctaInlineEdit(\'' + o.id + '\',\'monto\')">' + (esIng ? '+' : '−') + PERSO_FMT_MONEY(o.monto) + '</span>' + netoTag;
     const orig = (o.origen || (esIng ? '—' : (o.categoria || 'egreso')));
     // Teléfono con link WhatsApp (mismo sistema que Personalizadas)
     const wa = _persoWaNum(o.telefono);
@@ -22414,6 +22542,7 @@ function ctaRenderTable() {
       '</td></tr>';
   }).join('');
 
+  ctaUpdateEnrichBtn();
   ctaUpdateBulkBar();
   // checkbox "todo" refleja si todas las visibles están seleccionadas
   const ca = document.getElementById('cta-check-all');
@@ -22834,6 +22963,22 @@ async function ctaImportFile(file) {
   }
   document.getElementById('cta-import-file').value = '';
 }
+// Actualiza el botón de montos netos con cuántas ventas ML faltan enriquecer
+function ctaUpdateEnrichBtn() {
+  const btn = document.getElementById('cta-enrich-btn');
+  if (!btn || _ctaEnriching) return;
+  let pend = 0, total = 0;
+  Object.values(_ctaState.chunks).forEach(ch => (ch || []).forEach(o => {
+    if (o.src === 'ml') { total++; if (!o.netoML) pend++; }
+  }));
+  if (total === 0) { btn.textContent = '💰 Montos netos ML'; btn.title = 'No hay ventas de ML cargadas'; return; }
+  btn.textContent = pend > 0 ? '💰 Montos netos ML (' + pend + ' faltan)' : '💰 Montos netos ML ✓';
+  btn.title = pend > 0
+    ? pend + ' venta(s) de ML sin monto neto. Al tocar, solo procesa esas (no reconsume las ya hechas).'
+    : 'Todas las ventas de ML ya tienen su monto neto. No reconsume cuota.';
+  btn.style.opacity = pend > 0 ? '1' : '.65';
+}
+
 // ── Enriquecimiento ML: monto neto acreditado + nombre real ──────
 // Procesa en lotes pequeños con pausa (respeta rate-limit de ML y cuota
 // de Cloudflare). El Worker cachea cada orden, así corridas siguientes
@@ -22845,9 +22990,9 @@ async function ctaEnrichML() {
   // Ops ML del rango actual que aún no tienen neto aplicado
   const pend = [];
   Object.values(_ctaState.chunks).forEach(ch => (ch || []).forEach(o => {
-    if (o.src === 'ml' && !o.netoML && !o.manualEdit) pend.push(o);
+    if (o.src === 'ml' && !o.netoML) pend.push(o); // solo las que NO tienen neto aún
   }));
-  if (!pend.length) { alert('No hay ventas de ML pendientes de enriquecer en lo cargado.\n\nTip: poné el rango en "Todo el histórico" para procesarlas todas.'); return; }
+  if (!pend.length) { alert('✅ Todas las ventas de ML ya tienen su monto neto.\n\nNo se reconsume cuota. Las marcadas con neto quedan establecidas para siempre.'); return; }
   if (!confirm('💰 Traer monto neto + nombre real de ' + pend.length + ' venta(s) de ML.\n\nSe procesa en lotes (puede tardar). ¿Continuar?')) return;
 
   _ctaEnriching = true;
@@ -23278,8 +23423,8 @@ function ctaStockAddRow(c) {
   tr.className = 'cta-stock-row';
   // Emoji: input de texto (permite PEGAR cualquier emoji) con datalist de sugeridos
   tr.innerHTML =
-    '<td><input class="cs-emoji" value="' + _persoEsc(c.emoji || '📦') + '" list="cta-emoji-list" maxlength="4" style="font-size:18px;width:38px;text-align:center;padding:2px;border:1px solid var(--border);border-radius:6px" title="Pegá o escribí un emoji"></td>' +
-    '<td><input class="cs-nombre" value="' + _persoEsc(c.nombre) + '" style="font-size:12px;width:100%" placeholder="Nombre del producto"></td>' +
+    '<td style="padding:4px"><input class="cs-emoji" value="' + _persoEsc(c.emoji || '📦') + '" list="cta-emoji-list" maxlength="4" style="font-size:18px;width:46px;text-align:center;padding:3px;border:1px solid var(--border);border-radius:6px;box-sizing:border-box" title="Pegá o escribí un emoji"></td>' +
+    '<td style="padding:4px"><input class="cs-nombre" value="' + _persoEsc(c.nombre) + '" style="font-size:12px;width:100%;box-sizing:border-box" placeholder="Nombre"></td>' +
     '<td><input class="cs-match" value="' + _persoEsc((c.match || []).join(', ')) + '" style="font-size:11px;width:100%" placeholder="MAGICA, mug magico" title="Palabras del SKU/título que descuentan de este producto"></td>' +
     '<td><input class="cs-stock" type="number" value="' + (c.stock || 0) + '" style="font-size:12px;width:100%;text-align:center;font-weight:700"></td>' +
     '<td><input class="cs-min" type="number" value="' + (c.stockMin || 0) + '" min="0" style="font-size:12px;width:100%;text-align:center"></td>' +
@@ -27592,6 +27737,7 @@ async function wooSeoInit(){
         _wseoProducts = d.products;
         _wseoCachedAt = d.cachedAt || null;
         _wseoLoaded = true;
+        _wseoShowToolButtons();
         const btn = document.getElementById('wseo-load-btn');
         const refBtn = document.getElementById('wseo-refresh-btn');
         if(btn) btn.style.display='none';
@@ -27613,6 +27759,7 @@ async function wooSeoInit(){
         wseoUpdateStats();
         wseoRenderTable();
         wseoStartFreshLabel();
+        _wseoShowToolButtons();
         return;
       }
     }
@@ -27837,15 +27984,173 @@ function wseoGoPage(n){
   wseoRenderTable();
 }
 
+// ══════════ SEO Woo: selección + export/import Excel (v164) ══════════
+const _wseoSelected = new Set();
+// Campos exportables: clave -> {label, get(p), api(value) para import}
+const WSEO_FIELDS = {
+  id:               { label: 'ID',                 get: p => p.id, ro: true },
+  sku:              { label: 'SKU',                get: p => p.sku || '' },
+  name:             { label: 'Título',             get: p => p.name || '' },
+  regular_price:    { label: 'Precio regular',     get: p => p.regular_price ?? p.price ?? '' },
+  sale_price:       { label: 'Precio oferta',      get: p => p.sale_price ?? '' },
+  stock_quantity:   { label: 'Stock',              get: p => p.stock_quantity ?? '' },
+  status:           { label: 'Estado',             get: p => p.status || '' },
+  categories:       { label: 'Categorías',         get: p => (p.categories||[]).join(' | ') },
+  tags:             { label: 'Etiquetas',          get: p => (p.tags||[]).join(' | ') },
+  short_description:{ label: 'Descripción corta',  get: p => p.short_description || '' },
+  description:      { label: 'Descripción',        get: p => p.description || '' },
+  rank_math_focus_keyword: { label: 'SEO: Palabra clave', get: p => p.rank_math_focus_keyword || '' },
+  rank_math_title:  { label: 'SEO: Título',        get: p => p.rank_math_title || '' },
+  rank_math_description: { label: 'SEO: Meta desc.', get: p => p.rank_math_description || '' },
+};
+const WSEO_DEFAULT_FIELDS = ['id','sku','name','regular_price','stock_quantity','status','rank_math_focus_keyword'];
+
+function wseoToggleRow(id, on){ if(on) _wseoSelected.add(id); else _wseoSelected.delete(id); _wseoUpdateSelUI(); }
+function wseoToggleAll(on){
+  wseoGetFilteredRows().forEach(p=>{ if(on) _wseoSelected.add(p.id); else _wseoSelected.delete(p.id); });
+  wseoRenderTable();
+}
+function _wseoUpdateSelUI(){
+  const ca = document.getElementById('wseo-check-all');
+  if(ca){ const vis=wseoGetFilteredRows(); ca.checked = vis.length>0 && vis.every(p=>_wseoSelected.has(p.id)); }
+  const eb = document.getElementById('wseo-export-btn');
+  if(eb) eb.textContent = _wseoSelected.size ? ('📥 Exportar ('+_wseoSelected.size+')') : '📥 Exportar';
+}
+function _wseoShowToolButtons(){
+  ['wseo-export-btn','wseo-import-btn'].forEach(id=>{ const e=document.getElementById(id); if(e) e.style.display=''; });
+}
+
+// ── Export: abre modal selector de columnas ──────────────────
+function wseoExportOpen(){
+  let scope, rows;
+  if(_wseoSelected.size){
+    scope = _wseoSelected.size+' producto(s) seleccionado(s)';
+    rows = wseoGetFilteredRows().filter(p=>_wseoSelected.has(p.id));
+  } else {
+    const filtered = wseoGetFilteredRows();
+    if(filtered.length < _wseoProducts.length){
+      if(!confirm('No hay productos tildados.\n\nAceptar = exportar los '+filtered.length+' productos FILTRADOS\nCancelar = exportar TODA la base ('+_wseoProducts.length+')')){
+        rows = [..._wseoProducts]; scope = 'toda la base ('+rows.length+')';
+      } else { rows = filtered; scope = 'filtrados ('+rows.length+')'; }
+    } else { rows = [..._wseoProducts]; scope = 'todos ('+rows.length+')'; }
+  }
+  _wseoExportRows = rows;
+  // construir checkboxes de campos
+  const box = document.getElementById('wseo-export-fields');
+  box.innerHTML = Object.keys(WSEO_FIELDS).map(k=>{
+    const checked = WSEO_DEFAULT_FIELDS.includes(k) ? 'checked' : '';
+    return '<label style="display:flex;align-items:center;gap:6px;font-size:12px;padding:3px 0;cursor:pointer">'+
+      '<input type="checkbox" class="wseo-exp-fld" value="'+k+'" '+checked+'> '+WSEO_FIELDS[k].label+
+      (WSEO_FIELDS[k].ro?' <span style="font-size:9px;color:var(--text3)">(solo lectura)</span>':'')+'</label>';
+  }).join('');
+  document.getElementById('wseo-export-scope').textContent = 'Se exportarán: '+scope;
+  document.getElementById('wseo-export-modal').style.display='flex';
+}
+function wseoCloseExport(){ document.getElementById('wseo-export-modal').style.display='none'; }
+
+let _wseoExportRows = [];
+async function wseoExportRun(){
+  const flds = [...document.querySelectorAll('.wseo-exp-fld:checked')].map(c=>c.value);
+  if(!flds.length){ alert('Elegí al menos una columna.'); return; }
+  try{
+    const XLSX = await _seoLoadSheetJS();
+    const header = flds.map(k=>WSEO_FIELDS[k].label);
+    const aoa = [header];
+    _wseoExportRows.forEach(p=>{
+      aoa.push(flds.map(k=>{ const v = WSEO_FIELDS[k].get(p); return v==null?'':v; }));
+    });
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = flds.map(k=>({wch: k==='description'?50:k==='name'?34:k.startsWith('rank')?28:14}));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Productos Woo');
+    XLSX.writeFile(wb, 'woo-seo-'+new Date().toISOString().slice(0,10)+'.xlsx');
+    wseoCloseExport();
+    if(typeof showToast==='function') showToast('📥 Exportados '+_wseoExportRows.length+' productos','success');
+  }catch(e){ console.error('[wseo export]',e); alert('⚠ '+e.message); }
+}
+
+// ── Import: lee Excel y actualiza en lote (por ID o SKU) ─────
+async function wseoImportExcel(file){
+  if(!file) return;
+  const st = document.getElementById('wseo-status');
+  if(st) st.textContent='📤 Leyendo…';
+  try{
+    const XLSX = await _seoLoadSheetJS();
+    const wb = XLSX.read(await file.arrayBuffer(), { type:'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const aoa = XLSX.utils.sheet_to_json(ws, { header:1, defval:'' });
+    if(aoa.length<2) throw new Error('Excel vacío');
+    // Mapear encabezados -> claves de WSEO_FIELDS por label
+    const labelToKey = {}; Object.keys(WSEO_FIELDS).forEach(k=>{ labelToKey[WSEO_FIELDS[k].label.toLowerCase()] = k; });
+    const H = aoa[0].map(h=>String(h||'').toLowerCase().trim());
+    const colKey = H.map(h=>labelToKey[h] || null);
+    const idCol = colKey.indexOf('id');
+    const skuCol = colKey.indexOf('sku');
+    if(idCol<0 && skuCol<0) throw new Error('El Excel debe tener columna ID o SKU para identificar productos');
+
+    // Construir lista de cambios
+    const cambios = [];
+    for(let r=1;r<aoa.length;r++){
+      const row = aoa[r];
+      let prod = null;
+      if(idCol>=0 && row[idCol]) prod = _wseoProducts.find(p=>String(p.id)===String(row[idCol]).trim());
+      if(!prod && skuCol>=0 && row[skuCol]) prod = _wseoProducts.find(p=>(p.sku||'')===String(row[skuCol]).trim());
+      if(!prod) continue;
+      const body = {};
+      colKey.forEach((k,ci)=>{
+        if(!k || WSEO_FIELDS[k].ro) return;
+        let v = row[ci];
+        if(v==='' || v==null) return;
+        if(k==='categories' || k==='tags'){ body[k] = String(v).split('|').map(s=>s.trim()).filter(Boolean); }
+        else if(k==='regular_price'||k==='sale_price'||k==='stock_quantity'){ body[k] = String(v).replace(/[^\d.-]/g,''); }
+        else body[k] = String(v);
+      });
+      if(Object.keys(body).length) cambios.push({ id: prod.id, name: prod.name, body });
+    }
+    if(!cambios.length){ if(st) st.textContent=''; alert('No se detectaron cambios aplicables.'); return; }
+    if(!confirm('📤 Actualizar '+cambios.length+' producto(s) en WooCommerce?\n\nSe modifican solo las columnas presentes en el Excel.')) { if(st) st.textContent=''; return; }
+
+    let ok=0, err=0;
+    for(let i=0;i<cambios.length;i++){
+      const c = cambios[i];
+      if(st) st.textContent='📤 '+(i+1)+'/'+cambios.length+'…';
+      try{
+        const d = await _wseoApiPut(c.id, c.body);
+        // sincronizar localmente
+        await _wseoPersistLocal(c.id, c.body);
+        ok++;
+      }catch(e){ console.warn('[wseo import]',c.id,e.message); err++; }
+      await new Promise(res=>setTimeout(res,150)); // suave con la API
+    }
+    wseoRenderTable();
+    if(st) st.textContent='✓ '+ok+' actualizados'+(err?' · '+err+' con error':'');
+    if(typeof showToast==='function') showToast('📤 '+ok+' productos actualizados'+(err?' ('+err+' fallaron)':''), err?'warn':'success');
+  }catch(e){
+    console.error('[wseo import]',e);
+    if(st) st.textContent='⚠ '+e.message;
+    alert('⚠ No se pudo importar: '+e.message);
+  }
+  document.getElementById('wseo-import-file').value='';
+}
+
 // ── Aplicar filtros + sort y devolver rows ──────────────────
 function wseoGetFilteredRows(){
   const q = (document.getElementById('wseo-search')?.value||'').toLowerCase();
+  const scol = document.getElementById('wseo-search-col')?.value || '';
   let rows = [..._wseoProducts];
-  if(q) rows = rows.filter(p=>
-    (p.name||'').toLowerCase().includes(q) ||
-    (p.sku||'').toLowerCase().includes(q)  ||
-    String(p.id).includes(q)
-  );
+  if(q){
+    const kwOf = p => (p.rank_math_focus_keyword||'').toLowerCase();
+    if(scol==='sku')       rows = rows.filter(p=>(p.sku||'').toLowerCase().includes(q));
+    else if(scol==='name') rows = rows.filter(p=>(p.name||'').toLowerCase().includes(q));
+    else if(scol==='id')   rows = rows.filter(p=>String(p.id).includes(q));
+    else if(scol==='kw')   rows = rows.filter(p=>kwOf(p).includes(q));
+    else rows = rows.filter(p=>
+      (p.name||'').toLowerCase().includes(q) ||
+      (p.sku||'').toLowerCase().includes(q)  ||
+      String(p.id).includes(q) ||
+      kwOf(p).includes(q) ||
+      (p.categories||[]).join(' ').toLowerCase().includes(q));
+  }
   if(_wseoState.statusFilter) rows = rows.filter(p=>p.status===_wseoState.statusFilter);
   if(_wseoState.scoreFilter==='ok')       rows = rows.filter(p=>wseoScore(p)>=70);
   if(_wseoState.scoreFilter==='warn')     rows = rows.filter(p=>wseoScore(p)>=40 && wseoScore(p)<70);
@@ -27888,6 +28193,7 @@ function wseoRenderTable(){
   });
 
   const all = wseoGetFilteredRows();
+  setTimeout(_wseoUpdateSelUI, 0);
   const total = all.length;
   const pp = _wseoState.perPage;
   const pages = Math.max(1, Math.ceil(total/pp));
@@ -27940,6 +28246,7 @@ function wseoRenderTable(){
       : `<div style="width:38px;height:38px;background:var(--bg4);border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">🟣</div>`;
 
     return `<tr>
+      <td style="text-align:center"><input type="checkbox" class="wseo-row-check" data-id="${p.id}" ${_wseoSelected.has(p.id)?'checked':''} onchange="wseoToggleRow(${p.id}, this.checked)" style="cursor:pointer"></td>
       <td style="padding:8px 10px">
         <div style="display:flex;align-items:center;gap:8px">
           ${thumb}
