@@ -769,7 +769,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v161 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v162 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -3942,6 +3942,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <option value="mesant">Mes anterior</option>
       <option value="anio">Año actual</option>
       <option value="anioant">Año anterior</option>
+      <option value="historico">Histórico (todo)</option>
       <option value="custom">Rango personalizado</option>
     </select>
     <span id="cta-periodo-custom" style="display:none;gap:6px;align-items:center">
@@ -4025,9 +4026,25 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <span id="cta-status" style="font-size:11px;color:var(--text3)"></span>
       </div>
     </div>
+    <div id="cta-bulk-bar" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;background:var(--bg2);border:1px solid var(--accent);border-radius:9px;padding:8px 12px;margin-bottom:10px">
+      <span style="font-size:12px;font-weight:700" id="cta-bulk-count">0 seleccionadas</span>
+      <span style="color:var(--text3);font-size:11px">Acción masiva:</span>
+      <select id="cta-bulk-estado" style="font-size:11.5px;padding:4px 7px">
+        <option value="">Cambiar estado…</option>
+      </select>
+      <select id="cta-bulk-origen" style="font-size:11.5px;padding:4px 7px">
+        <option value="">Cambiar origen…</option>
+      </select>
+      <button class="btn btn-ghost btn-sm" onclick="ctaBulkProducto()" title="Asignar un producto del catálogo a todas">🛒 Producto</button>
+      <button class="btn btn-ghost btn-sm" onclick="ctaBulkEnrich()" title="Traer monto neto + nombre real de las ML seleccionadas">💰 Montos netos</button>
+      <button class="btn btn-ghost btn-sm" onclick="ctaBulkFactura()" title="Marcar/desmarcar color de factura">🧾 Factura</button>
+      <button class="btn btn-sm" style="background:#ef4444;color:#fff" onclick="ctaBulkDelete()">🗑️ Eliminar</button>
+      <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="ctaClearSel()">✕ Limpiar</button>
+    </div>
     <div class="tw">
       <table>
         <thead><tr>
+          <th style="width:28px;text-align:center"><input type="checkbox" id="cta-check-all" onchange="ctaToggleAll(this.checked)" title="Seleccionar todo" style="cursor:pointer"></th>
           <th style="white-space:nowrap;cursor:pointer;user-select:none" onclick="ctaSort('ts')">Fecha <span id="cta-sort-ts" style="font-size:10px"></span></th>
           <th style="cursor:pointer;user-select:none" onclick="ctaSort('detalle')">Detalle <span id="cta-sort-detalle" style="font-size:10px"></span></th>
           <th style="cursor:pointer;user-select:none" onclick="ctaSort('cliente')">Cliente <span id="cta-sort-cliente" style="font-size:10px"></span></th>
@@ -4041,7 +4058,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <th style="text-align:center;min-width:96px">Acciones</th>
         </tr></thead>
         <tbody id="cta-tbody">
-          <tr><td colspan="11" style="text-align:center;padding:32px;color:var(--text3)">Cargando…</td></tr>
+          <tr><td colspan="12" style="text-align:center;padding:32px;color:var(--text3)">Cargando…</td></tr>
         </tbody>
       </table>
     </div>
@@ -4062,11 +4079,13 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <div style="font-size:11px;color:var(--text3);margin-bottom:10px">
         El stock se descuenta solo con cada venta (ML/WA/manual) y se suma con los egresos de insumos. Configurá el <b>mínimo</b> y la <b>compra sugerida</b> para recibir alertas arriba.
       </div>
+      <datalist id="cta-emoji-list"><option value="☕"><option value="🍵"><option value="🧉"><option value="🍺"><option value="🏺"><option value="🎨"><option value="🎁"><option value="📦"><option value="🥤"><option value="🍶"><option value="⚽"><option value="🐟"><option value="🎣"><option value="🏕️"><option value="💧"><option value="🔥"><option value="⭐"><option value="🖼️"></datalist>
       <div class="tw" style="max-height:52vh;overflow:auto">
         <table style="font-size:12px">
           <thead><tr style="position:sticky;top:0;background:var(--bg2);z-index:1">
             <th style="width:42px"></th>
             <th>Producto</th>
+            <th title="Palabras clave del SKU o título de ML/Woo que descuentan de este producto. Separadas por coma. Ej: MAGICA, mug magico">🔗 Conecta con</th>
             <th style="text-align:center;width:90px" title="Stock actual">Stock</th>
             <th style="text-align:center;width:80px" title="Avisar cuando el stock baje de este número">Mínimo</th>
             <th style="text-align:center;width:90px" title="Cantidad a comprar cuando se llega al mínimo">Comprar</th>
@@ -21863,15 +21882,16 @@ const CTA_PAGE = 100;
 
 const CTA_ESTADOS = {
   '':          ['—', '#9ca3af'],
-  disenando:   ['🎨 Diseñando', '#eab308'],   // amarillo (fila amarilla)
-  a_cobrar:    ['💰 A cobrar',  '#ef4444'],   // rojo (fila roja)
+  disenando:   ['🎨 Diseñando', '#eab308'],   // amarillo
+  a_cobrar:    ['💰 A cobrar',  '#ef4444'],   // rojo
   pagada:      ['✅ Pagada',     '#22c55e'],
+  a_retirar:   ['🏬 A retirar',  '#3b82f6'],   // azul (entre Pagada y Entregada)
   entregada:   ['📦 Entregada',  '#16a34a'],   // verde
 };
 // Estados que se TOMAN de Mercado Libre (no editables, color de fila propio)
 const CTA_ML_ESTADOS = {
   imprimir:  ['🖨️ Imprimir',  '#ef4444'],   // rojo
-  en_camino: ['🚚 En camino', '#92400e'],   // marrón
+  en_camino: ['🚚 En camino', '#6b7280'],   // gris medio (antes marrón)
   entregado: ['✅ Entregado',  '#16a34a'],   // verde
 };
 // Tinte de fila: alpha mas notorio (no tan claro). Se concatena al hex del estado.
@@ -21896,6 +21916,7 @@ let _ctaState = {
   rango: 'todo', page: 1, sortCol: 'ts', sortDir: -1,
   periodo: 'mes',
   editId: null, saving: false, syncing: false,
+  selected: new Set(),
 };
 let _ctaSaveTimer = null;
 let _ctaMLSynced = false;
@@ -21999,6 +22020,9 @@ function _ctaPeriodoRango() {
     const d1 = new Date(now.getFullYear(), 0, 1);
     return [d0.getTime(), d1.getTime() - 1, 'Año ' + (now.getFullYear() - 1)];
   }
+  if (p === 'historico') {
+    return [0, Date.now(), 'Histórico completo'];
+  }
   // custom
   const dv = document.getElementById('cta-per-desde').value;
   const hv = document.getElementById('cta-per-hasta').value;
@@ -22016,7 +22040,7 @@ async function ctaSetPeriodo(v) {
     document.getElementById('cta-per-hasta').value = now.toISOString().slice(0, 10);
   }
   // estos períodos pueden requerir meses no cargados
-  if (['custom','mesant','anio','anioant','semana'].includes(v)) { _ctaState.rango = 'todo'; await ctaLoadRange(); }
+  if (['custom','mesant','anio','anioant','semana','historico'].includes(v)) { _ctaState.rango = 'todo'; await ctaLoadRange(); }
   ctaRenderKPIs();
   ctaRenderTable(); // la tabla también se limita al período
 }
@@ -22277,7 +22301,7 @@ function ctaRenderTable() {
   const cnt = document.getElementById('cta-count');
   if (cnt) cnt.textContent = ops.length.toLocaleString('es-AR') + ' operación(es) en el rango';
   if (!ops.length) {
-    tb.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:32px;color:var(--text3)">Sin operaciones. Cargá una con ➕ o importá el histórico 📦</td></tr>';
+    tb.innerHTML = '<tr><td colspan="12" style="text-align:center;padding:32px;color:var(--text3)">Sin operaciones. Cargá una con ➕ o importá el histórico 📦</td></tr>';
     document.getElementById('cta-pager').innerHTML = '';
     return;
   }
@@ -22324,7 +22348,9 @@ function ctaRenderTable() {
       if (o.estado) rowColor = est[1];
     }
     const rowBg = rowColor ? ' style="background:' + rowColor + CTA_ROW_ALPHA + '"' : '';
+    const checked = _ctaState.selected.has(o.id) ? ' checked' : '';
     return '<tr id="cta-row-' + o.id + '"' + rowBg + '>' +
+      '<td style="text-align:center"><input type="checkbox" class="cta-row-check" data-id="' + o.id + '" onchange="ctaToggleRow(\'' + o.id + '\', this.checked)"' + checked + ' style="cursor:pointer"></td>' +
       '<td style="white-space:nowrap;font-size:11px">' + f + '</td>' +
       '<td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;color:' + (o.facturaColor || 'var(--text1)') + ';font-weight:' + (o.facturaColor === '#ef4444' ? '600' : '400') + '" title="' + _persoEsc(o.detalle) + ' (clic para editar texto y color factura)" onclick="ctaInlineEdit(\'' + o.id + '\',\'detalle\')">' + _persoEsc(o.detalle) + '</td>' +
       '<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" title="Editar cliente" onclick="ctaInlineEdit(\'' + o.id + '\',\'cliente\')">' + _persoEsc(o.cliente) + '</td>' +
@@ -22341,6 +22367,10 @@ function ctaRenderTable() {
       '</td></tr>';
   }).join('');
 
+  ctaUpdateBulkBar();
+  // checkbox "todo" refleja si todas las visibles están seleccionadas
+  const ca = document.getElementById('cta-check-all');
+  if (ca) { const vis = _ctaOpsFiltradas(); ca.checked = vis.length > 0 && vis.every(o => _ctaState.selected.has(o.id)); }
   // Pager
   const pg = document.getElementById('cta-pager');
   if (pages <= 1) { pg.innerHTML = ''; }
@@ -22368,7 +22398,7 @@ function ctaToggleItems(id) {
   if (!found || !row) return;
   const tr = document.createElement('tr');
   tr.id = 'cta-items-' + id;
-  tr.innerHTML = '<td colspan="11" style="background:var(--bg2);font-size:11.5px;padding:8px 16px">' +
+  tr.innerHTML = '<td colspan="12" style="background:var(--bg2);font-size:11.5px;padding:8px 16px">' +
     (found.op.items || []).map(it =>
       '• <strong>' + _persoEsc(it.nombre) + '</strong> × ' + it.cant +
       (it.unit ? ' <span style="color:var(--text3)">(' + PERSO_FMT_MONEY(it.unit) + ' c/u)</span>' : '')
@@ -22466,14 +22496,19 @@ function ctaOpenOp(id) {
   const cliInput = document.getElementById('cta-f-cliente');
   if (cliInput && !cliInput._ctaBound) {
     cliInput._ctaBound = true;
-    cliInput.addEventListener('change', () => {
+    const autofill = () => {
       const info = _ctaClientes().get(cliInput.value.trim());
       if (info) {
         const tEl = document.getElementById('cta-f-telefono');
         const pEl = document.getElementById('cta-f-provincia');
-        if (tEl && !tEl.value && info.telefono) tEl.value = info.telefono;
-        if (pEl && !pEl.value && info.provincia) pEl.value = info.provincia;
+        if (tEl && info.telefono) tEl.value = info.telefono;
+        if (pEl && info.provincia) pEl.value = info.provincia;
       }
+    };
+    cliInput.addEventListener('change', autofill);
+    cliInput.addEventListener('input', () => {
+      // si coincide exactamente con un cliente guardado (elegido del datalist)
+      if (_ctaClientes().has(cliInput.value.trim())) autofill();
     });
   }
   document.getElementById('cta-op-modal').style.display = 'flex';
@@ -22759,6 +22794,112 @@ async function ctaEnrichML() {
   }
 }
 
+// ── Selección de filas + acciones masivas ───────────────────────
+function ctaToggleRow(id, on) {
+  if (on) _ctaState.selected.add(id); else _ctaState.selected.delete(id);
+  ctaUpdateBulkBar();
+}
+function ctaToggleAll(on) {
+  _ctaOpsFiltradas().forEach(o => { if (on) _ctaState.selected.add(o.id); else _ctaState.selected.delete(o.id); });
+  ctaRenderTable();
+}
+function ctaClearSel() {
+  _ctaState.selected.clear();
+  const ca = document.getElementById('cta-check-all'); if (ca) ca.checked = false;
+  ctaRenderTable();
+}
+function ctaUpdateBulkBar() {
+  const bar = document.getElementById('cta-bulk-bar');
+  const n = _ctaState.selected.size;
+  if (!bar) return;
+  bar.style.display = n ? 'flex' : 'none';
+  const c = document.getElementById('cta-bulk-count'); if (c) c.textContent = n + ' seleccionada(s)';
+  // poblar selects una vez
+  const se = document.getElementById('cta-bulk-estado');
+  if (se && se.options.length <= 1) {
+    Object.keys(CTA_ESTADOS).forEach(k => { if (k) se.innerHTML += '<option value="' + k + '">' + CTA_ESTADOS[k][0] + '</option>'; });
+    se.onchange = () => { if (se.value) { ctaBulkEstado(se.value); se.value = ''; } };
+  }
+  const so = document.getElementById('cta-bulk-origen');
+  if (so && so.options.length <= 1) {
+    CTA_ORIGENES.forEach(o => { so.innerHTML += '<option value="' + o + '">' + o + '</option>'; });
+    so.onchange = () => { if (so.value) { ctaBulkOrigen(so.value); so.value = ''; } };
+  }
+}
+function _ctaSelectedOps() {
+  const out = [];
+  _ctaState.selected.forEach(id => { const f = _ctaFind(id); if (f) out.push(f); });
+  return out;
+}
+function ctaBulkEstado(estado) {
+  _ctaSelectedOps().forEach(({ op, ym }) => {
+    if (op.tipo === 'ingreso' && op.src !== 'ml') { op.estado = estado; op.manualEdit = true; _ctaState.dirty.add(ym); }
+  });
+  ctaFlushDirty(); ctaRenderAll();
+}
+function ctaBulkOrigen(origen) {
+  _ctaSelectedOps().forEach(({ op, ym }) => { op.origen = origen; op.manualEdit = true; _ctaState.dirty.add(ym); });
+  ctaFlushDirty(); ctaRenderAll();
+}
+function ctaBulkProducto() {
+  if (!_ctaState.catalogo.length) { alert('Primero cargá productos en Stock y catálogo.'); return; }
+  const lista = _ctaState.catalogo.map((c, i) => (i + 1) + '. ' + (c.emoji || '') + ' ' + c.nombre).join('\n');
+  const sel = prompt('Asignar producto a ' + _ctaState.selected.size + ' operación(es).\nElegí el número:\n\n' + lista);
+  if (sel === null) return;
+  const idx = parseInt(sel, 10) - 1;
+  const prod = _ctaState.catalogo[idx];
+  if (!prod) { alert('Número inválido.'); return; }
+  _ctaSelectedOps().forEach(({ op, ym }) => {
+    op.items = [{ nombre: prod.nombre, cant: (op.items && op.items[0] && op.items[0].cant) || 1, unit: 0 }];
+    op.manualEdit = true; _ctaState.dirty.add(ym);
+  });
+  ctaFlushDirty(); ctaRenderAll();
+  if (typeof showToast === 'function') showToast('🛒 Producto asignado a ' + _ctaState.selected.size + ' operación(es)', 'success');
+}
+function ctaBulkFactura() {
+  const r = confirm('¿Marcar el detalle en ROJO (falta facturar)?\n\nAceptar = rojo · Cancelar = negro (facturado)');
+  _ctaSelectedOps().forEach(({ op, ym }) => {
+    if (r) op.facturaColor = '#ef4444'; else delete op.facturaColor;
+    op.manualEdit = true; _ctaState.dirty.add(ym);
+  });
+  ctaFlushDirty(); ctaRenderTable();
+}
+function ctaBulkDelete() {
+  const n = _ctaState.selected.size;
+  if (!n || !confirm('🗑️ ¿Eliminar ' + n + ' operación(es) seleccionada(s)?\n\nTambién revierte su efecto en stock. No se puede deshacer.')) return;
+  _ctaSelectedOps().forEach(({ op, ym }) => {
+    if (_ctaAplicarStock(op, -1)) _ctaCatDirty = true;
+    _ctaState.chunks[ym] = (_ctaState.chunks[ym] || []).filter(o => o.id !== op.id);
+    _ctaState.dirty.add(ym);
+  });
+  if (_ctaCatDirty) { _ctaPersistCatalogo(); _ctaCatDirty = false; }
+  _ctaState.selected.clear();
+  ctaFlushDirty(); ctaRenderAll();
+}
+async function ctaBulkEnrich() {
+  const mls = _ctaSelectedOps().filter(({ op }) => op.src === 'ml');
+  if (!mls.length) { alert('Ninguna seleccionada es de Mercado Libre.'); return; }
+  if (typeof userId === 'undefined' || !userId) { alert('Conectá Mercado Libre primero.'); return; }
+  if (!confirm('💰 Traer monto neto + nombre de ' + mls.length + ' venta(s) ML seleccionada(s)?')) return;
+  let okc = 0;
+  for (const { op, ym } of mls) {
+    const oid = (op.id || '').replace('ml_', '');
+    try {
+      const r = await fetch(WORKER + '/api/cta/ml-net/' + oid + '?user=' + userId);
+      const d = await r.json();
+      if (d.ok) {
+        if (d.neto) { op.monto = d.neto; op.netoML = true; }
+        if (d.nombre) op.cliente = d.nombre;
+        if (d.provincia && !op.provincia) op.provincia = d.provincia;
+        _ctaState.dirty.add(ym); okc++;
+      }
+    } catch (e) { console.warn('[bulk enrich]', oid, e.message); }
+    await new Promise(res => setTimeout(res, 300));
+  }
+  await ctaFlushDirty(); ctaRenderAll();
+  if (typeof showToast === 'function') showToast('💰 ' + okc + '/' + mls.length + ' enriquecidas', 'success');
+}
+
 // ── Estado de la operación (tiñe la fila) ────────────────────────
 function ctaSetEstado(id, estado) {
   const found = _ctaFind(id);
@@ -22906,6 +23047,38 @@ function ctaRenderStockAlerts() {
     '</div></div>';
 }
 
+// v162: resuelve a qué producto del catálogo corresponde un ítem de venta
+// (ML/Woo/WA) usando el SKU o el título. El usuario configura "matchers"
+// (palabras clave / prefijos de SKU) por producto. Ej: "MAGICA" -> "Mágica".
+// Sin matcher, cae al match por nombre exacto (manuales).
+function _ctaNormToken(s) {
+  return String(s || '').toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // sacar acentos
+    .replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function _ctaCatMatch(it) {
+  // 1) match exacto por nombre (operaciones manuales eligen del catálogo)
+  let cat = _ctaState.catalogo.find(c => c.nombre === it.nombre);
+  if (cat) return cat;
+  // 2) por SKU o título: busca el matcher del catálogo como prefijo/keyword
+  const hay = _ctaNormToken((it.sku || '') + ' ' + (it.nombre || ''));
+  if (!hay) return null;
+  let best = null, bestLen = 0;
+  for (const c of _ctaState.catalogo) {
+    const matchers = (c.match && c.match.length) ? c.match
+      : [_ctaNormToken(c.nombre).split(' ')[0]]; // fallback: 1ra palabra del nombre
+    for (const m of matchers) {
+      const mm = _ctaNormToken(m);
+      if (!mm) continue;
+      // match si el texto del ítem arranca con el matcher o lo contiene como palabra
+      const re = new RegExp('(^|\\b)' + mm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(\\b|[0-9])');
+      if (re.test(hay) && mm.length > bestLen) { best = c; bestLen = mm.length; }
+    }
+  }
+  return best;
+}
+
 // Aplica el delta de stock de una operación (venta resta, insumo suma)
 function _ctaAplicarStock(op, signo) {
   // signo: -1 al crear venta / +1 al crear compra insumo (o revertir)
@@ -22915,7 +23088,7 @@ function _ctaAplicarStock(op, signo) {
   const dir = esVenta ? -1 : 1;
   let cambio = false;
   (op.items || []).forEach(it => {
-    const cat = _ctaState.catalogo.find(c => c.nombre === it.nombre);
+    const cat = _ctaCatMatch(it);
     if (cat) { cat.stock = (cat.stock || 0) + dir * signo * (Number(it.cant) || 0); cambio = true; }
   });
   return cambio;
@@ -22950,10 +23123,11 @@ function ctaStockAddRow(c) {
   const tb = document.getElementById('cta-stock-rows');
   const tr = document.createElement('tr');
   tr.className = 'cta-stock-row';
-  const emojiOpts = CTA_EMOJIS.map(e => '<option value="' + e + '"' + (e === c.emoji ? ' selected' : '') + '>' + e + '</option>').join('');
+  // Emoji: input de texto (permite PEGAR cualquier emoji) con datalist de sugeridos
   tr.innerHTML =
-    '<td><select class="cs-emoji" style="font-size:16px;padding:2px;border:none;background:transparent;cursor:pointer">' + emojiOpts + '</select></td>' +
+    '<td><input class="cs-emoji" value="' + _persoEsc(c.emoji || '📦') + '" list="cta-emoji-list" maxlength="4" style="font-size:18px;width:38px;text-align:center;padding:2px;border:1px solid var(--border);border-radius:6px" title="Pegá o escribí un emoji"></td>' +
     '<td><input class="cs-nombre" value="' + _persoEsc(c.nombre) + '" style="font-size:12px;width:100%" placeholder="Nombre del producto"></td>' +
+    '<td><input class="cs-match" value="' + _persoEsc((c.match || []).join(', ')) + '" style="font-size:11px;width:100%" placeholder="MAGICA, mug magico" title="Palabras del SKU/título que descuentan de este producto"></td>' +
     '<td><input class="cs-stock" type="number" value="' + (c.stock || 0) + '" style="font-size:12px;width:100%;text-align:center;font-weight:700"></td>' +
     '<td><input class="cs-min" type="number" value="' + (c.stockMin || 0) + '" min="0" style="font-size:12px;width:100%;text-align:center"></td>' +
     '<td><input class="cs-comprar" type="number" value="' + (c.comprar || 0) + '" min="0" style="font-size:12px;width:100%;text-align:center"></td>' +
@@ -22968,10 +23142,12 @@ async function ctaSaveStock() {
     const nombre = tr.querySelector('.cs-nombre').value.trim();
     if (!nombre) return;
     const prev = _ctaState.catalogo.find(c => c.nombre === nombre) || {};
+    const matchRaw = (tr.querySelector('.cs-match').value || '').split(',').map(s => s.trim()).filter(Boolean);
     cat.push({
       id: prev.id || nombre.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''),
       nombre,
-      emoji: tr.querySelector('.cs-emoji').value || '📦',
+      emoji: tr.querySelector('.cs-emoji').value.trim() || '📦',
+      match: matchRaw,
       stockBase: parseFloat(tr.querySelector('.cs-stock').value) || 0,
       stock: parseFloat(tr.querySelector('.cs-stock').value) || 0,
       stockMin: parseFloat(tr.querySelector('.cs-min').value) || 0,
