@@ -769,7 +769,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v164 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v165 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4083,6 +4083,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <thead><tr>
           <th style="width:28px;text-align:center"><input type="checkbox" id="cta-check-all" onchange="ctaToggleAll(this.checked)" title="Seleccionar todo" style="cursor:pointer"></th>
           <th style="white-space:nowrap;cursor:pointer;user-select:none" onclick="ctaSort('ts')">Fecha <span id="cta-sort-ts" style="font-size:10px"></span></th>
+          <th style="width:40px;text-align:center" title="Miniatura del producto"></th>
           <th style="cursor:pointer;user-select:none" onclick="ctaSort('detalle')">Detalle <span id="cta-sort-detalle" style="font-size:10px"></span></th>
           <th style="cursor:pointer;user-select:none" onclick="ctaSort('cliente')">Cliente <span id="cta-sort-cliente" style="font-size:10px"></span></th>
           <th style="white-space:nowrap;cursor:pointer;user-select:none" onclick="ctaSort('telefono')">Teléfono <span id="cta-sort-telefono" style="font-size:10px"></span></th>
@@ -4091,11 +4092,12 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <th style="cursor:pointer;user-select:none" onclick="ctaSort('provincia')">Provincia <span id="cta-sort-provincia" style="font-size:10px"></span></th>
           <th style="text-align:right;white-space:nowrap;cursor:pointer;user-select:none" onclick="ctaSort('envio')" title="Costo de envío. Clic para ordenar.">Envío <span id="cta-sort-envio" style="font-size:10px"></span></th>
           <th style="text-align:right;cursor:pointer;user-select:none" onclick="ctaSort('monto')">Monto <span id="cta-sort-monto" style="font-size:10px"></span></th>
+          <th style="text-align:right;white-space:nowrap" title="Saldo acumulado (ingresos − egresos). No incluye envío.">Saldo</th>
           <th style="text-align:center;cursor:pointer;user-select:none;white-space:nowrap" onclick="ctaSort('estado')">Estado <span id="cta-sort-estado" style="font-size:10px"></span></th>
           <th style="text-align:center;min-width:96px">Acciones</th>
         </tr></thead>
         <tbody id="cta-tbody">
-          <tr><td colspan="12" style="text-align:center;padding:32px;color:var(--text3)">Cargando…</td></tr>
+          <tr><td colspan="13" style="text-align:center;padding:32px;color:var(--text3)">Cargando…</td></tr>
         </tbody>
       </table>
     </div>
@@ -7881,7 +7883,14 @@ async function saveEmpaque(itemId){
       body: JSON.stringify({ height:h, width:w, length:l, weight:p })
     });
     const d = await r.json();
-    if(!d.ok) throw new Error(d.error||'error');
+    if(!d.ok){
+      let m = d.error || 'error';
+      // Traducir el error técnico de ML a algo entendible
+      if(/has_bids|Cannot update item/i.test(m)){
+        m = 'ML no permite editar el empaque de esta publicación (tiene ventas/ofertas activas o es catálogo). Editalo desde ML directamente.';
+      }
+      throw new Error(m);
+    }
     // actualizar el item en memoria
     const item = allItems.find(i=>i.id===itemId);
     if(item){ item.shipping = item.shipping||{}; item.shipping.dimensions = d.dimensions; }
@@ -7889,7 +7898,7 @@ async function saveEmpaque(itemId){
     renderPubs();
   }catch(e){
     console.error('[empaque]',e);
-    if(msg){ msg.textContent='⚠ '+e.message; msg.style.color='var(--red)'; }
+    if(msg){ msg.textContent='⚠ '+e.message; msg.style.color='var(--red)'; msg.style.maxWidth='220px'; msg.style.display='inline-block'; msg.style.whiteSpace='normal'; }
   }
 }
 
@@ -7917,9 +7926,10 @@ async function saveSKU(itemId){
   if(!inp) return;
 
   const val = inp.value.trim().slice(0,40);
-  if(val && !/^[a-zA-Z0-9\-_.\/]+$/.test(val)){
+  // v165: permitir espacios (SKUs tipo "MAGICA 245")
+  if(val && !/^[a-zA-Z0-9\-_.\/ ]+$/.test(val)){
     inp.style.borderColor='var(--red)';
-    if(msgEl){ msgEl.textContent='⚠️ Solo letras, números, - _ . /'; msgEl.style.color='var(--red)'; }
+    if(msgEl){ msgEl.textContent='⚠️ Solo letras, números, espacio, - _ . /'; msgEl.style.color='var(--red)'; }
     return;
   }
 
@@ -22017,7 +22027,7 @@ function startPersoPolling() {
 // Orígenes con emoji, editables. Se guardan en localStorage; el array
 // CTA_ORIGENES se deriva para compatibilidad con el resto del código.
 const CTA_ORIGENES_DEFAULT = [
-  { nombre: 'ML', emoji: '🛒' }, { nombre: 'ML Cris', emoji: '🛒' },
+  { nombre: 'Mercado Libre', emoji: '🛒' }, { nombre: 'ML Cris', emoji: '🛒' },
   { nombre: 'Cris Wsp', emoji: '💬' }, { nombre: 'Wsp Tienda', emoji: '💬' },
   { nombre: 'Woo', emoji: '🛍️' }, { nombre: 'Presta', emoji: '🏪' },
   { nombre: 'Shopee', emoji: '🧡' }, { nombre: 'Instagram', emoji: '📸' },
@@ -22467,9 +22477,20 @@ function ctaRenderTable() {
   const cnt = document.getElementById('cta-count');
   if (cnt) cnt.textContent = ops.length.toLocaleString('es-AR') + ' operación(es) en el rango';
   if (!ops.length) {
-    tb.innerHTML = '<tr><td colspan="12" style="text-align:center;padding:32px;color:var(--text3)">Sin operaciones. Cargá una con ➕ o importá el histórico 📦</td></tr>';
+    tb.innerHTML = '<tr><td colspan="13" style="text-align:center;padding:32px;color:var(--text3)">Sin operaciones. Cargá una con ➕ o importá el histórico 📦</td></tr>';
     document.getElementById('cta-pager').innerHTML = '';
     return;
+  }
+  // v165: saldo acumulado por operación (cronológico asc, sin envío).
+  // Se calcula sobre TODAS las filtradas y se guarda en un mapa por id.
+  const saldoMap = {};
+  {
+    const cron = ops.slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    let acc = 0;
+    cron.forEach(o => {
+      acc += (o.tipo === 'ingreso' ? 1 : -1) * (Number(o.monto) || 0); // sin envío
+      saldoMap[o.id] = acc;
+    });
   }
   const pages = Math.ceil(ops.length / CTA_PAGE);
   if (_ctaState.page > pages) _ctaState.page = pages;
@@ -22527,6 +22548,7 @@ function ctaRenderTable() {
     return '<tr id="cta-row-' + o.id + '"' + rowBg + '>' +
       '<td style="text-align:center"><input type="checkbox" class="cta-row-check" data-id="' + o.id + '" onchange="ctaToggleRow(\'' + o.id + '\', this.checked)"' + checked + ' style="cursor:pointer"></td>' +
       '<td style="white-space:nowrap;font-size:11px">' + f + '</td>' +
+      '<td style="text-align:center">' + _ctaThumbCell(o) + '</td>' +
       '<td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;color:' + (o.facturaColor || 'var(--text1)') + ';font-weight:' + (o.facturaColor === '#ef4444' ? '600' : '400') + '" title="' + _persoEsc(o.detalle) + ' (clic para editar texto y color factura)" onclick="ctaInlineEdit(\'' + o.id + '\',\'detalle\')">' + _persoEsc(o.detalle) + '</td>' +
       '<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" title="Editar cliente" onclick="ctaInlineEdit(\'' + o.id + '\',\'cliente\')">' + _persoEsc(o.cliente) + '</td>' +
       '<td>' + tel + '</td>' +
@@ -22535,6 +22557,7 @@ function ctaRenderTable() {
       '<td style="font-size:11px;cursor:pointer" title="Editar provincia" onclick="ctaInlineEdit(\'' + o.id + '\',\'provincia\')">' + (_persoEsc(o.provincia) || '<span style="color:var(--text3)">—</span>') + '</td>' +
       '<td style="text-align:right;white-space:nowrap;font-size:11px">' + envioCell + '</td>' +
       '<td style="text-align:right;white-space:nowrap">' + montoCell + '</td>' +
+      '<td style="text-align:right;white-space:nowrap;font-weight:600;color:' + ((saldoMap[o.id] || 0) >= 0 ? 'var(--text2)' : '#ef4444') + '">' + (saldoMap[o.id] != null ? PERSO_FMT_MONEY(saldoMap[o.id]) : '—') + '</td>' +
       '<td style="text-align:center">' + estCell + '</td>' +
       '<td style="text-align:center;white-space:nowrap">' + _ctaLinkBtns(o) +
         '<button class="btn btn-ghost btn-sm" style="padding:3px 6px" title="Editar todo" onclick="ctaOpenOp(\'' + o.id + '\')">✏️</button>' +
@@ -22599,7 +22622,7 @@ function ctaToggleItems(id) {
       '</div>';
   }).join('');
   if (!(o.items || []).length) body = '<span style="color:var(--text3)">Sin productos en esta operación.</span>';
-  tr.innerHTML = '<td colspan="12" style="background:var(--bg2);font-size:11.5px;padding:8px 16px">' +
+  tr.innerHTML = '<td colspan="13" style="background:var(--bg2);font-size:11.5px;padding:8px 16px">' +
     '<div style="font-size:10.5px;color:var(--text3);margin-bottom:4px">Movimiento de stock de esta operación (editá cantidad o producto si hace falta):</div>' +
     body + '</td>';
   row.after(tr);
@@ -22909,18 +22932,18 @@ async function ctaSyncML() {
         sku: (oi.item && oi.item.seller_sku) || ''
       }));
       const buyer = o.buyer || {};
-      // Fix v159: provincia desde el shipping enriquecido (loadShippingStatuses)
       const provincia = (o.shipping && o.shipping.provincia) || '';
-      // Fix v159: título limpio sin "#id" → "Venta MercadoLibre <producto>"
       const titulo = items[0] ? String(items[0].nombre).slice(0, 70) : '';
+      // v165: miniatura del producto vendido (la del primer ítem)
+      const thumb = (o.order_items && o.order_items[0] && o.order_items[0].item && o.order_items[0].item.thumbnail) || '';
       chunk.push({
         id, ts: d.getTime(), fecha: d.toISOString().slice(0, 10),
-        tipo: 'ingreso', origen: 'ML', categoria: 'ventas',
+        tipo: 'ingreso', origen: 'Mercado Libre', categoria: 'ventas',
         detalle: 'Venta MercadoLibre' + (titulo ? ' ' + titulo : ''),
         cliente: [buyer.first_name, buyer.last_name].filter(Boolean).join(' ')
           || [buyer.billing_info && buyer.billing_info.first_name, buyer.billing_info && buyer.billing_info.last_name].filter(Boolean).join(' ')
           || buyer.nickname || '',
-        telefono: '', provincia,
+        telefono: '', provincia, thumb,
         items, envio: 0,
         monto: Number(o.paid_amount) || Number(o.total_amount) || 0,
         src: 'ml'
@@ -22931,7 +22954,45 @@ async function ctaSyncML() {
   }
   if (_ctaCatDirty) { _ctaPersistCatalogo(); _ctaCatDirty = false; }
   _ctaMLSynced = true;
+  // v165: enriquecer automáticamente las ventas ML nuevas (monto neto real).
+  // Solo las que recién entraron y sin neto; el Worker cachea, así no repite.
+  if (nuevos > 0 && typeof userId !== 'undefined' && userId) {
+    ctaAutoEnrichNuevas();
+  }
   return nuevos;
+}
+
+// Enriquece en segundo plano las ventas ML sin neto (máx 25 por sync para
+// no saturar; las demás quedan para el próximo sync o el botón manual).
+let _ctaAutoEnriching = false;
+async function ctaAutoEnrichNuevas() {
+  if (_ctaAutoEnriching) return;
+  _ctaAutoEnriching = true;
+  try {
+    const pend = [];
+    Object.values(_ctaState.chunks).forEach(ch => (ch || []).forEach(o => {
+      if (o.src === 'ml' && !o.netoML) pend.push(o);
+    }));
+    const lote = pend.slice(0, 25);
+    let cambios = false;
+    for (const o of lote) {
+      const oid = (o.id || '').replace('ml_', '');
+      try {
+        const r = await fetch(WORKER + '/api/cta/ml-net/' + oid + '?user=' + userId);
+        const d = await r.json();
+        if (d.ok) {
+          if (d.neto) { o.monto = d.neto; o.netoML = true; }
+          if (d.nombre) o.cliente = d.nombre;
+          if (d.provincia && !o.provincia) o.provincia = d.provincia;
+          if (d.envioComprador != null) { o.envioInfo = d.envioComprador; o.envio = 0; }
+          _ctaState.dirty.add(o.fecha.slice(0, 7));
+          cambios = true;
+        }
+      } catch (e) { /* sigue */ }
+      await new Promise(res => setTimeout(res, 250));
+    }
+    if (cambios) { await ctaFlushDirty(); ctaRenderAll(); }
+  } finally { _ctaAutoEnriching = false; }
 }
 
 // ── Importador del histórico (cta-import-historico.json) ────────
@@ -23090,6 +23151,23 @@ async function ctaSaveOrigenes() {
   setTimeout(ctaCloseOrigenes, 700);
 }
 function ctaCloseOrigenes() { document.getElementById('cta-origenes-modal').style.display = 'none'; }
+
+// Miniatura: ML/Woo usan la imagen del producto; Personalizadas (Cris Wsp)
+// el emoji del producto del catálogo; manuales el emoji del producto si mapea.
+function _ctaThumbCell(o) {
+  if (o.thumb) {
+    return '<img src="' + o.thumb + '" loading="lazy" style="width:30px;height:30px;object-fit:cover;border-radius:5px;border:1px solid var(--border)" onerror="this.style.display=\'none\'">';
+  }
+  // sin imagen: emoji del producto del catálogo (si mapea)
+  const it = (o.items || [])[0];
+  if (it) {
+    const cat = (typeof _ctaCatMatch === 'function') ? _ctaCatMatch(it) : null;
+    if (cat && cat.emoji) return '<span style="font-size:18px" title="' + _persoEsc(cat.nombre) + '">' + cat.emoji + '</span>';
+  }
+  // Personalizadas sin producto mapeado: ícono genérico
+  if (o.src === 'wa') return '<span style="font-size:16px">🎨</span>';
+  return '<span style="color:var(--text3)">·</span>';
+}
 
 // ── Selección de filas + acciones masivas ───────────────────────
 function ctaToggleRow(id, on) {
