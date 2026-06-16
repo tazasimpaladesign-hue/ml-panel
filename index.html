@@ -769,7 +769,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v167 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v168 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -22115,6 +22115,10 @@ let _ctaState = {
 };
 let _ctaSaveTimer = null;
 let _ctaMLSynced = false;
+// v168: la sincronización automática (ML/WA) solo trae operaciones con fecha
+// >= a este corte. El histórico anterior ya está importado del Excel y se
+// está depurando a mano; así las viejas no reaparecen al sincronizar.
+const CTA_SYNC_DESDE_TS = new Date('2026-06-16T00:00:00').getTime();
 let _ctaCatDirty = false;
 
 function _ctaYmNow() { return new Date().toISOString().slice(0, 7); }
@@ -22594,9 +22598,11 @@ function ctaRenderTable() {
       '<td style="text-align:center"><input type="checkbox" class="cta-row-check" data-id="' + o.id + '" onchange="ctaToggleRow(\'' + o.id + '\', this.checked)"' + checked + ' style="cursor:pointer"></td>' +
       '<td style="white-space:nowrap;font-size:11px">' + (o.facturada
         ? '<span style="display:inline-block;background:#fff;color:#15803d;font-weight:700;border:1px solid #bbf7d0;border-radius:999px;padding:2px 9px;font-size:10.5px" title="Facturada">' + f + '</span>'
-        : f) + '</td>' +
+        : (o.faltaFactura
+          ? '<span style="display:inline-block;background:#fff;color:#dc2626;font-weight:700;border:1px solid #fecaca;border-radius:999px;padding:2px 9px;font-size:10.5px" title="Falta facturar">' + f + '</span>'
+          : f)) + '</td>' +
       '<td style="text-align:center">' + _ctaThumbCell(o) + '</td>' +
-      '<td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;color:' + (o.facturaColor || 'var(--text1)') + ';font-weight:' + (o.facturaColor === '#ef4444' ? '600' : '400') + '" title="' + _persoEsc(o.detalle) + ' (clic para editar texto y color factura)" onclick="ctaInlineEdit(\'' + o.id + '\',\'detalle\')">' + _persoEsc(o.detalle) + '</td>' +
+      '<td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" title="' + _persoEsc(o.detalle) + ' (clic para editar texto y marca de factura)" onclick="ctaInlineEdit(\'' + o.id + '\',\'detalle\')">' + _persoEsc(o.detalle) + '</td>' +
       '<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" title="Editar cliente" onclick="ctaInlineEdit(\'' + o.id + '\',\'cliente\')">' + _persoEsc(o.cliente) + '</td>' +
       '<td>' + tel + '</td>' +
       '<td>' + prodBadge + '</td>' +
@@ -22616,7 +22622,10 @@ function ctaRenderTable() {
   ctaUpdateBulkBar();
   // checkbox "todo" refleja si todas las visibles están seleccionadas
   const ca = document.getElementById('cta-check-all');
-  if (ca) { const vis = _ctaOpsFiltradas(); ca.checked = vis.length > 0 && vis.every(o => _ctaState.selected.has(o.id)); }
+  if (ca) {
+    // refleja si TODA la página visible está seleccionada (no todas las filtradas)
+    ca.checked = slice.length > 0 && slice.every(o => _ctaState.selected.has(o.id));
+  }
   // Pager
   const pg = document.getElementById('cta-pager');
   if (pages <= 1) { pg.innerHTML = ''; }
@@ -22888,6 +22897,7 @@ async function ctaSyncWA() {
   let nuevos = 0;
   for (const p of peds) {
     if (!p.code || !p.ts) continue;
+    if (p.ts < CTA_SYNC_DESDE_TS) continue; // v168: solo desde el corte
     const ym = new Date(p.ts).toISOString().slice(0, 7);
     if (!_ctaState.loaded.has(ym)) {
       try {
@@ -22940,6 +22950,7 @@ async function ctaSyncML() {
     if (!dstr) continue;
     const d = new Date(dstr);
     if (isNaN(d)) continue;
+    if (d.getTime() < CTA_SYNC_DESDE_TS) continue; // v168: solo desde el corte
     const ym = d.toISOString().slice(0, 7);
     if (!porMes.has(ym)) porMes.set(ym, []);
     porMes.get(ym).push({ o, d });
@@ -23255,7 +23266,13 @@ function ctaToggleRow(id, on) {
   ctaUpdateBulkBar();
 }
 function ctaToggleAll(on) {
-  _ctaOpsFiltradas().forEach(o => { if (on) _ctaState.selected.add(o.id); else _ctaState.selected.delete(o.id); });
+  // v168: "seleccionar todo" actúa sobre la PÁGINA visible (no borra lo
+  // seleccionado en otras páginas). La selección persiste al paginar.
+  const ops = _ctaOpsFiltradas();
+  const pages = Math.ceil(ops.length / CTA_PAGE) || 1;
+  const pg = Math.min(_ctaState.page, pages);
+  const visibles = ops.slice((pg - 1) * CTA_PAGE, pg * CTA_PAGE);
+  visibles.forEach(o => { if (on) _ctaState.selected.add(o.id); else _ctaState.selected.delete(o.id); });
   ctaRenderTable();
 }
 function ctaClearSel() {
@@ -23312,13 +23329,13 @@ function ctaBulkProducto() {
   if (typeof showToast === 'function') showToast('🛒 Producto asignado a ' + _ctaState.selected.size + ' operación(es)', 'success');
 }
 function ctaBulkFactura() {
-  const v = prompt('Marca de facturación para las seleccionadas:\n  r = falta facturar (rojo)\n  f = facturada (fecha verde)\n  n = sin marca', 'f');
+  const v = prompt('Marca de facturación para las seleccionadas (pill en la fecha):\n  r = falta facturar (rojo)\n  f = facturada (verde)\n  n = sin marca', 'f');
   if (v === null) return;
   const c = v.trim().toLowerCase();
   _ctaSelectedOps().forEach(({ op, ym }) => {
-    if (c === 'r') { op.facturaColor = '#ef4444'; delete op.facturada; }
-    else if (c === 'f') { op.facturada = true; delete op.facturaColor; }
-    else { delete op.facturaColor; delete op.facturada; }
+    if (c === 'r') { op.faltaFactura = true; delete op.facturada; delete op.facturaColor; }
+    else if (c === 'f') { op.facturada = true; delete op.faltaFactura; delete op.facturaColor; }
+    else { delete op.facturada; delete op.faltaFactura; delete op.facturaColor; }
     op.manualEdit = true; _ctaState.dirty.add(ym);
   });
   ctaFlushDirty(); ctaRenderTable();
@@ -23397,12 +23414,12 @@ function ctaInlineEdit(id, campo) {
   }
   else if (campo === 'detalle') {
     o.detalle = String(nuevo).trim();
-    const col = prompt('Marca de facturación:\n  r = falta facturar (detalle en rojo)\n  f = ya facturada (fecha en verde)\n  n = normal (sin marca)', o.facturaColor === '#ef4444' ? 'r' : o.facturada ? 'f' : 'n');
+    const col = prompt('Marca de facturación (pill de color en la fecha):\n  r = falta facturar (fecha en ROJO)\n  f = ya facturada (fecha en VERDE)\n  n = normal (sin marca)', o.faltaFactura ? 'r' : o.facturada ? 'f' : 'n');
     if (col !== null) {
       const c = col.trim().toLowerCase();
-      if (c === 'r' || c === 'rojo') { o.facturaColor = '#ef4444'; delete o.facturada; }
-      else if (c === 'f' || c === 'facturada') { o.facturada = true; delete o.facturaColor; }
-      else { delete o.facturaColor; delete o.facturada; }
+      if (c === 'r' || c === 'rojo') { o.faltaFactura = true; delete o.facturada; delete o.facturaColor; }
+      else if (c === 'f' || c === 'facturada') { o.facturada = true; delete o.faltaFactura; delete o.facturaColor; }
+      else { delete o.facturada; delete o.faltaFactura; delete o.facturaColor; }
     }
   }
   else o[campo] = String(nuevo).trim();
