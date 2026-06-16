@@ -769,7 +769,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v166 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v167 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4031,6 +4031,16 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <div style="height:230px;position:relative"><canvas id="cta-chart"></canvas></div>
   </div>
 
+  <!-- Mensajes WhatsApp (espejo de Personalizadas, sincronizado por KV) -->
+  <div id="cta-msgs-card" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:14px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <div style="font-size:12.5px;font-weight:700">💬 Mensajes para WhatsApp</div>
+      <span style="font-size:10.5px;color:var(--text3)">Tocá 📋 para copiar · sincronizado con Personalizadas y todas las PCs</span>
+      <button class="btn btn-ghost btn-xs" style="margin-left:auto;font-size:10.5px" onclick="persoOpenMsgEditor()">⚙️ Editar</button>
+    </div>
+    <div id="cta-msgs-list" style="display:flex;flex-direction:column;gap:6px"></div>
+  </div>
+
   <!-- Tabla central -->
   <div class="card">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
@@ -4051,6 +4061,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         </select>
         <input type="text" id="cta-search" placeholder="🔍 Buscar..." style="max-width:200px;font-size:12px;padding:5px 9px" oninput="_ctaState.page=1;ctaRenderTable()">
         <button class="btn btn-sm" style="background:var(--accent);color:#fff" onclick="ctaOpenOp(null)">➕ Nueva operación</button>
+        <button class="btn btn-sm" style="background:#22c55e;color:#fff" onclick="ctaToggleMsgs()">💬 Mensajes WhatsApp</button>
         <button class="btn btn-ghost btn-sm" onclick="ctaSyncAll()" title="Trae ventas nuevas de ML y Personalizadas WA">⬇️ Sincronizar</button>
         <button class="btn btn-ghost btn-sm" onclick="ctaEnrichML()" id="cta-enrich-btn" title="Trae el monto NETO acreditado y el nombre real del comprador de cada venta de ML (en lotes, cacheado)">💰 Montos netos ML</button>
         <button class="btn btn-ghost btn-sm" onclick="ctaExportExcel()" title="Exporta a .xlsx las operaciones filtradas">📥 Exportar Excel</button>
@@ -21897,7 +21908,17 @@ function persoGetMsgs() {
   try { return JSON.parse(localStorage.getItem(PERSO_MSG_KEY) || 'null') || PERSO_MSG_DEFAULT; }
   catch (e) { return PERSO_MSG_DEFAULT; }
 }
-function persoSaveMsgs(arr) { localStorage.setItem(PERSO_MSG_KEY, JSON.stringify(arr)); }
+function persoSaveMsgs(arr) {
+  localStorage.setItem(PERSO_MSG_KEY, JSON.stringify(arr));
+  // v167: sincronizar al KV → mismo set de mensajes en todas las PCs y en
+  // las dos secciones (Personalizadas y Cuenta Impala).
+  if (typeof WORKER !== 'undefined') {
+    fetch(WORKER + '/api/cta/config', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ waMsgs: arr })
+    }).catch(e => console.warn('[wa msgs save]', e.message));
+  }
+}
 
 function persoToggleMsgs() {
   const card = document.getElementById('perso-msgs-card');
@@ -21907,15 +21928,18 @@ function persoToggleMsgs() {
 }
 
 function persoRenderMsgs() {
-  const list = document.getElementById('perso-msgs-list');
-  if (!list) return;
   const msgs = persoGetMsgs();
-  list.innerHTML = msgs.map((m, i) =>
+  const htmlMsgs = msgs.map((m, i) =>
     '<div style="display:flex;align-items:center;gap:8px">' +
       '<span style="flex-shrink:0;min-width:140px;font-size:11.5px;font-weight:700;color:#fff;background:' + _persoEsc(m.color || '#6b7280') + ';padding:5px 10px;border-radius:8px;text-align:center">' + _persoEsc(m.label) + '</span>' +
       '<span style="flex:1;font-size:11px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + _persoEsc(m.text) + '">' + _persoEsc((m.text || '').replace(/\n/g, ' ')) + '</span>' +
       '<button class="btn btn-ghost btn-sm" style="padding:4px 9px;flex-shrink:0" title="Copiar mensaje" onclick="persoCopyMsg(' + i + ')">📋 Copiar</button>' +
     '</div>').join('');
+  // v167: pintar en ambas secciones (Personalizadas y Cuenta Impala)
+  ['perso-msgs-list', 'cta-msgs-list'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = htmlMsgs;
+  });
 }
 
 async function persoCopyMsg(i) {
@@ -22118,6 +22142,20 @@ async function ctaInit() {
       _ctaState.resumen = d.resumen || {};
       _ctaState.catalogo = d.catalogo || [];
       _ctaState.boot = true;
+      // v167: traer config sincronizada (orígenes + mensajes WhatsApp) del KV
+      try {
+        const rc = await fetch(WORKER + '/api/cta/config');
+        const dc = await rc.json();
+        if (dc.ok) {
+          if (Array.isArray(dc.origenes) && dc.origenes.length) {
+            localStorage.setItem('cta_origenes', JSON.stringify(dc.origenes));
+            CTA_ORIGENES = dc.origenes.map(o => o.nombre);
+          }
+          if (Array.isArray(dc.waMsgs)) {
+            localStorage.setItem(PERSO_MSG_KEY, JSON.stringify(dc.waMsgs));
+          }
+        }
+      } catch (e) { console.warn('[cta config]', e.message); }
     } catch (e) {
       console.error('[cta]', e);
       _ctaStatus('⚠ ' + e.message);
@@ -22126,6 +22164,7 @@ async function ctaInit() {
   }
   await ctaLoadRange();
   ctaRenderAll();
+  if (typeof persoRenderMsgs === 'function') persoRenderMsgs(); // espejo de mensajes WA
   ctaSyncAll(true); // silencioso: WA apenas ingresa + ML asentado por siempre
 }
 
@@ -22467,7 +22506,10 @@ function _ctaOpsFiltradas() {
     else if (col === 'monto') { va = +a.monto || 0; vb = +b.monto || 0; }
     else if (col === 'envio') { va = (+a.envio || 0) + (+a.envioInfo || 0); vb = (+b.envio || 0) + (+b.envioInfo || 0); }
     else { va = String(a[col] || '').toLowerCase(); vb = String(b[col] || '').toLowerCase(); }
-    return va < vb ? -dir : va > vb ? dir : 0;
+    if (va < vb) return -dir; if (va > vb) return dir;
+    // v167: desempate estable por id (clave para que el saldo de carritos
+    // multi-producto / mismo timestamp no se vea invertido)
+    return (col === 'ts' ? 1 : dir) * String(a.id).localeCompare(String(b.id));
   });
   return ops;
 }
@@ -22487,7 +22529,7 @@ function ctaRenderTable() {
   // Se calcula sobre TODAS las filtradas y se guarda en un mapa por id.
   const saldoMap = {};
   {
-    const cron = ops.slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    const cron = ops.slice().sort((a, b) => (a.ts || 0) - (b.ts || 0) || String(a.id).localeCompare(String(b.id)));
     let acc = 0;
     cron.forEach(o => {
       acc += (o.tipo === 'ingreso' ? 1 : -1) * (Number(o.monto) || 0); // sin envío
@@ -22550,7 +22592,9 @@ function ctaRenderTable() {
     const checked = _ctaState.selected.has(o.id) ? ' checked' : '';
     return '<tr id="cta-row-' + o.id + '"' + rowBg + '>' +
       '<td style="text-align:center"><input type="checkbox" class="cta-row-check" data-id="' + o.id + '" onchange="ctaToggleRow(\'' + o.id + '\', this.checked)"' + checked + ' style="cursor:pointer"></td>' +
-      '<td style="white-space:nowrap;font-size:11px' + (o.facturada ? ';color:#15803d;font-weight:700' : '') + '" title="' + (o.facturada ? 'Facturada' : '') + '">' + f + '</td>' +
+      '<td style="white-space:nowrap;font-size:11px">' + (o.facturada
+        ? '<span style="display:inline-block;background:#fff;color:#15803d;font-weight:700;border:1px solid #bbf7d0;border-radius:999px;padding:2px 9px;font-size:10.5px" title="Facturada">' + f + '</span>'
+        : f) + '</td>' +
       '<td style="text-align:center">' + _ctaThumbCell(o) + '</td>' +
       '<td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;color:' + (o.facturaColor || 'var(--text1)') + ';font-weight:' + (o.facturaColor === '#ef4444' ? '600' : '400') + '" title="' + _persoEsc(o.detalle) + ' (clic para editar texto y color factura)" onclick="ctaInlineEdit(\'' + o.id + '\',\'detalle\')">' + _persoEsc(o.detalle) + '</td>' +
       '<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" title="Editar cliente" onclick="ctaInlineEdit(\'' + o.id + '\',\'cliente\')">' + _persoEsc(o.cliente) + '</td>' +
@@ -23141,6 +23185,11 @@ async function ctaSaveOrigenes() {
   }
   ctaSaveOrigenesLS(arr);
   CTA_ORIGENES = arr.map(o => o.nombre);
+  // v167: sincronizar al KV para que aparezca en todas las PCs
+  fetch(WORKER + '/api/cta/config', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ origenes: arr })
+  }).catch(e => console.warn('[cta config save]', e.message));
   // refrescar el select del modal de operación y los bulk selects
   const so = document.getElementById('cta-f-origen');
   if (so) { const v = so.value; so.innerHTML = CTA_ORIGENES.map(o => '<option value="' + o + '">' + o + '</option>').join(''); so.value = v; }
@@ -23161,15 +23210,43 @@ function _ctaThumbCell(o) {
   if (o.thumb) {
     return '<img src="' + o.thumb + '" loading="lazy" style="width:30px;height:30px;object-fit:cover;border-radius:5px;border:1px solid var(--border)" onerror="this.style.display=\'none\'">';
   }
-  // sin imagen: emoji del producto del catálogo (si mapea)
+  // v167: emoji manual (override) — útil sobre todo en egresos
+  if (o.emoji) {
+    return '<span style="font-size:18px;cursor:pointer" title="Editar emoji" onclick="ctaEditEmoji(\'' + o.id + '\')">' + o.emoji + '</span>';
+  }
+  // emoji del producto del catálogo (si mapea)
   const it = (o.items || [])[0];
   if (it) {
     const cat = (typeof _ctaCatMatch === 'function') ? _ctaCatMatch(it) : null;
-    if (cat && cat.emoji) return '<span style="font-size:18px" title="' + _persoEsc(cat.nombre) + '">' + cat.emoji + '</span>';
+    if (cat && cat.emoji) return '<span style="font-size:18px;cursor:pointer" title="' + _persoEsc(cat.nombre) + ' (clic para cambiar emoji)" onclick="ctaEditEmoji(\'' + o.id + '\')">' + cat.emoji + '</span>';
   }
-  // Personalizadas sin producto mapeado: ícono genérico
   if (o.src === 'wa') return '<span style="font-size:16px">🎨</span>';
+  // egresos / sin emoji: ícono clickeable para asignar uno
+  if (o.tipo === 'egreso') return '<span style="cursor:pointer;opacity:.55;font-size:15px" title="Asignar emoji" onclick="ctaEditEmoji(\'' + o.id + '\')">🏷️</span>';
   return '<span style="color:var(--text3)">·</span>';
+}
+
+// Editar el emoji de una operación (override manual; ideal para egresos)
+function ctaEditEmoji(id) {
+  const found = _ctaFind(id);
+  if (!found) return;
+  const actual = found.op.emoji || '';
+  const nuevo = prompt('Emoji para esta operación (pegá o escribí uno; vacío para quitar):', actual);
+  if (nuevo === null) return;
+  const e = nuevo.trim();
+  if (e) found.op.emoji = e; else delete found.op.emoji;
+  found.op.manualEdit = true;
+  ctaMarkDirty(found.ym);
+  ctaRenderTable();
+}
+
+// Mostrar/ocultar la card de mensajes WhatsApp en Cuenta Impala (espejo)
+function ctaToggleMsgs() {
+  const card = document.getElementById('cta-msgs-card');
+  if (!card) return;
+  const show = card.style.display === 'none';
+  card.style.display = show ? 'block' : 'none';
+  if (show && typeof persoRenderMsgs === 'function') persoRenderMsgs();
 }
 
 // ── Selección de filas + acciones masivas ───────────────────────
@@ -23426,7 +23503,7 @@ function ctaRenderStockAlerts() {
       (c.emoji || '📦') + ' <b>' + _persoEsc(c.nombre) + '</b>: ' +
       '<span style="color:#dc2626;font-weight:700">' + (c.stock || 0) + '</span> ' +
       '<span style="color:var(--text3)">(mín ' + (c.stockMin || 0) + ')</span>' +
-      (c.comprar ? ' → <b style="color:#16a34a">comprar ' + c.comprar + '</b>' : '') +
+      (() => { const comp = Math.max(0, (c.stockMin || 0) - ((c.comprado || 0) - (c.vendido || 0))); return comp ? ' → <b style="color:#16a34a">comprar ' + comp + '</b>' : ''; })() +
       '</span>').join('') +
     '</div></div>';
 }
@@ -23469,16 +23546,15 @@ function _ctaAplicarStock(op, signo) {
   const esVenta = op.tipo === 'ingreso';
   const esInsumo = op.tipo === 'egreso' && op.categoria === 'insumos';
   if (!esVenta && !esInsumo) return false;
-  const dir = esVenta ? -1 : 1;   // venta resta stock, compra suma
   let cambio = false;
   (op.items || []).forEach(it => {
     const cat = _ctaCatMatch(it);
     if (!cat) return;
     const q = Number(it.cant) || 0;
-    cat.stock = (cat.stock || 0) + dir * signo * q;
-    // v166: acumular totales históricos. Venta → vendido; compra insumo → comprado.
+    // v167: solo acumulamos comprado/vendido. El STOCK se DERIVA (comprado−vendido).
     if (esVenta) cat.vendido = Math.max(0, (cat.vendido || 0) + signo * q);
     else cat.comprado = Math.max(0, (cat.comprado || 0) + signo * q);
+    cat.stock = (cat.comprado || 0) - (cat.vendido || 0);
     cambio = true;
   });
   return cambio;
@@ -23518,14 +23594,26 @@ function ctaStockAddRow(c) {
     '<td style="padding:4px"><input class="cs-emoji" value="' + _persoEsc(c.emoji || '📦') + '" list="cta-emoji-list" maxlength="4" style="font-size:18px;width:46px;text-align:center;padding:3px;border:1px solid var(--border);border-radius:6px;box-sizing:border-box" title="Pegá o escribí un emoji"></td>' +
     '<td style="padding:4px"><input class="cs-nombre" value="' + _persoEsc(c.nombre) + '" style="font-size:12px;width:100%;box-sizing:border-box" placeholder="Nombre"></td>' +
     '<td><input class="cs-match" value="' + _persoEsc((c.match || []).join(', ')) + '" style="font-size:11px;width:100%" placeholder="MAGICA, mug magico" title="Palabras del SKU/título que descuentan de este producto"></td>' +
-    '<td><input class="cs-stock" type="number" value="' + (c.stock || 0) + '" style="font-size:12px;width:100%;text-align:center;font-weight:700"></td>' +
-    '<td><input class="cs-comprado" type="number" value="' + (c.comprado || 0) + '" min="0" style="font-size:12px;width:100%;text-align:center;color:#16a34a;font-weight:600" title="Total comprado (se suma solo con compras)"></td>' +
-    '<td><input class="cs-vendido" type="number" value="' + (c.vendido || 0) + '" min="0" style="font-size:12px;width:100%;text-align:center;color:#2563eb;font-weight:600" title="Total vendido (se suma solo con ventas)"></td>' +
-    '<td><input class="cs-min" type="number" value="' + (c.stockMin || 0) + '" min="0" style="font-size:12px;width:100%;text-align:center"></td>' +
-    '<td><input class="cs-comprar" type="number" value="' + (c.comprar || 0) + '" min="0" style="font-size:12px;width:100%;text-align:center"></td>' +
+    '<td><input class="cs-stock" type="number" value="' + ((c.comprado || 0) - (c.vendido || 0)) + '" readonly style="font-size:12px;width:100%;text-align:center;font-weight:700;background:var(--bg2);color:var(--text1)" title="Calculado: Comprado − Vendido (automático)"></td>' +
+    '<td><input class="cs-comprado" type="number" value="' + (c.comprado || 0) + '" min="0" style="font-size:12px;width:100%;text-align:center;color:#16a34a;font-weight:600" title="Stock inicial real + compras. Editá acá tu conteo inicial." oninput="ctaStockRecalcRow(this)"></td>' +
+    '<td><input class="cs-vendido" type="number" value="' + (c.vendido || 0) + '" min="0" style="font-size:12px;width:100%;text-align:center;color:#2563eb;font-weight:600" title="Total vendido (se suma solo con ventas)" oninput="ctaStockRecalcRow(this)"></td>' +
+    '<td><input class="cs-min" type="number" value="' + (c.stockMin || 0) + '" min="0" style="font-size:12px;width:100%;text-align:center" oninput="ctaStockRecalcRow(this)"></td>' +
+    '<td><input class="cs-comprar" type="number" value="' + Math.max(0, (c.stockMin || 0) - ((c.comprado || 0) - (c.vendido || 0))) + '" readonly style="font-size:12px;width:100%;text-align:center;background:var(--bg2);color:#d97706;font-weight:600" title="Calculado: Mínimo − Stock (cuánto comprar)"></td>' +
     '<td><input class="cs-costo" type="number" value="' + (c.costo || 0) + '" min="0" style="font-size:12px;width:100%;text-align:center"></td>' +
     '<td style="text-align:center"><button class="btn btn-ghost btn-xs" style="color:#ef4444;padding:2px 7px" onclick="this.closest(\'tr\').remove()">✕</button></td>';
   tb.appendChild(tr);
+}
+
+async // v167: recalcula Stock (comprado−vendido) y Comprar (mín−stock) de una fila
+function ctaStockRecalcRow(inp) {
+  const tr = inp.closest('tr');
+  if (!tr) return;
+  const comprado = parseFloat(tr.querySelector('.cs-comprado').value) || 0;
+  const vendido = parseFloat(tr.querySelector('.cs-vendido').value) || 0;
+  const min = parseFloat(tr.querySelector('.cs-min').value) || 0;
+  const stock = comprado - vendido;
+  tr.querySelector('.cs-stock').value = stock;
+  tr.querySelector('.cs-comprar').value = Math.max(0, min - stock);
 }
 
 async function ctaSaveStock() {
@@ -23540,12 +23628,11 @@ async function ctaSaveStock() {
       nombre,
       emoji: tr.querySelector('.cs-emoji').value.trim() || '📦',
       match: matchRaw,
-      stockBase: parseFloat(tr.querySelector('.cs-stock').value) || 0,
-      stock: parseFloat(tr.querySelector('.cs-stock').value) || 0,
       comprado: parseFloat(tr.querySelector('.cs-comprado').value) || 0,
       vendido: parseFloat(tr.querySelector('.cs-vendido').value) || 0,
+      stock: (parseFloat(tr.querySelector('.cs-comprado').value) || 0) - (parseFloat(tr.querySelector('.cs-vendido').value) || 0),
       stockMin: parseFloat(tr.querySelector('.cs-min').value) || 0,
-      comprar: parseFloat(tr.querySelector('.cs-comprar').value) || 0,
+      comprar: Math.max(0, (parseFloat(tr.querySelector('.cs-min').value) || 0) - ((parseFloat(tr.querySelector('.cs-comprado').value) || 0) - (parseFloat(tr.querySelector('.cs-vendido').value) || 0))),
       costo: parseFloat(tr.querySelector('.cs-costo').value) || 0,
       activo: true
     });
