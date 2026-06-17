@@ -769,7 +769,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v172 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v173 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -22327,47 +22327,53 @@ function _ctaRangeMonths() {
 }
 
 // Rango [desde,hasta] en ms del período del dashboard
+// v173: los rangos se expresan como LÍMITES DE FECHA (YYYY-MM-DD) para
+// comparar contra o.fecha sin problemas de zona horaria. Devuelve
+// [desdeFecha, hastaFecha, etiqueta]. Ambos límites son inclusivos.
+function _ctaLocalDateStr(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return y + '-' + m + '-' + dd;
+}
 function _ctaPeriodoRango() {
   const now = new Date();
   const p = _ctaState.periodo;
+  const L = _ctaLocalDateStr;
   if (p === 'hoy') {
-    const d0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    return [d0.getTime(), d0.getTime() + 86400000 - 1, 'Hoy ' + d0.toLocaleDateString('es-AR')];
+    const f = L(now);
+    return [f, f, 'Hoy ' + now.toLocaleDateString('es-AR')];
   }
   if (p === 'mes') {
     const d0 = new Date(now.getFullYear(), now.getMonth(), 1);
-    const d1 = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-    return [d0.getTime(), d1.getTime() - 1, d0.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })];
+    const d1 = new Date(now.getFullYear(), now.getMonth() + 1, 0); // último día del mes
+    return [L(d0), L(d1), d0.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })];
   }
   if (p === 'semana') {
     const dow = (now.getDay() + 6) % 7; // lunes=0
     const d0 = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dow);
-    return [d0.getTime(), d0.getTime() + 7 * 86400000 - 1, 'Semana del ' + d0.toLocaleDateString('es-AR')];
+    const d1 = new Date(d0.getFullYear(), d0.getMonth(), d0.getDate() + 6);
+    return [L(d0), L(d1), 'Semana del ' + d0.toLocaleDateString('es-AR')];
   }
   if (p === 'mesant') {
     const d0 = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const d1 = new Date(now.getFullYear(), now.getMonth(), 1);
-    return [d0.getTime(), d1.getTime() - 1, d0.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })];
+    const d1 = new Date(now.getFullYear(), now.getMonth(), 0);
+    return [L(d0), L(d1), d0.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })];
   }
   if (p === 'anio') {
-    const d0 = new Date(now.getFullYear(), 0, 1);
-    const d1 = new Date(now.getFullYear() + 1, 0, 1);
-    return [d0.getTime(), d1.getTime() - 1, 'Año ' + now.getFullYear()];
+    return [now.getFullYear() + '-01-01', now.getFullYear() + '-12-31', 'Año ' + now.getFullYear()];
   }
   if (p === 'anioant') {
-    const d0 = new Date(now.getFullYear() - 1, 0, 1);
-    const d1 = new Date(now.getFullYear(), 0, 1);
-    return [d0.getTime(), d1.getTime() - 1, 'Año ' + (now.getFullYear() - 1)];
+    const y = now.getFullYear() - 1;
+    return [y + '-01-01', y + '-12-31', 'Año ' + y];
   }
   if (p === 'historico') {
-    return [0, Date.now(), 'Histórico completo'];
+    return ['0000-01-01', '9999-12-31', 'Histórico completo'];
   }
-  // custom
+  // custom: los inputs date ya dan YYYY-MM-DD
   const dv = document.getElementById('cta-per-desde').value;
   const hv = document.getElementById('cta-per-hasta').value;
-  const d0 = dv ? new Date(dv + 'T00:00:00').getTime() : 0;
-  const d1 = hv ? new Date(hv + 'T23:59:59').getTime() : Date.now();
-  return [d0, d1, (dv || '...') + ' a ' + (hv || '...')];
+  return [dv || '0000-01-01', hv || '9999-12-31', (dv || '...') + ' a ' + (hv || '...')];
 }
 
 // v169: al cambiar las fechas del rango personalizado, refresca KPIs Y tabla
@@ -22469,11 +22475,11 @@ function _ctaResumenMes(ym) {
 }
 
 // Suma ingresos/egresos/unidades de las operaciones en [d0,d1]
-function _ctaSumaRango(d0, d1) {
+function _ctaSumaRango(f0, f1) {
   let ing = 0, eg = 0, uni = 0, ops = 0;
   Object.values(_ctaState.chunks).forEach(ch => (ch || []).forEach(o => {
-    const t = o.ts || 0;
-    if (t < d0 || t > d1) return;
+    const f = o.fecha || '';
+    if (!f || f < f0 || f > f1) return; // comparación de strings YYYY-MM-DD
     ops++;
     if (o.tipo === 'ingreso') { ing += (+o.monto || 0) + (+o.envio || 0); (o.items || []).forEach(it => uni += +it.cant || 0); }
     else eg += (+o.monto || 0);
@@ -22482,14 +22488,21 @@ function _ctaSumaRango(d0, d1) {
 }
 
 function ctaRenderKPIs() {
-  const [d0, d1, label] = _ctaPeriodoRango();
+  const [f0, f1, label] = _ctaPeriodoRango();
   const lblEl = document.getElementById('cta-periodo-label');
   if (lblEl) lblEl.textContent = '· ' + label;
 
-  // Período anterior equivalente (misma duración, justo antes) para el %
-  const dur = d1 - d0;
-  const a = _ctaSumaRango(d0, d1);
-  const b = _ctaSumaRango(d0 - dur - 1, d0 - 1);
+  // Período anterior equivalente (misma cantidad de días, justo antes) para el %
+  const a = _ctaSumaRango(f0, f1);
+  let b = { ing: 0, eg: 0, uni: 0, ops: 0 };
+  if (f0 > '0000-01-01' && f1 < '9999-12-31') {
+    const ms0 = new Date(f0 + 'T00:00:00').getTime();
+    const ms1 = new Date(f1 + 'T00:00:00').getTime();
+    const dias = Math.round((ms1 - ms0) / 86400000) + 1;
+    const pf1 = _ctaLocalDateStr(new Date(ms0 - 86400000));
+    const pf0 = _ctaLocalDateStr(new Date(ms0 - dias * 86400000));
+    b = _ctaSumaRango(pf0, pf1);
+  }
 
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.innerHTML = v; };
   const vs = (now, before) => {
@@ -22618,9 +22631,9 @@ function _ctaOpsFiltradas() {
   const q = (document.getElementById('cta-search').value || '').toLowerCase().trim();
   let ops = [];
   Object.values(_ctaState.chunks).forEach(ch => { ops = ops.concat(ch || []); });
-  // v160: limitar al período del dashboard
-  const [pd0, pd1] = _ctaPeriodoRango();
-  ops = ops.filter(o => { const t = o.ts || 0; return t >= pd0 && t <= pd1; });
+  // v173: limitar al período del dashboard comparando por FECHA (sin zona horaria)
+  const [pf0, pf1] = _ctaPeriodoRango();
+  ops = ops.filter(o => { const f = o.fecha || ''; return f && f >= pf0 && f <= pf1; });
   if (q) {
     const colEl = document.getElementById('cta-search-col');
     const col = colEl ? colEl.value : '';
