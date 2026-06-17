@@ -769,7 +769,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v170 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v171 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4070,8 +4070,10 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <button class="btn btn-ghost btn-sm" onclick="ctaOpenStock()" title="Ver y administrar stock + catálogo de productos">📦 Stock y catálogo</button>
         <button class="btn btn-ghost btn-sm" onclick="ctaOpenOrigenes()" title="Editar nombres y emojis de los orígenes (renombrar actualiza todas las filas)">⚙️ Orígenes</button>
         <button class="btn btn-ghost btn-sm" onclick="ctaOpenCategorias()" title="Editar las categorías de egreso (insumos, impuestos, proveedores...)">🧾 Egresos</button>
-        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('cta-import-file').click()" title="Importar el histórico del Excel (cta-import-historico.json)">📥 Importar histórico</button>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('cta-import-file').click()" title="Importar el histórico del Excel (cta-import-historico.json) — SOBRESCRIBE los meses">📥 Importar histórico</button>
         <input type="file" id="cta-import-file" accept=".json" style="display:none" onchange="ctaImportFile(this.files[0])">
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('cta-merge-file').click()" title="Agregar operaciones sueltas SIN borrar lo existente (JSON con chunks)">➕ Agregar ops</button>
+        <input type="file" id="cta-merge-file" accept=".json" style="display:none" onchange="ctaMergeFile(this.files[0])">
         <span id="cta-status" style="font-size:11px;color:var(--text3)"></span>
       </div>
     </div>
@@ -23204,6 +23206,41 @@ async function ctaImportFile(file) {
   }
   document.getElementById('cta-import-file').value = '';
 }
+// v171: agrega operaciones sueltas SIN sobrescribir los meses (merge idempotente).
+// Acepta un JSON simple { chunks: { "YYYY-MM": [ops...] } }.
+async function ctaMergeFile(file) {
+  if (!file) return;
+  let data;
+  try { data = JSON.parse(await file.text()); }
+  catch (e) { alert('El archivo no es un JSON válido.'); return; }
+  if (!data.chunks || typeof data.chunks !== 'object') {
+    alert('El JSON debe tener un objeto "chunks" con los meses. Ej: { "chunks": { "2026-06": [ ... ] } }');
+    return;
+  }
+  let totalOps = 0, meses = Object.keys(data.chunks);
+  meses.forEach(ym => { if (Array.isArray(data.chunks[ym])) totalOps += data.chunks[ym].length; });
+  if (!totalOps) { alert('El JSON no tiene operaciones para agregar.'); return; }
+  if (!confirm('➕ AGREGAR OPERACIONES\n\n' + totalOps + ' operación(es) en ' + meses.length + ' mes(es).\n\nNO borra nada de lo que ya tenés. Las que ya existan (mismo id) se omiten.\n\n¿Continuar?')) return;
+  _ctaStatus('➕ Agregando…');
+  try {
+    const r = await fetch(WORKER + '/api/cta/merge', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chunks: data.chunks })
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'merge falló');
+    _ctaState.boot = false; _ctaState.chunks = {}; _ctaState.loaded = new Set(); _ctaState.dirty = new Set();
+    if (typeof showToast === 'function') showToast('➕ ' + d.added + ' agregadas' + (d.skipped ? ' · ' + d.skipped + ' ya existían' : ''), 'success');
+    await ctaInit();
+    alert('✅ Listo.\n\nAgregadas: ' + d.added + '\nOmitidas (ya existían): ' + d.skipped);
+  } catch (e) {
+    console.error('[cta merge]', e);
+    alert('⚠ No se pudo agregar: ' + e.message);
+    _ctaStatus('⚠ ' + e.message);
+  }
+  document.getElementById('cta-merge-file').value = '';
+}
+
 // Actualiza el botón de montos netos con cuántas ventas ML faltan enriquecer
 function ctaUpdateEnrichBtn() {
   const btn = document.getElementById('cta-enrich-btn');
