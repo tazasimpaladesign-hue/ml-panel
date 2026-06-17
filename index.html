@@ -769,7 +769,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v168 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v169 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -3972,9 +3972,9 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <option value="custom">Rango personalizado</option>
     </select>
     <span id="cta-periodo-custom" style="display:none;gap:6px;align-items:center">
-      <input type="date" id="cta-per-desde" style="font-size:12px;padding:4px 7px" onchange="ctaRenderKPIs()">
+      <input type="date" id="cta-per-desde" style="font-size:12px;padding:4px 7px" onchange="ctaCustomChanged()">
       <span style="font-size:12px;color:var(--text3)">a</span>
-      <input type="date" id="cta-per-hasta" style="font-size:12px;padding:4px 7px" onchange="ctaRenderKPIs()">
+      <input type="date" id="cta-per-hasta" style="font-size:12px;padding:4px 7px" onchange="ctaCustomChanged()">
     </span>
     <span id="cta-periodo-label" style="font-size:11px;color:var(--text3);margin-left:4px"></span>
   </div>
@@ -4105,10 +4105,11 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <th style="text-align:right;cursor:pointer;user-select:none" onclick="ctaSort('monto')">Monto <span id="cta-sort-monto" style="font-size:10px"></span></th>
           <th style="text-align:right;white-space:nowrap" title="Saldo acumulado (ingresos − egresos). No incluye envío.">Saldo</th>
           <th style="text-align:center;cursor:pointer;user-select:none;white-space:nowrap" onclick="ctaSort('estado')">Estado <span id="cta-sort-estado" style="font-size:10px"></span></th>
+          <th style="text-align:center;width:34px" title="Color de resaltado de la fila">🎨</th>
           <th style="text-align:center;min-width:96px">Acciones</th>
         </tr></thead>
         <tbody id="cta-tbody">
-          <tr><td colspan="13" style="text-align:center;padding:32px;color:var(--text3)">Cargando…</td></tr>
+          <tr><td colspan="14" style="text-align:center;padding:32px;color:var(--text3)">Cargando…</td></tr>
         </tbody>
       </table>
     </div>
@@ -22080,15 +22081,26 @@ const CTA_ESTADOS = {
   disenando:   ['🎨 Diseñando', '#eab308'],   // amarillo
   a_cobrar:    ['💰 A cobrar',  '#ef4444'],   // rojo
   pagada:      ['✅ Pagada',     '#22c55e'],
-  a_retirar:   ['🏬 A retirar',  '#3b82f6'],   // azul (entre Pagada y Entregada)
-  entregada:   ['📦 Entregada',  '#16a34a'],   // verde
+  a_realizar:  ['🛠️ A realizar', '#16a34a'],  // verde (entre Pagada y A retirar)
+  a_retirar:   ['🏬 A retirar',  '#3b82f6'],   // azul
+  entregada:   ['📦 Entregada',  ''],          // v169: SIN color de fila
 };
 // Estados que se TOMAN de Mercado Libre (no editables, color de fila propio)
 const CTA_ML_ESTADOS = {
   imprimir:  ['🖨️ Imprimir',  '#ef4444'],   // rojo
-  en_camino: ['🚚 En camino', '#6b7280'],   // gris medio (antes marrón)
-  entregado: ['✅ Entregado',  '#16a34a'],   // verde
+  en_camino: ['🚚 En camino', '#16a34a'],   // v169: verde (antes gris)
+  entregado: ['✅ Entregado',  ''],          // v169: SIN color de fila
 };
+// Paleta de colores para resaltado manual de filas (los de siempre + 2 nuevos)
+const CTA_COLORES = [
+  { id: '',        nombre: 'Sin color',  hex: '' },
+  { id: 'amarillo', nombre: 'Amarillo',  hex: '#eab308' },
+  { id: 'rojo',     nombre: 'Rojo',      hex: '#ef4444' },
+  { id: 'verde',    nombre: 'Verde',     hex: '#16a34a' },
+  { id: 'azul',     nombre: 'Azul',      hex: '#3b82f6' },
+  { id: 'naranja',  nombre: 'Naranja',   hex: '#f97316' },   // nuevo
+  { id: 'violeta',  nombre: 'Violeta',   hex: '#8b5cf6' },   // nuevo
+];
 // Tinte de fila: alpha mas notorio (no tan claro). Se concatena al hex del estado.
 const CTA_ROW_ALPHA = '2b';
 // Deriva el estado ML desde el shipping de la orden cacheada en allOrders
@@ -22121,7 +22133,14 @@ let _ctaMLSynced = false;
 const CTA_SYNC_DESDE_TS = new Date('2026-06-16T00:00:00').getTime();
 let _ctaCatDirty = false;
 
-function _ctaYmNow() { return new Date().toISOString().slice(0, 7); }
+function _ctaYmNow() { return _ctaLocalDate(new Date()).slice(0, 7); }
+// v169: fecha local YYYY-MM-DD (sin corrimiento de zona horaria como toISOString)
+function _ctaLocalDate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return y + '-' + m + '-' + dd;
+}
 function _ctaStatus(t) { const el = document.getElementById('cta-status'); if (el) el.textContent = t || ''; }
 
 async function ctaInit() {
@@ -22245,13 +22264,21 @@ function _ctaPeriodoRango() {
   return [d0, d1, (dv || '...') + ' a ' + (hv || '...')];
 }
 
+// v169: al cambiar las fechas del rango personalizado, refresca KPIs Y tabla
+async function ctaCustomChanged() {
+  _ctaState.page = 1;
+  await ctaLoadRange();
+  ctaRenderKPIs();
+  ctaRenderTable();
+}
+
 async function ctaSetPeriodo(v) {
   _ctaState.periodo = v;
   document.getElementById('cta-periodo-custom').style.display = (v === 'custom') ? 'inline-flex' : 'none';
   if (v === 'custom' && !document.getElementById('cta-per-desde').value) {
     const now = new Date();
-    document.getElementById('cta-per-desde').value = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-    document.getElementById('cta-per-hasta').value = now.toISOString().slice(0, 10);
+    document.getElementById('cta-per-desde').value = _ctaLocalDate(new Date(now.getFullYear(), now.getMonth(), 1));
+    document.getElementById('cta-per-hasta').value = _ctaLocalDate(now);
   }
   // estos períodos pueden requerir meses no cargados
   if (['custom','mesant','anio','anioant','semana','historico'].includes(v)) { _ctaState.rango = 'todo'; await ctaLoadRange(); }
@@ -22525,7 +22552,7 @@ function ctaRenderTable() {
   const cnt = document.getElementById('cta-count');
   if (cnt) cnt.textContent = ops.length.toLocaleString('es-AR') + ' operación(es) en el rango';
   if (!ops.length) {
-    tb.innerHTML = '<tr><td colspan="13" style="text-align:center;padding:32px;color:var(--text3)">Sin operaciones. Cargá una con ➕ o importá el histórico 📦</td></tr>';
+    tb.innerHTML = '<tr><td colspan="14" style="text-align:center;padding:32px;color:var(--text3)">Sin operaciones. Cargá una con ➕ o importá el histórico 📦</td></tr>';
     document.getElementById('cta-pager').innerHTML = '';
     return;
   }
@@ -22566,8 +22593,17 @@ function ctaRenderTable() {
     if (esIng && o.estado === 'a_cobrar' && !o.montoColor) montoColor = '#ef4444';
     const netoTag = (o.src === 'ml' && o.netoML)
       ? ' <span style="color:#16a34a;font-size:9px" title="Monto neto real de Mercado Pago (establecido, no reconsume)">✓neto</span>' : '';
-    const montoCell = '<span style="font-weight:700;color:' + montoColor + ';cursor:pointer" ' +
-      'title="Editar monto" onclick="ctaInlineEdit(\'' + o.id + '\',\'monto\')">' + (esIng ? '+' : '−') + PERSO_FMT_MONEY(o.monto) + '</span>' + netoTag;
+    const montoTxt = (esIng ? '+' : '−') + PERSO_FMT_MONEY(o.monto);
+    // v169: si el monto tiene color manual (r/v), se muestra como pill (igual que la fecha)
+    let montoCell;
+    if (o.montoColor === '#ef4444') {
+      montoCell = '<span style="display:inline-block;background:#fff;color:#dc2626;font-weight:700;border:1px solid #fecaca;border-radius:999px;padding:2px 9px;font-size:10.5px;cursor:pointer" title="Editar monto" onclick="ctaInlineEdit(\'' + o.id + '\',\'monto\')">' + montoTxt + '</span>' + netoTag;
+    } else if (o.montoColor === '#22c55e') {
+      montoCell = '<span style="display:inline-block;background:#fff;color:#15803d;font-weight:700;border:1px solid #bbf7d0;border-radius:999px;padding:2px 9px;font-size:10.5px;cursor:pointer" title="Editar monto" onclick="ctaInlineEdit(\'' + o.id + '\',\'monto\')">' + montoTxt + '</span>' + netoTag;
+    } else {
+      montoCell = '<span style="font-weight:700;color:' + montoColor + ';cursor:pointer" ' +
+        'title="Editar monto" onclick="ctaInlineEdit(\'' + o.id + '\',\'monto\')">' + montoTxt + '</span>' + netoTag;
+    }
     const orig = (o.origen || (esIng ? '—' : (o.categoria || 'egreso')));
     // Teléfono con link WhatsApp (mismo sistema que Personalizadas)
     const wa = _persoWaNum(o.telefono);
@@ -22580,19 +22616,23 @@ function ctaRenderTable() {
     let rowColor = '';
     if (mlEst) {
       const m = CTA_ML_ESTADOS[mlEst];
-      estCell = '<span style="font-size:11px;font-weight:700;color:' + m[1] + ';border:1.5px solid ' + m[1] +
+      const brd = m[1] || '#9ca3af';
+      estCell = '<span style="font-size:11px;font-weight:700;color:' + brd + ';border:1.5px solid ' + brd +
         ';border-radius:6px;padding:3px 8px;white-space:nowrap" title="Estado tomado de Mercado Libre">' + m[0] + '</span>';
-      rowColor = m[1];
+      rowColor = m[1]; // puede ser '' (entregado sin color)
     } else {
-      // v166: estado editable en ingresos Y egresos (todas las opciones)
+      // estado editable en ingresos Y egresos (todas las opciones)
       const est = CTA_ESTADOS[o.estado || ''] || CTA_ESTADOS[''];
+      const brd = est[1] || '#9ca3af';
       const opts = Object.keys(CTA_ESTADOS).map(k =>
         '<option value="' + k + '"' + (k === (o.estado || '') ? ' selected' : '') + '>' + CTA_ESTADOS[k][0] + '</option>').join('');
       estCell = '<select onchange="ctaSetEstado(\'' + o.id + '\', this.value)" ' +
-        'style="font-size:11px;padding:3px 6px;border-radius:6px;border:1.5px solid ' + est[1] + ';color:' + est[1] + ';font-weight:700;background:var(--bg1)">' + opts + '</select>';
+        'style="font-size:11px;padding:3px 6px;border-radius:6px;border:1.5px solid ' + brd + ';color:' + brd + ';font-weight:700;background:var(--bg1)">' + opts + '</select>';
       if (o.estado) rowColor = est[1];
     }
-    const rowBg = rowColor ? ' style="background:' + rowColor + CTA_ROW_ALPHA + '"' : '';
+    // v169: el color MANUAL de fila (rowColorManual) tiene prioridad sobre el del estado
+    const colorFinal = o.rowColorManual ? o.rowColorManual : rowColor;
+    const rowBg = colorFinal ? ' style="background:' + colorFinal + CTA_ROW_ALPHA + '"' : '';
     const checked = _ctaState.selected.has(o.id) ? ' checked' : '';
     return '<tr id="cta-row-' + o.id + '"' + rowBg + '>' +
       '<td style="text-align:center"><input type="checkbox" class="cta-row-check" data-id="' + o.id + '" onchange="ctaToggleRow(\'' + o.id + '\', this.checked)"' + checked + ' style="cursor:pointer"></td>' +
@@ -22612,6 +22652,7 @@ function ctaRenderTable() {
       '<td style="text-align:right;white-space:nowrap">' + montoCell + '</td>' +
       '<td style="text-align:right;white-space:nowrap;font-weight:600;color:' + ((saldoMap[o.id] || 0) >= 0 ? 'var(--text2)' : '#ef4444') + '">' + (saldoMap[o.id] != null ? PERSO_FMT_MONEY(saldoMap[o.id]) : '—') + '</td>' +
       '<td style="text-align:center">' + estCell + '</td>' +
+      '<td style="text-align:center"><button class="btn btn-ghost btn-sm" style="padding:2px 5px;font-size:12px" title="Color de resaltado" onclick="ctaOpenColorPicker(\'' + o.id + '\', event)">' + (o.rowColorManual ? '<span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:' + o.rowColorManual + ';border:1px solid var(--border)"></span>' : '🎨') + '</button></td>' +
       '<td style="text-align:center;white-space:nowrap">' + _ctaLinkBtns(o) +
         '<button class="btn btn-ghost btn-sm" style="padding:3px 6px" title="Editar todo" onclick="ctaOpenOp(\'' + o.id + '\')">✏️</button>' +
         '<button class="btn btn-ghost btn-sm" style="padding:3px 6px;color:#ef4444" title="Eliminar" onclick="ctaDeleteOp(\'' + o.id + '\')">🗑️</button>' +
@@ -22678,7 +22719,7 @@ function ctaToggleItems(id) {
       '</div>';
   }).join('');
   if (!(o.items || []).length) body = '<span style="color:var(--text3)">Sin productos en esta operación.</span>';
-  tr.innerHTML = '<td colspan="13" style="background:var(--bg2);font-size:11.5px;padding:8px 16px">' +
+  tr.innerHTML = '<td colspan="14" style="background:var(--bg2);font-size:11.5px;padding:8px 16px">' +
     '<div style="font-size:10.5px;color:var(--text3);margin-bottom:4px">Movimiento de stock de esta operación (editá cantidad o producto si hace falta):</div>' +
     body + '</td>';
   row.after(tr);
@@ -22816,6 +22857,19 @@ function ctaOpenOp(id) {
 
 function ctaCloseOp() { document.getElementById('cta-op-modal').style.display = 'none'; }
 
+// v169: timestamp de una operación manual. Si es hoy usa la hora actual;
+// si es otra fecha, usa el fin del día para que quede ARRIBA de las ventas
+// ML/WA de esa jornada (que entran con su hora real).
+function _ctaManualTs(fecha, editId) {
+  if (editId) {
+    const f = _ctaFind(editId);
+    if (f && f.op.ts && f.op.fecha === fecha) return f.op.ts; // conservar al editar misma fecha
+  }
+  const hoy = _ctaLocalDate(new Date());
+  if (fecha === hoy) return Date.now();
+  return new Date(fecha + 'T23:59:59').getTime();
+}
+
 function ctaSaveOp() {
   const get = i => document.getElementById('cta-f-' + i).value;
   const fecha = get('fecha');
@@ -22834,7 +22888,7 @@ function ctaSaveOp() {
   const prev = prevFound ? prevFound.op : null;
   const op = {
     id: _ctaState.editId || ('m_' + Date.now() + '_' + Math.floor(Math.random() * 999)),
-    ts: new Date(fecha + 'T12:00:00').getTime(),
+    ts: _ctaManualTs(fecha, _ctaState.editId),
     fecha, tipo,
     origen: tipo === 'ingreso' ? get('origen') : '',
     categoria: tipo === 'ingreso' ? 'ventas' : get('categoria'),
@@ -22913,7 +22967,7 @@ async function ctaSyncWA() {
     let op = chunk.find(o => o.id === id);
     if (!op) {
       chunk.push({
-        id, ts: p.ts, fecha: new Date(p.ts).toISOString().slice(0, 10),
+        id, ts: p.ts, fecha: _ctaLocalDate(new Date(p.ts)),
         tipo: 'ingreso', origen: 'Cris Wsp', categoria: 'ventas',
         detalle: 'Personalizada ' + p.code + (p.producto ? ' · ' + p.producto : ''),
         cliente: p.comprador || '', telefono: p.telefono || '', provincia: p.provincia || '',
@@ -22975,9 +23029,9 @@ async function ctaSyncML() {
           let chg = false;
           const prov = (o.shipping && o.shipping.provincia) || '';
           if (prov && !ex.provincia) { ex.provincia = prov; chg = true; }
-          if (/^Venta ML #/.test(ex.detalle || '')) {
+          if (/^Venta ML #/.test(ex.detalle || '') || /^Venta MercadoLibre /.test(ex.detalle || '')) {
             const t = (ex.items && ex.items[0]) ? String(ex.items[0].nombre).slice(0, 70) : '';
-            ex.detalle = 'Venta MercadoLibre' + (t ? ' ' + t : ''); chg = true;
+            ex.detalle = 'Venta' + (t ? ' ' + t : ' MercadoLibre'); chg = true;
           }
           if (chg) { ctaMarkDirty(ym); nuevos++; }
         }
@@ -22995,9 +23049,9 @@ async function ctaSyncML() {
       // v165: miniatura del producto vendido (la del primer ítem)
       const thumb = (o.order_items && o.order_items[0] && o.order_items[0].item && o.order_items[0].item.thumbnail) || '';
       chunk.push({
-        id, ts: d.getTime(), fecha: d.toISOString().slice(0, 10),
+        id, ts: d.getTime(), fecha: _ctaLocalDate(d),
         tipo: 'ingreso', origen: 'Mercado Libre', categoria: 'ventas',
-        detalle: 'Venta MercadoLibre' + (titulo ? ' ' + titulo : ''),
+        detalle: 'Venta' + (titulo ? ' ' + titulo : ' MercadoLibre'),
         cliente: [buyer.first_name, buyer.last_name].filter(Boolean).join(' ')
           || [buyer.billing_info && buyer.billing_info.first_name, buyer.billing_info && buyer.billing_info.last_name].filter(Boolean).join(' ')
           || buyer.nickname || '',
@@ -23375,6 +23429,45 @@ async function ctaBulkEnrich() {
   }
   await ctaFlushDirty(); ctaRenderAll();
   if (typeof showToast === 'function') showToast('💰 ' + okc + '/' + mls.length + ' enriquecidas', 'success');
+}
+
+// ── Paleta de color de resaltado de fila (manual) ────────────────
+function ctaOpenColorPicker(id, ev) {
+  if (ev) ev.stopPropagation();
+  // cerrar cualquier popover abierto
+  const prev = document.getElementById('cta-color-pop');
+  if (prev) prev.remove();
+  const found = _ctaFind(id);
+  if (!found) return;
+  const pop = document.createElement('div');
+  pop.id = 'cta-color-pop';
+  pop.style.cssText = 'position:fixed;z-index:3000;background:var(--bg1);border:1px solid var(--border);border-radius:10px;box-shadow:0 12px 30px rgba(0,0,0,.25);padding:8px;display:flex;gap:6px;flex-wrap:wrap;max-width:180px';
+  pop.innerHTML = CTA_COLORES.map(c =>
+    '<div onclick="ctaSetRowColor(\'' + id + '\',\'' + c.hex + '\')" title="' + c.nombre + '" ' +
+    'style="width:24px;height:24px;border-radius:6px;cursor:pointer;border:2px solid ' + ((found.op.rowColorManual || '') === c.hex ? 'var(--accent)' : 'var(--border)') + ';' +
+    (c.hex ? 'background:' + c.hex : 'background:repeating-linear-gradient(45deg,#fff,#fff 4px,#eee 4px,#eee 8px)') + '"></div>'
+  ).join('');
+  document.body.appendChild(pop);
+  // posicionar cerca del botón
+  const r = ev && ev.target ? ev.target.getBoundingClientRect() : { left: 200, bottom: 200 };
+  pop.style.left = Math.max(8, Math.min(r.left - 70, window.innerWidth - pop.offsetWidth - 8)) + 'px';
+  pop.style.top = (r.bottom + 6) + 'px';
+  // cerrar al clickear afuera
+  setTimeout(() => {
+    const close = (e) => { if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('mousedown', close); } };
+    document.addEventListener('mousedown', close);
+  }, 0);
+}
+
+function ctaSetRowColor(id, hex) {
+  const found = _ctaFind(id);
+  if (!found) return;
+  if (hex) found.op.rowColorManual = hex; else delete found.op.rowColorManual;
+  found.op.manualEdit = true;
+  ctaMarkDirty(found.ym);
+  const pop = document.getElementById('cta-color-pop');
+  if (pop) pop.remove();
+  ctaRenderTable();
 }
 
 // ── Estado de la operación (tiñe la fila) ────────────────────────
