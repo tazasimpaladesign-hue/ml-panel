@@ -769,7 +769,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v169 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v170 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4069,6 +4069,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <input type="file" id="cta-xlsx-file" accept=".xlsx,.xls,.csv" style="display:none" onchange="ctaImportExcel(this.files[0])">
         <button class="btn btn-ghost btn-sm" onclick="ctaOpenStock()" title="Ver y administrar stock + catálogo de productos">📦 Stock y catálogo</button>
         <button class="btn btn-ghost btn-sm" onclick="ctaOpenOrigenes()" title="Editar nombres y emojis de los orígenes (renombrar actualiza todas las filas)">⚙️ Orígenes</button>
+        <button class="btn btn-ghost btn-sm" onclick="ctaOpenCategorias()" title="Editar las categorías de egreso (insumos, impuestos, proveedores...)">🧾 Egresos</button>
         <button class="btn btn-ghost btn-sm" onclick="document.getElementById('cta-import-file').click()" title="Importar el histórico del Excel (cta-import-historico.json)">📥 Importar histórico</button>
         <input type="file" id="cta-import-file" accept=".json" style="display:none" onchange="ctaImportFile(this.files[0])">
         <span id="cta-status" style="font-size:11px;color:var(--text3)"></span>
@@ -4086,6 +4087,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <button class="btn btn-ghost btn-sm" onclick="ctaBulkProducto()" title="Asignar un producto del catálogo a todas">🛒 Producto</button>
       <button class="btn btn-ghost btn-sm" onclick="ctaBulkEnrich()" title="Traer monto neto + nombre real de las ML seleccionadas">💰 Montos netos</button>
       <button class="btn btn-ghost btn-sm" onclick="ctaBulkFactura()" title="Marcar/desmarcar color de factura">🧾 Factura</button>
+      <button class="btn btn-ghost btn-sm" onclick="ctaBulkColor(event)" title="Color de resaltado para las seleccionadas">🎨 Color</button>
       <button class="btn btn-sm" style="background:#ef4444;color:#fff" onclick="ctaBulkDelete()">🗑️ Eliminar</button>
       <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="ctaClearSel()">✕ Limpiar</button>
     </div>
@@ -4118,6 +4120,23 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
   <div class="alert a-info" style="margin-top:14px;font-size:11px">
     💡 Las ventas de <strong>ML</strong> y <strong>Personalizadas WA</strong> entran solas con "Sincronizar" (y al abrir la sección). Las de ML quedan asentadas <strong>para siempre</strong> aunque ML solo conserve 12 meses. Los meses cerrados del histórico usan los <strong>totales oficiales</strong> de tu Excel en KPIs y gráficos.
+  </div>
+
+  <!-- Modal Categorías de egreso (listado de egresos / proveedores) -->
+  <div id="cta-categorias-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;align-items:center;justify-content:center">
+    <div class="card" style="max-width:460px;width:94%;margin:0;max-height:90vh;overflow:auto">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+        <div class="card-title" style="margin:0">🧾 Categorías de egreso</div>
+        <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="ctaCatAddRow()">➕ Categoría</button>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Tipos de gasto (insumos, impuestos, proveedores, servicios...). El emoji aparece al elegir la categoría en una operación. Se sincroniza en todas las PCs.</div>
+      <div id="cta-cat-rows" style="display:flex;flex-direction:column;gap:6px"></div>
+      <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end;align-items:center">
+        <span id="cta-cat-status" style="font-size:11px;color:var(--text3);margin-right:auto"></span>
+        <button class="btn btn-ghost btn-sm" onclick="ctaCloseCategorias()">Cerrar</button>
+        <button class="btn btn-sm" style="background:var(--accent);color:#fff" onclick="ctaSaveCategorias()">💾 Guardar</button>
+      </div>
+    </div>
   </div>
 
   <!-- Modal Orígenes -->
@@ -22074,16 +22093,48 @@ function ctaOrigenEmoji(nombre) {
   return o ? (o.emoji || '') : '';
 }
 let CTA_ORIGENES = ctaGetOrigenes().map(o => o.nombre);
+
+// Categorías de egreso editables (el "listado de egresos"). emoji + nombre.
+const CTA_CATEGORIAS_DEFAULT = [
+  { id: 'insumos',    nombre: 'Insumos',              emoji: '📦' },
+  { id: 'impuestos',  nombre: 'Impuestos (ARCA/ATM)', emoji: '🏛️' },
+  { id: 'servicios',  nombre: 'Servicios/Contadores', emoji: '🧾' },
+  { id: 'comisiones', nombre: 'Comisiones ML',        emoji: '💳' },
+  { id: 'envios',     nombre: 'Envíos',               emoji: '🚚' },
+  { id: 'sueldos',    nombre: 'Sueldos',              emoji: '👤' },
+  { id: 'otros',      nombre: 'Otros',                emoji: '📎' },
+];
+function ctaGetCategorias() {
+  try {
+    const s = JSON.parse(localStorage.getItem('cta_categorias') || 'null');
+    if (Array.isArray(s) && s.length) return s;
+  } catch (e) {}
+  return CTA_CATEGORIAS_DEFAULT.slice();
+}
+function ctaSaveCategoriasLS(arr) { localStorage.setItem('cta_categorias', JSON.stringify(arr)); }
+function ctaCatEmoji(id) {
+  const c = ctaGetCategorias().find(x => x.id === id);
+  return c ? (c.emoji || '') : '';
+}
+function _ctaFillCategoriaSelect() {
+  const sel = document.getElementById('cta-f-categoria');
+  if (!sel) return;
+  const v = sel.value;
+  sel.innerHTML = ctaGetCategorias().map(c =>
+    '<option value="' + c.id + '">' + (c.emoji ? c.emoji + ' ' : '') + _persoEsc(c.nombre) + '</option>').join('');
+  if (v) sel.value = v;
+}
 const CTA_PAGE = 100;
 
 const CTA_ESTADOS = {
   '':          ['—', '#9ca3af'],
-  disenando:   ['🎨 Diseñando', '#eab308'],   // amarillo
-  a_cobrar:    ['💰 A cobrar',  '#ef4444'],   // rojo
-  pagada:      ['✅ Pagada',     '#22c55e'],
-  a_realizar:  ['🛠️ A realizar', '#16a34a'],  // verde (entre Pagada y A retirar)
-  a_retirar:   ['🏬 A retirar',  '#3b82f6'],   // azul
-  entregada:   ['📦 Entregada',  ''],          // v169: SIN color de fila
+  disenando:   ['🎨 Diseñando', '#ca8a04'],   // amarillo (más oscuro)
+  a_cobrar:    ['💰 A cobrar',  '#dc2626'],   // rojo
+  a_pagar:     ['💳 A pagar',   '#b45309'],   // ámbar oscuro (egresos pendientes)
+  pagada:      ['✅ Pagada',     '#16a34a'],
+  a_realizar:  ['🛠️ A realizar', '#15803d'],  // verde oscuro
+  a_retirar:   ['🏬 A retirar',  '#2563eb'],   // azul
+  entregada:   ['📦 Entregada',  ''],          // SIN color de fila
 };
 // Estados que se TOMAN de Mercado Libre (no editables, color de fila propio)
 const CTA_ML_ESTADOS = {
@@ -22094,15 +22145,17 @@ const CTA_ML_ESTADOS = {
 // Paleta de colores para resaltado manual de filas (los de siempre + 2 nuevos)
 const CTA_COLORES = [
   { id: '',        nombre: 'Sin color',  hex: '' },
-  { id: 'amarillo', nombre: 'Amarillo',  hex: '#eab308' },
-  { id: 'rojo',     nombre: 'Rojo',      hex: '#ef4444' },
-  { id: 'verde',    nombre: 'Verde',     hex: '#16a34a' },
-  { id: 'azul',     nombre: 'Azul',      hex: '#3b82f6' },
-  { id: 'naranja',  nombre: 'Naranja',   hex: '#f97316' },   // nuevo
-  { id: 'violeta',  nombre: 'Violeta',   hex: '#8b5cf6' },   // nuevo
+  { id: 'amarillo', nombre: 'Amarillo',  hex: '#d4a017' },   // mostaza (distinto del naranja)
+  { id: 'rojo',     nombre: 'Rojo',      hex: '#dc2626' },
+  { id: 'verde',    nombre: 'Verde',     hex: '#15803d' },
+  { id: 'azul',     nombre: 'Azul',      hex: '#2563eb' },
+  { id: 'naranja',  nombre: 'Naranja',   hex: '#ea580c' },   // naranja fuerte
+  { id: 'violeta',  nombre: 'Violeta',   hex: '#7c3aed' },   // violeta oscuro
+  { id: 'turquesa', nombre: 'Turquesa',  hex: '#0d9488' },   // nuevo
+  { id: 'rosa',     nombre: 'Rosa',      hex: '#db2777' },   // nuevo
 ];
 // Tinte de fila: alpha mas notorio (no tan claro). Se concatena al hex del estado.
-const CTA_ROW_ALPHA = '2b';
+const CTA_ROW_ALPHA = '33';
 // Deriva el estado ML desde el shipping de la orden cacheada en allOrders
 function _ctaMLEstado(op) {
   if (op.src !== 'ml') return null;
@@ -22155,6 +22208,7 @@ async function ctaInit() {
     sp.innerHTML = '<option value="">Provincia…</option>' +
       PERSO_PROVINCIAS.map(p => '<option value="' + p + '">' + p + '</option>').join('');
   }
+  _ctaFillCategoriaSelect(); // v170: categorías editables
   if (!_ctaState.boot) {
     _ctaStatus('Cargando…');
     try {
@@ -22176,6 +22230,9 @@ async function ctaInit() {
           }
           if (Array.isArray(dc.waMsgs)) {
             localStorage.setItem(PERSO_MSG_KEY, JSON.stringify(dc.waMsgs));
+          }
+          if (Array.isArray(dc.categorias) && dc.categorias.length) {
+            localStorage.setItem('cta_categorias', JSON.stringify(dc.categorias));
           }
         }
       } catch (e) { console.warn('[cta config]', e.message); }
@@ -22604,7 +22661,13 @@ function ctaRenderTable() {
       montoCell = '<span style="font-weight:700;color:' + montoColor + ';cursor:pointer" ' +
         'title="Editar monto" onclick="ctaInlineEdit(\'' + o.id + '\',\'monto\')">' + montoTxt + '</span>' + netoTag;
     }
-    const orig = (o.origen || (esIng ? '—' : (o.categoria || 'egreso')));
+    let orig = (o.origen || (esIng ? '—' : (o.categoria || 'egreso')));
+    // v170: en egresos, anteponer el emoji de la categoría
+    if (!esIng && o.categoria) {
+      const cnom = (ctaGetCategorias().find(c => c.id === o.categoria) || {}).nombre || o.categoria;
+      const cemo = ctaCatEmoji(o.categoria);
+      orig = (cemo ? cemo + ' ' : '') + cnom;
+    }
     // Teléfono con link WhatsApp (mismo sistema que Personalizadas)
     const wa = _persoWaNum(o.telefono);
     const tel = o.telefono
@@ -22671,10 +22734,15 @@ function ctaRenderTable() {
   const pg = document.getElementById('cta-pager');
   if (pages <= 1) { pg.innerHTML = ''; }
   else {
+    let optsP = '';
+    for (let i = 1; i <= pages; i++) optsP += '<option value="' + i + '"' + (i === _ctaState.page ? ' selected' : '') + '>Pág ' + i + '</option>';
     pg.innerHTML =
+      '<button class="btn btn-ghost btn-sm" ' + (_ctaState.page <= 1 ? 'disabled' : '') + ' onclick="_ctaState.page=1;ctaRenderTable()" title="Primera">«</button>' +
       '<button class="btn btn-ghost btn-sm" ' + (_ctaState.page <= 1 ? 'disabled' : '') + ' onclick="_ctaState.page--;ctaRenderTable()">←</button>' +
-      '<span style="font-size:11px;color:var(--text3)">Página ' + _ctaState.page + ' de ' + pages + '</span>' +
-      '<button class="btn btn-ghost btn-sm" ' + (_ctaState.page >= pages ? 'disabled' : '') + ' onclick="_ctaState.page++;ctaRenderTable()">→</button>';
+      '<select onchange="_ctaState.page=parseInt(this.value,10);ctaRenderTable()" style="font-size:11px;padding:3px 6px">' + optsP + '</select>' +
+      '<span style="font-size:11px;color:var(--text3)">de ' + pages + '</span>' +
+      '<button class="btn btn-ghost btn-sm" ' + (_ctaState.page >= pages ? 'disabled' : '') + ' onclick="_ctaState.page++;ctaRenderTable()">→</button>' +
+      '<button class="btn btn-ghost btn-sm" ' + (_ctaState.page >= pages ? 'disabled' : '') + ' onclick="_ctaState.page=' + pages + ';ctaRenderTable()" title="Última">»</button>';
   }
 }
 
@@ -23206,6 +23274,51 @@ async function ctaEnrichML() {
   }
 }
 
+// ── Gestión de categorías de egreso (editables, sincronizadas) ───
+function ctaOpenCategorias() {
+  const rows = document.getElementById('cta-cat-rows');
+  rows.innerHTML = '';
+  ctaGetCategorias().forEach(c => ctaCatAddRow(c));
+  document.getElementById('cta-categorias-modal').style.display = 'flex';
+}
+function ctaCatAddRow(c) {
+  c = c || { id: '', nombre: '', emoji: '🏷️' };
+  const rows = document.getElementById('cta-cat-rows');
+  const div = document.createElement('div');
+  div.className = 'cta-cat-row';
+  div.style.cssText = 'display:flex;gap:8px;align-items:center';
+  div.dataset.cid = c.id || '';
+  div.innerHTML =
+    '<input class="cc-emoji" value="' + _persoEsc(c.emoji || '🏷️') + '" list="cta-emoji-list" maxlength="4" style="width:42px;font-size:18px;text-align:center;padding:3px;border:1px solid var(--border);border-radius:6px" title="Pegá o elegí un emoji">' +
+    '<input class="cc-nombre" value="' + _persoEsc(c.nombre) + '" style="flex:1;font-size:12px" placeholder="Nombre de la categoría">' +
+    '<button class="btn btn-ghost btn-xs" style="color:#ef4444;padding:2px 8px" onclick="this.closest(\'.cta-cat-row\').remove()">✕</button>';
+  rows.appendChild(div);
+}
+async function ctaSaveCategorias() {
+  const arr = [];
+  document.querySelectorAll('#cta-cat-rows .cta-cat-row').forEach(div => {
+    const nombre = div.querySelector('.cc-nombre').value.trim();
+    if (!nombre) return;
+    const emoji = div.querySelector('.cc-emoji').value.trim() || '🏷️';
+    let id = div.dataset.cid;
+    if (!id) id = nombre.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+    arr.push({ id, nombre, emoji });
+  });
+  if (!arr.length) { alert('Tiene que haber al menos una categoría.'); return; }
+  ctaSaveCategoriasLS(arr);
+  _ctaFillCategoriaSelect();
+  fetch(WORKER + '/api/cta/config', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ categorias: arr })
+  }).catch(e => console.warn('[cat save]', e.message));
+  const st = document.getElementById('cta-cat-status');
+  if (st) st.textContent = '✓ Guardado (' + arr.length + ')';
+  ctaRenderTable();
+  if (typeof showToast === 'function') showToast('🧾 Categorías guardadas', 'success');
+  setTimeout(ctaCloseCategorias, 600);
+}
+function ctaCloseCategorias() { document.getElementById('cta-categorias-modal').style.display = 'none'; }
+
 // ── Gestión de orígenes (renombrar propaga a todas las filas) ────
 let _ctaOrigBefore = [];
 function ctaOpenOrigenes() {
@@ -23382,6 +23495,37 @@ function ctaBulkProducto() {
   ctaFlushDirty(); ctaRenderAll();
   if (typeof showToast === 'function') showToast('🛒 Producto asignado a ' + _ctaState.selected.size + ' operación(es)', 'success');
 }
+function ctaBulkColor(ev) {
+  if (ev) ev.stopPropagation();
+  const prev = document.getElementById('cta-color-pop');
+  if (prev) prev.remove();
+  const pop = document.createElement('div');
+  pop.id = 'cta-color-pop';
+  pop.style.cssText = 'position:fixed;z-index:3000;background:var(--bg1);border:1px solid var(--border);border-radius:10px;box-shadow:0 12px 30px rgba(0,0,0,.25);padding:8px;display:flex;gap:6px;flex-wrap:wrap;max-width:200px';
+  pop.innerHTML = CTA_COLORES.map(c =>
+    '<div onclick="ctaBulkSetColor(\'' + c.hex + '\')" title="' + c.nombre + '" ' +
+    'style="width:24px;height:24px;border-radius:6px;cursor:pointer;border:2px solid var(--border);' +
+    (c.hex ? 'background:' + c.hex : 'background:repeating-linear-gradient(45deg,#fff,#fff 4px,#eee 4px,#eee 8px)') + '"></div>'
+  ).join('');
+  document.body.appendChild(pop);
+  const r = ev && ev.target ? ev.target.getBoundingClientRect() : { left: 200, bottom: 200 };
+  pop.style.left = Math.max(8, Math.min(r.left - 70, window.innerWidth - pop.offsetWidth - 8)) + 'px';
+  pop.style.top = (r.bottom + 6) + 'px';
+  setTimeout(() => {
+    const close = (e) => { if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('mousedown', close); } };
+    document.addEventListener('mousedown', close);
+  }, 0);
+}
+function ctaBulkSetColor(hex) {
+  _ctaSelectedOps().forEach(({ op, ym }) => {
+    if (hex) op.rowColorManual = hex; else delete op.rowColorManual;
+    op.manualEdit = true; _ctaState.dirty.add(ym);
+  });
+  const pop = document.getElementById('cta-color-pop');
+  if (pop) pop.remove();
+  ctaFlushDirty(); ctaRenderTable();
+}
+
 function ctaBulkFactura() {
   const v = prompt('Marca de facturación para las seleccionadas (pill en la fecha):\n  r = falta facturar (rojo)\n  f = facturada (verde)\n  n = sin marca', 'f');
   if (v === null) return;
@@ -23549,18 +23693,25 @@ async function ctaExportExcel() {
   _ctaStatus('⏳ Generando Excel…');
   try {
     const XLSX = await _seoLoadSheetJS();
-    const header = ['Fecha','Tipo','Detalle','Cliente','Teléfono','Provincia','Origen','Categoría','Productos','Envío','Monto','Estado'];
+    const header = ['Fecha','Tipo','Detalle','Cliente','Teléfono','Provincia','Origen','Categoría','Productos','Envío','Monto','Saldo','Estado'];
+    // Saldo acumulado cronológico (sin envío), mismo criterio que la tabla
+    const saldoMapExp = {};
+    {
+      const cron = ops.slice().sort((a, b) => (a.ts || 0) - (b.ts || 0) || String(a.id).localeCompare(String(b.id)));
+      let acc = 0;
+      cron.forEach(o => { acc += (o.tipo === 'ingreso' ? 1 : -1) * (Number(o.monto) || 0); saldoMapExp[o.id] = acc; });
+    }
     const aoa = [header];
     ops.forEach(o => {
       const prods = (o.items || []).map(it => it.nombre + ' x' + it.cant).join(' | ');
       aoa.push([
         o.fecha || '', o.tipo || '', o.detalle || '', o.cliente || '', o.telefono || '',
         o.provincia || '', o.origen || '', o.categoria || '', prods,
-        +o.envio || 0, +o.monto || 0, (CTA_ESTADOS[o.estado || ''] || [''])[0]
+        +o.envio || 0, +o.monto || 0, saldoMapExp[o.id] || 0, (CTA_ESTADOS[o.estado || ''] || [''])[0]
       ]);
     });
     const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols'] = [{wch:11},{wch:9},{wch:34},{wch:22},{wch:14},{wch:16},{wch:11},{wch:13},{wch:30},{wch:10},{wch:12},{wch:13}];
+    ws['!cols'] = [{wch:11},{wch:9},{wch:34},{wch:22},{wch:14},{wch:16},{wch:11},{wch:13},{wch:30},{wch:10},{wch:12},{wch:13},{wch:13}];
     const totIng = ops.filter(o=>o.tipo==='ingreso').reduce((a,o)=>a+(+o.monto||0)+(+o.envio||0),0);
     const totEg = ops.filter(o=>o.tipo==='egreso').reduce((a,o)=>a+(+o.monto||0),0);
     const resumen = XLSX.utils.aoa_to_sheet([
