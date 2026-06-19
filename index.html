@@ -17,6 +17,12 @@
     padding-top:20px !important;
     padding-bottom:40px !important;
   }
+
+/* v176: grid responsive del dashboard de Cuenta Impala */
+@media (min-width: 900px) {
+  .cta-dash-70-30 { grid-template-columns: 7fr 3fr !important; }
+  .cta-dash-50-50 { grid-template-columns: 1fr 1fr !important; }
+}
 </style>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -769,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v175 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v176 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4017,19 +4023,36 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     </div>
   </div>
 
-  <!-- Gráfico -->
-  <div class="card mb">
-    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
-      <div class="card-title" style="margin:0">📊 Evolución de la cuenta</div>
-      <span style="font-size:10px;color:var(--text3)" id="cta-chart-note"></span>
-      <select id="cta-chart-mode" onchange="ctaRenderChart()" style="margin-left:auto;font-size:12px;padding:5px 9px;border-radius:8px">
-        <option value="mensual">Evolución mensual</option>
-        <option value="anual">Por año</option>
-        <option value="origen">Por origen</option>
-        <option value="provincia">Por provincia</option>
-      </select>
+  <!-- Dashboard analítico (v176) -->
+  <!-- Fila 1: gráfico principal mixto (70%) + donut orígenes (30%) -->
+  <div class="cta-dash-grid cta-dash-70-30" style="display:grid;grid-template-columns:1fr;gap:14px;margin-bottom:14px" id="cta-dash-row1">
+    <div class="card" style="margin:0">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+        <div class="card-title" style="margin:0">📊 Evolución de la cuenta</div>
+        <span style="font-size:10px;color:var(--text3)" id="cta-chart-note"></span>
+        <select id="cta-chart-mode" onchange="ctaRenderChart()" style="margin-left:auto;font-size:12px;padding:5px 9px;border-radius:8px">
+          <option value="mensual">Mensual</option>
+          <option value="trimestral">Trimestral</option>
+          <option value="anual">Anual</option>
+        </select>
+      </div>
+      <div style="height:250px;position:relative"><canvas id="cta-chart"></canvas></div>
     </div>
-    <div style="height:230px;position:relative"><canvas id="cta-chart"></canvas></div>
+    <div class="card" style="margin:0">
+      <div class="card-title" style="margin:0 0 8px">Orígenes</div>
+      <div style="height:250px;position:relative"><canvas id="cta-chart-origenes"></canvas></div>
+    </div>
+  </div>
+  <!-- Fila 2: provincias (barras horiz) + productos (donut) -->
+  <div class="cta-dash-grid cta-dash-50-50" style="display:grid;grid-template-columns:1fr;gap:14px;margin-bottom:14px" id="cta-dash-row2">
+    <div class="card" style="margin:0">
+      <div class="card-title" style="margin:0 0 8px">📍 Ventas por provincia</div>
+      <div style="height:230px;position:relative"><canvas id="cta-chart-provincias"></canvas></div>
+    </div>
+    <div class="card" style="margin:0">
+      <div class="card-title" style="margin:0 0 8px">🛒 Ventas por producto</div>
+      <div style="height:230px;position:relative"><canvas id="cta-chart-productos"></canvas></div>
+    </div>
   </div>
 
   <!-- Mensajes WhatsApp (espejo de Personalizadas, sincronizado por KV) -->
@@ -22462,7 +22485,120 @@ async function ctaFlushDirty() {
 }
 
 // ── Render maestro ───────────────────────────────────────────────
-function ctaRenderAll() { ctaRenderStockAlerts(); ctaRenderKPIs(); ctaRenderChart(); ctaRenderTable(); }
+function ctaRenderAll() { ctaRenderStockAlerts(); ctaRenderKPIs(); ctaRenderChart(); ctaRenderDashCharts(); ctaRenderTable(); }
+
+// v176: gráficos del dashboard (orígenes, provincias, productos) sobre el período activo
+function _ctaOpsPeriodo() {
+  const [pf0, pf1] = _ctaPeriodoRango();
+  const out = [];
+  Object.values(_ctaState.chunks).forEach(ch => (ch || []).forEach(o => {
+    const f = o.fecha || '';
+    if (f && f >= pf0 && f <= pf1) out.push(o);
+  }));
+  return out;
+}
+
+const CTA_DASH_COLORS = ['#6366f1','#10b981','#f59e0b','#ef4444','#3b82f6','#8b5cf6','#ec4899','#14b8a6','#f97316','#64748b'];
+
+function ctaRenderDashCharts() {
+  if (typeof Chart === 'undefined' || typeof makeChart !== 'function') return;
+  const ops = _ctaOpsPeriodo().filter(o => o.tipo === 'ingreso');
+
+  // ── Donut Orígenes ──
+  if (document.getElementById('cta-chart-origenes')) {
+    const map = new Map();
+    ops.forEach(o => {
+      const k = (o.origen || '').trim() || '(sin origen)';
+      map.set(k, (map.get(k) || 0) + (+o.monto || 0) + (+o.envio || 0));
+    });
+    const ent = [...map.entries()].sort((a, b) => b[1] - a[1]);
+    const top = ent.slice(0, 6);
+    if (ent.length > 6) { const otros = ent.slice(6).reduce((a, e) => a + e[1], 0); top.push(['Otros', otros]); }
+    makeChart('cta-chart-origenes', {
+      type: 'doughnut',
+      data: { labels: top.map(t => t[0]), datasets: [{ data: top.map(t => t[1]), backgroundColor: CTA_DASH_COLORS, borderWidth: 2, borderColor: 'var(--bg1)' }] },
+      options: _ctaDonutOpts()
+    });
+  }
+
+  // ── Barras horizontales Provincias ──
+  if (document.getElementById('cta-chart-provincias')) {
+    const map = new Map();
+    ops.forEach(o => {
+      const k = (o.provincia || '').trim() || '(sin provincia)';
+      map.set(k, (map.get(k) || 0) + (+o.monto || 0) + (+o.envio || 0));
+    });
+    const ent = [...map.entries()].sort((a, b) => b[1] - a[1]);
+    const top = ent.slice(0, 8);
+    if (ent.length > 8) { const otras = ent.slice(8).reduce((a, e) => a + e[1], 0); top.push(['Otras', otras]); }
+    makeChart('cta-chart-provincias', {
+      type: 'bar',
+      data: { labels: top.map(t => t[0]), datasets: [{ label: 'Ventas', data: top.map(t => t[1]),
+        backgroundColor: c => { const { ctx, chartArea } = c.chart; return chartArea ? _persoGrad(ctx, chartArea, '#6366f1', 'e8', '60') : '#6366f1cc'; },
+        borderRadius: 6, borderSkipped: false }] },
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: _ctaTooltipMoney() },
+        scales: {
+          x: { ticks: { callback: v => '$' + _ctaAbrev(v), color: 'var(--text3)', font: { size: 10 } }, grid: { color: 'var(--border)' } },
+          y: { ticks: { color: 'var(--text2)', font: { size: 10.5 } }, grid: { display: false } }
+        }
+      }
+    });
+  }
+
+  // ── Donut Productos ──
+  if (document.getElementById('cta-chart-productos')) {
+    const map = new Map();
+    ops.forEach(o => (o.items || []).forEach(it => {
+      const cat = (typeof _ctaCatMatch === 'function') ? _ctaCatMatch(it) : null;
+      const k = cat ? cat.nombre : (it.nombre || '(otro)');
+      const val = (+it.cant || 0) * (+it.unit || 0) || ((+o.monto || 0) / ((o.items || []).length || 1));
+      map.set(k, (map.get(k) || 0) + val);
+    }));
+    const ent = [...map.entries()].sort((a, b) => b[1] - a[1]);
+    const top = ent.slice(0, 7);
+    if (ent.length > 7) { const otros = ent.slice(7).reduce((a, e) => a + e[1], 0); top.push(['Otros', otros]); }
+    if (top.length) {
+      makeChart('cta-chart-productos', {
+        type: 'doughnut',
+        data: { labels: top.map(t => t[0]), datasets: [{ data: top.map(t => t[1]), backgroundColor: CTA_DASH_COLORS, borderWidth: 2, borderColor: 'var(--bg1)' }] },
+        options: _ctaDonutOpts()
+      });
+    }
+  }
+}
+
+function _ctaAbrev(v) {
+  v = +v || 0;
+  if (Math.abs(v) >= 1e6) return (v / 1e6).toFixed(1).replace('.0', '') + 'M';
+  if (Math.abs(v) >= 1e3) return (v / 1e3).toFixed(0) + 'k';
+  return String(Math.round(v));
+}
+function _ctaTooltipMoney() {
+  return {
+    backgroundColor: '#1e293b', titleColor: '#fff', bodyColor: '#fff', borderRadius: 8, padding: 10,
+    callbacks: { label: c => ' ' + PERSO_FMT_MONEY(c.parsed.x != null ? c.parsed.x : c.parsed) }
+  };
+}
+function _ctaDonutOpts() {
+  return {
+    responsive: true, maintainAspectRatio: false, cutout: '58%',
+    plugins: {
+      legend: { position: 'bottom', labels: { color: 'var(--text2)', font: { size: 10.5 }, padding: 8, boxWidth: 12, usePointStyle: true } },
+      tooltip: {
+        backgroundColor: '#1e293b', titleColor: '#fff', bodyColor: '#fff', borderRadius: 8, padding: 10,
+        callbacks: {
+          label: c => {
+            const tot = c.dataset.data.reduce((a, b) => a + b, 0) || 1;
+            const pct = (c.parsed / tot * 100).toFixed(1);
+            return ' ' + c.label + ': ' + PERSO_FMT_MONEY(c.parsed) + ' (' + pct + '%)';
+          }
+        }
+      }
+    }
+  };
+}
 
 function _ctaResumenMes(ym) {
   const r = _ctaState.resumen[ym];
@@ -22489,6 +22625,41 @@ function _ctaSumaRango(f0, f1) {
   return { ing, eg, uni, ops };
 }
 
+// v176: nombre exacto del período anterior según el filtro activo, para los
+// badges de comparación ("vs mayo 2026", "vs 2024", "vs Q1 2026", etc.)
+function _ctaPeriodoAnteriorLabel() {
+  const now = new Date();
+  const p = _ctaState.periodo;
+  const MES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  if (p === 'hoy') return 'ayer';
+  if (p === 'semana') return 'la semana pasada';
+  if (p === 'mes') {
+    const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    return MES[d.getMonth()] + ' ' + d.getFullYear();
+  }
+  if (p === 'mesant') {
+    const d = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+    return MES[d.getMonth()] + ' ' + d.getFullYear();
+  }
+  if (p === 'anio') return String(now.getFullYear() - 1);
+  if (p === 'anioant') return String(now.getFullYear() - 2);
+  if (p === 'historico') return 'período previo';
+  if (p === 'custom') {
+    const dv = document.getElementById('cta-per-desde').value;
+    const hv = document.getElementById('cta-per-hasta').value;
+    if (dv && hv) {
+      const ms0 = new Date(dv + 'T00:00:00').getTime();
+      const ms1 = new Date(hv + 'T00:00:00').getTime();
+      const dias = Math.round((ms1 - ms0) / 86400000) + 1;
+      const pf0 = new Date(ms0 - dias * 86400000);
+      const pf1 = new Date(ms0 - 86400000);
+      return _ctaLocalDateStr(pf0) + ' a ' + _ctaLocalDateStr(pf1);
+    }
+    return 'período previo';
+  }
+  return 'período anterior';
+}
+
 function ctaRenderKPIs() {
   const [f0, f1, label] = _ctaPeriodoRango();
   const lblEl = document.getElementById('cta-periodo-label');
@@ -22507,12 +22678,13 @@ function ctaRenderKPIs() {
   }
 
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.innerHTML = v; };
+  const prevLabel = _ctaPeriodoAnteriorLabel();
   const vs = (now, before) => {
-    if (!before) return '';
+    if (!before) return '<span style="color:var(--text3)">— sin datos ' + prevLabel + '</span>';
     const p = ((now - before) / Math.abs(before)) * 100;
     const up = p >= 0;
     return '<span style="color:' + (up ? '#22c55e' : '#ef4444') + '">' + (up ? '▲' : '▼') + ' ' +
-      Math.abs(p).toFixed(0) + '%</span> vs período anterior';
+      Math.abs(p).toFixed(0) + '%</span> vs ' + prevLabel;
   };
   set('cta-kpi-ing', PERSO_FMT_MONEY(a.ing)); set('cta-kpi-ing-vs', vs(a.ing, b.ing));
   set('cta-kpi-eg', PERSO_FMT_MONEY(a.eg)); set('cta-kpi-eg-vs', vs(a.eg, b.eg));
@@ -22535,8 +22707,8 @@ function ctaRenderChart() {
   const note = document.getElementById('cta-chart-note');
   let config;
 
-  if (mode === 'mensual' || mode === 'anual') {
-    if (note) note.textContent = 'Meses cerrados: totales oficiales del Excel';
+  if (mode === 'mensual' || mode === 'anual' || mode === 'trimestral') {
+    if (note) note.textContent = 'Ingresos, egresos y rentabilidad % por período';
     const yms = Object.keys(_ctaState.resumen).sort();
     let labels = [], ings = [], egs = [], netos = [];
     if (mode === 'mensual') {
@@ -22545,6 +22717,18 @@ function ctaRenderChart() {
         const r = _ctaState.resumen[ym];
         labels.push(ym.slice(2).replace('-', '/'));
         ings.push(r.ing || 0); egs.push(r.eg || 0); netos.push((r.ing || 0) - (r.eg || 0));
+      });
+    } else if (mode === 'trimestral') {
+      const map = new Map();
+      yms.forEach(ym => {
+        const y = ym.slice(0, 4), m = parseInt(ym.slice(5, 7), 10);
+        const q = 'Q' + (Math.floor((m - 1) / 3) + 1) + ' ' + y;
+        const r = _ctaState.resumen[ym];
+        if (!map.has(q)) map.set(q, { i: 0, e: 0 });
+        const e = map.get(q); e.i += r.ing || 0; e.e += r.eg || 0;
+      });
+      [...map.keys()].slice(-12).forEach(q => {
+        labels.push(q); ings.push(map.get(q).i); egs.push(map.get(q).e); netos.push(map.get(q).i - map.get(q).e);
       });
     } else {
       const map = new Map();
@@ -22570,6 +22754,10 @@ function ctaRenderChart() {
             : (c => { const { ctx, chartArea } = c.chart; return chartArea ? _persoGrad(ctx, chartArea, '#ef4444', 'e8', '78') : '#ef4444cc'; }),
           borderWidth: 2.5, fill: mode === 'mensual', cubicInterpolationMode: 'monotone',
           pointRadius: 2.5, pointHoverRadius: 6, borderRadius: 8, borderSkipped: false, yAxisID: 'y' },
+        { type: 'line', label: 'Rentabilidad %', yAxisID: 'y1',
+          data: ings.map((iv, k) => iv > 0 ? Math.round((netos[k] / iv) * 1000) / 10 : 0),
+          borderColor: '#f59e0b', backgroundColor: '#f59e0b', borderWidth: 3,
+          pointRadius: 3, pointHoverRadius: 6, cubicInterpolationMode: 'monotone', fill: false, order: 0 },
       ]},
       options: _ctaChartOpts()
     };
@@ -22605,14 +22793,23 @@ function _ctaChartOpts(moneyY) {
     plugins: {
       legend: { position: 'top', align: 'end',
         labels: { usePointStyle: true, pointStyle: 'circle', boxWidth: 6, boxHeight: 6, font: { size: 10.5, weight: '600' }, color: ax, padding: 14 } },
-      tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ': ' + PERSO_FMT_MONEY(c.parsed.y) } },
+      tooltip: {
+        backgroundColor: '#1e293b', titleColor: '#fff', bodyColor: '#fff', borderRadius: 8, padding: 10,
+        callbacks: { label: c => {
+          if (c.dataset.label === 'Rentabilidad %') return ' Rentabilidad: ' + (c.parsed.y || 0).toFixed(1) + '%';
+          return ' ' + c.dataset.label + ': ' + PERSO_FMT_MONEY(c.parsed.y);
+        } }
+      },
     },
     scales: {
       x: { grid: { display: false }, border: { display: false }, ticks: { font: { size: 10 }, color: ax, maxRotation: 35 } },
-      y: { beginAtZero: true, border: { display: false },
+      y: { beginAtZero: true, border: { display: false }, position: 'left',
            grid: { color: 'rgba(148,163,184,.10)', drawTicks: false },
            ticks: { font: { size: 10 }, color: ax, padding: 8,
              callback: v => '$' + (v >= 1000000 ? (v / 1000000).toFixed(1) + 'M' : v >= 1000 ? Math.round(v / 1000) + 'k' : v) } },
+      y1: { beginAtZero: true, position: 'right', border: { display: false },
+            grid: { display: false }, display: !moneyY,
+            ticks: { font: { size: 10 }, color: '#f59e0b', padding: 6, callback: v => v + '%' } },
     }
   };
 }
