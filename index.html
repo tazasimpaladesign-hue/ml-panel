@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v178 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v179 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -22246,6 +22246,8 @@ let _ctaMLSynced = false;
 // >= a este corte. El histórico anterior ya está importado del Excel y se
 // está depurando a mano; así las viejas no reaparecen al sincronizar.
 const CTA_SYNC_DESDE_TS = new Date('2026-06-16T00:00:00').getTime();
+// v179: corte propio para ventas de la tienda web (WooCommerce)
+const CTA_WOO_DESDE_TS = new Date('2026-06-18T00:00:00').getTime();
 let _ctaCatDirty = false;
 
 function _ctaYmNow() { return _ctaLocalDate(new Date()).slice(0, 7); }
@@ -22522,7 +22524,7 @@ function ctaRenderDashCharts() {
     makeChart('cta-chart-origenes', {
       type: 'doughnut',
       data: { labels: top.map(t => t[0]), datasets: [{ data: top.map(t => t[1]), backgroundColor: CTA_DASH_COLORS, borderWidth: 1, borderColor: 'var(--bg1)' }] },
-      options: _ctaDonutOpts(),
+      options: _ctaDonutOptsMonto(),
       plugins: [ChartDataLabels]
     });
   }
@@ -22544,13 +22546,13 @@ function ctaRenderDashCharts() {
         borderRadius: 6, borderSkipped: false }] },
       options: {
         indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-        layout: { padding: { right: 54 } },
+        layout: { padding: { right: 90 } },
         plugins: {
           legend: { display: false }, tooltip: _ctaTooltipMoney(),
           // v178: monto al final de cada barra (según período)
           datalabels: {
-            anchor: 'end', align: 'end', color: 'var(--text2)', font: { size: 9.5, weight: '700' },
-            formatter: v => '$' + _ctaAbrev(v)
+            anchor: 'end', align: 'end', color: 'var(--text2)', font: { size: 9, weight: '700' },
+            formatter: v => PERSO_FMT_MONEY(v)
           }
         },
         scales: {
@@ -22562,27 +22564,71 @@ function ctaRenderDashCharts() {
     });
   }
 
-  // ── Donut Productos ──
+  // ── Donut Productos (con unidades vendidas) ──
   if (document.getElementById('cta-chart-productos')) {
-    const map = new Map();
+    const map = new Map();   // nombre -> {monto, unidades}
     ops.forEach(o => (o.items || []).forEach(it => {
       const cat = (typeof _ctaCatMatch === 'function') ? _ctaCatMatch(it) : null;
       const k = cat ? cat.nombre : (it.nombre || '(otro)');
       const val = (+it.cant || 0) * (+it.unit || 0) || ((+o.monto || 0) / ((o.items || []).length || 1));
-      map.set(k, (map.get(k) || 0) + val);
+      const cur = map.get(k) || { monto: 0, uni: 0 };
+      cur.monto += val; cur.uni += (+it.cant || 0);
+      map.set(k, cur);
     }));
-    const ent = [...map.entries()].sort((a, b) => b[1] - a[1]);
+    const ent = [...map.entries()].sort((a, b) => b[1].monto - a[1].monto);
     const top = ent.slice(0, 7);
-    if (ent.length > 7) { const otros = ent.slice(7).reduce((a, e) => a + e[1], 0); top.push(['Otros', otros]); }
+    if (ent.length > 7) {
+      const o = ent.slice(7).reduce((a, e) => ({ monto: a.monto + e[1].monto, uni: a.uni + e[1].uni }), { monto: 0, uni: 0 });
+      top.push(['Otros', o]);
+    }
     if (top.length) {
+      const unidades = top.map(t => t[1].uni);
       makeChart('cta-chart-productos', {
         type: 'doughnut',
-        data: { labels: top.map(t => t[0]), datasets: [{ data: top.map(t => t[1]), backgroundColor: CTA_DASH_COLORS, borderWidth: 1, borderColor: 'var(--bg1)' }] },
-        options: _ctaDonutOpts(),
+        data: { labels: top.map(t => t[0]), datasets: [{ data: top.map(t => t[1].monto), _uni: unidades, backgroundColor: CTA_DASH_COLORS, borderWidth: 1, borderColor: 'var(--bg1)' }] },
+        options: _ctaDonutOptsUni(unidades),
         plugins: [ChartDataLabels]
       });
     }
   }
+}
+
+// Opciones de donut que muestran el MONTO sobre cada porción (orígenes)
+function _ctaDonutOptsMonto() {
+  const base = _ctaDonutOpts();
+  base.plugins.datalabels = {
+    color: '#fff', font: { size: 9, weight: '700' },
+    formatter: (v, ctx) => {
+      const tot = ctx.dataset.data.reduce((a, b) => a + b, 0) || 1;
+      const pct = v / tot * 100;
+      return pct >= 7 ? '$' + _ctaAbrev(v) : '';
+    },
+    textStrokeColor: 'rgba(0,0,0,.45)', textStrokeWidth: 3
+  };
+  return base;
+}
+
+// Opciones de donut que muestran UNIDADES sobre cada porción (productos)
+function _ctaDonutOptsUni(unidades) {
+  const base = _ctaDonutOpts();
+  base.plugins.datalabels = {
+    color: '#fff', font: { size: 9.5, weight: '700' },
+    formatter: (v, ctx) => {
+      const tot = ctx.dataset.data.reduce((a, b) => a + b, 0) || 1;
+      const pct = v / tot * 100;
+      if (pct < 7) return '';
+      const u = unidades[ctx.dataIndex] || 0;
+      return u + 'u';
+    },
+    textStrokeColor: 'rgba(0,0,0,.45)', textStrokeWidth: 3
+  };
+  base.plugins.tooltip.callbacks.label = c => {
+    const tot = c.dataset.data.reduce((a, b) => a + b, 0) || 1;
+    const pct = (c.parsed / tot * 100).toFixed(1);
+    const u = (c.dataset._uni && c.dataset._uni[c.dataIndex]) || 0;
+    return ' ' + c.label + ': ' + u + ' u · ' + PERSO_FMT_MONEY(c.parsed) + ' (' + pct + '%)';
+  };
+  return base;
 }
 
 function _ctaAbrev(v) {
@@ -23366,12 +23412,111 @@ async function ctaSyncAll(silent) {
   try {
     nuevos += await ctaSyncWA();
     nuevos += await ctaSyncML();
+    nuevos += await ctaSyncWoo();
     if (!silent || nuevos > 0) {
       if (typeof showToast === 'function' && nuevos > 0) showToast('💼 ' + nuevos + ' venta(s) nueva(s) asentada(s) en Cuenta Impala', 'success');
       ctaRenderAll();
     }
   } catch (e) { console.warn('[cta sync]', e); }
   finally { _ctaState.syncing = false; }
+}
+
+// v179: ventas de la tienda web (WooCommerce) → Cuenta Impala.
+// Fuente: /api/woo/notifications (lo que ya llega por webhook). Desde el corte
+// 18-06-2026 para no duplicar lo anterior. Trae monto, envío y comprador; si la
+// orden tiene pago por Mercado Pago, intenta el neto real vía worker.
+async function ctaSyncWoo() {
+  if (!token || !userId) return 0;
+  let notifs = [];
+  try {
+    const r = await fetch(WORKER + '/api/woo/notifications', { headers: { 'Authorization': 'Bearer ' + token } });
+    if (!r.ok) return 0;
+    const d = await r.json();
+    notifs = (d.pendingRecent || []).concat(d.notifications || []);
+  } catch (e) { return 0; }
+  if (!notifs.length) return 0;
+
+  // dedup por orderId (quedarnos con la más reciente de cada orden)
+  const byId = new Map();
+  notifs.forEach(n => { if (n && n.orderId != null) { if (!byId.has(n.orderId)) byId.set(n.orderId, n); } });
+
+  let nuevos = 0;
+  const porMes = new Map();
+  for (const n of byId.values()) {
+    const st = String(n.status || '').toLowerCase();
+    if (['cancelled', 'refunded', 'failed', 'trash'].includes(st)) continue;
+    const dstr = n.dateCreated || n.received;
+    if (!dstr) continue;
+    const d = new Date(dstr);
+    if (isNaN(d) || d.getTime() < CTA_WOO_DESDE_TS) continue;
+    const ym = _ctaLocalDate(d).slice(0, 7);
+    if (!porMes.has(ym)) porMes.set(ym, []);
+    porMes.get(ym).push({ n, d });
+  }
+  for (const [ym, lista] of porMes) {
+    if (!_ctaState.loaded.has(ym)) {
+      try {
+        const r = await fetch(WORKER + '/api/cta/ops/' + ym);
+        const dd = await r.json();
+        _ctaState.chunks[ym] = (dd.ok && Array.isArray(dd.ops)) ? dd.ops : [];
+        _ctaState.loaded.add(ym);
+      } catch (e) { continue; }
+    }
+    const chunk = _ctaEnsureChunk(ym);
+    const ids = new Set(chunk.map(x => x.id));
+    for (const { n, d } of lista) {
+      const id = 'woo_' + n.orderId;
+      if (ids.has(id)) continue;
+      const envio = Number(n.shippingTotal) || 0;
+      const totalConEnvio = Number(n.total) || 0;
+      // monto contable = total SIN envío (el envío va aparte como informativo)
+      const monto = Math.max(0, totalConEnvio - envio);
+      const prod = n.productSummary && n.productSummary !== '—' ? n.productSummary : 'venta web';
+      chunk.push({
+        id, ts: d.getTime(), fecha: _ctaLocalDate(d),
+        tipo: 'ingreso', origen: 'Tienda Web', categoria: 'ventas',
+        detalle: 'Venta ' + prod,
+        cliente: n.customer || '', telefono: n.phone || '', provincia: '',
+        items: [], envio: 0, envioInfo: envio,
+        monto: monto,
+        src: 'woo', thumb: n.productImage || ''
+      });
+      ids.add(id); ctaMarkDirty(ym); nuevos++;
+    }
+  }
+  // Enriquecer neto MP de las ventas Woo nuevas (si el worker lo soporta)
+  if (nuevos > 0) { try { await ctaEnrichWooNet(); } catch (e) {} }
+  return nuevos;
+}
+
+// v179: intenta traer el neto real de Mercado Pago para las ventas Woo
+async function ctaEnrichWooNet() {
+  const pend = [];
+  Object.values(_ctaState.chunks).forEach(ch => (ch || []).forEach(o => {
+    if (o.src === 'woo' && !o.netoML && o.id) pend.push(o);
+  }));
+  if (!pend.length || pend.length > 15) return;
+  const ids = pend.map(o => o.id.replace('woo_', ''));
+  try {
+    const r = await fetch(WORKER + '/api/woo/mp-net?user=' + userId, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderIds: ids })
+    });
+    if (!r.ok) return;
+    const d = await r.json();
+    if (d.ok && d.result) {
+      let cambios = false;
+      pend.forEach(o => {
+        const data = d.result[o.id.replace('woo_', '')];
+        if (data && !data.error) {
+          if (data.neto) { o.monto = data.neto; o.netoML = true; }
+          if (data.envio != null) { o.envioInfo = data.envio; }
+          _ctaState.dirty.add(o.fecha.slice(0, 7)); cambios = true;
+        }
+      });
+      if (cambios) await ctaFlushDirty();
+    }
+  } catch (e) { /* el endpoint puede no existir aún */ }
 }
 
 // WA: apenas ingresa el pedido aparece como operación (origen WA)
@@ -24467,8 +24612,8 @@ async function ctaSaveStock() {
       stockInicial: parseFloat(tr.querySelector('.cs-inicial').value) || 0,
       // v178: el valor editado es el TOTAL; guardamos la base = total − lo derivado
       // de las operaciones, para que las ops sigan sumando sin duplicar.
-      compradoBase: Math.max(0, (parseFloat(tr.querySelector('.cs-comprado').value) || 0) - (c._compradoOps || 0)),
-      vendidoBase: Math.max(0, (parseFloat(tr.querySelector('.cs-vendido').value) || 0) - (c._vendidoOps || 0)),
+      compradoBase: Math.max(0, (parseFloat(tr.querySelector('.cs-comprado').value) || 0) - (prev._compradoOps || 0)),
+      vendidoBase: Math.max(0, (parseFloat(tr.querySelector('.cs-vendido').value) || 0) - (prev._vendidoOps || 0)),
       stockMin: parseFloat(tr.querySelector('.cs-min').value) || 0,
       costo: parseFloat(tr.querySelector('.cs-costo').value) || 0,
       activo: true
