@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v177 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v178 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4188,10 +4188,10 @@ input::placeholder,textarea::placeholder{color:#6b7280}
             <th style="width:54px">Emoji</th>
             <th style="width:160px">Producto</th>
             <th style="width:160px" title="Palabras clave del SKU o título de ML/Woo que descuentan de este producto. Separadas por coma. Ej: MAGICA, mug magico">🔗 Conecta con</th>
-            <th style="text-align:center;width:84px" title="Conteo inicial real (lo configurás vos)">Stock inicial</th>
-            <th style="text-align:center;width:84px" title="Stock actual = inicial + comprado − vendido (automático)">Stock</th>
-            <th style="text-align:center;width:84px" title="Total comprado (derivado de las operaciones de insumos)">Comprado</th>
-            <th style="text-align:center;width:80px" title="Total vendido (derivado de las ventas)">Vendido</th>
+            <th style="text-align:center;width:80px" title="Conteo inicial real (lo configurás vos)">Stock inicial</th>
+            <th style="text-align:center;width:96px" title="Total comprado. Editá el histórico; las compras de insumos nuevas se suman solas.">Comprado</th>
+            <th style="text-align:center;width:88px" title="Total vendido. Editá el histórico; las ventas nuevas se suman solas.">Vendido</th>
+            <th style="text-align:center;width:80px" title="Stock actual = inicial + comprado − vendido (automático)">Stock</th>
             <th style="text-align:center;width:78px" title="Avisar cuando el stock baje de este número">Mínimo</th>
             <th style="text-align:center;width:84px" title="Cantidad a comprar cuando se llega al mínimo">Comprar</th>
             <th style="text-align:center;width:80px" title="Costo unitario (para rentabilidad)">Costo $</th>
@@ -22405,6 +22405,8 @@ async function ctaCustomChanged() {
   _ctaState.page = 1;
   await ctaLoadRange();
   ctaRenderKPIs();
+  ctaRenderChart();
+  ctaRenderDashCharts();
   ctaRenderTable();
 }
 
@@ -22417,9 +22419,11 @@ async function ctaSetPeriodo(v) {
     document.getElementById('cta-per-hasta').value = _ctaLocalDate(now);
   }
   // estos períodos pueden requerir meses no cargados
-  if (['custom','mesant','anio','anioant','semana','historico'].includes(v)) { _ctaState.rango = 'todo'; await ctaLoadRange(); }
+  if (['custom','mesant','anio','anioant','semana','historico','trimestre','ayer'].includes(v)) { _ctaState.rango = 'todo'; await ctaLoadRange(); }
   ctaRenderKPIs();
-  ctaRenderTable(); // la tabla también se limita al período
+  ctaRenderChart();         // v178: el gráfico principal también sigue el período
+  ctaRenderDashCharts();    // v178: donuts y barras también
+  ctaRenderTable();
 }
 
 async function ctaLoadRange() {
@@ -22517,8 +22521,9 @@ function ctaRenderDashCharts() {
     if (ent.length > 6) { const otros = ent.slice(6).reduce((a, e) => a + e[1], 0); top.push(['Otros', otros]); }
     makeChart('cta-chart-origenes', {
       type: 'doughnut',
-      data: { labels: top.map(t => t[0]), datasets: [{ data: top.map(t => t[1]), backgroundColor: CTA_DASH_COLORS, borderWidth: 2, borderColor: 'var(--bg1)' }] },
-      options: _ctaDonutOpts()
+      data: { labels: top.map(t => t[0]), datasets: [{ data: top.map(t => t[1]), backgroundColor: CTA_DASH_COLORS, borderWidth: 1, borderColor: 'var(--bg1)' }] },
+      options: _ctaDonutOpts(),
+      plugins: [ChartDataLabels]
     });
   }
 
@@ -22539,12 +22544,21 @@ function ctaRenderDashCharts() {
         borderRadius: 6, borderSkipped: false }] },
       options: {
         indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: _ctaTooltipMoney() },
+        layout: { padding: { right: 54 } },
+        plugins: {
+          legend: { display: false }, tooltip: _ctaTooltipMoney(),
+          // v178: monto al final de cada barra (según período)
+          datalabels: {
+            anchor: 'end', align: 'end', color: 'var(--text2)', font: { size: 9.5, weight: '700' },
+            formatter: v => '$' + _ctaAbrev(v)
+          }
+        },
         scales: {
           x: { ticks: { callback: v => '$' + _ctaAbrev(v), color: 'var(--text3)', font: { size: 10 } }, grid: { color: 'var(--border)' } },
           y: { ticks: { color: 'var(--text2)', font: { size: 10.5 } }, grid: { display: false } }
         }
-      }
+      },
+      plugins: [ChartDataLabels]
     });
   }
 
@@ -22563,8 +22577,9 @@ function ctaRenderDashCharts() {
     if (top.length) {
       makeChart('cta-chart-productos', {
         type: 'doughnut',
-        data: { labels: top.map(t => t[0]), datasets: [{ data: top.map(t => t[1]), backgroundColor: CTA_DASH_COLORS, borderWidth: 2, borderColor: 'var(--bg1)' }] },
-        options: _ctaDonutOpts()
+        data: { labels: top.map(t => t[0]), datasets: [{ data: top.map(t => t[1]), backgroundColor: CTA_DASH_COLORS, borderWidth: 1, borderColor: 'var(--bg1)' }] },
+        options: _ctaDonutOpts(),
+        plugins: [ChartDataLabels]
       });
     }
   }
@@ -22585,8 +22600,9 @@ function _ctaTooltipMoney() {
 function _ctaDonutOpts() {
   return {
     responsive: true, maintainAspectRatio: false, cutout: '58%',
+    layout: { padding: 4 },
     plugins: {
-      legend: { position: 'bottom', labels: { color: 'var(--text2)', font: { size: 10.5 }, padding: 8, boxWidth: 12, usePointStyle: true } },
+      legend: { position: 'bottom', labels: { color: 'var(--text2)', font: { size: 10 }, padding: 7, boxWidth: 11, usePointStyle: true } },
       tooltip: {
         backgroundColor: '#1e293b', titleColor: '#fff', bodyColor: '#fff', borderRadius: 8, padding: 10,
         callbacks: {
@@ -22596,6 +22612,16 @@ function _ctaDonutOpts() {
             return ' ' + c.label + ': ' + PERSO_FMT_MONEY(c.parsed) + ' (' + pct + '%)';
           }
         }
+      },
+      // v178: etiqueta permanente con % sobre cada segmento (>7%)
+      datalabels: {
+        color: '#fff', font: { size: 10, weight: '700' },
+        formatter: (v, ctx) => {
+          const tot = ctx.dataset.data.reduce((a, b) => a + b, 0) || 1;
+          const pct = v / tot * 100;
+          return pct >= 7 ? Math.round(pct) + '%' : '';
+        },
+        textStrokeColor: 'rgba(0,0,0,.45)', textStrokeWidth: 3
       }
     }
   };
@@ -22831,6 +22857,7 @@ function _ctaChartOpts(moneyY) {
     plugins: {
       legend: { position: 'top', align: 'end',
         labels: { usePointStyle: true, pointStyle: 'circle', boxWidth: 6, boxHeight: 6, font: { size: 10.5, weight: '600' }, color: ax, padding: 14 } },
+      datalabels: { display: false },
       tooltip: {
         backgroundColor: '#1e293b', titleColor: '#fff', bodyColor: '#fff', borderRadius: 8, padding: 10,
         callbacks: { label: c => {
@@ -24357,9 +24384,13 @@ function _ctaAplicarStock(op, signo) {
 
 // Recalcula TODO el stock desde cero recorriendo las operaciones (para el botón recalcular)
 function ctaRecalcStock() {
-  // v177: vendido y comprado se DERIVAN escaneando todas las operaciones.
-  // stockInicial es el conteo manual del usuario. Stock = inicial + comprado − vendido.
-  _ctaState.catalogo.forEach(c => { c._vendido = 0; c._comprado = 0; });
+  // v178: modelo HÍBRIDO. Cada producto tiene:
+  //   - compradoBase / vendidoBase: tu registro histórico manual (editable)
+  //   - lo derivado de las operaciones nuevas (ventas y compras de insumos)
+  // comprado total = base + derivado ; vendido total = base + derivado
+  // stock = stockInicial + comprado − vendido
+  // Así NO se pierde el registro histórico y las operaciones nuevas lo ajustan solas.
+  _ctaState.catalogo.forEach(c => { c._vendidoOps = 0; c._compradoOps = 0; });
   Object.values(_ctaState.chunks).forEach(ch => (ch || []).forEach(op => {
     const esVenta = op.tipo === 'ingreso';
     const esInsumo = op.tipo === 'egreso' && op.categoria === 'insumos';
@@ -24368,13 +24399,13 @@ function ctaRecalcStock() {
       const cat = _ctaCatMatch(it);
       if (!cat) return;
       const q = Number(it.cant) || 0;
-      if (esVenta) cat._vendido += q; else cat._comprado += q;
+      if (esVenta) cat._vendidoOps += q; else cat._compradoOps += q;
     });
   }));
   _ctaState.catalogo.forEach(c => {
-    c.vendido = c._vendido;
-    c.comprado = c._comprado;
-    c.stock = (Number(c.stockInicial) || 0) + c._comprado - c._vendido;
+    c.comprado = (Number(c.compradoBase) || 0) + c._compradoOps;
+    c.vendido = (Number(c.vendidoBase) || 0) + c._vendidoOps;
+    c.stock = (Number(c.stockInicial) || 0) + c.comprado - c.vendido;
   });
 }
 
@@ -24398,9 +24429,9 @@ function ctaStockAddRow(c) {
     '<td style="padding:4px"><input class="cs-nombre" value="' + _persoEsc(c.nombre) + '" style="font-size:12px;width:100%;box-sizing:border-box" placeholder="Nombre"></td>' +
     '<td><input class="cs-match" value="' + _persoEsc((c.match || []).join(', ')) + '" style="font-size:11px;width:100%" placeholder="MAGICA, mug magico" title="Palabras del SKU/título que descuentan de este producto"></td>' +
     '<td><input class="cs-inicial" type="number" value="' + (Number(c.stockInicial) || 0) + '" style="font-size:12px;width:100%;text-align:center;font-weight:700" title="Tu conteo inicial real" oninput="ctaStockRecalcRow(this)"></td>' +
-    '<td><input class="cs-stock" type="number" value="' + (Number(c.stock) || 0) + '" readonly style="font-size:12px;width:100%;text-align:center;font-weight:700;background:var(--bg2);color:var(--text1)" title="Automático: inicial + comprado − vendido"></td>' +
-    '<td><input class="cs-comprado" type="number" value="' + (Number(c.comprado) || 0) + '" readonly style="font-size:12px;width:100%;text-align:center;color:#16a34a;font-weight:600;background:var(--bg2)" title="Derivado de las compras de insumos"></td>' +
-    '<td><input class="cs-vendido" type="number" value="' + (Number(c.vendido) || 0) + '" readonly style="font-size:12px;width:100%;text-align:center;color:#2563eb;font-weight:600;background:var(--bg2)" title="Derivado de las ventas"></td>' +
+    '<td><input class="cs-comprado" type="number" value="' + (Number(c.comprado) || 0) + '" min="0" style="font-size:12px;width:100%;text-align:center;color:#16a34a;font-weight:700" title="Total comprado histórico. Las compras de insumos nuevas se suman automáticamente." oninput="ctaStockRecalcRow(this)"></td>' +
+    '<td><input class="cs-vendido" type="number" value="' + (Number(c.vendido) || 0) + '" min="0" style="font-size:12px;width:100%;text-align:center;color:#2563eb;font-weight:700" title="Total vendido histórico. Las ventas nuevas se suman automáticamente." oninput="ctaStockRecalcRow(this)"></td>' +
+    '<td><input class="cs-stock" type="number" value="' + (Number(c.stock) || 0) + '" readonly style="font-size:12px;width:100%;text-align:center;font-weight:800;background:var(--bg2);color:var(--text1)" title="Automático: inicial + comprado − vendido"></td>' +
     '<td><input class="cs-min" type="number" value="' + (c.stockMin || 0) + '" min="0" style="font-size:12px;width:100%;text-align:center" oninput="ctaStockRecalcRow(this)"></td>' +
     '<td><input class="cs-comprar" type="number" value="' + Math.max(0, (c.stockMin || 0) - (Number(c.stock) || 0)) + '" readonly style="font-size:12px;width:100%;text-align:center;background:var(--bg2);color:#d97706;font-weight:600" title="Calculado: Mínimo − Stock"></td>' +
     '<td><input class="cs-costo" type="number" value="' + (c.costo || 0) + '" min="0" style="font-size:12px;width:100%;text-align:center"></td>' +
@@ -24417,8 +24448,8 @@ function ctaStockRecalcRow(inp) {
   const vendido = parseFloat(tr.querySelector('.cs-vendido').value) || 0;
   const min = parseFloat(tr.querySelector('.cs-min').value) || 0;
   const stock = inicial + comprado - vendido;
-  tr.querySelector('.cs-stock').value = stock;
-  tr.querySelector('.cs-comprar').value = Math.max(0, min - stock);
+  const stEl = tr.querySelector('.cs-stock'); if (stEl) stEl.value = stock;
+  const coEl = tr.querySelector('.cs-comprar'); if (coEl) coEl.value = Math.max(0, min - stock);
 }
 
 async function ctaSaveStock() {
@@ -24434,6 +24465,10 @@ async function ctaSaveStock() {
       emoji: tr.querySelector('.cs-emoji').value.trim() || '📦',
       match: matchRaw,
       stockInicial: parseFloat(tr.querySelector('.cs-inicial').value) || 0,
+      // v178: el valor editado es el TOTAL; guardamos la base = total − lo derivado
+      // de las operaciones, para que las ops sigan sumando sin duplicar.
+      compradoBase: Math.max(0, (parseFloat(tr.querySelector('.cs-comprado').value) || 0) - (c._compradoOps || 0)),
+      vendidoBase: Math.max(0, (parseFloat(tr.querySelector('.cs-vendido').value) || 0) - (c._vendidoOps || 0)),
       stockMin: parseFloat(tr.querySelector('.cs-min').value) || 0,
       costo: parseFloat(tr.querySelector('.cs-costo').value) || 0,
       activo: true
