@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v182 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v183 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4025,6 +4025,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <option value="trimestral">Trimestral</option>
           <option value="anual">Anual</option>
         </select>
+        <button class="btn btn-sm" style="background:#6366f1;color:#fff;font-size:12px" onclick="ctaExportarReporte()" title="Generar un reporte con los datos del período + prompt de IA">📄 Exportar reporte</button>
       </div>
       <div style="height:250px;position:relative"><canvas id="cta-chart"></canvas></div>
     </div>
@@ -4107,6 +4108,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <option value="">Cambiar origen…</option>
       </select>
       <button class="btn btn-ghost btn-sm" onclick="ctaBulkProducto()" title="Asignar un producto del catálogo a todas">🛒 Producto</button>
+      <button class="btn btn-ghost btn-sm" onclick="ctaBulkProvincia()" title="Asignar provincia a todas las seleccionadas">📍 Provincia</button>
       <button class="btn btn-ghost btn-sm" onclick="ctaBulkEnrich()" title="Traer monto neto + nombre real de las ML seleccionadas">💰 Montos netos</button>
       <button class="btn btn-ghost btn-sm" onclick="ctaBulkFactura()" title="Marcar/desmarcar color de factura">🧾 Factura</button>
       <button class="btn btn-ghost btn-sm" onclick="ctaBulkColor(event)" title="Color de resaltado para las seleccionadas">🎨 Color</button>
@@ -4122,7 +4124,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <th style="cursor:pointer;user-select:none" onclick="ctaSort('detalle')">Detalle <span id="cta-sort-detalle" style="font-size:10px"></span></th>
           <th style="cursor:pointer;user-select:none" onclick="ctaSort('cliente')">Cliente <span id="cta-sort-cliente" style="font-size:10px"></span></th>
           <th style="white-space:nowrap;cursor:pointer;user-select:none" onclick="ctaSort('telefono')">Teléfono <span id="cta-sort-telefono" style="font-size:10px"></span></th>
-          <th style="white-space:nowrap">Productos</th>
+          <th style="white-space:nowrap;cursor:pointer;user-select:none" onclick="ctaSort('productos')">Productos <span id="cta-sort-productos" style="font-size:10px"></span></th>
           <th style="cursor:pointer;user-select:none" onclick="ctaSort('origen')">Origen <span id="cta-sort-origen" style="font-size:10px"></span></th>
           <th style="cursor:pointer;user-select:none" onclick="ctaSort('provincia')">Provincia <span id="cta-sort-provincia" style="font-size:10px"></span></th>
           <th style="text-align:right;white-space:nowrap;cursor:pointer;user-select:none" onclick="ctaSort('envio')" title="Costo de envío. Clic para ordenar.">Envío <span id="cta-sort-envio" style="font-size:10px"></span></th>
@@ -22966,8 +22968,8 @@ function _ctaChartOpts(moneyY) {
 // ── Tabla ────────────────────────────────────────────────────────
 function ctaSort(col) {
   if (_ctaState.sortCol === col) _ctaState.sortDir *= -1;
-  else { _ctaState.sortCol = col; _ctaState.sortDir = (col === 'ts' || col === 'monto' || col === 'envio') ? -1 : 1; }
-  ['ts','detalle','cliente','telefono','origen','provincia','envio','monto','estado'].forEach(c => {
+  else { _ctaState.sortCol = col; _ctaState.sortDir = (col === 'ts' || col === 'monto' || col === 'envio' || col === 'productos') ? -1 : 1; }
+  ['ts','detalle','cliente','telefono','origen','provincia','envio','monto','estado','productos'].forEach(c => {
     const el = document.getElementById('cta-sort-' + c);
     if (el) el.innerHTML = (typeof sortArrow === 'function') ? sortArrow(c, _ctaState.sortCol, _ctaState.sortDir) : '';
   });
@@ -23003,6 +23005,7 @@ function _ctaOpsFiltradas() {
     if (col === 'ts') { va = a.ts || 0; vb = b.ts || 0; }
     else if (col === 'monto') { va = +a.monto || 0; vb = +b.monto || 0; }
     else if (col === 'envio') { va = (+a.envio || 0) + (+a.envioInfo || 0); vb = (+b.envio || 0) + (+b.envioInfo || 0); }
+    else if (col === 'productos') { va = (a.items || []).reduce((s, it) => s + (+it.cant || 0), 0); vb = (b.items || []).reduce((s, it) => s + (+it.cant || 0), 0); }
     else { va = String(a[col] || '').toLowerCase(); vb = String(b[col] || '').toLowerCase(); }
     if (va < vb) return -dir; if (va > vb) return dir;
     // v167: desempate estable por id (clave para que el saldo de carritos
@@ -23081,7 +23084,7 @@ function ctaRenderTable() {
     // Teléfono con link WhatsApp (mismo sistema que Personalizadas)
     const wa = _persoWaNum(o.telefono);
     const tel = o.telefono
-      ? '<a href="https://wa.me/' + wa + '" target="_blank" style="color:#22c55e;font-weight:600;text-decoration:none" title="WhatsApp">📱 ' + _persoEsc(o.telefono) + '</a>'
+      ? '<span style="display:inline-flex;align-items:center;gap:4px"><a href="https://wa.me/' + wa + '" target="_blank" style="color:#22c55e;font-weight:600;text-decoration:none" title="WhatsApp">📱 ' + _persoEsc(o.telefono) + '</a><span style="cursor:pointer;opacity:.5;font-size:10px" onclick="ctaInlineEdit(\'' + o.id + '\',\'telefono\')" title="Editar teléfono">✏️</span></span>'
       : '<span style="color:var(--text3);font-size:11px;cursor:pointer" onclick="ctaInlineEdit(\'' + o.id + '\',\'telefono\')" title="Agregar teléfono">+ tel</span>';
     // Estado: ML lo toma del envío (no editable); el resto es select editable
     const mlEst = _ctaMLEstado(o);
@@ -23826,6 +23829,113 @@ async function ctaImportFile(file) {
   }
   document.getElementById('cta-import-file').value = '';
 }
+// ══════════════════ REPORTE EXPORTABLE + PROMPT IA (v183) ══════════════════
+function _ctaReadKpi(id) {
+  const el = document.getElementById(id);
+  return el ? el.textContent.trim() : '—';
+}
+// Recalcula la distribución por orígenes / provincias / productos del período
+function _ctaReportData() {
+  const ops = _ctaOpsPeriodo().filter(o => o.tipo === 'ingreso');
+  const sum = (map, k, v) => map.set(k, (map.get(k) || 0) + v);
+  const oMap = new Map(), pMap = new Map(), prMap = new Map();
+  ops.forEach(o => {
+    sum(oMap, (o.origen || '(sin origen)').trim(), (+o.monto || 0) + (+o.envio || 0));
+    sum(pMap, (o.provincia || '(sin provincia)').trim(), (+o.monto || 0) + (+o.envio || 0));
+    (o.items || []).forEach(it => {
+      const cat = _ctaCatMatch(it);
+      const k = cat ? cat.nombre : (it.nombre || '(otro)');
+      const val = (+it.cant || 0) * (+it.unit || 0) || ((+o.monto || 0) / ((o.items || []).length || 1));
+      const cur = prMap.get(k) || { monto: 0, uni: 0 };
+      cur.monto += val; cur.uni += (+it.cant || 0); prMap.set(k, cur);
+    });
+  });
+  const ord = m => [...m.entries()].sort((a, b) => (b[1].monto != null ? b[1].monto : b[1]) - (a[1].monto != null ? a[1].monto : a[1]));
+  return {
+    origenes: ord(oMap), provincias: ord(pMap), productos: ord(prMap),
+    totOrig: [...oMap.values()].reduce((a, b) => a + b, 0) || 1,
+    totProv: [...pMap.values()].reduce((a, b) => a + b, 0) || 1,
+    totProd: [...prMap.values()].reduce((a, b) => a + b.monto, 0) || 1,
+  };
+}
+
+function ctaExportarReporte() {
+  const [, , periodoLabel] = _ctaPeriodoRango();
+  const d = _ctaReportData();
+  // KPIs leídos del DOM (lo que ves en pantalla)
+  const k = {
+    ing: _ctaReadKpi('cta-kpi-ing'), eg: _ctaReadKpi('cta-kpi-eg'), gan: _ctaReadKpi('cta-kpi-neto'),
+    uni: _ctaReadKpi('cta-kpi-uni'), rent: _ctaReadKpi('cta-kpi-rent'), runrate: _ctaReadKpi('cta-kpi-runrate'),
+    renthist: _ctaReadKpi('cta-kpi-renthist'), saldo: _ctaReadKpi('cta-kpi-saldo'),
+    unihist: _ctaReadKpi('cta-kpi-unihist'), stockval: _ctaReadKpi('cta-kpi-stockval'),
+  };
+  const fmtPct = (v, tot) => (v / tot * 100).toFixed(1) + '%';
+  // Tablas
+  const filaOrig = d.origenes.map(([n, v]) => '<tr><td>' + _persoEsc(n) + '</td><td style="text-align:right">' + PERSO_FMT_MONEY(v) + '</td><td style="text-align:right">' + fmtPct(v, d.totOrig) + '</td></tr>').join('');
+  const filaProv = d.provincias.slice(0, 12).map(([n, v]) => '<tr><td>' + _persoEsc(n) + '</td><td style="text-align:right">' + PERSO_FMT_MONEY(v) + '</td><td style="text-align:right">' + fmtPct(v, d.totProv) + '</td></tr>').join('');
+  const filaProd = d.productos.map(([n, o]) => '<tr><td>' + _persoEsc(n) + '</td><td style="text-align:right">' + o.uni + '</td><td style="text-align:right">' + PERSO_FMT_MONEY(o.monto) + '</td><td style="text-align:right">' + fmtPct(o.monto, d.totProd) + '</td></tr>').join('');
+
+  // Listas dinámicas para el prompt (texto plano)
+  const listaOrig = d.origenes.map(([n, v]) => n + ' ' + PERSO_FMT_MONEY(v) + ' (' + fmtPct(v, d.totOrig) + ')').join('; ');
+  const listaProv = d.provincias.slice(0, 5).map(([n, v]) => n + ' ' + PERSO_FMT_MONEY(v) + ' (' + fmtPct(v, d.totProv) + ')').join('; ');
+  const listaProd = d.productos.map(([n, o]) => n + ' ' + o.uni + 'u ' + PERSO_FMT_MONEY(o.monto) + ' (' + fmtPct(o.monto, d.totProd) + ')').join('; ');
+
+  const prompt = 'Actúa como un consultor financiero y experto en e-commerce. Analiza los siguientes datos de mi negocio de personalización (tazas, hoppies, jarros) radicado en Argentina y dame un plan de acción a 90 días. Necesito estrategias puntuales para potenciar las ventas en mi tienda propia frente a Mercado Libre, optimizar la logística de envíos desde Mendoza hacia Buenos Aires/CABA, y recomendaciones de compra a fábricas para mis productos estrella sin quebrar stock.\n\n' +
+    'MÉTRICAS DEL PERÍODO (' + periodoLabel + '):\n' +
+    '   * Ingresos: ' + k.ing + '\n' +
+    '   * Egresos: ' + k.eg + '\n' +
+    '   * Ganancia Neta: ' + k.gan + '\n' +
+    '   * Rentabilidad del período: ' + k.rent + '\n' +
+    '   * Rentabilidad histórica: ' + k.renthist + '\n' +
+    '   * Saldo histórico: ' + k.saldo + '\n' +
+    '   * Stock valorizado: ' + k.stockval + '\n' +
+    '   * Unidades vendidas (período): ' + k.uni + '\n\n' +
+    'DISTRIBUCIÓN POR CANALES (Orígenes): ' + (listaOrig || 'sin datos') + '\n' +
+    'VENTAS POR PROVINCIA (Top 5): ' + (listaProv || 'sin datos') + '\n' +
+    'VENTAS POR PRODUCTO: ' + (listaProd || 'sin datos') + '\n\n' +
+    'Con esta radiografía, ¿qué anomalías o cuellos de botella financieros detectas, y qué herramientas de automatización o IA me sugieres integrar en la gestión diaria para escalar la facturación?';
+
+  const fecha = new Date().toLocaleString('es-AR');
+  const css = 'body{font-family:Inter,Arial,sans-serif;color:#0f172a;max-width:820px;margin:24px auto;padding:0 18px;line-height:1.5}' +
+    'h1{font-size:22px;margin:0 0 4px}h2{font-size:15px;margin:22px 0 8px;border-bottom:2px solid #6366f1;padding-bottom:4px}' +
+    '.sub{color:#64748b;font-size:12px;margin-bottom:18px}' +
+    '.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:10px 0}' +
+    '.kpi{border:1px solid #e2e8f0;border-radius:8px;padding:8px 11px}.kpi .l{font-size:9px;text-transform:uppercase;color:#64748b;letter-spacing:.4px}.kpi .v{font-size:16px;font-weight:800}' +
+    'table{width:100%;border-collapse:collapse;font-size:12.5px;margin:6px 0}th,td{padding:5px 8px;border-bottom:1px solid #e2e8f0;text-align:left}th{background:#f1f5f9;font-size:11px;text-transform:uppercase;letter-spacing:.3px}' +
+    '.prompt{background:#0f172a;color:#e2e8f0;border-radius:10px;padding:16px;font-size:12px;white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;margin-top:10px;user-select:all}' +
+    '.btns{margin:18px 0;display:flex;gap:8px}.btns button{font-size:13px;padding:8px 14px;border-radius:8px;border:1px solid #6366f1;cursor:pointer}.btns .p{background:#6366f1;color:#fff}.btns .s{background:#fff;color:#6366f1}' +
+    '@media print{.btns{display:none}}';
+
+  const doc = '<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Reporte Cuenta Impala — ' + periodoLabel + '</title><style>' + css + '</style></head><body>' +
+    '<h1>📊 Reporte Cuenta Impala Design</h1>' +
+    '<div class="sub">Período: <b>' + periodoLabel + '</b> · Generado: ' + fecha + '</div>' +
+    '<div class="btns"><button class="p" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button><button class="s" onclick="navigator.clipboard.writeText(document.getElementById(\'promptIA\').textContent).then(()=>{this.textContent=\'✓ Prompt copiado\'})">📋 Copiar prompt de IA</button></div>' +
+    '<h2>Métricas financieras</h2><div class="kpis">' +
+    '<div class="kpi"><div class="l">Ingresos</div><div class="v" style="color:#10b981">' + k.ing + '</div></div>' +
+    '<div class="kpi"><div class="l">Egresos</div><div class="v" style="color:#ef4444">' + k.eg + '</div></div>' +
+    '<div class="kpi"><div class="l">Ganancia</div><div class="v" style="color:#16a34a">' + k.gan + '</div></div>' +
+    '<div class="kpi"><div class="l">Unidades</div><div class="v">' + k.uni + '</div></div>' +
+    '<div class="kpi"><div class="l">Rentab. período</div><div class="v">' + k.rent + '</div></div>' +
+    '<div class="kpi"><div class="l">Mensual estimado</div><div class="v">' + k.runrate + '</div></div>' +
+    '<div class="kpi"><div class="l">Rentab. histórica</div><div class="v">' + k.renthist + '</div></div>' +
+    '<div class="kpi"><div class="l">Saldo histórico</div><div class="v" style="color:#7c3aed">' + k.saldo + '</div></div>' +
+    '<div class="kpi"><div class="l">Unid. históricas</div><div class="v">' + k.unihist + '</div></div>' +
+    '<div class="kpi"><div class="l">Stock valorizado</div><div class="v">' + k.stockval + '</div></div>' +
+    '</div>' +
+    '<h2>Distribución por canales (Orígenes)</h2><table><thead><tr><th>Origen</th><th style="text-align:right">Monto</th><th style="text-align:right">%</th></tr></thead><tbody>' + (filaOrig || '<tr><td colspan="3">Sin datos</td></tr>') + '</tbody></table>' +
+    '<h2>Ventas por provincia</h2><table><thead><tr><th>Provincia</th><th style="text-align:right">Monto</th><th style="text-align:right">%</th></tr></thead><tbody>' + (filaProv || '<tr><td colspan="3">Sin datos</td></tr>') + '</tbody></table>' +
+    '<h2>Ventas por producto</h2><table><thead><tr><th>Producto</th><th style="text-align:right">Unidades</th><th style="text-align:right">Monto</th><th style="text-align:right">%</th></tr></thead><tbody>' + (filaProd || '<tr><td colspan="4">Sin datos</td></tr>') + '</tbody></table>' +
+    '<h2>🤖 Prompt estratégico de IA</h2>' +
+    '<div style="font-size:11.5px;color:#64748b;margin-bottom:6px">Copiá este texto y pegalo en Claude, ChatGPT o Gemini para un análisis estratégico:</div>' +
+    '<div class="prompt" id="promptIA">' + _persoEsc(prompt) + '</div>' +
+    '</body></html>';
+
+  const w = window.open('', '_blank');
+  if (!w) { alert('Permití las ventanas emergentes para ver el reporte.'); return; }
+  w.document.write(doc); w.document.close();
+  if (typeof showToast === 'function') showToast('📄 Reporte generado', 'success');
+}
+
 // ══════════════════ PROVEEDORES (agenda de contactos) ══════════════════
 let _provState = { list: [], loaded: false, editId: null };
 
@@ -24277,6 +24387,20 @@ function ctaBulkProducto() {
   ctaFlushDirty(); ctaRenderAll();
   if (typeof showToast === 'function') showToast('🛒 Producto asignado a ' + _ctaState.selected.size + ' operación(es)', 'success');
 }
+function ctaBulkProvincia() {
+  const lista = PERSO_PROVINCIAS.map((p, i) => (i + 1) + '. ' + p).join('\n');
+  const sel = prompt('Asignar provincia a ' + _ctaState.selected.size + ' operación(es).\nElegí el número:\n\n' + lista);
+  if (sel === null) return;
+  const idx = parseInt(sel, 10) - 1;
+  const prov = PERSO_PROVINCIAS[idx];
+  if (!prov) { alert('Número inválido.'); return; }
+  _ctaSelectedOps().forEach(({ op, ym }) => {
+    op.provincia = prov; op.manualEdit = true; _ctaState.dirty.add(ym);
+  });
+  ctaFlushDirty(); ctaRenderAll();
+  if (typeof showToast === 'function') showToast('📍 Provincia asignada a ' + _ctaState.selected.size + ' operación(es)', 'success');
+}
+
 function ctaBulkColor(ev) {
   if (ev) ev.stopPropagation();
   const prev = document.getElementById('cta-color-pop');
@@ -24546,16 +24670,45 @@ function _ctaRenderStockAlertsV2() {
   const cards = bajos.map(c => {
     const comprar = Math.max(0, (Number(c.stockMin) || 0) - (Number(c.stock) || 0));
     const st = Number(c.stock) || 0;
-    return '<div class="mc ctakpi" style="border-left:3px solid #f59e0b;min-width:150px">' +
-      '<div class="mc-label" style="display:flex;align-items:center;gap:4px">' + (c.emoji || '📦') + ' ' + _persoEsc(c.nombre) + '</div>' +
-      '<div class="ctakpi-val" style="color:' + (st <= 0 ? '#dc2626' : '#d97706') + '">' + st + ' <span style="font-size:9px;color:var(--text3);font-weight:600">/ mín ' + (c.stockMin || 0) + '</span></div>' +
-      '<div class="ctakpi-sub" style="color:#16a34a;font-weight:700">→ comprar ' + comprar + '</div>' +
+    const col = _ctaColorProducto(c);
+    const tc = _ctaTextoContraste(col);
+    const subC = tc === '#fff' ? 'rgba(255,255,255,.85)' : 'rgba(0,0,0,.6)';
+    return '<div class="ctakpi" style="min-width:150px;background:' + col + ';color:' + tc + ';border:1px solid rgba(0,0,0,.12)">' +
+      '<div class="mc-label" style="display:flex;align-items:center;gap:4px;color:' + tc + '">' + (c.emoji || '📦') + ' ' + _persoEsc(c.nombre) + '</div>' +
+      '<div class="ctakpi-val" style="color:' + tc + '">' + st + ' <span style="font-size:9px;color:' + subC + ';font-weight:600">/ mín ' + (c.stockMin || 0) + '</span></div>' +
+      '<div class="ctakpi-sub" style="color:' + subC + ';font-weight:700">→ comprar ' + comprar + '</div>' +
       '</div>';
   }).join('');
   cont.innerHTML =
     '<div style="font-size:11px;font-weight:700;color:#b45309;margin-bottom:7px">⚠ Stock bajo — hay que reponer ' + bajos.length + ' producto(s)</div>' +
     '<div style="display:flex;gap:7px;flex-wrap:wrap">' + cards + '</div>';
 }
+// v183: color de una ficha de producto. Usa c.color si está; si no, lo deduce
+// del nombre por palabras clave; si no, un color estable por hash del nombre.
+function _ctaColorProducto(c) {
+  if (c.color && /^#[0-9a-fA-F]{6}$/.test(c.color)) return c.color;
+  const n = (c.nombre || '').toLowerCase();
+  const mapa = [
+    [/amarill/, '#eab308'], [/\broj/, '#dc2626'], [/verde/, '#16a34a'],
+    [/azul oscuro|marino/, '#1e3a5f'], [/celeste/, '#38bdf8'], [/\bazul/, '#3b82f6'],
+    [/rosa|rosad/, '#ec4899'], [/naranj/, '#f97316'], [/violet|lila|morad/, '#8b5cf6'],
+    [/turques|aguamar/, '#14b8a6'], [/negr/, '#374151'], [/blanc/, '#e5e7eb'],
+    [/gris/, '#6b7280'], [/dorad|gold/, '#d4a017'], [/chop/, '#92400e'],
+    [/hoppy|hoppi/, '#64748b'], [/magic|mágic/, '#7c3aed'], [/jarr|term/, '#0d9488'],
+  ];
+  for (const [re, col] of mapa) { if (re.test(n)) return col; }
+  // hash estable → color de la paleta
+  let h = 0; for (let i = 0; i < n.length; i++) h = (h * 31 + n.charCodeAt(i)) >>> 0;
+  return CTA_DASH_COLORS[h % CTA_DASH_COLORS.length];
+}
+// Devuelve '#fff' o '#000' según el fondo, para que el texto se lea.
+function _ctaTextoContraste(hex) {
+  const c = hex.replace('#', '');
+  const r = parseInt(c.slice(0, 2), 16), g = parseInt(c.slice(2, 4), 16), b = parseInt(c.slice(4, 6), 16);
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.6 ? '#0f172a' : '#fff';
+}
+
 function _ctaRenderStockAlertsOLD() {
   const box = document.getElementById('cta-stock-alerts');
   if (!box) return;
