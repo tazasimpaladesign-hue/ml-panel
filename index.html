@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v187 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v188 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4031,7 +4031,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   </div>
 
   <!-- Mensajes WhatsApp (espejo de Personalizadas, sincronizado por KV) -->
-  <div id="cta-msgs-card" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:14px">
+  <div id="cta-msgs-card" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:14px;width:100%;max-width:100%;box-sizing:border-box;overflow:hidden">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
       <div style="font-size:12.5px;font-weight:700">💬 Mensajes para WhatsApp</div>
       <span style="font-size:10.5px;color:var(--text3)">Tocá 📋 para copiar · sincronizado con Personalizadas y todas las PCs</span>
@@ -12397,7 +12397,25 @@ function _comboCandidatos() {
 }
 
 // Clave única de un par (sin importar orden) para no repetir combos publicados
-function _comboKey(idA, idB) { return [idA, idB].sort().join('|'); }
+function _comboKey(ids) { return [...ids].sort().join('|'); }
+
+// v188: ¿estos productos comparten una palabra temática significativa?
+// Sirve para validar combos de la IA y para el fallback local.
+function _comboTemaTokens(title) {
+  const stop = new Set(['taza','tazas','de','con','para','el','la','los','las','y','en','un','una','set','ml','cm','x','por','tu','mi','diseno','disenos','personalizada','personalizado','personalizadas','ceramica','color','colores','modelo','modelos','jarro','jarros','termico','termica','mate','mates','hoppy','hoppies','vaso','vasos','magica','magicas','original','calidad','premium','regalo','sublimada','sublimado','impresa','full','print','oz','combo','kit','pack']);
+  return (title || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .split(/[^a-z0-9]+/).filter(w => w.length > 2 && !stop.has(w));
+}
+function _comboTienenTemaComun(items) {
+  if (items.length < 2) return false;
+  // todos deben compartir al menos una palabra temática con el primero
+  const base = new Set(_comboTemaTokens(items[0].title));
+  for (let i = 1; i < items.length; i++) {
+    const toks = _comboTemaTokens(items[i].title);
+    if (!toks.some(t => base.has(t))) return false;
+  }
+  return true;
+}
 
 async function comboGenerar(cantidad, renovar) {
   if (_comboState.generating) return;
@@ -12415,51 +12433,74 @@ async function comboGenerar(cantidad, renovar) {
 
   try {
     const cands = _comboCandidatos();
-    const top = cands.slice(0, 30); // top 30 candidatos para que la IA elija
+    const top = cands.slice(0, 40); // top 40 candidatos para que la IA elija
     const publicadosSet = new Set(_comboState.publicados.map(c => c.key));
     const yaEnPantalla = new Set(_comboState.combos.map(c => c.key));
 
-    // Lista compacta para el prompt
-    const lista = top.map((i, idx) => idx + '|' + (i.title || '').slice(0, 70) + '|ventas:' + (i.sold_quantity || 0)).join('\n');
+    // Lista para el prompt: índice + título + ventas (el título es clave para la temática)
+    const lista = top.map((i, idx) => idx + '. ' + (i.title || '').slice(0, 75)).join('\n');
 
-    const prompt = 'Sos experto en e-commerce de productos personalizados (tazas, jarros térmicos, mates, hoppies) en Mercado Libre Argentina. ' +
-      'Te paso una lista de mis publicaciones más vendidas (formato: indice|titulo|ventas). ' +
-      'Armá ' + cantidad + ' COMBOS de 2 productos que combinen bien para subir el ticket promedio (ej: una taza temática + un jarro térmico del mismo equipo/tema, o productos complementarios). ' +
-      'Priorizá combinar productos de la misma temática (mismo club, personaje, etc.) o complementarios. ' +
-      'Para cada combo generá un título atractivo de venta (máx 60 caracteres, estilo "Combo Taza y Jarro Set Messi 2026"). ' +
-      'Respondé SOLO un JSON válido (sin texto extra, sin markdown) con este formato exacto: ' +
-      '{"combos":[{"a":indice_producto1,"b":indice_producto2,"titulo":"titulo del combo"}]}. ' +
-      'Los indices son los números de la lista. No repitas pares. ' +
-      'LISTA:\n' + lista;
+    const prompt =
+      'Sos un experto en venta cruzada (cross-sell) de productos personalizados en Mercado Libre Argentina. ' +
+      'Tengo una tienda de tazas de cerámica, tazas mágicas, jarros térmicos, mates, hoppies y vasos, todos con diseños temáticos (clubes de fútbol, personajes, series, bandas, profesiones, etc.).\n\n' +
+      'Abajo está la lista de mis publicaciones (formato: "indice. titulo").\n\n' +
+      'TU TAREA: armar ' + cantidad + ' combos para subir el ticket promedio. CADA combo puede tener 2 o 3 productos.\n\n' +
+      'REGLA FUNDAMENTAL — LOS PRODUCTOS DE UN COMBO DEBEN TENER RELACIÓN TEMÁTICA CLARA. Solo combiná productos que compartan:\n' +
+      '  - El mismo club/equipo (ej: dos productos de Boca, o de River)\n' +
+      '  - El mismo personaje/serie/película (ej: dos de Harry Potter, o de Star Wars)\n' +
+      '  - La misma banda, profesión o temática (ej: dos de enfermería, dos de Messi)\n\n' +
+      'PROHIBIDO combinar productos sin relación (ej: NUNCA juntes Boca con Harry Potter, ni River con Papá Noel, ni Messi con una taza de gatos). Si un producto no tiene un compañero temático claro en la lista, NO lo uses.\n' +
+      'Preferí combos de tipos distintos de producto dentro de la misma temática (ej: una taza + un jarro del mismo club es mejor que dos tazas iguales).\n' +
+      'Cuando haya 3 productos de la misma temática y distintos tipos, armá un combo de 3.\n\n' +
+      'Para cada combo creá un título de venta atractivo (máx 60 caracteres), ej: "Combo Taza + Jarro Termico Boca Juniors 2026".\n\n' +
+      'RESPONDÉ SOLO con JSON válido, sin texto ni markdown alrededor, con este formato EXACTO:\n' +
+      '{"combos":[{"productos":[indice1,indice2],"titulo":"...","tema":"Boca Juniors"},{"productos":[indice1,indice2,indice3],"titulo":"...","tema":"Harry Potter"}]}\n' +
+      'El campo "productos" es un array de 2 o 3 índices de la lista. El campo "tema" es la temática común (para verificación). No repitas combos.\n\n' +
+      'LISTA DE PUBLICACIONES:\n' + lista;
 
-    const r = await callClaude(prompt, null, 2000);
+    const r = await callClaude(prompt, null, 2500);
     let combosIA = [];
     if (r.ok && r.text) {
-      // Parsear el JSON (puede venir con texto alrededor o con markdown)
       let jsonTxt = r.text.trim().replace(/```json/gi, '').replace(/```/g, '');
       const m = jsonTxt.match(/\{[\s\S]*\}/);
       if (m) jsonTxt = m[0];
-      try { combosIA = (JSON.parse(jsonTxt).combos) || []; }
-      catch (e) { console.warn('[combos] JSON inválido de la IA, uso fallback local'); }
+      try {
+        const parsed = JSON.parse(jsonTxt);
+        combosIA = (parsed.combos || []).map(c => ({
+          idxs: Array.isArray(c.productos) ? c.productos : [c.a, c.b].filter(x => x != null),
+          titulo: c.titulo, tema: c.tema || ''
+        }));
+      } catch (e) { console.warn('[combos] JSON inválido de la IA, uso fallback local'); }
     } else {
       console.warn('[combos] IA no disponible (' + (r.error || 'sin respuesta') + '), uso fallback local');
     }
-    // Fallback: si la IA falló o no devolvió combos válidos, armamos combos
-    // localmente combinando los mejores productos de a pares.
+    // Validación anti-disparate: descartar combos donde los productos NO comparten
+    // ninguna palabra temática (filtra los errores de los modelos débiles).
+    combosIA = combosIA.filter(c => {
+      if (!c.idxs || c.idxs.length < 2) return false;
+      const items = c.idxs.map(i => top[i]).filter(Boolean);
+      if (items.length < 2) return false;
+      return _comboTienenTemaComun(items);
+    });
+    // Fallback: si la IA falló o sus combos no pasaron la validación temática,
+    // armamos combos localmente SOLO con productos que comparten temática.
     if (!combosIA.length) {
       combosIA = _comboFallbackLocal(top, cantidad);
     }
 
     const nuevos = [];
     for (const c of combosIA) {
-      const a = top[c.a], b = top[c.b];
-      if (!a || !b || a.id === b.id) continue;
-      const key = _comboKey(a.id, b.id);
+      const items = (c.idxs || []).map(i => top[i]).filter(Boolean);
+      if (items.length < 2) continue;
+      // quitar duplicados de id dentro del combo
+      const vistos = new Set(); const prods = [];
+      for (const it of items) { if (!vistos.has(it.id)) { vistos.add(it.id); prods.push(it); } }
+      if (prods.length < 2) continue;
+      const key = _comboKey(prods.map(p => p.id));
       if (publicadosSet.has(key) || yaEnPantalla.has(key) || nuevos.some(n => n.key === key)) continue;
       nuevos.push({
-        key, titulo: (c.titulo || 'Combo especial').slice(0, 70),
-        a: { id: a.id, title: a.title, thumb: a.thumbnail, permalink: a.permalink, ventas: a.sold_quantity || 0 },
-        b: { id: b.id, title: b.title, thumb: b.thumbnail, permalink: b.permalink, ventas: b.sold_quantity || 0 },
+        key, titulo: (c.titulo || ('Combo ' + (c.tema || 'especial'))).slice(0, 70),
+        productos: prods.map(p => ({ id: p.id, title: p.title, thumb: p.thumbnail, permalink: p.permalink, ventas: p.sold_quantity || 0 })),
       });
       if (_comboState.combos.length + nuevos.length >= cantidad) break;
     }
@@ -12478,31 +12519,54 @@ async function comboGenerar(cantidad, renovar) {
   }
 }
 
-// Fallback local: arma combos emparejando productos por temática (palabras en
-// común en el título) o, si no hay, simplemente los mejores de a pares.
+// Fallback local v188: agrupa productos por palabra temática y arma combos
+// SOLO entre productos que comparten tema (nunca combina cosas sin relación).
+// Cuando un tema tiene 3+ productos de tipos distintos, arma un combo de 3.
 function _comboFallbackLocal(items, cantidad) {
-  const stop = new Set(['taza','de','con','para','el','la','los','las','y','en','un','una','set','ml','cm','x','por','tu','mi','diseno','diseño','personalizada','personalizado','ceramica','cerámica','color','modelo']);
-  const tokens = (t) => (t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/[^a-z0-9]+/).filter(w => w.length > 2 && !stop.has(w));
-  const out = []; const used = new Set();
-  // 1) emparejar por temática (token compartido)
-  for (let i = 0; i < items.length && out.length < cantidad; i++) {
-    if (used.has(i)) continue;
-    const ti = tokens(items[i].title);
-    for (let j = i + 1; j < items.length && out.length < cantidad; j++) {
-      if (used.has(j)) continue;
-      const tj = tokens(items[j].title);
-      const comun = ti.find(w => tj.includes(w));
-      if (comun) {
-        const palabra = comun.charAt(0).toUpperCase() + comun.slice(1);
-        out.push({ a: i, b: j, titulo: 'Combo ' + palabra + ' x2 2026' });
-        used.add(i); used.add(j); break;
-      }
+  // tipo de producto (para preferir combos de tipos distintos)
+  const tipoDe = (t) => {
+    const n = (t || '').toLowerCase();
+    if (/jarro|termico|termica/.test(n)) return 'jarro';
+    if (/mate/.test(n)) return 'mate';
+    if (/hoppy|hoppie/.test(n)) return 'hoppy';
+    if (/vaso/.test(n)) return 'vaso';
+    if (/magic|mágic/.test(n)) return 'magica';
+    return 'taza';
+  };
+  // agrupar índices por cada palabra temática
+  const grupos = {}; // tema -> [indices]
+  items.forEach((it, idx) => {
+    const toks = _comboTemaTokens(it.title);
+    const unicos = [...new Set(toks)];
+    unicos.forEach(tk => { (grupos[tk] = grupos[tk] || []).push(idx); });
+  });
+  // ordenar temas por cantidad de productos (los más ricos primero)
+  const temas = Object.keys(grupos).filter(tk => grupos[tk].length >= 2)
+    .sort((a, b) => grupos[b].length - grupos[a].length);
+  const out = []; const usados = new Set();
+  for (const tema of temas) {
+    if (out.length >= cantidad) break;
+    // productos del tema aún no usados, con su tipo
+    const disp = grupos[tema].filter(i => !usados.has(i)).map(i => ({ i, tipo: tipoDe(items[i].title) }));
+    if (disp.length < 2) continue;
+    // intentar agarrar tipos distintos
+    const porTipo = {};
+    disp.forEach(d => { if (!porTipo[d.tipo]) porTipo[d.tipo] = d.i; });
+    const tiposDistintos = Object.values(porTipo);
+    const cap = tema.charAt(0).toUpperCase() + tema.slice(1);
+    if (tiposDistintos.length >= 3) {
+      const tres = tiposDistintos.slice(0, 3);
+      out.push({ idxs: tres, titulo: 'Combo Set x3 ' + cap + ' 2026', tema: cap });
+      tres.forEach(i => usados.add(i));
+    } else if (tiposDistintos.length === 2) {
+      out.push({ idxs: tiposDistintos, titulo: 'Combo ' + cap + ' 2026', tema: cap });
+      tiposDistintos.forEach(i => usados.add(i));
+    } else {
+      // mismo tipo: combinar 2 del mismo tema igual (ej dos tazas del mismo club)
+      const dos = disp.slice(0, 2).map(d => d.i);
+      out.push({ idxs: dos, titulo: 'Combo ' + cap + ' x2 2026', tema: cap });
+      dos.forEach(i => usados.add(i));
     }
-  }
-  // 2) completar con los mejores sin usar, de a pares
-  const libres = items.map((_, i) => i).filter(i => !used.has(i));
-  for (let k = 0; k + 1 < libres.length && out.length < cantidad; k += 2) {
-    out.push({ a: libres[k], b: libres[k + 1], titulo: 'Combo especial 2x 2026' });
   }
   return out;
 }
@@ -12514,30 +12578,36 @@ function comboRender() {
     grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:30px;color:var(--text3)">Tocá "✨ Generar combos".</div>';
     return;
   }
-  grid.innerHTML = _comboState.combos.map((c, idx) =>
-    '<div style="border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--bg1);display:flex;flex-direction:column;gap:8px">' +
-      '<div style="display:flex;align-items:center;gap:6px;justify-content:center">' +
-        '<div style="text-align:center;width:46%">' +
-          '<img src="' + (c.a.thumb || '') + '" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--border)" onerror="this.style.opacity=.3">' +
-          '<div style="font-size:9.5px;color:var(--text3);margin-top:3px;line-height:1.2;max-height:24px;overflow:hidden" title="' + _persoEsc(c.a.title) + '">' + _persoEsc(c.a.title.slice(0, 32)) + '</div>' +
-        '</div>' +
-        '<div style="font-size:22px;font-weight:800;color:#6366f1;flex-shrink:0">+</div>' +
-        '<div style="text-align:center;width:46%">' +
-          '<img src="' + (c.b.thumb || '') + '" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--border)" onerror="this.style.opacity=.3">' +
-          '<div style="font-size:9.5px;color:var(--text3);margin-top:3px;line-height:1.2;max-height:24px;overflow:hidden" title="' + _persoEsc(c.b.title) + '">' + _persoEsc(c.b.title.slice(0, 32)) + '</div>' +
-        '</div>' +
-      '</div>' +
+  grid.innerHTML = _comboState.combos.map((c, idx) => {
+    const prods = c.productos || [];
+    const anchoImg = prods.length >= 3 ? '30%' : '44%';
+    // miniaturas con "+" entre cada una
+    let thumbs = '';
+    prods.forEach((p, k) => {
+      if (k > 0) thumbs += '<div style="font-size:20px;font-weight:800;color:#6366f1;flex-shrink:0">+</div>';
+      thumbs += '<div style="text-align:center;width:' + anchoImg + '">' +
+        '<img src="' + (p.thumb || '') + '" style="width:58px;height:58px;object-fit:cover;border-radius:8px;border:1px solid var(--border)" onerror="this.style.opacity=.3">' +
+        '<div style="font-size:9px;color:var(--text3);margin-top:3px;line-height:1.2;max-height:24px;overflow:hidden" title="' + _persoEsc(p.title) + '">' + _persoEsc((p.title || '').slice(0, 28)) + '</div>' +
+      '</div>';
+    });
+    // botones para ver cada producto
+    let botonesProd = '';
+    prods.forEach((p, k) => {
+      botonesProd += '<button class="btn btn-ghost btn-xs" style="flex:1;font-size:10px" onclick="window.open(\'' + (p.permalink || '#') + '\',\'_blank\')" title="Ver producto ' + (k + 1) + '">🔗 ' + (k + 1) + '</button>';
+    });
+    return '<div style="border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--bg1);display:flex;flex-direction:column;gap:8px">' +
+      '<div style="display:flex;align-items:center;gap:5px;justify-content:center">' + thumbs + '</div>' +
+      (prods.length >= 3 ? '<div style="text-align:center;font-size:9px;color:#6366f1;font-weight:700;text-transform:uppercase;letter-spacing:.4px">Combo x3 · mayor ticket</div>' : '') +
       '<div style="background:var(--bg2);border-radius:8px;padding:7px 9px;text-align:center">' +
         '<div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.4px">Título sugerido</div>' +
         '<div style="font-size:12.5px;font-weight:700;cursor:pointer" title="Clic para copiar" onclick="navigator.clipboard.writeText(this.textContent);if(typeof showToast===\'function\')showToast(\'📋 Título copiado\',\'ok\')">' + _persoEsc(c.titulo) + '</div>' +
       '</div>' +
       '<div style="display:flex;gap:6px">' +
-        '<button class="btn btn-ghost btn-xs" style="flex:1;font-size:10.5px" onclick="window.open(\'' + (c.a.permalink || '#') + '\',\'_blank\')" title="Ver producto 1">🔗 Prod 1</button>' +
-        '<button class="btn btn-ghost btn-xs" style="flex:1;font-size:10.5px" onclick="window.open(\'' + (c.b.permalink || '#') + '\',\'_blank\')" title="Ver producto 2">🔗 Prod 2</button>' +
-        '<button class="btn btn-xs" style="flex:1.4;background:#16a34a;color:#fff;font-size:10.5px" onclick="comboMarcarPublicado(' + idx + ')" title="Marcar como publicado y generar otro nuevo">✓ Publicado</button>' +
+        botonesProd +
+        '<button class="btn btn-xs" style="flex:1.6;background:#16a34a;color:#fff;font-size:10.5px" onclick="comboMarcarPublicado(' + idx + ')" title="Marcar como publicado y generar otro nuevo">✓ Publicado</button>' +
       '</div>' +
-    '</div>'
-  ).join('');
+    '</div>';
+  }).join('');
 }
 
 async function comboMarcarPublicado(idx) {
@@ -22267,10 +22337,14 @@ async function persoCopyMsg(i) {
 }
 
 function persoOpenMsgEditor() {
+  const modal = document.getElementById('perso-msg-modal');
+  // v188: mover el modal directo al <body> para que se vea desde cualquier
+  // sección (si queda dentro de una sección oculta, no aparecería).
+  if (modal && modal.parentElement !== document.body) document.body.appendChild(modal);
   const rows = document.getElementById('perso-msg-rows');
   rows.innerHTML = '';
   persoGetMsgs().forEach(m => persoMsgAddRow(m));
-  document.getElementById('perso-msg-modal').style.display = 'flex';
+  if (modal) modal.style.display = 'flex';
 }
 
 function persoMsgAddRow(m) {
