@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v189 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v190 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -12452,7 +12452,7 @@ async function comboGenerar(cantidad, renovar) {
 
   try {
     const cands = _comboCandidatos();
-    const top = cands.slice(0, 40); // top 40 candidatos para que la IA elija
+    const top = cands.slice(0, 25); // top 25 (prompts cortos andan mejor en modelos free)
     const publicadosSet = new Set(_comboState.publicados.map(c => c.key));
     const yaEnPantalla = new Set(_comboState.combos.map(c => c.key));
 
@@ -12480,21 +12480,32 @@ async function comboGenerar(cantidad, renovar) {
       'El campo productos es un array de 2 o 3 indices de la lista. tema = tematica comun. justificacion = 1 frase de por que combinan. No repitas combos.\n\n' +
       'LISTADO DE PRODUCTOS A ANALIZAR:\n' + lista;
 
-    const r = await callClaude(prompt, null, 2500);
+    // v190: intentar con la IA, con reintento si devuelve vacío (modelos free a
+    // veces no responden a la primera). Parser robusto.
     let combosIA = [];
-    if (r.ok && r.text) {
-      let jsonTxt = r.text.trim().replace(/```json/gi, '').replace(/```/g, '');
+    let ultimoError = '';
+    const parsearRespuesta = (txt) => {
+      if (!txt) return [];
+      let jsonTxt = txt.trim().replace(/```json/gi, '').replace(/```/g, '');
       const m = jsonTxt.match(/\{[\s\S]*\}/);
       if (m) jsonTxt = m[0];
       try {
         const parsed = JSON.parse(jsonTxt);
-        combosIA = (parsed.combos || []).map(c => ({
+        return (parsed.combos || []).map(c => ({
           idxs: Array.isArray(c.productos) ? c.productos : [c.a, c.b].filter(x => x != null),
           titulo: c.titulo, tema: c.tema || '', justificacion: c.justificacion || ''
         }));
-      } catch (e) { console.warn('[combos] JSON inválido de la IA, uso fallback local'); }
-    } else {
-      console.warn('[combos] IA no disponible (' + (r.error || 'sin respuesta') + '), uso fallback local');
+      } catch (e) { return []; }
+    };
+    for (let intento = 0; intento < 2 && !combosIA.length; intento++) {
+      const r = await callClaude(prompt, null, 2500);
+      if (r.ok && r.text) {
+        combosIA = parsearRespuesta(r.text);
+        if (!combosIA.length) { ultimoError = 'la IA respondió pero sin combos válidos'; console.warn('[combos] intento ' + (intento + 1) + ': ' + ultimoError); }
+      } else {
+        ultimoError = r.error || 'sin respuesta del modelo';
+        console.warn('[combos] intento ' + (intento + 1) + ': ' + ultimoError);
+      }
     }
     // Validación anti-disparate: descartar combos donde los productos NO comparten
     // ninguna palabra temática (filtra los errores de los modelos débiles).
@@ -12506,8 +12517,11 @@ async function comboGenerar(cantidad, renovar) {
     });
     // Fallback: si la IA falló o sus combos no pasaron la validación temática,
     // armamos combos localmente SOLO con productos que comparten temática.
+    let usoFallback = false;
     if (!combosIA.length) {
+      usoFallback = true;
       combosIA = _comboFallbackLocal(top, cantidad);
+      console.warn('[combos] usando fallback local (agrupación por temática del título)');
     }
 
     const nuevos = [];
@@ -12530,9 +12544,19 @@ async function comboGenerar(cantidad, renovar) {
     _comboState.combos = _comboState.combos.concat(nuevos).slice(0, cantidad);
     _comboPersistVisibles(); // v189: quedan guardados hasta Renovar/Publicado
     if (!_comboState.combos.length) {
-      if (grid) grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:30px;color:var(--text3)">No se generaron combos nuevos (puede que ya estén todos publicados). Probá 🔄 Renovar.</div>';
+      // mensaje específico según la causa
+      let msg;
+      if (nuevos.length === 0 && (publicadosSet.size > 0 || yaEnPantalla.size > 0)) {
+        msg = '✓ Ya marcaste como publicados todos los combos posibles con tus productos actuales. Para volver a verlos, borrá el historial con 🔄 Renovar.';
+      } else if (usoFallback && !combosIA.length) {
+        msg = '⚠ No se pudieron armar combos. La IA no respondió y no encontré productos que compartan temática en los títulos. Revisá que tus publicaciones tengan el club/personaje en el título, o probá de nuevo en unos segundos (la IA gratuita a veces está saturada).';
+      } else {
+        msg = '⚠ La IA no está disponible en este momento (' + _persoEsc(ultimoError || 'modelos saturados') + '). Probá de nuevo en unos segundos — el sistema reintenta con varios modelos.';
+      }
+      if (grid) grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:24px;color:var(--text3);line-height:1.5;font-size:12.5px">' + msg + '</div>';
     } else {
       comboRender();
+      if (usoFallback && typeof showToast === 'function') showToast('💡 Combos armados localmente (la IA no respondió)', 'info');
     }
   } catch (e) {
     console.error('[combos]', e);
@@ -22387,7 +22411,10 @@ async function persoCopyMsg(i) {
 // v189: Centro de mensajes — abre el modal en modo LISTA (copiar)
 function persoOpenMsgCenter() {
   const modal = document.getElementById('perso-msg-modal');
-  if (modal && modal.parentElement !== document.body) document.body.appendChild(modal);
+  // v190: mover dentro de #main (no al body) para heredar los colores del tema
+  // claro. En el body quedaban los colores oscuros del :root y no se leía.
+  const main = document.getElementById('main') || document.body;
+  if (modal && modal.parentElement !== main) main.appendChild(modal);
   persoMsgCenterView();
   if (modal) modal.style.display = 'flex';
 }
@@ -22403,10 +22430,10 @@ function persoMsgCenterView() {
   const msgs = persoGetMsgs();
   if (!msgs.length) { list.innerHTML = '<div style="color:var(--text3);font-size:12px;text-align:center;padding:16px">No hay mensajes. Tocá "Editar mensajes" para crear.</div>'; return; }
   list.innerHTML = msgs.map((m, i) =>
-    '<button onclick="persoCopyMsg(' + i + ')" title="Clic para copiar" style="display:flex;align-items:flex-start;gap:10px;text-align:left;width:100%;background:var(--bg1);border:1px solid var(--border);border-radius:9px;padding:9px 11px;cursor:pointer;font-family:inherit">' +
+    '<button onclick="persoCopyMsg(' + i + ')" title="Clic para copiar" style="display:flex;align-items:flex-start;gap:10px;text-align:left;width:100%;background:#f8fafc;border:1px solid #e2e8f0;border-radius:9px;padding:9px 11px;cursor:pointer;font-family:inherit">' +
       '<span style="flex-shrink:0;min-width:120px;max-width:120px;font-size:11px;font-weight:700;color:#fff;background:' + _persoEsc(m.color || '#6b7280') + ';padding:5px 8px;border-radius:7px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + _persoEsc(m.label) + '</span>' +
-      '<span style="flex:1;min-width:0;font-size:11.5px;color:var(--text2);line-height:1.4;white-space:pre-wrap;word-break:break-word;max-height:60px;overflow:hidden">' + _persoEsc((m.text || '').slice(0, 180)) + ((m.text || '').length > 180 ? '…' : '') + '</span>' +
-      '<span style="flex-shrink:0;font-size:11px;color:var(--accent);font-weight:700">📋</span>' +
+      '<span style="flex:1;min-width:0;font-size:11.5px;color:#1e293b;line-height:1.4;white-space:pre-wrap;word-break:break-word;max-height:60px;overflow:hidden">' + _persoEsc((m.text || '').slice(0, 180)) + ((m.text || '').length > 180 ? '…' : '') + '</span>' +
+      '<span style="flex-shrink:0;font-size:11px;color:#2563eb;font-weight:700">📋</span>' +
     '</button>').join('');
 }
 // Mostrar la vista EDITAR
