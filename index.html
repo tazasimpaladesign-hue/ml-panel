@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v191 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v192 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -2799,9 +2799,13 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <th style="text-align:left;padding:6px 8px">Producto</th>
           <th style="text-align:right;padding:6px 8px">Costo</th>
           <th style="text-align:right;padding:6px 8px">🟡 Clásica</th>
+          <th style="text-align:right;padding:6px 4px;font-size:9px" title="Margen sobre el costo. Editable: cambia el precio sin tocar los porcentajes.">Margen c/u</th>
           <th style="text-align:right;padding:6px 8px">🔵 Premium</th>
+          <th style="text-align:right;padding:6px 4px;font-size:9px" title="Margen sobre el costo. Editable.">Margen c/u</th>
           <th style="text-align:right;padding:6px 8px">🟣 Woo</th>
+          <th style="text-align:right;padding:6px 4px;font-size:9px" title="Margen sobre el costo. Editable.">Margen c/u</th>
           <th style="text-align:right;padding:6px 8px">⚪ Mayorista</th>
+          <th style="text-align:right;padding:6px 4px;font-size:9px" title="Margen sobre el costo. Editable.">Margen c/u</th>
           <th style="text-align:right;padding:6px 8px">💰 Ganancia</th>
           <th style="text-align:right;padding:6px 8px">Rentab.</th>
           <th style="padding:6px 8px;text-align:center">Acciones</th>
@@ -12498,13 +12502,16 @@ async function comboGenerar(cantidad, renovar) {
       } catch (e) { return []; }
     };
     for (let intento = 0; intento < 2 && !combosIA.length; intento++) {
-      const r = await callClaude(prompt, null, 2500);
-      if (r.ok && r.text) {
-        combosIA = parsearRespuesta(r.text);
+      try {
+        // callClaude devuelve texto directamente, o LANZA si todos los modelos
+        // fallan. Capturamos el throw para poder usar el fallback local.
+        const txt = await callClaude(prompt, null, 2500);
+        combosIA = parsearRespuesta(txt);
         if (!combosIA.length) { ultimoError = 'la IA respondió pero sin combos válidos'; console.warn('[combos] intento ' + (intento + 1) + ': ' + ultimoError); }
-      } else {
-        ultimoError = r.error || 'sin respuesta del modelo';
+      } catch (e) {
+        ultimoError = e.message || 'sin respuesta del modelo';
         console.warn('[combos] intento ' + (intento + 1) + ': ' + ultimoError);
+        if (intento === 0) await new Promise(r => setTimeout(r, 1500));
       }
     }
     // Validación anti-disparate: descartar combos donde los productos NO comparten
@@ -19627,14 +19634,31 @@ function pcRenderHistory(){
     var rc=rentab>=30?'var(--green)':rentab>=10?'var(--amber)':'var(--red)';
     var gc=ganC>=0?'var(--green)':'var(--red)';
     function pr(id){ return chs[id]?.precio>0?'$'+Math.round(chs[id].precio).toLocaleString('es-AR'):'—'; }
+    // v192: celda de precio (con id para refrescar) + celda de margen editable
+    function celdaPrecio(id){
+      return '<td id="pch-'+h.id+'-'+id+'-precio" style="padding:6px 8px;text-align:right;color:var(--green);font-weight:600">'+pr(id)+'</td>';
+    }
+    function celdaMargen(id){
+      var ch=chs[id];
+      if(!ch || !(ch.precio>0) || !(h.origen>0)){
+        return '<td style="padding:6px 4px;text-align:right;color:var(--text3);font-size:10px">—</td>';
+      }
+      var m=(ch.ganancia/h.origen*100);
+      return '<td style="padding:6px 4px;text-align:right">'
+        +'<input type="number" id="pch-'+h.id+'-'+id+'-margen" value="'+m.toFixed(0)+'" '
+        +'onchange="pcHistMargenChange('+h.id+',\''+id+'\',this.value)" '
+        +'style="width:48px;font-size:10.5px;text-align:right;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg1);color:var(--text2)" '
+        +'title="Margen sobre costo. Editá para cambiar el precio (no toca los %)."> <span style="font-size:9px;color:var(--text3)">%</span>'
+        +'</td>';
+    }
     return '<tr style="border-bottom:1px solid var(--border)">'
       +'<td style="padding:6px 8px;color:var(--text3);white-space:nowrap;font-size:11px">'+h.fecha+'</td>'
       +'<td style="padding:6px 8px;font-weight:600;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+h.nombre+'</td>'
       +'<td style="padding:6px 8px;text-align:right">$'+Math.round(h.origen).toLocaleString('es-AR')+'</td>'
-      +'<td style="padding:6px 8px;text-align:right;color:var(--green);font-weight:600">'+pr('clasica')+'</td>'
-      +'<td style="padding:6px 8px;text-align:right;color:var(--green)">'+pr('premium')+'</td>'
-      +'<td style="padding:6px 8px;text-align:right;color:var(--green)">'+pr('woo')+'</td>'
-      +'<td style="padding:6px 8px;text-align:right;color:var(--green)">'+pr('mayor')+'</td>'
+      +celdaPrecio('clasica')+celdaMargen('clasica')
+      +celdaPrecio('premium')+celdaMargen('premium')
+      +celdaPrecio('woo')+celdaMargen('woo')
+      +celdaPrecio('mayor')+celdaMargen('mayor')
       +'<td style="padding:6px 8px;text-align:right;font-weight:700;color:'+gc+'">$'+Math.round(ganC).toLocaleString('es-AR')+'</td>'
       +'<td style="padding:6px 8px;text-align:right;font-weight:700;color:'+rc+'">'+rentab.toFixed(0)+'%</td>'
       +'<td style="padding:6px 8px;text-align:center;white-space:nowrap">'
@@ -19642,6 +19666,43 @@ function pcRenderHistory(){
       +'<button class="btn btn-danger btn-xs" onclick="pcDeleteCalc('+h.id+')" title="Eliminar">✕</button>'
       +'</td></tr>';
   }).join('');
+}
+
+// v192: cambiar el margen de un canal en el historial recalcula SOLO el precio
+// de ese canal usando la misma fórmula que la calculadora, SIN tocar los
+// porcentajes ni los costos fijos (ML, flete, producción, extra). Guarda.
+function pcHistMargenChange(histId, chId, valor){
+  var hist = pcLoadHistory();
+  var h = hist.find(function(x){ return x.id===histId; });
+  if(!h || !h.channels || !h.channels[chId]) return;
+  var ch = h.channels[chId];
+  var costo = h.origen || 0;
+  var margenPct = parseFloat(valor) || 0;
+  // ganancia objetivo = margen% × costo
+  var gananciaTarget = margenPct * costo / 100;
+  // Precio = (Ganancia + Costo + FlatFee + Envío) / (1 − sumaPct)
+  // Reusamos los porcentajes y fijos YA guardados del canal (no se modifican).
+  var sumPct = ((ch.comPct||0) + (ch.iibbPct||0) + (ch.retencionesPct||0) +
+                (ch.publicidadPct||0) + (ch.hostingPct||0) + (ch.contablePct||0) +
+                (ch.packagingPct||0) + (ch.debcredPct||0)) / 100;
+  var envio = ch.envioCheck ? (ch.envioAmt||ch.envioCosto||0) : 0;
+  var denom = 1 - sumPct;
+  if(denom < 0.01){ showToast('No se puede: los porcentajes suman demasiado.','error'); return; }
+  var nuevoPrecio = Math.ceil(((gananciaTarget + costo + (ch.flatFee||0) + envio) / denom) / 10) * 10;
+  // actualizar SOLO precio, ganancia y los montos derivados (no los %)
+  ch.precio = nuevoPrecio;
+  ch.ganancia = gananciaTarget;
+  // recalcular montos $ de cada concepto (derivan del nuevo precio, pero los % quedan igual)
+  ['com','iibb','retenciones','publicidad','hosting','contable','packaging','debcred'].forEach(function(f){
+    if(ch[f+'Pct']!=null) ch[f+'Amt'] = nuevoPrecio * ch[f+'Pct'] / 100;
+  });
+  pcSaveHistoryLS(hist);
+  // refrescar la celda de precio de ese canal sin redibujar toda la tabla
+  var pEl = document.getElementById('pch-'+histId+'-'+chId+'-precio');
+  if(pEl) pEl.textContent = '$'+Math.round(nuevoPrecio).toLocaleString('es-AR');
+  // si es el canal clásica, refrescar también ganancia/rentab de la fila
+  if(chId==='clasica') pcRenderHistory();
+  showToast('✓ Precio '+chId+' actualizado a $'+Math.round(nuevoPrecio).toLocaleString('es-AR'),'success');
 }
 
 
@@ -23620,6 +23681,20 @@ function ctaToggleItems(id) {
 }
 
 // Editar un ítem de una operación (cantidad o producto) y reajustar stock
+// v192: recalcula el monto de la operación sumando los ítems (cant × precio).
+// Solo cuando hay ítems con precio cargado. Marca que el monto fue editado
+// manualmente para que el neto de ML/Woo no lo pise después.
+function _ctaRecalcMontoDesdeItems(op) {
+  if (!op.items || !op.items.length) return;
+  // si ningún ítem tiene precio unitario, no tocamos el monto
+  const totalItems = op.items.reduce((a, it) => a + (Number(it.cant) || 0) * (Number(it.unit) || 0), 0);
+  if (totalItems > 0) {
+    op.monto = Math.round(totalItems * 100) / 100;
+    op.netoML = false;       // ya no es el neto automático, es manual
+    op.manualEdit = true;
+  }
+}
+
 function ctaEditItem(opId, idx, campo, valor) {
   const found = _ctaFind(opId);
   if (!found || !found.op.items || !found.op.items[idx]) return;
@@ -23632,12 +23707,14 @@ function ctaEditItem(opId, idx, campo, valor) {
   else op.items[idx].nombre = valor;
   op.manualEdit = true;
   if (wasApplied) _ctaAplicarStock(op, 1);
+  _ctaRecalcMontoDesdeItems(op);   // v192: actualizar el Monto de la fila
   _ctaPersistCatalogo();
   _ctaState.dirty.add(found.ym);
   ctaMarkDirty(found.ym);
   const exp = document.getElementById('cta-items-' + opId);
   if (exp) exp.remove();
   ctaToggleItems(opId);
+  ctaRenderTable();           // v192: refrescar la tabla para ver el nuevo Monto/Saldo
   ctaRenderStockAlerts();
 }
 
@@ -23652,11 +23729,13 @@ function ctaAddItemToOp(opId) {
   op.items.push({ nombre: '', cant: 1, unit: 0 });
   op.manualEdit = true;
   if (wasApplied) { _ctaAplicarStock(op, 1); _ctaPersistCatalogo(); }
+  _ctaRecalcMontoDesdeItems(op);
   _ctaState.dirty.add(found.ym);
   ctaMarkDirty(found.ym);
   const exp = document.getElementById('cta-items-' + opId);
   if (exp) exp.remove();
   ctaToggleItems(opId);
+  ctaRenderTable();
 }
 
 // v177: quita un ítem de una operación desde el carrito
@@ -23669,12 +23748,14 @@ function ctaRemoveItemFromOp(opId, idx) {
   op.items.splice(idx, 1);
   op.manualEdit = true;
   if (wasApplied) _ctaAplicarStock(op, 1);
+  _ctaRecalcMontoDesdeItems(op);
   _ctaPersistCatalogo();
   _ctaState.dirty.add(found.ym);
   ctaMarkDirty(found.ym);
   const exp = document.getElementById('cta-items-' + opId);
   if (exp) exp.remove();
   ctaToggleItems(opId);
+  ctaRenderTable();
   ctaRenderStockAlerts();
 }
 
