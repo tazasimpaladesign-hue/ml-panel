@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v186 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v187 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1269,7 +1269,6 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <div class="mc-val" id="seo-err">—</div><div class="mc-val" id="q-avg">—</div>
     <div class="mc-val" id="q-high">—</div><div class="mc-val" id="q-mid">—</div>
     <div class="mc-val" id="q-low">—</div><div class="mc-val" id="q-err">—</div>
-    </div>
   </div>
 
   <div class="g60 mb">
@@ -3863,7 +3862,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <span style="font-size:10.5px;color:var(--text3)">Tocá 📋 para copiar y pegalo en el chat del cliente</span>
         <button class="btn btn-ghost btn-xs" style="margin-left:auto;font-size:10.5px" onclick="persoOpenMsgEditor()">⚙️ Editar</button>
       </div>
-      <div id="perso-msgs-list" style="display:flex;flex-direction:column;gap:6px"></div>
+      <div id="perso-msgs-list" style="display:flex;flex-direction:column;gap:6px;width:100%;max-width:100%;overflow:hidden"></div>
     </div>
 
     <div class="tw">
@@ -4038,7 +4037,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <span style="font-size:10.5px;color:var(--text3)">Tocá 📋 para copiar · sincronizado con Personalizadas y todas las PCs</span>
       <button class="btn btn-ghost btn-xs" style="margin-left:auto;font-size:10.5px" onclick="persoOpenMsgEditor()">⚙️ Editar</button>
     </div>
-    <div id="cta-msgs-list" style="display:flex;flex-direction:column;gap:6px"></div>
+    <div id="cta-msgs-list" style="display:flex;flex-direction:column;gap:6px;width:100%;max-width:100%;overflow:hidden"></div>
   </div>
 
   <!-- Tabla central -->
@@ -12360,15 +12359,27 @@ let _comboState = { combos: [], publicados: [], loaded: false, generating: false
 async function _comboLoadPublicados() {
   if (_comboState.loaded) return;
   try {
-    const r = await fetch(WORKER + '/api/combos');
-    const d = await r.json();
-    _comboState.publicados = (d.ok && Array.isArray(d.combos)) ? d.combos : [];
-  } catch (e) { _comboState.publicados = []; }
+    const r = await fetch(WORKER + '/api/combos', { headers: { 'Authorization': 'Bearer ' + token } });
+    if (r.ok) {
+      const d = await r.json();
+      _comboState.publicados = (d.ok && Array.isArray(d.combos)) ? d.combos : [];
+    } else {
+      // si el worker no tiene el endpoint todavia, seguimos sin bloquear
+      console.warn('[combos] /api/combos HTTP', r.status, '- usando localStorage');
+      _comboState.publicados = JSON.parse(localStorage.getItem('mlp_combos_pub') || '[]');
+    }
+  } catch (e) {
+    console.warn('[combos] /api/combos falló:', e.message, '- usando localStorage');
+    _comboState.publicados = JSON.parse(localStorage.getItem('mlp_combos_pub') || '[]');
+  }
   _comboState.loaded = true;
 }
 function _comboSavePublicados() {
+  // siempre guardar local como respaldo
+  try { localStorage.setItem('mlp_combos_pub', JSON.stringify(_comboState.publicados)); } catch (e) {}
+  // e intentar subir a la nube (si el worker lo soporta)
   fetch(WORKER + '/api/combos', {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
     body: JSON.stringify({ combos: _comboState.publicados })
   }).catch(e => console.warn('[combos save]', e.message));
 }
@@ -12421,16 +12432,23 @@ async function comboGenerar(cantidad, renovar) {
       'Los indices son los números de la lista. No repitas pares. ' +
       'LISTA:\n' + lista;
 
-    const r = await callClaude(prompt, null, 1500);
-    if (!r.ok) throw new Error(r.error || 'La IA no respondió');
-
-    // Parsear el JSON (puede venir con texto alrededor)
-    let jsonTxt = r.text.trim();
-    const m = jsonTxt.match(/\{[\s\S]*\}/);
-    if (m) jsonTxt = m[0];
-    let parsed;
-    try { parsed = JSON.parse(jsonTxt); } catch (e) { throw new Error('La IA devolvió un formato inesperado. Probá de nuevo.'); }
-    const combosIA = (parsed.combos || []);
+    const r = await callClaude(prompt, null, 2000);
+    let combosIA = [];
+    if (r.ok && r.text) {
+      // Parsear el JSON (puede venir con texto alrededor o con markdown)
+      let jsonTxt = r.text.trim().replace(/```json/gi, '').replace(/```/g, '');
+      const m = jsonTxt.match(/\{[\s\S]*\}/);
+      if (m) jsonTxt = m[0];
+      try { combosIA = (JSON.parse(jsonTxt).combos) || []; }
+      catch (e) { console.warn('[combos] JSON inválido de la IA, uso fallback local'); }
+    } else {
+      console.warn('[combos] IA no disponible (' + (r.error || 'sin respuesta') + '), uso fallback local');
+    }
+    // Fallback: si la IA falló o no devolvió combos válidos, armamos combos
+    // localmente combinando los mejores productos de a pares.
+    if (!combosIA.length) {
+      combosIA = _comboFallbackLocal(top, cantidad);
+    }
 
     const nuevos = [];
     for (const c of combosIA) {
@@ -12458,6 +12476,35 @@ async function comboGenerar(cantidad, renovar) {
     _comboState.generating = false;
     if (btn) { btn.disabled = false; btn.textContent = '✨ Generar combos'; }
   }
+}
+
+// Fallback local: arma combos emparejando productos por temática (palabras en
+// común en el título) o, si no hay, simplemente los mejores de a pares.
+function _comboFallbackLocal(items, cantidad) {
+  const stop = new Set(['taza','de','con','para','el','la','los','las','y','en','un','una','set','ml','cm','x','por','tu','mi','diseno','diseño','personalizada','personalizado','ceramica','cerámica','color','modelo']);
+  const tokens = (t) => (t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/[^a-z0-9]+/).filter(w => w.length > 2 && !stop.has(w));
+  const out = []; const used = new Set();
+  // 1) emparejar por temática (token compartido)
+  for (let i = 0; i < items.length && out.length < cantidad; i++) {
+    if (used.has(i)) continue;
+    const ti = tokens(items[i].title);
+    for (let j = i + 1; j < items.length && out.length < cantidad; j++) {
+      if (used.has(j)) continue;
+      const tj = tokens(items[j].title);
+      const comun = ti.find(w => tj.includes(w));
+      if (comun) {
+        const palabra = comun.charAt(0).toUpperCase() + comun.slice(1);
+        out.push({ a: i, b: j, titulo: 'Combo ' + palabra + ' x2 2026' });
+        used.add(i); used.add(j); break;
+      }
+    }
+  }
+  // 2) completar con los mejores sin usar, de a pares
+  const libres = items.map((_, i) => i).filter(i => !used.has(i));
+  for (let k = 0; k + 1 < libres.length && out.length < cantidad; k += 2) {
+    out.push({ a: libres[k], b: libres[k + 1], titulo: 'Combo especial 2x 2026' });
+  }
+  return out;
 }
 
 function comboRender() {
@@ -22192,9 +22239,9 @@ function persoToggleMsgs() {
 function persoRenderMsgs() {
   const msgs = persoGetMsgs();
   const htmlMsgs = msgs.map((m, i) =>
-    '<div style="display:flex;align-items:center;gap:8px">' +
-      '<span style="flex-shrink:0;min-width:140px;font-size:11.5px;font-weight:700;color:#fff;background:' + _persoEsc(m.color || '#6b7280') + ';padding:5px 10px;border-radius:8px;text-align:center">' + _persoEsc(m.label) + '</span>' +
-      '<span style="flex:1;font-size:11px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + _persoEsc(m.text) + '">' + _persoEsc((m.text || '').replace(/\n/g, ' ')) + '</span>' +
+    '<div style="display:flex;align-items:center;gap:8px;width:100%;max-width:100%;min-width:0;overflow:hidden">' +
+      '<span style="flex-shrink:0;max-width:160px;font-size:11.5px;font-weight:700;color:#fff;background:' + _persoEsc(m.color || '#6b7280') + ';padding:5px 10px;border-radius:8px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + _persoEsc(m.label) + '">' + _persoEsc(m.label) + '</span>' +
+      '<span style="flex:1 1 0;min-width:0;font-size:11px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + _persoEsc(m.text) + '">' + _persoEsc((m.text || '').replace(/\n/g, ' ')) + '</span>' +
       '<button class="btn btn-ghost btn-sm" style="padding:4px 9px;flex-shrink:0" title="Copiar mensaje" onclick="persoCopyMsg(' + i + ')">📋 Copiar</button>' +
     '</div>').join('');
   // v167: pintar en ambas secciones (Personalizadas y Cuenta Impala)
