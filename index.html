@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v184 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v185 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4200,6 +4200,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
             <th style="text-align:center;width:104px" title="Total comprado (de tu Excel). Las compras de insumos nuevas lo suman.">Comprado</th>
             <th style="text-align:center;width:96px" title="Total vendido (de tu Excel). Las ventas nuevas lo suman.">Vendido</th>
             <th style="text-align:center;width:84px" title="Stock = Comprado − Vendido (automático)">Stock</th>
+            <th style="text-align:center;width:90px" title="Días de inventario que quedan según la venta de los últimos 30 días. La fecha es cuándo conviene pedir (considera la demora del proveedor).">Días inv.</th>
             <th style="text-align:center;width:78px" title="Avisar cuando el stock baje de este número">Mínimo</th>
             <th style="text-align:center;width:84px" title="Cantidad a comprar cuando se llega al mínimo">Comprar</th>
             <th style="text-align:center;width:80px" title="Costo unitario (para rentabilidad)">Costo $</th>
@@ -11737,18 +11738,28 @@ const SEO_PRED_MATCH_WINDOW_DAYS = 14; // ventana hacia atrás para buscar snaps
 function _predLoad(){
   try {
     const raw = localStorage.getItem(SEO_PRED_STORAGE);
-    if(!raw) return { snapshots:{}, matches:[], lastReportTs:0, firstRunTs:0 };
+    if(!raw) return { snapshots:{}, matches:[], lastReportTs:0, firstRunTs:0, cumTP:0, cumFP:0, cumDoneFP:{}, cumDoneTP:{} };
     const d = JSON.parse(raw);
     return {
       snapshots: d.snapshots || {},
       matches:   d.matches   || [],
       lastReportTs: d.lastReportTs || 0,
       firstRunTs:   d.firstRunTs   || 0,
+      // v185: acumulado permanente de aciertos/fallos (no se borra con la rotación)
+      cumTP:     d.cumTP     || 0,   // total de aciertos históricos
+      cumFP:     d.cumFP     || 0,   // total de fallos históricos
+      cumDoneTP: d.cumDoneTP || {},  // itemIds ya contados como TP (evita duplicar)
+      cumDoneFP: d.cumDoneFP || {},  // itemIds ya contados como FP por snapshot
     };
-  } catch(e){ return { snapshots:{}, matches:[], lastReportTs:0, firstRunTs:0 }; }
+  } catch(e){ return { snapshots:{}, matches:[], lastReportTs:0, firstRunTs:0, cumTP:0, cumFP:0, cumDoneFP:{}, cumDoneTP:{} }; }
 }
 function _predSave(store){
   try {
+    // v185: garantizar que los acumulados existan antes de guardar
+    if(store.cumTP === undefined) store.cumTP = 0;
+    if(store.cumFP === undefined) store.cumFP = 0;
+    if(!store.cumDoneTP) store.cumDoneTP = {};
+    if(!store.cumDoneFP) store.cumDoneFP = {};
     localStorage.setItem(SEO_PRED_STORAGE, JSON.stringify(store));
     return true;
   } catch(e){
@@ -12422,8 +12433,25 @@ function _predGetRadarStats(){
   const fnItems = Object.values(fnMatchesByItem)
     .sort((a, b) => b.totalUnits - a.totalUnits);
 
+  // ── v185: acumular TP/FP PERMANENTES (efectividad histórica certera) ──
+  // Un acierto (TP) se cuenta una sola vez por item. Un fallo (FP) se cuenta
+  // una vez por snapshot-hot que no vendió. Nunca se borran.
+  let cumChanged = false;
+  for(const itemId of uniqueHotSold){
+    if(!store.cumDoneTP[itemId]){ store.cumDoneTP[itemId] = Date.now(); store.cumTP++; cumChanged = true; }
+  }
+  for(const fp of fpItems){
+    // clave por item+ts del snapshot para no recontar el mismo episodio
+    const key = fp.itemId + ':' + (fp.snapshot?.ts || 0);
+    if(!store.cumDoneFP[key]){ store.cumDoneFP[key] = Date.now(); store.cumFP++; cumChanged = true; }
+  }
+  if(cumChanged) _predSave(store);
+
   const total = uniqueHotSold.size + fpItems.length;
   const effectiveness = total > 0 ? Math.round((uniqueHotSold.size / total) * 100) : null;
+  // Efectividad HISTÓRICA acumulada (permanente)
+  const cumTotal = (store.cumTP || 0) + (store.cumFP || 0);
+  const cumEffectiveness = cumTotal > 0 ? Math.round((store.cumTP / cumTotal) * 100) : null;
 
   return {
     tp: uniqueHotSold.size,
@@ -12432,6 +12460,10 @@ function _predGetRadarStats(){
     totalHotItems: total,
     totalMatches: recentMatches.length,
     effectiveness,
+    // v185: acumulados permanentes
+    cumTP: store.cumTP || 0,
+    cumFP: store.cumFP || 0,
+    cumEffectiveness,
     // v127: listas detalladas para el modal
     tpItems,
     fpItems,
@@ -12732,9 +12764,16 @@ function renderRadarAciertos(){
 
     //    Efectividad (NO clickeable — es métrica agregada)
     +   '<div style="background:#ffffff;border:1px solid '+c.bdr+';border-radius:8px;padding:11px 13px;text-align:center">'
-    +     '<div style="font-size:11px;color:'+c.dim+';font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px">🏆 Efectividad</div>'
+    +     '<div style="font-size:11px;color:'+c.dim+';font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px">🏆 Efectividad 7d</div>'
     +     '<div style="font-size:30px;font-weight:800;color:'+effColor+';line-height:1">'+effLabel+'</div>'
     +     '<div style="font-size:10.5px;color:'+c.dim+';margin-top:4px">'+stats.totalHotItems+' items 🔥 totales</div>'
+    +   '</div>'
+
+    //    v185: Efectividad HISTÓRICA acumulada (permanente desde el inicio)
+    +   '<div style="background:#ffffff;border:1px solid '+c.bdr+';border-radius:8px;padding:11px 13px;text-align:center" title="Efectividad acumulada desde que empezó a medir. '+(stats.cumTP||0)+' aciertos y '+(stats.cumFP||0)+' fallos históricos.">'
+    +     '<div style="font-size:11px;color:'+c.dim+';font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px">📈 Efectividad histórica</div>'
+    +     '<div style="font-size:30px;font-weight:800;color:'+(stats.cumEffectiveness===null?'#94a3b8':stats.cumEffectiveness>=60?'#16a34a':stats.cumEffectiveness>=40?'#eab308':'#dc2626')+';line-height:1">'+(stats.cumEffectiveness===null?'—':stats.cumEffectiveness+'%')+'</div>'
+    +     '<div style="font-size:10.5px;color:'+c.dim+';margin-top:4px">'+(stats.cumTP||0)+' ✓ · '+(stats.cumFP||0)+' ✗ acumulados</div>'
     +   '</div>'
 
     //    Pasó por alto (clickeable)
@@ -24673,16 +24712,67 @@ function _ctaRenderStockAlertsV2() {
     const col = _ctaColorProducto(c);
     const tc = _ctaTextoContraste(col);
     const subC = tc === '#fff' ? 'rgba(255,255,255,.85)' : 'rgba(0,0,0,.6)';
-    return '<div class="ctakpi" style="min-width:158px;padding:9px 12px;background:' + col + ';color:' + tc + ';border:1px solid rgba(0,0,0,.12)">' +
+    const di = _ctaDiasInventario(c);
+    const fechaTxt = (di.velocidad > 0 && di.fechaCompra) ? ' el ' + _ctaFmtFecha(di.fechaCompra) : '';
+    const diasTxt = di.velocidad > 0 ? (di.dias === Infinity ? '∞' : di.dias + ' días') : 'sin ventas 30d';
+    return '<div class="ctakpi" style="min-width:172px;padding:9px 12px;background:' + col + ';color:' + tc + ';border:1px solid rgba(0,0,0,.12)">' +
       '<div class="mc-label" style="display:flex;align-items:center;gap:4px;color:' + tc + ';font-size:10px">' + (c.emoji || '📦') + ' ' + _persoEsc(c.nombre) + '</div>' +
       '<div style="color:' + tc + ';font-weight:800;font-size:21px;line-height:1.1;margin:2px 0">' + st + ' <span style="font-size:11px;color:' + subC + ';font-weight:600">/ mín ' + (c.stockMin || 0) + '</span></div>' +
-      '<div style="color:' + subC + ';font-weight:800;font-size:13.5px">→ comprar ' + comprar + '</div>' +
+      '<div style="color:' + subC + ';font-weight:800;font-size:13px">→ comprar ' + comprar + fechaTxt + '</div>' +
+      '<div style="color:' + subC + ';font-size:11px;font-weight:600;margin-top:1px">días de stock: ' + diasTxt + '</div>' +
       '</div>';
   }).join('');
   cont.innerHTML =
     '<div style="font-size:11px;font-weight:700;color:#b45309;margin-bottom:7px">⚠ Stock bajo — hay que reponer ' + bajos.length + ' producto(s)</div>' +
     '<div style="display:flex;gap:7px;flex-wrap:wrap">' + cards + '</div>';
 }
+// v185: lead time (demora del proveedor en días) según el tipo de producto.
+function _ctaLeadTime(c) {
+  if (Number(c.leadTime) > 0) return Number(c.leadTime); // override manual si existe
+  const n = (c.nombre || '').toLowerCase();
+  // Jarros térmicos, mates, chops y tazas plásticas: reposición rápida (~5 días)
+  if (/jarr|term|mate|chop|plast|plást|poly|hoppy|hoppi/.test(n)) return 5;
+  // Tazas blancas, mágicas, interior color: reposición lenta (~28 días)
+  if (/blanc|magic|mágic|interior|cer[aá]mic|taza/.test(n)) return 28;
+  return 15; // por defecto, intermedio
+}
+
+// v185: velocidad de venta diaria (unidades/día) de un producto en los últimos 30 días,
+// calculada desde las operaciones de la cuenta (ventas que mapean al producto).
+function _ctaVelocidadVenta(c) {
+  const desde = _ctaLocalDateStr(new Date(Date.now() - 30 * 86400000));
+  let unidades = 0;
+  Object.values(_ctaState.chunks).forEach(ch => (ch || []).forEach(o => {
+    if (o.tipo !== 'ingreso') return;
+    if ((o.fecha || '') < desde) return;
+    (o.items || []).forEach(it => {
+      const cat = _ctaCatMatch(it);
+      if (cat && cat.nombre === c.nombre) unidades += Number(it.cant) || 0;
+    });
+  }));
+  return unidades / 30; // unidades por día
+}
+
+// v185: días de inventario restantes + fecha sugerida de compra.
+// Devuelve { dias, fechaCompra (Date|null), velocidad }.
+function _ctaDiasInventario(c) {
+  const vel = _ctaVelocidadVenta(c);
+  const stock = Number(c.stock) || 0;
+  if (vel <= 0) return { dias: stock > 0 ? Infinity : 0, fechaCompra: null, velocidad: 0 };
+  const dias = Math.round(stock / vel);
+  const lead = _ctaLeadTime(c);
+  // hay que pedir cuando queden 'lead' días de stock → dentro de (dias - lead) días
+  const diasHastaPedir = dias - lead;
+  const fechaCompra = new Date(Date.now() + Math.max(0, diasHastaPedir) * 86400000);
+  return { dias, fechaCompra, velocidad: vel, lead };
+}
+function _ctaFmtFecha(d) {
+  if (!d) return '—';
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  return dd + '-' + mm + '-' + d.getFullYear();
+}
+
 // v183: color de una ficha de producto. Usa c.color si está; si no, lo deduce
 // del nombre por palabras clave; si no, un color estable por hash del nombre.
 function _ctaColorProducto(c) {
@@ -24833,6 +24923,7 @@ function ctaStockAddRow(c) {
     '<td><input class="cs-comprado" type="number" value="' + (Number(c.comprado) || 0) + '" min="0" style="font-size:12px;width:100%;text-align:center;color:#16a34a;font-weight:700" title="Total comprado (de tu Excel). Las compras de insumos nuevas lo suman solas." oninput="ctaStockRecalcRow(this)"></td>' +
     '<td><input class="cs-vendido" type="number" value="' + (Number(c.vendido) || 0) + '" min="0" style="font-size:12px;width:100%;text-align:center;color:#2563eb;font-weight:700" title="Total vendido (de tu Excel). Las ventas nuevas lo suman solas." oninput="ctaStockRecalcRow(this)"></td>' +
     '<td><input class="cs-stock" type="number" value="' + ((Number(c.comprado) || 0) - (Number(c.vendido) || 0)) + '" readonly style="font-size:12px;width:100%;text-align:center;font-weight:800;background:var(--bg2);color:var(--text1)" title="Automático: Comprado − Vendido"></td>' +
+    '<td style="text-align:center;font-size:11px">' + (() => { const di = _ctaDiasInventario(c); if (di.velocidad <= 0) return '<span style="color:var(--text3)" title="Sin ventas en 30 días">—</span>'; const col = di.dias <= di.lead ? '#dc2626' : di.dias <= di.lead * 1.5 ? '#d97706' : '#16a34a'; return '<span style="font-weight:800;color:' + col + '" title="Vel: ' + di.velocidad.toFixed(2) + ' u/día · pedir aprox ' + _ctaFmtFecha(di.fechaCompra) + '">' + (di.dias === Infinity ? '∞' : di.dias + 'd') + '</span>'; })() + '</td>' +
     '<td><input class="cs-min" type="number" value="' + (c.stockMin || 0) + '" min="0" style="font-size:12px;width:100%;text-align:center" oninput="ctaStockRecalcRow(this)"></td>' +
     '<td><input class="cs-comprar" type="number" value="' + Math.max(0, (c.stockMin || 0) - (Number(c.stock) || 0)) + '" readonly style="font-size:12px;width:100%;text-align:center;background:var(--bg2);color:#d97706;font-weight:600" title="Calculado: Mínimo − Stock"></td>' +
     '<td><input class="cs-costo" type="number" value="' + (c.costo || 0) + '" min="0" style="font-size:12px;width:100%;text-align:center"></td>' +
