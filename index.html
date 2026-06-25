@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v192 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v193 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1250,15 +1250,34 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
       <div>
         <div class="card-title" style="margin:0">🎁 Combos sugeridos por IA <span style="font-size:10px;color:var(--text3);font-weight:500">· para subir el ticket promedio</span></div>
-        <div style="font-size:11px;color:var(--text3)">Combinaciones de tus productos más vendidos/visitados. Marcá uno como publicado y se genera otro nuevo.</div>
+        <div style="font-size:11px;color:var(--text3)">5 combinaciones de tus mejores productos. "Listo" = publicado · "✕" = mala combinación (no la repite).</div>
       </div>
       <div style="display:flex;gap:8px;margin-left:auto;flex-wrap:wrap">
-        <button class="btn btn-sm" id="combo-gen-btn" style="background:#6366f1;color:#fff" onclick="comboGenerar(10)">✨ Generar combos</button>
-        <button class="btn btn-ghost btn-sm" onclick="comboGenerar(10, true)" title="Volver a generar todos">🔄 Renovar</button>
+        <button class="btn btn-sm" id="combo-gen-btn" style="background:#6366f1;color:#fff" onclick="comboGenerar(5)">✨ Generar combos</button>
+        <button class="btn btn-ghost btn-sm" onclick="comboAbrirManual()" title="Armar un combo a mano buscando productos">🔍 Armar manual</button>
+        <button class="btn btn-ghost btn-sm" onclick="comboGenerar(5, true)" title="Volver a generar todos">🔄 Renovar</button>
       </div>
     </div>
-    <div id="combo-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px">
-      <div style="grid-column:1/-1;text-align:center;padding:30px;color:var(--text3)">Tocá "✨ Generar combos" para que la IA arme combinaciones con tus mejores productos.</div>
+    <!-- Buscador manual de combos (oculto hasta tocar "Armar manual") -->
+    <div id="combo-manual" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+        <input type="text" id="combo-manual-q" placeholder="Buscar (ej: river, messi, harry potter)..." style="flex:1;min-width:200px;font-size:12px;padding:6px 10px" onkeyup="if(event.key===&quot;Enter&quot;)comboManualBuscar()">
+        <button class="btn btn-sm" style="background:#6366f1;color:#fff" onclick="comboManualBuscar()">🔍 Buscar</button>
+        <button class="btn btn-ghost btn-xs" onclick="comboCerrarManual()">✕ Cerrar</button>
+      </div>
+      <div style="font-size:10.5px;color:var(--text3);margin-bottom:6px">Seleccioná 2 o 3 productos (ordenados por más vendidos/visitados). Después armá el combo.</div>
+      <div id="combo-manual-results" style="display:flex;flex-direction:column;gap:5px;max-height:280px;overflow-y:auto"></div>
+      <div id="combo-manual-sel" style="margin-top:10px;display:none">
+        <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:6px">Seleccionados: <span id="combo-manual-count">0</span></div>
+        <div id="combo-manual-chips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input type="text" id="combo-manual-titulo" placeholder="Título del combo (opcional, lo armo solo si lo dejás vacío)" style="flex:1;min-width:220px;font-size:12px;padding:6px 10px">
+          <button class="btn btn-sm" style="background:#16a34a;color:#fff" onclick="comboManualArmar()">➕ Armar combo</button>
+        </div>
+      </div>
+    </div>
+    <div id="combo-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:10px">
+      <div style="grid-column:1/-1;text-align:center;padding:30px;color:var(--text3)">Tocá "✨ Generar combos" para que la IA arme 5 combinaciones con tus mejores productos.</div>
     </div>
   </div>
 
@@ -2797,17 +2816,19 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <tr style="font-size:10px;color:var(--text3);background:var(--bg3);border-bottom:2px solid var(--border)">
           <th style="text-align:left;padding:6px 8px;white-space:nowrap">Fecha</th>
           <th style="text-align:left;padding:6px 8px">Producto</th>
-          <th style="text-align:right;padding:6px 8px">Costo</th>
+          <th style="text-align:right;padding:6px 6px;font-size:9.5px" title="Costo de la taza blanca (insumo base). Editable: cambia el precio final de cada plataforma sin tocar los porcentajes ni los costos fijos.">Costo Blanco ($)</th>
           <th style="text-align:right;padding:6px 8px">🟡 Clásica</th>
-          <th style="text-align:right;padding:6px 4px;font-size:9px" title="Margen sobre el costo. Editable: cambia el precio sin tocar los porcentajes.">Margen c/u</th>
+          <th style="text-align:right;padding:6px 4px;font-size:9px" title="Margen sobre el costo. Editable.">Margen</th>
+          <th style="text-align:right;padding:6px 4px;font-size:9px" title="Ganancia neta de Clásica">Ganan.</th>
           <th style="text-align:right;padding:6px 8px">🔵 Premium</th>
-          <th style="text-align:right;padding:6px 4px;font-size:9px" title="Margen sobre el costo. Editable.">Margen c/u</th>
+          <th style="text-align:right;padding:6px 4px;font-size:9px" title="Margen sobre el costo. Editable.">Margen</th>
+          <th style="text-align:right;padding:6px 4px;font-size:9px" title="Ganancia neta de Premium">Ganan.</th>
           <th style="text-align:right;padding:6px 8px">🟣 Woo</th>
-          <th style="text-align:right;padding:6px 4px;font-size:9px" title="Margen sobre el costo. Editable.">Margen c/u</th>
+          <th style="text-align:right;padding:6px 4px;font-size:9px" title="Margen sobre el costo. Editable.">Margen</th>
+          <th style="text-align:right;padding:6px 4px;font-size:9px" title="Ganancia neta de Woo">Ganan.</th>
           <th style="text-align:right;padding:6px 8px">⚪ Mayorista</th>
-          <th style="text-align:right;padding:6px 4px;font-size:9px" title="Margen sobre el costo. Editable.">Margen c/u</th>
-          <th style="text-align:right;padding:6px 8px">💰 Ganancia</th>
-          <th style="text-align:right;padding:6px 8px">Rentab.</th>
+          <th style="text-align:right;padding:6px 4px;font-size:9px" title="Margen sobre el costo. Editable.">Margen</th>
+          <th style="text-align:right;padding:6px 4px;font-size:9px" title="Ganancia neta de Mayorista">Ganan.</th>
           <th style="padding:6px 8px;text-align:center">Acciones</th>
         </tr>
       </thead>
@@ -12541,10 +12562,11 @@ async function comboGenerar(cantidad, renovar) {
       if (prods.length < 2) continue;
       const key = _comboKey(prods.map(p => p.id));
       if (publicadosSet.has(key) || yaEnPantalla.has(key) || nuevos.some(n => n.key === key)) continue;
+      const fuente = usoFallback ? 'panel' : (window._lastAIModel || 'IA');
       nuevos.push({
         key, titulo: (c.titulo || ('Combo ' + (c.tema || 'especial'))).slice(0, 70),
-        tema: c.tema || '', justificacion: c.justificacion || '',
-        productos: prods.map(p => ({ id: p.id, title: p.title, thumb: p.thumbnail, permalink: p.permalink, ventas: p.sold_quantity || 0 })),
+        tema: c.tema || '', justificacion: c.justificacion || '', fuente: fuente,
+        productos: prods.map(p => ({ id: p.id, title: p.title, thumb: p.thumbnail, permalink: p.permalink, sku: (typeof itemGetSKU==='function'? itemGetSKU(p) : (p.seller_custom_field||'')) || '', ventas: p.sold_quantity || 0 })),
       });
       if (_comboState.combos.length + nuevos.length >= cantidad) break;
     }
@@ -12563,7 +12585,13 @@ async function comboGenerar(cantidad, renovar) {
       if (grid) grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:24px;color:var(--text3);line-height:1.5;font-size:12.5px">' + msg + '</div>';
     } else {
       comboRender();
-      if (usoFallback && typeof showToast === 'function') showToast('💡 Combos armados localmente (la IA no respondió)', 'info');
+      if (typeof showToast === 'function') {
+        if (usoFallback) showToast('⚙️ ' + _comboState.combos.length + ' combos armados por el panel (la IA no respondió)', 'info');
+        else {
+          const modelo = (window._lastAIModel || '').split('/').pop().replace(':free', '') || 'IA';
+          showToast('🤖 ' + _comboState.combos.length + ' combos generados por ' + modelo, 'success');
+        }
+      }
     }
   } catch (e) {
     console.error('[combos]', e);
@@ -12636,20 +12664,29 @@ function comboRender() {
   grid.innerHTML = _comboState.combos.map((c, idx) => {
     const prods = c.productos || [];
     const anchoImg = prods.length >= 3 ? '30%' : '44%';
-    // miniaturas con "+" entre cada una
+    // miniaturas con "+" entre cada una, con MLA + SKU debajo
     let thumbs = '';
     prods.forEach((p, k) => {
       if (k > 0) thumbs += '<div style="font-size:20px;font-weight:800;color:#6366f1;flex-shrink:0">+</div>';
+      const mla = p.id || '';
+      const sku = p.sku || '';
       thumbs += '<div style="text-align:center;width:' + anchoImg + '">' +
-        '<img src="' + (p.thumb || '') + '" style="width:58px;height:58px;object-fit:cover;border-radius:8px;border:1px solid var(--border)" onerror="this.style.opacity=.3">' +
-        '<div style="font-size:9px;color:var(--text3);margin-top:3px;line-height:1.2;max-height:24px;overflow:hidden" title="' + _persoEsc(p.title) + '">' + _persoEsc((p.title || '').slice(0, 28)) + '</div>' +
+        '<img src="' + (p.thumb || '') + '" style="width:54px;height:54px;object-fit:cover;border-radius:8px;border:1px solid var(--border)" onerror="this.style.opacity=.3">' +
+        '<div style="font-size:8.5px;color:var(--text3);margin-top:2px;line-height:1.15;max-height:22px;overflow:hidden" title="' + _persoEsc(p.title) + '">' + _persoEsc((p.title || '').slice(0, 26)) + '</div>' +
+        '<div style="font-size:8.5px;font-weight:700;color:#2563eb;cursor:pointer;margin-top:1px" title="Clic para copiar el código" onclick="navigator.clipboard.writeText(\'' + mla + '\');if(typeof showToast===\'function\')showToast(\'📋 ' + mla + ' copiado\',\'ok\')">' + _persoEsc(mla) + '</div>' +
+        (sku ? '<div style="font-size:8px;color:var(--text3)" title="SKU">SKU: ' + _persoEsc(sku) + '</div>' : '') +
       '</div>';
     });
     // botones para ver cada producto
     let botonesProd = '';
     prods.forEach((p, k) => {
-      botonesProd += '<button class="btn btn-ghost btn-xs" style="flex:1;font-size:10px" onclick="window.open(\'' + (p.permalink || '#') + '\',\'_blank\')" title="Ver producto ' + (k + 1) + '">🔗 ' + (k + 1) + '</button>';
+      botonesProd += '<button class="btn btn-ghost btn-xs" style="flex:1;font-size:10px" onclick="window.open(\'' + (p.permalink || '#') + '\',\'_blank\')" title="Ver ' + _persoEsc(p.id || '') + ' en ML">🔗 ' + (k + 1) + '</button>';
     });
+    // badge de origen (qué IA o si fue el panel)
+    const fuente = c.fuente || '';
+    const fuenteBadge = fuente
+      ? '<div style="font-size:8.5px;color:var(--text3);text-align:center">' + (fuente === 'panel' ? '⚙️ armado por el panel' : '🤖 ' + _persoEsc(fuente)) + '</div>'
+      : '';
     return '<div style="border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--bg1);display:flex;flex-direction:column;gap:8px">' +
       '<div style="display:flex;align-items:center;gap:5px;justify-content:center">' + thumbs + '</div>' +
       (prods.length >= 3 ? '<div style="text-align:center;font-size:9px;color:#6366f1;font-weight:700;text-transform:uppercase;letter-spacing:.4px">Combo x3 · mayor ticket</div>' : '') +
@@ -12658,15 +12695,132 @@ function comboRender() {
         '<div style="font-size:12.5px;font-weight:700;cursor:pointer" title="Clic para copiar" onclick="navigator.clipboard.writeText(this.textContent);if(typeof showToast===\'function\')showToast(\'📋 Título copiado\',\'ok\')">' + _persoEsc(c.titulo) + '</div>' +
       '</div>' +
       (c.justificacion ? '<div style="font-size:10px;color:var(--text3);font-style:italic;text-align:center;line-height:1.3">💡 ' + _persoEsc(c.justificacion) + '</div>' : '') +
+      fuenteBadge +
       '<div style="display:flex;gap:6px">' +
         botonesProd +
       '</div>' +
       '<div style="display:flex;gap:6px">' +
-        '<button class="btn btn-xs" style="flex:1.3;background:#ffe600;color:#2d3277;font-weight:700;font-size:10.5px" onclick="comboPublicarML(' + idx + ')" title="Abrir Mercado Libre para crear la publicación del combo (copia el título primero)">📤 Publicar en ML</button>' +
-        '<button class="btn btn-xs" style="flex:1;background:#16a34a;color:#fff;font-size:10.5px" onclick="comboMarcarPublicado(' + idx + ')" title="Marcar como publicado (no se vuelve a sugerir)">✓ Listo</button>' +
+        '<button class="btn btn-xs" style="flex:1.6;background:#ffe600;color:#2d3277;font-weight:700;font-size:10.5px" onclick="comboPublicarML(' + idx + ')" title="Abrir el armador de KIT de Mercado Libre. Copiá los códigos MLA de arriba para agregarlos.">📤 Publicar kit en ML</button>' +
+        '<button class="btn btn-xs" style="flex:1;background:#16a34a;color:#fff;font-size:10.5px" onclick="comboMarcarPublicado(' + idx + ')" title="Combo bueno y ya publicado (no se vuelve a sugerir)">✓ Listo</button>' +
+        '<button class="btn btn-xs" style="flex:0.6;background:#ef4444;color:#fff;font-size:11px" onclick="comboMarcarMalo(' + idx + ')" title="Mala combinación: descartar y no volver a sugerirla">✕</button>' +
       '</div>' +
     '</div>';
   }).join('');
+}
+
+// v193: marcar un combo como MALA combinación. Lo descarta y lo recuerda para
+// no volver a sugerirlo (igual que publicado, pero marcado como rechazado).
+function comboMarcarMalo(idx) {
+  const c = _comboState.combos[idx];
+  if (!c) return;
+  _comboState.publicados.push({ key: c.key, titulo: c.titulo, rechazado: true, fecha: _ctaLocalDate ? _ctaLocalDate(new Date()) : '' });
+  _comboSavePublicados();
+  _comboState.combos.splice(idx, 1);
+  _comboPersistVisibles();
+  comboRender();
+  if (typeof showToast === 'function') showToast('✕ Combo descartado (no se vuelve a sugerir)', 'info');
+}
+
+// ══════════════ ARMADOR MANUAL DE COMBOS (v193) ══════════════
+let _comboManualSel = [];  // productos seleccionados a mano
+
+function comboAbrirManual() {
+  const box = document.getElementById('combo-manual');
+  if (box) box.style.display = 'block';
+  const q = document.getElementById('combo-manual-q');
+  if (q) { q.value = ''; q.focus(); }
+  document.getElementById('combo-manual-results').innerHTML = '<div style="color:var(--text3);font-size:11px;padding:10px;text-align:center">Escribí algo y tocá Buscar.</div>';
+}
+function comboCerrarManual() {
+  const box = document.getElementById('combo-manual');
+  if (box) box.style.display = 'none';
+  _comboManualSel = [];
+}
+
+// Busca en allItems por texto, ordena por ventas+visitas, muestra con checkbox
+function comboManualBuscar() {
+  const q = (document.getElementById('combo-manual-q').value || '').trim().toLowerCase();
+  const cont = document.getElementById('combo-manual-results');
+  if (!q) { cont.innerHTML = '<div style="color:var(--text3);font-size:11px;padding:10px;text-align:center">Escribí algo para buscar.</div>'; return; }
+  if (!Array.isArray(allItems) || !allItems.length) { cont.innerHTML = '<div style="color:#dc2626;font-size:11px;padding:10px;text-align:center">Esperá a que carguen las publicaciones.</div>'; return; }
+  const qWords = q.split(/\s+/);
+  const matches = allItems.filter(i => {
+    if (i.status !== 'active') return false;
+    const t = (i.title || '').toLowerCase();
+    return qWords.every(w => t.includes(w));
+  }).map(i => {
+    const ventas = i.sold_quantity || 0;
+    const vis = i._visits30 || i.visits || 0;
+    return { i, score: ventas * 2 + vis * 0.1, ventas, vis };
+  }).sort((a, b) => b.score - a.score).slice(0, 25);
+  if (!matches.length) { cont.innerHTML = '<div style="color:var(--text3);font-size:11px;padding:10px;text-align:center">Sin resultados para "' + _persoEsc(q) + '".</div>'; return; }
+  cont.innerHTML = matches.map(m => {
+    const i = m.i;
+    const sel = _comboManualSel.some(s => s.id === i.id);
+    const sku = (typeof itemGetSKU === 'function' ? itemGetSKU(i) : '') || '';
+    return '<div onclick="comboManualToggle(\'' + i.id + '\')" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid ' + (sel ? '#16a34a' : 'var(--border)') + ';border-radius:8px;cursor:pointer;background:' + (sel ? 'rgba(22,163,74,.08)' : 'var(--bg1)') + '">' +
+      '<span style="font-size:14px">' + (sel ? '✅' : '⬜') + '</span>' +
+      '<img src="' + (i.thumbnail || '') + '" style="width:38px;height:38px;object-fit:cover;border-radius:5px;flex-shrink:0" onerror="this.style.opacity=.3">' +
+      '<div style="flex:1;min-width:0">' +
+        '<div style="font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + _persoEsc(i.title) + '">' + _persoEsc(i.title) + '</div>' +
+        '<div style="font-size:9px;color:var(--text3)">' + _persoEsc(i.id) + (sku ? ' · SKU: ' + _persoEsc(sku) : '') + ' · ' + m.ventas + ' vendidos</div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function comboManualToggle(id) {
+  const i = allItems.find(x => x.id === id);
+  if (!i) return;
+  const idx = _comboManualSel.findIndex(s => s.id === id);
+  if (idx >= 0) _comboManualSel.splice(idx, 1);
+  else {
+    if (_comboManualSel.length >= 3) { showToast('Máximo 3 productos por combo', 'info'); return; }
+    _comboManualSel.push(i);
+  }
+  comboManualBuscar();      // re-render con el check actualizado
+  comboManualRenderSel();
+}
+
+function comboManualRenderSel() {
+  const wrap = document.getElementById('combo-manual-sel');
+  const chips = document.getElementById('combo-manual-chips');
+  const count = document.getElementById('combo-manual-count');
+  if (!wrap) return;
+  if (!_comboManualSel.length) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+  count.textContent = _comboManualSel.length;
+  chips.innerHTML = _comboManualSel.map(p => {
+    const sku = (typeof itemGetSKU === 'function' ? itemGetSKU(p) : '') || '';
+    return '<span style="display:inline-flex;align-items:center;gap:5px;background:var(--bg1);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:10.5px">' +
+      '<img src="' + (p.thumbnail || '') + '" style="width:20px;height:20px;object-fit:cover;border-radius:3px">' +
+      _persoEsc((p.title || '').slice(0, 22)) + ' <span style="color:#2563eb;font-weight:700">' + _persoEsc(p.id) + '</span>' +
+      (sku ? '<span style="color:var(--text3)">SKU:' + _persoEsc(sku) + '</span>' : '') +
+      '<span style="cursor:pointer;color:#ef4444;font-weight:700" onclick="event.stopPropagation();comboManualToggle(\'' + p.id + '\')">✕</span>' +
+    '</span>';
+  }).join('');
+}
+
+function comboManualArmar() {
+  if (_comboManualSel.length < 2) { showToast('Elegí al menos 2 productos', 'info'); return; }
+  const prods = _comboManualSel.map(p => ({
+    id: p.id, title: p.title, thumb: p.thumbnail, permalink: p.permalink,
+    sku: (typeof itemGetSKU === 'function' ? itemGetSKU(p) : '') || '', ventas: p.sold_quantity || 0
+  }));
+  const key = _comboKey(prods.map(p => p.id));
+  // título: el que escribió, o uno armado con palabras comunes
+  let titulo = (document.getElementById('combo-manual-titulo').value || '').trim();
+  if (!titulo) {
+    const toks = _comboTemaTokens(prods[0].title);
+    const tema = toks.length ? (toks[0].charAt(0).toUpperCase() + toks[0].slice(1)) : 'Especial';
+    titulo = 'Combo ' + tema + (prods.length >= 3 ? ' Set x3' : '') + ' 2026';
+  }
+  _comboState.combos.unshift({ key, titulo: titulo.slice(0, 70), tema: '', justificacion: 'Armado manualmente', fuente: 'panel', productos: prods });
+  _comboState.combos = _comboState.combos.slice(0, 10);
+  _comboPersistVisibles();
+  comboRender();
+  comboCerrarManual();
+  showToast('➕ Combo manual agregado', 'success');
 }
 
 function comboMarcarPublicado(idx) {
@@ -12682,15 +12836,16 @@ function comboMarcarPublicado(idx) {
   if (typeof showToast === 'function') showToast('✓ Combo marcado como publicado', 'success');
 }
 
-// v189: abrir Mercado Libre para publicar el combo. Copia el título al
-// portapapeles y abre el formulario de nueva publicación de ML.
+// v193: abrir el armador de KIT de Mercado Libre (función nueva de ML que deja
+// agregar productos por su código MLA). Copia los códigos MLA al portapapeles.
 function comboPublicarML(idx) {
   const c = _comboState.combos[idx];
   if (!c) return;
-  try { navigator.clipboard.writeText(c.titulo); } catch (e) {}
-  if (typeof showToast === 'function') showToast('📋 Título copiado · abriendo Mercado Libre…', 'success');
-  // formulario de publicación de ML (el vendedor pega el título y arma el combo)
-  window.open('https://www.mercadolibre.com.ar/publicaciones/nueva', '_blank');
+  const codigos = (c.productos || []).map(p => p.id).filter(Boolean).join(' ');
+  try { navigator.clipboard.writeText(codigos); } catch (e) {}
+  if (typeof showToast === 'function') showToast('📋 Códigos copiados (' + codigos + ') · abriendo armador de kit…', 'success');
+  // armador de kit de ML — desde acá se agregan los productos por su MLA
+  window.open('https://www.mercadolibre.com.ar/publicar/kit#from=list', '_blank');
 }
 
 // v189: persistir los combos visibles para que NO se regeneren al recargar.
@@ -19629,12 +19784,7 @@ function pcRenderHistory(){
   if(!has){ tbody.innerHTML=''; return; }
   tbody.innerHTML=hist.map(function(h){
     var chs=h.channels||{};
-    var ganC=chs.clasica?.ganancia||0;
-    var rentab=h.origen>0?(ganC/h.origen*100):0;
-    var rc=rentab>=30?'var(--green)':rentab>=10?'var(--amber)':'var(--red)';
-    var gc=ganC>=0?'var(--green)':'var(--red)';
     function pr(id){ return chs[id]?.precio>0?'$'+Math.round(chs[id].precio).toLocaleString('es-AR'):'—'; }
-    // v192: celda de precio (con id para refrescar) + celda de margen editable
     function celdaPrecio(id){
       return '<td id="pch-'+h.id+'-'+id+'-precio" style="padding:6px 8px;text-align:right;color:var(--green);font-weight:600">'+pr(id)+'</td>';
     }
@@ -19647,25 +19797,74 @@ function pcRenderHistory(){
       return '<td style="padding:6px 4px;text-align:right">'
         +'<input type="number" id="pch-'+h.id+'-'+id+'-margen" value="'+m.toFixed(0)+'" '
         +'onchange="pcHistMargenChange('+h.id+',\''+id+'\',this.value)" '
-        +'style="width:48px;font-size:10.5px;text-align:right;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg1);color:var(--text2)" '
-        +'title="Margen sobre costo. Editá para cambiar el precio (no toca los %)."> <span style="font-size:9px;color:var(--text3)">%</span>'
+        +'style="width:44px;font-size:10.5px;text-align:right;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg1);color:var(--text2)" '
+        +'title="Margen sobre costo. Editá para cambiar el precio (no toca los %).">'
         +'</td>';
+    }
+    // v193: ganancia neta de cada canal
+    function celdaGanancia(id){
+      var ch=chs[id];
+      if(!ch || !(ch.precio>0)){
+        return '<td style="padding:6px 4px;text-align:right;color:var(--text3);font-size:10px">—</td>';
+      }
+      var g=ch.ganancia||0;
+      var col=g>=0?'var(--green)':'var(--red)';
+      return '<td id="pch-'+h.id+'-'+id+'-ganan" style="padding:6px 4px;text-align:right;font-weight:600;font-size:10.5px;color:'+col+'">$'+Math.round(g).toLocaleString('es-AR')+'</td>';
     }
     return '<tr style="border-bottom:1px solid var(--border)">'
       +'<td style="padding:6px 8px;color:var(--text3);white-space:nowrap;font-size:11px">'+h.fecha+'</td>'
       +'<td style="padding:6px 8px;font-weight:600;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+h.nombre+'</td>'
-      +'<td style="padding:6px 8px;text-align:right">$'+Math.round(h.origen).toLocaleString('es-AR')+'</td>'
-      +celdaPrecio('clasica')+celdaMargen('clasica')
-      +celdaPrecio('premium')+celdaMargen('premium')
-      +celdaPrecio('woo')+celdaMargen('woo')
-      +celdaPrecio('mayor')+celdaMargen('mayor')
-      +'<td style="padding:6px 8px;text-align:right;font-weight:700;color:'+gc+'">$'+Math.round(ganC).toLocaleString('es-AR')+'</td>'
-      +'<td style="padding:6px 8px;text-align:right;font-weight:700;color:'+rc+'">'+rentab.toFixed(0)+'%</td>'
+      // v193: Costo Blanco editable
+      +'<td style="padding:6px 6px;text-align:right">'
+        +'<span style="color:var(--text3);font-size:10px">$</span>'
+        +'<input type="number" id="pch-'+h.id+'-costo" value="'+Math.round(h.origen||0)+'" '
+        +'onchange="pcHistCostoChange('+h.id+',this.value)" '
+        +'style="width:64px;font-size:10.5px;text-align:right;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg1);color:var(--text1);font-weight:600" '
+        +'title="Costo de la taza blanca. Cambia el precio de cada plataforma sin tocar los porcentajes.">'
+      +'</td>'
+      +celdaPrecio('clasica')+celdaMargen('clasica')+celdaGanancia('clasica')
+      +celdaPrecio('premium')+celdaMargen('premium')+celdaGanancia('premium')
+      +celdaPrecio('woo')+celdaMargen('woo')+celdaGanancia('woo')
+      +celdaPrecio('mayor')+celdaMargen('mayor')+celdaGanancia('mayor')
       +'<td style="padding:6px 8px;text-align:center;white-space:nowrap">'
       +'<button class="btn btn-ghost btn-xs" onclick="pcLoadCalc('+h.id+')" title="Cargar">↺</button> '
       +'<button class="btn btn-danger btn-xs" onclick="pcDeleteCalc('+h.id+')" title="Eliminar">✕</button>'
       +'</td></tr>';
   }).join('');
+}
+
+// v193: cambiar el Costo Blanco recalcula el precio de TODOS los canales para
+// mantener el MISMO margen (ganancia/costo), sin tocar porcentajes ni fijos.
+function pcHistCostoChange(histId, valor){
+  var hist = pcLoadHistory();
+  var h = hist.find(function(x){ return x.id===histId; });
+  if(!h) return;
+  var nuevoCosto = parseFloat(valor) || 0;
+  if(nuevoCosto <= 0){ showToast('El costo debe ser mayor a 0.','error'); return; }
+  var costoViejo = h.origen || 0;
+  h.origen = nuevoCosto;
+  // por cada canal: mantener el margen% → recalcular ganancia y precio
+  ['clasica','premium','woo','mayor'].forEach(function(chId){
+    var ch = h.channels && h.channels[chId];
+    if(!ch || !(ch.precio>0)) return;
+    // margen que tenía (sobre el costo viejo)
+    var margenPct = costoViejo>0 ? (ch.ganancia/costoViejo*100) : 0;
+    var gananciaTarget = margenPct * nuevoCosto / 100;
+    var sumPct = ((ch.comPct||0)+(ch.iibbPct||0)+(ch.retencionesPct||0)+(ch.publicidadPct||0)+
+                  (ch.hostingPct||0)+(ch.contablePct||0)+(ch.packagingPct||0)+(ch.debcredPct||0))/100;
+    var envio = ch.envioCheck ? (ch.envioAmt||ch.envioCosto||0) : 0;
+    var denom = 1 - sumPct;
+    if(denom < 0.01) return;
+    var nuevoPrecio = Math.ceil(((gananciaTarget + nuevoCosto + (ch.flatFee||0) + envio) / denom) / 10) * 10;
+    ch.precio = nuevoPrecio;
+    ch.ganancia = gananciaTarget;
+    ['com','iibb','retenciones','publicidad','hosting','contable','packaging','debcred'].forEach(function(f){
+      if(ch[f+'Pct']!=null) ch[f+'Amt'] = nuevoPrecio * ch[f+'Pct'] / 100;
+    });
+  });
+  pcSaveHistoryLS(hist);
+  pcRenderHistory();
+  showToast('✓ Costo actualizado a $'+Math.round(nuevoCosto).toLocaleString('es-AR')+' — precios recalculados','success');
 }
 
 // v192: cambiar el margen de un canal en el historial recalcula SOLO el precio
@@ -19697,11 +19896,11 @@ function pcHistMargenChange(histId, chId, valor){
     if(ch[f+'Pct']!=null) ch[f+'Amt'] = nuevoPrecio * ch[f+'Pct'] / 100;
   });
   pcSaveHistoryLS(hist);
-  // refrescar la celda de precio de ese canal sin redibujar toda la tabla
+  // refrescar la celda de precio y de ganancia de ese canal
   var pEl = document.getElementById('pch-'+histId+'-'+chId+'-precio');
   if(pEl) pEl.textContent = '$'+Math.round(nuevoPrecio).toLocaleString('es-AR');
-  // si es el canal clásica, refrescar también ganancia/rentab de la fila
-  if(chId==='clasica') pcRenderHistory();
+  var gEl = document.getElementById('pch-'+histId+'-'+chId+'-ganan');
+  if(gEl){ gEl.textContent = '$'+Math.round(gananciaTarget).toLocaleString('es-AR'); gEl.style.color = gananciaTarget>=0?'var(--green)':'var(--red)'; }
   showToast('✓ Precio '+chId+' actualizado a $'+Math.round(nuevoPrecio).toLocaleString('es-AR'),'success');
 }
 
@@ -21868,6 +22067,7 @@ async function callClaude(prompt, history, maxTokens){
     ];
     cpats.forEach(function(p){text=text.replace(p,'').trim();});
     if(d.model) console.log('[AI] modelo usado:', d.model);
+    window._lastAIModel = d.model || '';   // v193: para atribución de combos
     return {ok:true, text};
   }
 
