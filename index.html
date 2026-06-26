@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v194 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v195 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -5324,7 +5324,7 @@ async function loadItemsFast(){
     // _nocache rompe cualquier caché de red/Worker — health incluido en atributos
     const nc=Date.now();
     const results=await Promise.all(chunks.map(chunk=>
-      mlGet('/items?ids='+chunk.join(',')+'&include_attributes=all&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations,health,date_created&_nocache='+nc)
+      mlGet('/items?ids='+chunk.join(',')+'&include_attributes=all&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,sale_terms,tags,shipping,catalog_listing,catalog_product_id,variations,health,date_created,last_updated&_nocache='+nc)
     ));
     allItems=[];
     results.forEach(r=>{ r.forEach(x=>{if(x.code===200)allItems.push(x.body);}); });
@@ -5372,7 +5372,7 @@ async function loadItemsFull(){
       const batch = chunks.slice(i, i+PARALLEL);
       const results = await Promise.all(batch.map(async (chunk) => {
         try{
-          const r = await mlGet('/items?ids='+chunk.join(',')+'&include_attributes=all&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations,health,date_created');
+          const r = await mlGet('/items?ids='+chunk.join(',')+'&include_attributes=all&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,sale_terms,tags,shipping,catalog_listing,catalog_product_id,variations,health,date_created,last_updated');
           return r || [];
         }catch(e){ return []; }
       }));
@@ -7184,7 +7184,7 @@ function renderDashTopPubs(){
     const price   = i?.price||0;
     const thumb   = i?.thumbnail||'';
     const sc      = itemHealthPct(i);
-    const editUrl = i ? 'https://www.mercadolibre.com.ar/publicaciones/'+i.id+'/modificar' : null;
+    const editUrl = i ? mlEditLink(i.id, i) : null;
     const medal   = idx===0?'🥇':idx===1?'🥈':idx===2?'🥉':(idx+1);
     const arrow   = trendArrow(prevRanks, itemId, idx);
     const metric  =
@@ -7924,7 +7924,7 @@ function renderPubs(){
         <div style="display:flex;gap:4px">
           <button class="btn btn-ghost btn-xs" onclick="quickOptimize('${item.id}','${item.title.replace(/'/g,"\\'")}')">✨</button>
           <a href="${item.permalink||'#'}" target="_blank" class="btn btn-ghost btn-xs" style="text-decoration:none">🔗</a>
-          ${item.id?`<a href="${mlEditLink(item.id)}" target="_blank" rel="noopener" class="btn btn-ghost btn-xs" style="text-decoration:none;background:#fffbeb;color:#78350f;border-color:#fde68a" title="Editar en MercadoLibre">✏️</a>`:''}
+          ${item.id?`<a href="${mlEditLink(item.id, item)}" target="_blank" rel="noopener" class="btn btn-ghost btn-xs" style="text-decoration:none;background:#fffbeb;color:#78350f;border-color:#fde68a" title="Editar en MercadoLibre">✏️</a>`:''}
           ${item.id?`<a href="${mlRepublishLink(item)}" target="_blank" rel="noopener" class="btn btn-ghost btn-xs" style="text-decoration:none;background:#eff6ff;color:#1e40af;border-color:#bfdbfe" title="Republicar producto: abre la publicación en ML, donde arriba tenés el botón &quot;Vender uno igual&quot; que copia fotos, título, descripción y características a una nueva">🔄</a>`:''}
         </div>
       </td>
@@ -8447,9 +8447,29 @@ function getPubTypeKey(item){
   return 'classic';
 }
 
-function mlEditLink(id){
+function mlEditLink(id, item){
   if(!id||typeof id!=='string'||id.length<5) return null;
+  // v195: los KITS de ML usan id con prefijo MLAU y se editan en /modificar/kit.
+  // Las publicaciones normales (MLA...) siguen igual para no romperlas.
+  if(_mlEsKit(id, item)){
+    return 'https://www.mercadolibre.com.ar/publicaciones/'+id+'/modificar/kit';
+  }
   return 'https://www.mercadolibre.com.ar/publicaciones/'+id+'/modificar';
+}
+
+// v195: detecta si una publicación es un KIT (paquete de productos).
+// Señales: id con prefijo MLAU, o el item marcado como kit en ML.
+function _mlEsKit(id, item){
+  if(typeof id==='string' && /^MLAU/i.test(id)) return true;
+  if(item){
+    if(item.kit === true) return true;
+    // algunos kits vienen con un atributo/tag específico
+    const tags = item.tags || [];
+    if(tags.includes('kit') || tags.includes('package')) return true;
+    const lt = (item.listing_type_id||'').toLowerCase();
+    if(lt.includes('kit')) return true;
+  }
+  return false;
 }
 
 // v146: "Vender uno igual" NO tiene una URL pública/estable de deep-link
@@ -9822,6 +9842,8 @@ function _seoExportColumns(){
     { id:'stock',       label:'Stock disponible',   type:'num',  def:true,  value:i=> i.available_quantity??0 },
     { id:'sold',        label:'Vendidas históricas',type:'num',  def:true,  value:i=> i.sold_quantity||0 },
     { id:'created',     label:'Fecha creación',     type:'text', def:true,  value:i=> fmtTs(i.date_created) },
+    { id:'lastModified', label:'Fecha modificada',  type:'text', def:true,  value:i=> fmtTs(i.last_updated) },
+    { id:'daysNoMod',   label:'Días sin modificar', type:'num',  def:true,  value:i=> i.last_updated ? Math.floor((Date.now()-new Date(i.last_updated).getTime())/86400000) : '' },
     { id:'ageDays',     label:'Antigüedad (días)',  type:'num',  def:true,  value:i=> i.date_created ? Math.floor((Date.now()-new Date(i.date_created).getTime())/86400000) : '' },
     { id:'seoScore',    label:'Score SEO título',   type:'num',  def:true,  value:i=> seoScore(i.title||'') },
     { id:'quality',     label:'Calidad publicación',type:'num',  def:true,  value:i=> qualityScore(i) },
@@ -10634,7 +10656,7 @@ function renderSEOTable(){
     // generando falsos positivos sobre títulos que originalmente son correctos en ML.
 
     const eanP   = ch.find(c=>c.id==='ean');
-    const editUrl= mlEditLink(item.id);
+    const editUrl= mlEditLink(item.id, item);
     const sT     = item.title.replace(/'/g,"\\'");
     const eanArg = eanP?"'faltante'":'null';
     const m      = itemMetrics[item.id];
@@ -12465,6 +12487,15 @@ function _comboTienenTemaComun(items) {
   return tokenSets.slice(1).every(s => [...s].some(t => tokenSets[0].has(t)));
 }
 
+// v195: arma una frase con las temáticas ya publicadas para que la IA las evite
+function _comboTemasAEvitar() {
+  const temas = [..._comboState.publicados, ..._comboState.combos]
+    .map(c => c.tema).filter(t => t && t.length > 1);
+  const unicos = [...new Set(temas)].slice(0, 15);
+  if (!unicos.length) return '';
+  return 'Ya tengo combos de estas temáticas, intentá explorar OTRAS distintas: ' + unicos.join(', ') + '.';
+}
+
 async function comboGenerar(cantidad, renovar) {
   if (_comboState.generating) return;
   if (!Array.isArray(allItems) || allItems.length < 2) {
@@ -12473,7 +12504,9 @@ async function comboGenerar(cantidad, renovar) {
   }
   _comboState.generating = true;
   await _comboLoadPublicados();
-  if (renovar) _comboState.combos = [];
+  // v195: "Generar" y "Renovar" ambos arrancan una tanda nueva (vacían lo visible).
+  // Lo ya marcado como Listo/✕ queda en publicados y no se vuelve a sugerir.
+  _comboState.combos = [];
   const btn = document.getElementById('combo-gen-btn');
   if (btn) { btn.disabled = true; btn.textContent = '✨ Generando…'; }
   const grid = document.getElementById('combo-grid');
@@ -12481,11 +12514,17 @@ async function comboGenerar(cantidad, renovar) {
 
   try {
     const cands = _comboCandidatos();
-    // v194: si ya publicaste muchos combos, ampliamos el pool para tener variedad.
-    // Cuantos más combos publicados, más productos candidatos consideramos.
+    // v195: pool más grande + barajado para variar las combinaciones cada vez.
+    // Tomamos un universo amplio de los mejores y barajamos para que la IA no vea
+    // siempre los mismos productos primero.
     const yaPub = _comboState.publicados.length;
-    const poolSize = yaPub >= 10 ? 60 : (yaPub >= 5 ? 40 : 25);
-    const top = cands.slice(0, poolSize);
+    const universo = Math.min(cands.length, yaPub >= 5 ? 120 : 80);
+    const poolBase = cands.slice(0, universo);
+    // Fisher-Yates shuffle (con sesgo: los primeros 15 mejores quedan, el resto se baraja)
+    const fijos = poolBase.slice(0, 15);
+    const resto = poolBase.slice(15);
+    for (let i = resto.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [resto[i], resto[j]] = [resto[j], resto[i]]; }
+    const top = fijos.concat(resto).slice(0, 45);
     const publicadosSet = new Set(_comboState.publicados.map(c => c.key));
     const yaEnPantalla = new Set(_comboState.combos.map(c => c.key));
 
@@ -12507,7 +12546,9 @@ async function comboGenerar(cantidad, renovar) {
       '- Estructura: [Combo/Kit/Set] + [Productos] + [Tematica] + [Caracteristica clave].\n' +
       '- Sin caracteres especiales (sin guiones, barras, comillas ni emojis).\n' +
       '- MAXIMO 60 caracteres (obligatorio). Sin repetir palabras. Palabras clave de alto volumen.\n\n' +
-      'Generá ' + cantidad + ' combos. Cada combo: 2 o 3 productos.\n\n' +
+      'Generá ' + cantidad + ' combos NUEVOS y VARIADOS. Cada combo: 2 o 3 productos. ' +
+      'Intentá usar productos y temáticas DIFERENTES entre los combos (no repitas siempre los mismos productos más vendidos). ' +
+      _comboTemasAEvitar() + '\n\n' +
       'RESPONDE SOLO con JSON valido, sin texto ni markdown alrededor, formato EXACTO:\n' +
       '{"combos":[{"productos":[indice1,indice2],"titulo":"Combo Taza y Jarro Boca Juniors 2026","tema":"Boca Juniors","justificacion":"Misma hinchada, productos complementarios"}]}\n' +
       'El campo productos es un array de 2 o 3 indices de la lista. tema = tematica comun. justificacion = 1 frase de por que combinan. No repitas combos.\n\n' +
@@ -12682,7 +12723,7 @@ function comboRender() {
       thumbs += '<div style="text-align:center;width:' + anchoImg + '">' +
         '<img src="' + (p.thumb || '') + '" style="width:54px;height:54px;object-fit:cover;border-radius:8px;border:1px solid var(--border)" onerror="this.style.opacity=.3">' +
         '<div style="font-size:8.5px;color:var(--text3);margin-top:2px;line-height:1.15;max-height:22px;overflow:hidden" title="' + _persoEsc(p.title) + '">' + _persoEsc((p.title || '').slice(0, 26)) + '</div>' +
-        '<div style="font-size:8.5px;font-weight:700;color:#2563eb;cursor:pointer;margin-top:1px" title="Clic para copiar el código" onclick="navigator.clipboard.writeText(\'' + mla + '\');if(typeof showToast===\'function\')showToast(\'📋 ' + mla + ' copiado\',\'ok\')">' + _persoEsc(mla) + '</div>' +
+        '<div style="font-size:8.5px;font-weight:700;color:#2563eb;cursor:pointer;margin-top:1px" title="Clic para copiar el código" onclick="navigator.clipboard.writeText(\'' + mla + '\')">' + _persoEsc(mla) + '</div>' +
         (sku ? '<div style="font-size:8px;color:var(--text3)" title="SKU">SKU: ' + _persoEsc(sku) + '</div>' : '') +
       '</div>';
     });
@@ -17751,7 +17792,7 @@ function refreshAlerts(){
       ? `window.open('${a._adUrl}','_blank','noopener')`
       : `alertGoTo('${a.category}','${safeId}','${safeTitle}',this,'${a.uid}')`;
     const extraBtn = a._adUrl && safeId
-      ? `<button class="btn btn-sm" onclick="window.open('https://www.mercadolibre.com.ar/publicaciones/${safeId}/modificar','_blank','noopener')" style="flex-shrink:0;background:#fffbeb;color:#78350f;border:1px solid #fde68a;font-weight:600;white-space:nowrap;margin-top:4px">✏️ Editar en ML -></button>`
+      ? `<button class="btn btn-sm" onclick="window.open(mlEditLink(safeId),'_blank','noopener')" style="flex-shrink:0;background:#fffbeb;color:#78350f;border:1px solid #fde68a;font-weight:600;white-space:nowrap;margin-top:4px">✏️ Editar en ML -></button>`
       : '';
 
     // v70: checkbox individual para alertas con item_id, solo en filtros bulk-enabled
@@ -17951,7 +17992,7 @@ function alertGoTo(category, itemId, itemTitle, btnEl, uid){
     case 'sinvis':
     case 'fuga_conv':
       if(itemId){
-        window.open('https://www.mercadolibre.com.ar/publicaciones/' + itemId + '/modificar', '_blank', 'noopener');
+        window.open(mlEditLink(itemId), '_blank', 'noopener');
       } else {
         showSection('publicaciones');
       }
@@ -18134,7 +18175,7 @@ function renderBulkList(){
   const rowsHtml = items.map(i=>{
     const qty=i.available_quantity??0;
     const qColor=qty===0?'var(--red)':qty<=3?'var(--amber)':'var(--green)';
-    const editUrl = (typeof mlEditLink==='function') ? mlEditLink(i.id) : ('https://www.mercadolibre.com.ar/publicaciones/'+i.id+'/modificar');
+    const editUrl = (typeof mlEditLink==='function') ? mlEditLink(i.id, i) : ('https://www.mercadolibre.com.ar/publicaciones/'+i.id+'/modificar');
     const statusBadge = '<span class="badge '+(i.status==='active'?'bg-green':'bg-amber')+'" style="white-space:nowrap;font-size:9.5px">'+(i.status==='active'?'● Activa':'⏸ Pausada')+'</span>';
     return '<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)">'
       // (1) checkbox
