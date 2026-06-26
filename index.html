@@ -1104,6 +1104,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <th>Publicación</th>
           <th style="white-space:nowrap;text-align:center" title="Medidas y peso del paquete para Mercado Envíos. ML recomienda mantenerlas actualizadas.">📦 Empaque</th>
           <th onclick="pubSort('sku')"   style="cursor:pointer;user-select:none;white-space:nowrap">SKU <span id="pub-sort-sku" style="font-size:10px"></span></th>
+          <th onclick="pubSort('lastMod')" style="cursor:pointer;user-select:none;white-space:nowrap;text-align:center" title="Última fecha que ML registró un cambio (precio, fotos, stock). Detecta publicaciones que hace mucho no se tocan y pueden perder posicionamiento.">Fecha modif. <span id="pub-sort-lastMod" style="font-size:10px"></span></th>
           <th onclick="pubSort('price')" style="cursor:pointer;user-select:none;white-space:nowrap;text-align:right">Precio <span id="pub-sort-price" style="font-size:10px"></span></th>
           <th onclick="pubSort('stock')" style="cursor:pointer;user-select:none;white-space:nowrap;text-align:center">Stock <span id="pub-sort-stock" style="font-size:10px"></span></th>
           <th onclick="pubSort('ean')"   style="cursor:pointer;user-select:none;white-space:nowrap" title="Código de barras universal (GTIN/EAN). Clic en el lápiz para editar.">Cód. universal <span id="pub-sort-ean" style="font-size:10px"></span></th>
@@ -1419,7 +1420,6 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <th onclick="seoSort('price')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:90px;max-width:90px">Precio<br><span style="font-size:10px">↕</span></th>
           <th onclick="seoSort('stock')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:65px;max-width:65px">Stock<br><span style="font-size:10px">↕</span></th>
           <th onclick="seoSort('sku')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:90px;max-width:90px" title="Código SKU del vendedor. Clic para ordenar. Editable con el lápiz.">SKU<br><span style="font-size:10px">↕</span><span id="seo-sort-sku" style="font-size:10px"></span></th>
-          <th onclick="seoSort('lastMod')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:88px;max-width:88px" title="Última fecha que ML registró un cambio en la publicación (precio, fotos, stock, etc). Sirve para detectar publicaciones que hace mucho no se tocan y pueden perder posicionamiento.">Fecha<br>modif.<br><span style="font-size:10px">↕</span><span id="seo-sort-lastMod" style="font-size:10px"></span></th>
           <th onclick="seoSort('visits30')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:75px;max-width:75px;background:#dbeafe" title="Visitas últimos 30 días">Visitas<br>30d<br><span style="font-size:10px">↕</span><span id="seo-sort-visits30" style="font-size:10px"></span></th>
           <th onclick="seoSort('sales60')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:70px;max-width:70px;background:#dcfce7" title="Ventas últimos 60 días">Ventas<br>60d<br><span style="font-size:10px">↕</span><span id="seo-sort-sales60" style="font-size:10px"></span></th>
           <th onclick="seoSort('sold')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:80px;max-width:80px" title="Total ventas históricas del ítem">Vendidas<br>histór.<br><span style="font-size:10px">↕</span><span id="seo-sort-sold" style="font-size:10px"></span></th>
@@ -7820,7 +7820,7 @@ function pubSort(col){
   if(pubState.sortCol===col) pubState.sortDir*=-1;
   else{ pubState.sortCol=col; pubState.sortDir=-1; }
   // actualizar flechas (v141: nuevas columnas sku, ean, type, avail, thermo)
-  ['price','stock','sold','sku','ean','type','avail','thermo'].forEach(c=>{
+  ['price','stock','sold','sku','ean','type','avail','thermo','lastMod'].forEach(c=>{
     const el=document.getElementById('pub-sort-'+c);
     if(el) el.innerHTML=sortArrow(c,pubState.sortCol,pubState.sortDir);
   });
@@ -7859,6 +7859,7 @@ function renderPubs(){
     else if(col==='type')    { va=(getPubTypeKey(a)||'').toLowerCase();vb=(getPubTypeKey(b)||'').toLowerCase();return dir*(va<vb?-1:va>vb?1:0); }
     else if(col==='avail')   { va=_itemManufDays(a);                       vb=_itemManufDays(b); }
     else if(col==='thermo')  { va=_itemThermoScore(a);                     vb=_itemThermoScore(b); }
+    else if(col==='lastMod') { va=a.last_updated?new Date(a.last_updated).getTime():0; vb=b.last_updated?new Date(b.last_updated).getTime():0; }
     else if(legacySort==='sold')       { return (b.sold_quantity||0)-(a.sold_quantity||0); }
     else if(legacySort==='price-asc')  { return (a.price||0)-(b.price||0); }
     else if(legacySort==='price-desc') { return (b.price||0)-(a.price||0); }
@@ -7870,7 +7871,7 @@ function renderPubs(){
 
   const tbody=document.getElementById('pubs-tbody');
   if(!tbody) return;
-  if(!items.length){tbody.innerHTML='<tr><td colspan="13" style="text-align:center;color:var(--text3);padding:22px">Sin resultados para los filtros actuales</td></tr>';return;}
+  if(!items.length){tbody.innerHTML='<tr><td colspan="14" style="text-align:center;color:var(--text3);padding:22px">Sin resultados para los filtros actuales</td></tr>';return;}
   const _pubTypeLabel = { catalog:'Catálogo', premium:'Premium', free:'Gratuita', classic:'Clásica' };
   tbody.innerHTML=items.map(item=>{
     const sku = itemGetSKU(item) || '';
@@ -8670,7 +8671,7 @@ function seoSort(col){
   if(seoState.sortCol===col) seoState.sortDir*=-1;
   else{ seoState.sortCol=col; seoState.sortDir=-1; }
   seoState.page=1;
-  ['quality','sold','sales7','visits','conv','visits30','sales60','created','lastSale','daysNoSale','sku','lastMod'].forEach(c=>{
+  ['quality','sold','sales7','visits','conv','visits30','sales60','created','lastSale','daysNoSale','sku'].forEach(c=>{
     const el=document.getElementById('seo-sort-'+c);
     if(el) el.innerHTML=sortArrow(c,seoState.sortCol,seoState.sortDir);
   });
@@ -10579,7 +10580,7 @@ function renderSEOTable(){
       else if(seoState.sortCol==='price') { va=a.price||0;                 vb=b.price||0; }
       else if(seoState.sortCol==='stock') { va=a.available_quantity??0;    vb=b.available_quantity??0; }
       else if(seoState.sortCol==='created'){ va=a.date_created ? new Date(a.date_created).getTime() : 0; vb=b.date_created ? new Date(b.date_created).getTime() : 0; }
-      else if(seoState.sortCol==='lastMod'){ va=a.last_updated ? new Date(a.last_updated).getTime() : 0; vb=b.last_updated ? new Date(b.last_updated).getTime() : 0; }
+
       else if(seoState.sortCol==='lastSale'){
         // 0 = sin venta (las publicaciones sin ventas quedan al final en DESC, al inicio en ASC)
         va = getLastSaleTs(a.id) || 0;
