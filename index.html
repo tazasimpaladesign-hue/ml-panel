@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v195 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v196 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1419,6 +1419,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <th onclick="seoSort('price')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:90px;max-width:90px">Precio<br><span style="font-size:10px">↕</span></th>
           <th onclick="seoSort('stock')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:65px;max-width:65px">Stock<br><span style="font-size:10px">↕</span></th>
           <th onclick="seoSort('sku')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:90px;max-width:90px" title="Código SKU del vendedor. Clic para ordenar. Editable con el lápiz.">SKU<br><span style="font-size:10px">↕</span><span id="seo-sort-sku" style="font-size:10px"></span></th>
+          <th onclick="seoSort('lastMod')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:88px;max-width:88px" title="Última fecha que ML registró un cambio en la publicación (precio, fotos, stock, etc). Sirve para detectar publicaciones que hace mucho no se tocan y pueden perder posicionamiento.">Fecha<br>modif.<br><span style="font-size:10px">↕</span><span id="seo-sort-lastMod" style="font-size:10px"></span></th>
           <th onclick="seoSort('visits30')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:75px;max-width:75px;background:#dbeafe" title="Visitas últimos 30 días">Visitas<br>30d<br><span style="font-size:10px">↕</span><span id="seo-sort-visits30" style="font-size:10px"></span></th>
           <th onclick="seoSort('sales60')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:70px;max-width:70px;background:#dcfce7" title="Ventas últimos 60 días">Ventas<br>60d<br><span style="font-size:10px">↕</span><span id="seo-sort-sales60" style="font-size:10px"></span></th>
           <th onclick="seoSort('sold')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:80px;max-width:80px" title="Total ventas históricas del ítem">Vendidas<br>histór.<br><span style="font-size:10px">↕</span><span id="seo-sort-sold" style="font-size:10px"></span></th>
@@ -5776,6 +5777,7 @@ function _saveDataCache(){
       listing_type_id: i.listing_type_id, health: i.health,
       catalog_listing: i.catalog_listing, catalog_product_id: i.catalog_product_id,
       video_id: i.video_id, date_created: i.date_created,
+      last_updated: i.last_updated, sale_terms: i.sale_terms,
       seller_custom_field: i.seller_custom_field, tags: i.tags,
       shipping: i.shipping,  // v164: mode + dimensions para columna Empaque
       // v142: persistir SKU(attr), EAN y tiempo de disponibilidad ya extraídos
@@ -7896,6 +7898,7 @@ function renderPubs(){
             onclick="startSKUEdit('${item.id}','${skuDisp.replace(/'/g,"\\'")}')">✎</button>
         </div>
       </td>
+      <td style="text-align:center;font-size:10.5px;color:var(--text2);white-space:nowrap" title="${item.last_updated ? 'Modificada: '+fmtTs(item.last_updated) : 'Sin datos de modificación'}">${_seoFechaModCell(item)}</td>
       <td style="text-align:right">
         <div id="price-cell-${item.id}" style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
           <span style="font-weight:600;color:var(--text);cursor:pointer" title="Clic para editar precio" onclick="startPriceEdit('${item.id}',${item.price||0})">$${(item.price||0).toLocaleString('es-AR')}</span>
@@ -8449,27 +8452,10 @@ function getPubTypeKey(item){
 
 function mlEditLink(id, item){
   if(!id||typeof id!=='string'||id.length<5) return null;
-  // v195: los KITS de ML usan id con prefijo MLAU y se editan en /modificar/kit.
-  // Las publicaciones normales (MLA...) siguen igual para no romperlas.
-  if(_mlEsKit(id, item)){
-    return 'https://www.mercadolibre.com.ar/publicaciones/'+id+'/modificar/kit';
-  }
+  // v196: SIEMPRE /modificar normal. ML detecta solo si el MLA es un kit y
+  // redirige a la edición de kit internamente. Forzar /modificar/kit en un MLA
+  // que no es kit (o que no podemos identificar) rompe y manda a la home.
   return 'https://www.mercadolibre.com.ar/publicaciones/'+id+'/modificar';
-}
-
-// v195: detecta si una publicación es un KIT (paquete de productos).
-// Señales: id con prefijo MLAU, o el item marcado como kit en ML.
-function _mlEsKit(id, item){
-  if(typeof id==='string' && /^MLAU/i.test(id)) return true;
-  if(item){
-    if(item.kit === true) return true;
-    // algunos kits vienen con un atributo/tag específico
-    const tags = item.tags || [];
-    if(tags.includes('kit') || tags.includes('package')) return true;
-    const lt = (item.listing_type_id||'').toLowerCase();
-    if(lt.includes('kit')) return true;
-  }
-  return false;
 }
 
 // v146: "Vender uno igual" NO tiene una URL pública/estable de deep-link
@@ -8560,6 +8546,18 @@ function itemGetEAN(item){
 
 // v140: Devuelve el tiempo de disponibilidad de stock (sale_term MANUFACTURING_TIME)
 // como string "N días", o '' si no está configurado. number_unit en la API de ML.
+// v196: celda de "Fecha modificada" para la tabla de Publicaciones.
+// Muestra la fecha y, si hace mucho que no se toca, lo resalta (pierde posición).
+function _seoFechaModCell(item){
+  if(!item.last_updated) return '<span style="color:var(--text3)">—</span>';
+  const dias = Math.floor((Date.now()-new Date(item.last_updated).getTime())/86400000);
+  const fecha = fmtTs(item.last_updated);
+  let color = 'var(--text2)';
+  if(dias >= 90) color = '#dc2626';        // +3 meses: rojo
+  else if(dias >= 45) color = '#d97706';   // +45 días: ámbar
+  return '<span style="color:'+color+'">'+fecha+'</span><br><span style="font-size:9px;color:'+color+'">'+dias+' días</span>';
+}
+
 function itemGetManufacturingTime(item){
   const terms = item.sale_terms || [];
   const mt = terms.find(t => t.id === 'MANUFACTURING_TIME');
@@ -8672,7 +8670,7 @@ function seoSort(col){
   if(seoState.sortCol===col) seoState.sortDir*=-1;
   else{ seoState.sortCol=col; seoState.sortDir=-1; }
   seoState.page=1;
-  ['quality','sold','sales7','visits','conv','visits30','sales60','created','lastSale','daysNoSale','sku'].forEach(c=>{
+  ['quality','sold','sales7','visits','conv','visits30','sales60','created','lastSale','daysNoSale','sku','lastMod'].forEach(c=>{
     const el=document.getElementById('seo-sort-'+c);
     if(el) el.innerHTML=sortArrow(c,seoState.sortCol,seoState.sortDir);
   });
@@ -9842,8 +9840,6 @@ function _seoExportColumns(){
     { id:'stock',       label:'Stock disponible',   type:'num',  def:true,  value:i=> i.available_quantity??0 },
     { id:'sold',        label:'Vendidas históricas',type:'num',  def:true,  value:i=> i.sold_quantity||0 },
     { id:'created',     label:'Fecha creación',     type:'text', def:true,  value:i=> fmtTs(i.date_created) },
-    { id:'lastModified', label:'Fecha modificada',  type:'text', def:true,  value:i=> fmtTs(i.last_updated) },
-    { id:'daysNoMod',   label:'Días sin modificar', type:'num',  def:true,  value:i=> i.last_updated ? Math.floor((Date.now()-new Date(i.last_updated).getTime())/86400000) : '' },
     { id:'ageDays',     label:'Antigüedad (días)',  type:'num',  def:true,  value:i=> i.date_created ? Math.floor((Date.now()-new Date(i.date_created).getTime())/86400000) : '' },
     { id:'seoScore',    label:'Score SEO título',   type:'num',  def:true,  value:i=> seoScore(i.title||'') },
     { id:'quality',     label:'Calidad publicación',type:'num',  def:true,  value:i=> qualityScore(i) },
@@ -10583,6 +10579,7 @@ function renderSEOTable(){
       else if(seoState.sortCol==='price') { va=a.price||0;                 vb=b.price||0; }
       else if(seoState.sortCol==='stock') { va=a.available_quantity??0;    vb=b.available_quantity??0; }
       else if(seoState.sortCol==='created'){ va=a.date_created ? new Date(a.date_created).getTime() : 0; vb=b.date_created ? new Date(b.date_created).getTime() : 0; }
+      else if(seoState.sortCol==='lastMod'){ va=a.last_updated ? new Date(a.last_updated).getTime() : 0; vb=b.last_updated ? new Date(b.last_updated).getTime() : 0; }
       else if(seoState.sortCol==='lastSale'){
         // 0 = sin venta (las publicaciones sin ventas quedan al final en DESC, al inicio en ASC)
         va = getLastSaleTs(a.id) || 0;
@@ -12452,11 +12449,15 @@ function _comboSavePublicados() {
 function _comboCandidatos() {
   if (!Array.isArray(allItems)) return [];
   const activos = allItems.filter(i => i.status === 'active' && i.thumbnail);
-  // score = ventas*2 + visitas30d (si están) — prioriza lo que más rota
+  // v196: prioriza los MÁS VISITADOS (último registro de visitas que tengamos).
+  // Las visitas reflejan interés actual mejor que las ventas históricas.
   return activos.map(i => {
-    const ventas = i.sold_quantity || 0;
-    const vis = i._visits30 || i.visits || 0;
-    return { i, score: ventas * 2 + vis * 0.1 };
+    const m = (typeof itemMetrics !== 'undefined' && itemMetrics[i.id]) ? itemMetrics[i.id] : {};
+    const vis30 = m.visits30 || 0;
+    const vis7 = m.visits || 0;
+    // score dominado por visitas; ventas solo como pequeño desempate
+    const score = vis30 * 1 + vis7 * 2 + (i.sold_quantity || 0) * 0.05;
+    return { i, score };
   }).sort((a, b) => b.score - a.score).map(x => x.i);
 }
 
@@ -12527,6 +12528,8 @@ async function comboGenerar(cantidad, renovar) {
     const top = fijos.concat(resto).slice(0, 45);
     const publicadosSet = new Set(_comboState.publicados.map(c => c.key));
     const yaEnPantalla = new Set(_comboState.combos.map(c => c.key));
+    // v196: sets de productos de cada combo publicado, para bloquear near-duplicados
+    const publicadosProds = _comboState.publicados.map(c => new Set((c.key || '').split('|')));
 
     // Lista para el prompt: índice + título + ventas (el título es clave para la temática)
     const lista = top.map((i, idx) => idx + '. ' + (i.title || '').slice(0, 75)).join('\n');
@@ -12547,8 +12550,7 @@ async function comboGenerar(cantidad, renovar) {
       '- Sin caracteres especiales (sin guiones, barras, comillas ni emojis).\n' +
       '- MAXIMO 60 caracteres (obligatorio). Sin repetir palabras. Palabras clave de alto volumen.\n\n' +
       'Generá ' + cantidad + ' combos NUEVOS y VARIADOS. Cada combo: 2 o 3 productos. ' +
-      'Intentá usar productos y temáticas DIFERENTES entre los combos (no repitas siempre los mismos productos más vendidos). ' +
-      _comboTemasAEvitar() + '\n\n' +
+      'Intentá usar productos y temáticas DIFERENTES entre los combos. ' + '\n\n' +
       'RESPONDE SOLO con JSON valido, sin texto ni markdown alrededor, formato EXACTO:\n' +
       '{"combos":[{"productos":[indice1,indice2],"titulo":"Combo Taza y Jarro Boca Juniors 2026","tema":"Boca Juniors","justificacion":"Misma hinchada, productos complementarios"}]}\n' +
       'El campo productos es un array de 2 o 3 indices de la lista. tema = tematica comun. justificacion = 1 frase de por que combinan. No repitas combos.\n\n' +
@@ -12611,6 +12613,13 @@ async function comboGenerar(cantidad, renovar) {
       if (prods.length < 2) continue;
       const key = _comboKey(prods.map(p => p.id));
       if (publicadosSet.has(key) || yaEnPantalla.has(key) || nuevos.some(n => n.key === key)) continue;
+      // bloquear si comparte 2+ productos con un combo ya publicado/descartado
+      const misProds = new Set(prods.map(p => p.id));
+      const yaParecido = publicadosProds.some(ps => {
+        let comp = 0; misProds.forEach(id => { if (ps.has(id)) comp++; });
+        return comp >= 2;
+      });
+      if (yaParecido) continue;
       const fuente = usoFallback ? 'panel' : (window._lastAIModel || 'IA');
       nuevos.push({
         key, titulo: (c.titulo || ('Combo ' + (c.tema || 'especial'))).slice(0, 70),
@@ -12905,7 +12914,6 @@ function comboPublicarML(idx) {
   if (!c) return;
   const codigos = (c.productos || []).map(p => p.id).filter(Boolean).join(' ');
   try { navigator.clipboard.writeText(codigos); } catch (e) {}
-  if (typeof showToast === 'function') showToast('📋 Códigos copiados (' + codigos + ') · abriendo armador de kit…', 'success');
   // armador de kit de ML — desde acá se agregan los productos por su MLA
   window.open('https://www.mercadolibre.com.ar/publicar/kit#from=list', '_blank');
 }
