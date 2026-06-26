@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v196 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v197 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -5325,13 +5325,43 @@ async function loadItemsFast(){
     // _nocache rompe cualquier caché de red/Worker — health incluido en atributos
     const nc=Date.now();
     const results=await Promise.all(chunks.map(chunk=>
-      mlGet('/items?ids='+chunk.join(',')+'&include_attributes=all&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,sale_terms,tags,shipping,catalog_listing,catalog_product_id,variations,health,date_created,last_updated&_nocache='+nc)
+      mlGet('/items?ids='+chunk.join(',')+'&include_attributes=all&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations,health,date_created&_nocache='+nc)
     ));
     allItems=[];
     results.forEach(r=>{ r.forEach(x=>{if(x.code===200)allItems.push(x.body);}); });
     _updateItemsUI();
     // refreshHealthScores movido a loadItemsFull (se ejecuta cuando ya están TODOS los items)
   }catch(e){console.warn('[loadItemsFast]',e);}
+}
+
+// v197: trae last_updated de cada publicación en lotes, con un fetch mínimo
+// (solo id + last_updated) que NO interfiere con la carga principal.
+async function _cargarLastUpdated(){
+  try{
+    if(!Array.isArray(allItems) || !allItems.length) return;
+    const ids = allItems.map(i=>i.id).filter(Boolean);
+    const CH = 20;
+    for(let k=0;k<ids.length;k+=CH){
+      const chunk = ids.slice(k,k+CH);
+      try{
+        const r = await mlGet('/items?ids='+chunk.join(',')+'&attributes=id,last_updated');
+        // respuesta multiget: [{code, body:{id,last_updated}}, ...]
+        const arr = Array.isArray(r) ? r : [];
+        arr.forEach(row=>{
+          const b = row && row.body ? row.body : row;
+          if(b && b.id && b.last_updated){
+            const it = allItems.find(x=>x.id===b.id);
+            if(it) it.last_updated = b.last_updated;
+          }
+        });
+      }catch(e){ /* si un lote falla, seguimos con el resto */ }
+    }
+    // refrescar la tabla de Publicaciones si está visible
+    if(typeof renderPubs==='function' && document.getElementById('section-publicaciones')?.classList.contains('active')){
+      renderPubs();
+    }
+    console.log('[lastUpdated] cargado para', ids.length, 'publicaciones');
+  }catch(e){ console.warn('[lastUpdated]', e.message); }
 }
 
 async function loadItemsFull(){
@@ -5373,7 +5403,7 @@ async function loadItemsFull(){
       const batch = chunks.slice(i, i+PARALLEL);
       const results = await Promise.all(batch.map(async (chunk) => {
         try{
-          const r = await mlGet('/items?ids='+chunk.join(',')+'&include_attributes=all&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,sale_terms,tags,shipping,catalog_listing,catalog_product_id,variations,health,date_created,last_updated');
+          const r = await mlGet('/items?ids='+chunk.join(',')+'&include_attributes=all&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations,health,date_created');
           return r || [];
         }catch(e){ return []; }
       }));
@@ -5385,6 +5415,10 @@ async function loadItemsFull(){
     // Actualizar health scores con datos recién bajados de ML
     refreshHealthScores();
     console.log('[loadItemsFull]',allItems.length);
+    // v197: cargar last_updated por separado (no se puede pedir junto al resto
+    // de atributos sin romper la respuesta multiget). Corre en segundo plano,
+    // no bloquea, y al terminar refresca la tabla de Publicaciones.
+    _cargarLastUpdated();
     // v118: Cargar cache del Termómetro SEO (sincrono, instantáneo).
     // El cálculo completo se hace cuando el usuario toca "📊 Cargar métricas"
     // en la sección SEO. El cache trae los valores de hasta 4h atrás.
@@ -5777,7 +5811,7 @@ function _saveDataCache(){
       listing_type_id: i.listing_type_id, health: i.health,
       catalog_listing: i.catalog_listing, catalog_product_id: i.catalog_product_id,
       video_id: i.video_id, date_created: i.date_created,
-      last_updated: i.last_updated, sale_terms: i.sale_terms,
+      last_updated: i.last_updated,
       seller_custom_field: i.seller_custom_field, tags: i.tags,
       shipping: i.shipping,  // v164: mode + dimensions para columna Empaque
       // v142: persistir SKU(attr), EAN y tiempo de disponibilidad ya extraídos
