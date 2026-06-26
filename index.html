@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v197 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v198 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1090,6 +1090,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <option value="premium">Premium</option>
           <option value="free">Gratuita</option>
         </select>
+        <button class="btn btn-ghost btn-sm" id="btn-cargar-fechas" onclick="_cargarLastUpdated()" title="Carga la fecha de última modificación de cada publicación desde Mercado Libre (columna Fecha modif.). Se hace de forma pausada para no saturar. Puede tardar 1-2 minutos con muchas publicaciones." style="white-space:nowrap">📅 Cargar fechas modif.</button>
       </div>
       <div class="bulk-bar" id="bulk-bar">
         <span id="bulk-count-bar">0 seleccionadas</span>
@@ -5336,16 +5337,22 @@ async function loadItemsFast(){
 
 // v197: trae last_updated de cada publicación en lotes, con un fetch mínimo
 // (solo id + last_updated) que NO interfiere con la carga principal.
+let _cargandoFechas = false;
 async function _cargarLastUpdated(){
+  if(_cargandoFechas){ showToast('Ya se están cargando las fechas, esperá...','info'); return; }
+  if(!Array.isArray(allItems) || !allItems.length){ showToast('Primero esperá a que carguen las publicaciones','info'); return; }
+  _cargandoFechas = true;
+  const btn = document.getElementById('btn-cargar-fechas');
+  if(btn){ btn.disabled = true; btn._txt = btn.textContent; }
   try{
-    if(!Array.isArray(allItems) || !allItems.length) return;
     const ids = allItems.map(i=>i.id).filter(Boolean);
-    const CH = 20;
+    const CH = 20;               // 20 publicaciones por pedido
+    const total = ids.length;
+    let hechos = 0;
     for(let k=0;k<ids.length;k+=CH){
       const chunk = ids.slice(k,k+CH);
       try{
         const r = await mlGet('/items?ids='+chunk.join(',')+'&attributes=id,last_updated');
-        // respuesta multiget: [{code, body:{id,last_updated}}, ...]
         const arr = Array.isArray(r) ? r : [];
         arr.forEach(row=>{
           const b = row && row.body ? row.body : row;
@@ -5354,14 +5361,31 @@ async function _cargarLastUpdated(){
             if(it) it.last_updated = b.last_updated;
           }
         });
-      }catch(e){ /* si un lote falla, seguimos con el resto */ }
+      }catch(e){ /* si un lote falla, seguimos */ }
+      hechos += chunk.length;
+      // feedback en el botón
+      if(btn) btn.textContent = '📅 Cargando ' + Math.min(hechos,total) + '/' + total + '...';
+      // PAUSA entre lotes para NO saturar ML (250ms cada 20 publicaciones)
+      await new Promise(r=>setTimeout(r,250));
+      // refrescar la tabla cada 200 publicaciones para ver el progreso
+      if(hechos % 200 === 0 && typeof renderPubs==='function' && document.getElementById('section-publicaciones')?.classList.contains('active')){
+        renderPubs();
+      }
     }
-    // refrescar la tabla de Publicaciones si está visible
     if(typeof renderPubs==='function' && document.getElementById('section-publicaciones')?.classList.contains('active')){
       renderPubs();
     }
-    console.log('[lastUpdated] cargado para', ids.length, 'publicaciones');
-  }catch(e){ console.warn('[lastUpdated]', e.message); }
+    // guardar last_updated en el cache para no recargarlo cada vez
+    try{ _saveDataCache && _saveDataCache(); }catch(e){}
+    console.log('[lastUpdated] cargado para', total, 'publicaciones');
+    showToast('✓ Fechas de modificación cargadas ('+total+' publicaciones)','success');
+  }catch(e){
+    console.warn('[lastUpdated]', e.message);
+    showToast('Error cargando fechas: '+e.message,'error');
+  }finally{
+    _cargandoFechas = false;
+    if(btn){ btn.disabled = false; btn.textContent = btn._txt || '📅 Cargar fechas modif.'; }
+  }
 }
 
 async function loadItemsFull(){
@@ -5415,10 +5439,9 @@ async function loadItemsFull(){
     // Actualizar health scores con datos recién bajados de ML
     refreshHealthScores();
     console.log('[loadItemsFull]',allItems.length);
-    // v197: cargar last_updated por separado (no se puede pedir junto al resto
-    // de atributos sin romper la respuesta multiget). Corre en segundo plano,
-    // no bloquea, y al terminar refresca la tabla de Publicaciones.
-    _cargarLastUpdated();
+    // v198: la carga de last_updated (Fecha modif.) ya NO es automática para no
+    // saturar ML ni el localStorage. Se dispara con el botón "📅 Cargar fechas"
+    // en la sección Publicaciones, de forma pausada.
     // v118: Cargar cache del Termómetro SEO (sincrono, instantáneo).
     // El cálculo completo se hace cuando el usuario toca "📊 Cargar métricas"
     // en la sección SEO. El cache trae los valores de hasta 4h atrás.
@@ -11839,9 +11862,20 @@ function _predSave(store){
   } catch(e){
     // Cuota llena: hacer rotación más agresiva y reintentar
     console.warn('[SEOPred] Cuota localStorage llena, rotando...');
-    _predRotate(store, 0.5); // conservar solo 50% del sample
+    _predRotate(store, 0.3); // conservar solo 30% del sample
     try { localStorage.setItem(SEO_PRED_STORAGE, JSON.stringify(store)); return true; }
-    catch(e2){ console.error('[SEOPred] No se pudo guardar tras rotar:', e2); return false; }
+    catch(e2){
+      // v198: segundo intento más agresivo (10%)
+      _predRotate(store, 0.1);
+      try { localStorage.setItem(SEO_PRED_STORAGE, JSON.stringify(store)); return true; }
+      catch(e3){
+        // último recurso: borrar las predicciones (dato secundario) para liberar
+        // espacio y que el cache de publicaciones SÍ pueda guardarse.
+        console.error('[SEOPred] Sin espacio: borrando predicciones para liberar localStorage');
+        try { localStorage.removeItem(SEO_PRED_STORAGE); } catch(e4){}
+        return false;
+      }
+    }
   }
 }
 
@@ -27662,7 +27696,38 @@ function selectOptItem(id,title){
   });
 }
 
+// v198: liberar localStorage si está cerca del límite, ANTES de cargar datos.
+// El Radar de Aciertos (predicciones) puede crecer mucho y llenar la cuota,
+// impidiendo guardar el cache de publicaciones. Si detectamos poco espacio,
+// recortamos las predicciones (dato secundario) para que todo lo demás funcione.
+function _liberarEspacioSiNecesario(){
+  try{
+    // medir tamaño aproximado del localStorage
+    let total = 0;
+    for(let i=0;i<localStorage.length;i++){
+      const k = localStorage.key(i);
+      const v = localStorage.getItem(k) || '';
+      total += k.length + v.length;
+    }
+    const mb = total / (1024*1024);
+    console.log('[localStorage] uso aproximado:', mb.toFixed(2), 'MB');
+    // localStorage suele permitir ~5MB. Si pasamos 4MB, recortamos.
+    if(mb > 4){
+      console.warn('[localStorage] cerca del límite ('+mb.toFixed(2)+'MB), recortando predicciones...');
+      // borrar las predicciones del Radar (se regeneran solas)
+      try{ localStorage.removeItem('mlp_seo_predictions_v1'); }catch(e){}
+      // borrar caches viejos que se regeneran
+      try{ localStorage.removeItem('mlp_items_v2'); }catch(e){}
+      try{ localStorage.removeItem('mlp_orders_v1'); }catch(e){}
+      let after = 0;
+      for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); after += (k.length + (localStorage.getItem(k)||'').length); }
+      console.log('[localStorage] liberado, ahora:', (after/(1024*1024)).toFixed(2), 'MB');
+    }
+  }catch(e){ console.warn('[localStorage] no se pudo medir:', e.message); }
+}
+
 (async function boot(){
+  _liberarEspacioSiNecesario(); // v198: liberar espacio antes de todo
   const params  = new URLSearchParams(window.location.search);
   const code    = params.get('code');
   const activeApp = localStorage.getItem('ml_active_app');
