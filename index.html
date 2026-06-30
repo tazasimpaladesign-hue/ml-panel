@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v200 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v201 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1090,7 +1090,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <option value="premium">Premium</option>
           <option value="free">Gratuita</option>
         </select>
-        <button class="btn btn-ghost btn-sm" id="btn-cargar-fechas" onclick="_cargarLastUpdated()" title="Trae desde Mercado Libre la fecha de última modificación, el tiempo de disponibilidad actualizado y los descuentos de cada publicación. Se hace de forma pausada para no saturar. Puede tardar 1-2 minutos con muchas publicaciones." style="white-space:nowrap">🔄 Actualizar fechas/descuentos</button>
+        <button class="btn btn-ghost btn-sm" id="btn-cargar-fechas" onclick="_cargarLastUpdated()" title="Trae desde Mercado Libre la fecha de modificación, el tiempo de disponibilidad y los descuentos. Pausado para no saturar. (También se cargan al tocar Cargar métricas en el Analizador SEO.)" style="white-space:nowrap">📅 Fechas y descuentos</button>
       </div>
       <div class="bulk-bar" id="bulk-bar">
         <span id="bulk-count-bar">0 seleccionadas</span>
@@ -1343,7 +1343,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <input type="text" id="seo-search" placeholder="🔍 Título, SKU o ID (MLA / MLAU / número)..." title="Busca por título, SKU o ID de MercadoLibre (detecta MLA, MLAU o el número). Filtra en tiempo real." style="min-width:230px;flex:1;max-width:330px;font-size:12px;padding:6px 10px" oninput="seoSearchDebounced()">
         <button class="btn btn-ghost btn-sm" id="seo-adv-btn" onclick="seoAdvToggle()" title="Filtros avanzados por rango: precio, stock, fecha, calidad, conversión, visitas, ventas y temperatura SEO" style="position:relative;white-space:nowrap">🔧 Filtros avanzados<span id="seo-adv-badge" style="display:none;position:absolute;top:-7px;right:-7px;min-width:17px;height:17px;line-height:17px;padding:0 4px;border-radius:9px;background:var(--accent);color:#fff;font-size:10px;font-weight:700;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.25)"></span></button>
         <button class="btn btn-ghost btn-sm" id="seo-multi-sort-btn" onclick="seoMultiSortToggle()" title="Ordenar por múltiples criterios en cascada">🔢 Orden avanzado<span id="seo-multi-sort-count" style="margin-left:4px;color:var(--accent);font-weight:700"></span></button>
-        <button class="btn btn-ghost btn-sm" onclick="loadSEOMetrics()" id="seo-metrics-btn" title="Cargar visitas reales de los últimos 7 días desde ML (página actual fresca, resto desde caché si está disponible)">📊 Cargar métricas</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadSEOMetrics()" id="seo-metrics-btn" title="Carga TODO desde ML: visitas reales, fecha de modificación, tiempo de disponibilidad y descuentos. Los datos quedan guardados y visibles (también en otras PCs) hasta que lo vuelvas a tocar. Pausado para no saturar.">📊 Cargar métricas</button>
         <button class="btn btn-ghost btn-sm" onclick="loadSEOMetricsFull()" id="seo-metrics-full-btn" title="Forzar refresh COMPLETO: borra el caché local y vuelve a pedir todas las métricas a ML. Más lento pero garantiza datos 100% frescos.">🔄 Refresh total</button>
         <button class="btn btn-ghost btn-sm" onclick="analyzeSEOAll()">↻ Actualizar</button>
         <button class="btn btn-primary btn-sm" onclick="seoExportOpen()" id="seo-export-btn" title="Exportar las publicaciones filtradas a un archivo .xlsx para subir a una IA y pedirle estrategia">📥 Exportar reporte</button>
@@ -5339,23 +5339,72 @@ async function loadItemsFast(){
 // v197: trae last_updated de cada publicación en lotes, con un fetch mínimo
 // (solo id + last_updated) que NO interfiere con la carga principal.
 let _cargandoFechas = false;
-async function _cargarLastUpdated(){
-  if(_cargandoFechas){ showToast('Ya se están cargando las fechas, esperá...','info'); return; }
+const _EXTRA_DATA_KEY = 'mlp_extra_data_v1';   // fecha+tiempo+descuento persistido
+const _EXTRA_DATA_TS_KEY = 'mlp_extra_data_ts_v1';
+
+// v201: guardar los datos extra (last_updated, sale_terms, _regularPrice) para
+// que queden VISIBLES al abrir en otra PC sin reconsumir. Se guardan por item.
+function _saveExtraData(){
+  try{
+    const map = {};
+    (allItems||[]).forEach(i=>{
+      if(i.last_updated || i._regularPrice || (i.sale_terms && i.sale_terms.length)){
+        map[i.id] = {
+          lu: i.last_updated || null,
+          rp: i._regularPrice || null,
+          st: (i.sale_terms||[]).filter(t=>t.id==='MANUFACTURING_TIME').map(t=>({id:t.id,value_name:t.value_name})),
+        };
+      }
+    });
+    localStorage.setItem(_EXTRA_DATA_KEY, JSON.stringify(map));
+    localStorage.setItem(_EXTRA_DATA_TS_KEY, String(Date.now()));
+  }catch(e){ console.warn('[extraData] no se pudo guardar:', e.message); }
+}
+// v201: restaurar los datos extra al cargar (para que estén visibles aunque no
+// se hayan refrescado). Se llama después de cargar allItems.
+function _restoreExtraData(){
+  try{
+    const raw = localStorage.getItem(_EXTRA_DATA_KEY);
+    if(!raw) return;
+    const map = JSON.parse(raw);
+    (allItems||[]).forEach(i=>{
+      const d = map[i.id];
+      if(d){
+        if(d.lu && !i.last_updated) i.last_updated = d.lu;
+        if(d.rp && !i._regularPrice) i._regularPrice = d.rp;
+        if(d.st && d.st.length && !(i.sale_terms&&i.sale_terms.length)) i.sale_terms = d.st;
+      }
+    });
+    const ts = parseInt(localStorage.getItem(_EXTRA_DATA_TS_KEY)||'0',10);
+    if(ts) console.log('[extraData] restaurado de hace', Math.round((Date.now()-ts)/3600000), 'horas');
+  }catch(e){ console.warn('[extraData] no se pudo restaurar:', e.message); }
+}
+
+// v201: carga unificada — fecha modif + tiempo disponib + DESCUENTOS.
+// Los descuentos vienen de /items/{id}/prices (regular_amount = precio tachado),
+// porque original_price del endpoint /items quedó obsoleto y viene null.
+// Se hace pausado para no saturar. Solo trae descuentos de items visibles/con
+// visitas (no de los 2400) para no consumir de más.
+async function _cargarLastUpdated(soloVisibles){
+  if(_cargandoFechas){ showToast('Ya se están cargando los datos, esperá...','info'); return; }
   if(!Array.isArray(allItems) || !allItems.length){ showToast('Primero esperá a que carguen las publicaciones','info'); return; }
   _cargandoFechas = true;
   const btn = document.getElementById('btn-cargar-fechas');
   if(btn){ btn.disabled = true; btn._txt = btn.textContent; }
+  const refrescar = ()=>{
+    if(typeof renderPubs==='function' && document.getElementById('section-publicaciones')?.classList.contains('active')) renderPubs();
+    if(typeof renderSEOTable==='function' && document.getElementById('section-seo')?.classList.contains('active')) renderSEOTable();
+  };
   try{
+    // ── PASO 1: fecha modif + tiempo disponib (multiget liviano, todos los items) ──
     const ids = allItems.map(i=>i.id).filter(Boolean);
-    const CH = 20;               // 20 publicaciones por pedido
+    const CH = 20;
     const total = ids.length;
     let hechos = 0;
     for(let k=0;k<ids.length;k+=CH){
       const chunk = ids.slice(k,k+CH);
       try{
-        // v200: traemos en el mismo pedido: fecha modif + tiempo disponib (sale_terms)
-        // + precio y precio original (para detectar descuentos). Todo de una.
-        const r = await mlGet('/items?ids='+chunk.join(',')+'&attributes=id,last_updated,sale_terms,price,original_price');
+        const r = await mlGet('/items?ids='+chunk.join(',')+'&attributes=id,last_updated,sale_terms');
         const arr = Array.isArray(r) ? r : [];
         arr.forEach(row=>{
           const b = row && row.body ? row.body : row;
@@ -5363,36 +5412,62 @@ async function _cargarLastUpdated(){
             const it = allItems.find(x=>x.id===b.id);
             if(it){
               if(b.last_updated) it.last_updated = b.last_updated;
-              if(b.sale_terms !== undefined) it.sale_terms = b.sale_terms;   // tiempo disponib actualizado
-              if(b.price != null) it.price = b.price;                        // precio actual (con descuento)
-              if(b.original_price !== undefined) it.original_price = b.original_price; // precio sin descuento
+              if(b.sale_terms !== undefined) it.sale_terms = b.sale_terms;
             }
           }
         });
-      }catch(e){ /* si un lote falla, seguimos */ }
+      }catch(e){}
       hechos += chunk.length;
-      // feedback en el botón
-      if(btn) btn.textContent = '🔄 Actualizando ' + Math.min(hechos,total) + '/' + total + '...';
-      // PAUSA entre lotes para NO saturar ML (250ms cada 20 publicaciones)
-      await new Promise(r=>setTimeout(r,250));
-      // refrescar la tabla cada 200 publicaciones para ver el progreso
-      if(hechos % 200 === 0 && typeof renderPubs==='function' && document.getElementById('section-publicaciones')?.classList.contains('active')){
-        renderPubs();
-      }
+      if(btn) btn.textContent = '🔄 Fechas '+Math.min(hechos,total)+'/'+total;
+      await new Promise(r=>setTimeout(r,200));
+      if(hechos % 200 === 0) refrescar();
     }
-    if(typeof renderPubs==='function' && document.getElementById('section-publicaciones')?.classList.contains('active')){
-      renderPubs();
+    refrescar();
+
+    // ── PASO 2: DESCUENTOS vía /items/{id}/prices (1 llamada por item) ──
+    // Para no consumir de más, solo de items activos con visitas (los que te
+    // importan para analizar descuentos). regular_amount = precio sin descuento.
+    let conMetricas = allItems.filter(i=>i.status==='active');
+    // priorizar los que tienen visitas registradas (si hay métricas cargadas)
+    conMetricas.sort((a,b)=>{
+      const va=(itemMetrics[a.id]?.visits30||0), vb=(itemMetrics[b.id]?.visits30||0);
+      return vb-va;
+    });
+    // límite para no saturar: hasta 400 publicaciones con descuento-check
+    const objetivo = conMetricas.slice(0, 400);
+    let pHechos = 0;
+    for(const it of objetivo){
+      try{
+        const pr = await mlGet('/items/'+it.id+'/prices');
+        // buscar el precio standard con regular_amount (precio tachado)
+        const lst = (pr && Array.isArray(pr.prices)) ? pr.prices : [];
+        let regular = 0, venta = 0;
+        lst.forEach(p=>{
+          if(p.regular_amount && p.regular_amount > 0) regular = Math.max(regular, +p.regular_amount);
+          if(p.amount && (p.type==='standard'||p.type==='promotion')) venta = +p.amount;
+        });
+        if(regular > 0) it._regularPrice = regular;
+        else it._regularPrice = 0;  // sin descuento confirmado
+        if(venta > 0) it.price = venta;
+      }catch(e){ /* item sin prices o error, seguimos */ }
+      pHechos++;
+      if(btn) btn.textContent = '🔄 Descuentos '+pHechos+'/'+objetivo.length;
+      await new Promise(r=>setTimeout(r,180));   // pausa para no saturar
+      if(pHechos % 50 === 0) refrescar();
     }
-    // guardar last_updated en el cache para no recargarlo cada vez
+    refrescar();
+
+    // guardar todo para que quede visible en otras PCs
+    _saveExtraData();
     try{ _saveDataCache && _saveDataCache(); }catch(e){}
-    showToast('✓ Datos actualizados: fecha modif, tiempo disponib y descuentos ('+total+' publicaciones)','success');
-    console.log('[datosML] cargados (fecha+tiempo+descuentos) para', total, 'publicaciones');
+    showToast('✓ Datos cargados: fechas, tiempo de disponib y descuentos','success');
+    console.log('[datosML] fechas+tiempo de', total, 'items · descuentos de', objetivo.length);
   }catch(e){
     console.warn('[datosML]', e.message);
     showToast('Error cargando datos: '+e.message,'error');
   }finally{
     _cargandoFechas = false;
-    if(btn){ btn.disabled = false; btn.textContent = btn._txt || '🔄 Actualizar fechas/descuentos'; }
+    if(btn){ btn.disabled = false; btn.textContent = btn._txt || '📅 Fechas y descuentos'; }
   }
 }
 
@@ -5447,9 +5522,11 @@ async function loadItemsFull(){
     // Actualizar health scores con datos recién bajados de ML
     refreshHealthScores();
     console.log('[loadItemsFull]',allItems.length);
-    // v198: la carga de last_updated (Fecha modif.) ya NO es automática para no
-    // saturar ML ni el localStorage. Se dispara con el botón "📅 Cargar fechas"
-    // en la sección Publicaciones, de forma pausada.
+    // v201: restaurar datos extra guardados (fecha modif, descuentos, tiempo)
+    // para que queden VISIBLES aunque no se refresquen. No consume nada de ML.
+    if(typeof _restoreExtraData==='function') _restoreExtraData();
+    // La actualización de esos datos se dispara con el botón "Cargar métricas"
+    // del Analizador SEO o el botón de Publicaciones, de forma pausada.
     // v118: Cargar cache del Termómetro SEO (sincrono, instantáneo).
     // El cálculo completo se hace cuando el usuario toca "📊 Cargar métricas"
     // en la sección SEO. El cache trae los valores de hasta 4h atrás.
@@ -5836,7 +5913,7 @@ function _saveDataCache(){
     const ts = Date.now();
     // Items: solo campos esenciales para renderizado rápido (evitar exceder 5MB de localStorage)
     const itemsSlim = allItems.map(i => ({
-      id: i.id, title: i.title, price: i.price, original_price: i.original_price, status: i.status,
+      id: i.id, title: i.title, price: i.price, original_price: i.original_price, _regularPrice: i._regularPrice, status: i.status,
       available_quantity: i.available_quantity, sold_quantity: i.sold_quantity,
       thumbnail: i.thumbnail, category_id: i.category_id,
       listing_type_id: i.listing_type_id, health: i.health,
@@ -8638,16 +8715,23 @@ function fmtTs(ts){
   return d.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric'});
 }
 
-// v200: ¿la publicación tiene descuento? (precio actual < precio original).
-// original_price viene de ML solo si cargaste los datos con el botón Actualizar.
+// v201: ¿la publicación tiene descuento? El precio "tachado" (sin descuento)
+// viene de /items/{id}/prices como regular_amount (lo guardamos en _regularPrice).
+// original_price del endpoint /items quedó obsoleto y suele venir null, por eso
+// usamos prioritariamente _regularPrice. Cae a original_price por compatibilidad.
+function _itemPrecioRegular(item){
+  const reg = +item._regularPrice || 0;
+  if(reg > 0) return reg;
+  return +item.original_price || 0;
+}
 function _itemTieneDescuento(item){
-  const orig = +item.original_price || 0;
+  const orig = _itemPrecioRegular(item);
   const actual = +item.price || 0;
   return orig > 0 && actual > 0 && orig > actual;
 }
 function _itemDescuentoPct(item){
   if(!_itemTieneDescuento(item)) return 0;
-  const orig = +item.original_price, actual = +item.price;
+  const orig = _itemPrecioRegular(item), actual = +item.price;
   return Math.round((orig - actual) / orig * 100);
 }
 
@@ -8657,7 +8741,7 @@ function _seoPrecioCell(item){
   const actual = +item.price || 0;
   const id = item.id;
   if(_itemTieneDescuento(item)){
-    const orig = +item.original_price;
+    const orig = _itemPrecioRegular(item);
     const pct = _itemDescuentoPct(item);
     return '<span style="display:inline-flex;flex-direction:column;align-items:flex-end;line-height:1.15;cursor:pointer" title="Clic para editar precio · tiene ' + pct + '% de descuento" onclick="startPriceEdit(\'' + id + '\',' + actual + ')">' +
       '<span style="font-size:10px;color:var(--text3);text-decoration:line-through;text-decoration-color:#ef4444;text-decoration-thickness:1.5px">$' + orig.toLocaleString('es-AR') + '</span>' +
@@ -9120,6 +9204,8 @@ const SEO_SCENARIO_ORDER = [
   'sin_fotos', 'sin_ean',
   // v118: SEO Termómetro
   'termo_bajo_seo',
+  // v201: filtros de descuento (requieren cargar datos con Cargar métricas)
+  'con_descuento', 'sin_descuento',
 ];
 
 // v80: ¿Califica un ítem para un escenario? Esta función es la fuente de verdad
@@ -11537,6 +11623,13 @@ async function loadSEOMetrics(){
     if(btn){ btn.disabled=false; btn.textContent='📊 Métricas ✓'; }
     console.log('[SEO] Métricas completas para', ids.length, 'ítems');
 
+    // v201: después de las visitas, cargar fechas + tiempo disponib + descuentos
+    // (usa las métricas recién cargadas para priorizar los más visitados).
+    // No bloquea el resto del flujo; corre y va refrescando la tabla.
+    if(typeof _cargarLastUpdated==='function'){
+      _cargarLastUpdated().catch(e=>console.warn('[SEO] carga extra falló:', e?.message));
+    }
+
     // v118: recalcular Termómetro SEO ahora que tenemos todas las visitas
     // (esto también dispara predTakeSnapshot → guarda snapshot local + upload diferido)
     if(typeof seoThermoRecalcAll === 'function') seoThermoRecalcAll();
@@ -13714,6 +13807,41 @@ function _predLastSyncLabel(){
 }
 
 // v130: Sync manual bidireccional (Download → Merge → Upload).
+// v201: diagnóstico del Radar de Aciertos. Llamá window.predDiagnostico() en
+// la consola para ver el estado: cuántos snapshots, matches, y si está activo.
+window.predDiagnostico = function(){
+  const s = _predLoad();
+  const snaps = Object.values(s.snapshots||{}).reduce((a,arr)=>a+arr.length,0);
+  const items = Object.keys(s.snapshots||{}).length;
+  const ultimoSnap = Math.max(0, ...Object.values(s.snapshots||{}).flat().map(x=>x.ts||0));
+  const info = {
+    snapshots_totales: snaps,
+    items_trackeados: items,
+    matches: (s.matches||[]).length,
+    ultimo_snapshot_hace_horas: ultimoSnap ? Math.round((Date.now()-ultimoSnap)/3600000) : 'nunca',
+    primer_run_hace_dias: s.firstRunTs ? Math.round((Date.now()-s.firstRunTs)/86400000) : 0,
+    aciertos_historicos_cumTP: s.cumTP||0,
+    fallos_historicos_cumFP: s.cumFP||0,
+  };
+  console.table(info);
+  console.log('Si "ultimo_snapshot_hace_horas" es alto o "nunca", el Radar no está tomando datos nuevos.');
+  console.log('Para reiniciar el Radar desde cero: window.predResetRadar()');
+  return info;
+};
+
+// v201: reiniciar el Radar de Aciertos desde cero (borra snapshots y matches).
+// Útil si quedó corrupto por falta de espacio. Los datos se regeneran al cargar
+// métricas. window.predResetRadar() desde la consola.
+window.predResetRadar = function(){
+  if(!confirm('¿Reiniciar el Radar de Aciertos desde cero? Se borran los snapshots y empieza a acumular de nuevo al cargar métricas.')) return;
+  try{
+    localStorage.removeItem(SEO_PRED_STORAGE);
+    if(typeof showToast==='function') showToast('🔄 Radar reiniciado. Cargá métricas para empezar a acumular.','success');
+    if(typeof renderRadarAciertos==='function') renderRadarAciertos();
+    console.log('[Radar] reiniciado. Tocá "Cargar métricas" para tomar el primer snapshot nuevo.');
+  }catch(e){ console.warn('[Radar reset]', e.message); }
+};
+
 // Expuesta para uso desde el botón "🔄 Sync ahora" del Radar de Aciertos.
 // v133: Feedback detallado al usuario sobre cada paso + tamaños.
 async function predSyncManual(){
