@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v199 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v200 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1090,7 +1090,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <option value="premium">Premium</option>
           <option value="free">Gratuita</option>
         </select>
-        <button class="btn btn-ghost btn-sm" id="btn-cargar-fechas" onclick="_cargarLastUpdated()" title="Carga la fecha de última modificación de cada publicación desde Mercado Libre (columna Fecha modif.). Se hace de forma pausada para no saturar. Puede tardar 1-2 minutos con muchas publicaciones." style="white-space:nowrap">📅 Cargar fechas modif.</button>
+        <button class="btn btn-ghost btn-sm" id="btn-cargar-fechas" onclick="_cargarLastUpdated()" title="Trae desde Mercado Libre la fecha de última modificación, el tiempo de disponibilidad actualizado y los descuentos de cada publicación. Se hace de forma pausada para no saturar. Puede tardar 1-2 minutos con muchas publicaciones." style="white-space:nowrap">🔄 Actualizar fechas/descuentos</button>
       </div>
       <div class="bulk-bar" id="bulk-bar">
         <span id="bulk-count-bar">0 seleccionadas</span>
@@ -4038,6 +4038,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <div class="card-title" style="margin:0">📊 Evolución de la cuenta</div>
         <span style="font-size:10px;color:var(--text3)" id="cta-chart-note"></span>
         <select id="cta-chart-mode" onchange="ctaRenderChart()" style="margin-left:auto;font-size:12px;padding:5px 9px;border-radius:8px">
+          <option value="diario" selected>Diario</option>
           <option value="mensual">Mensual</option>
           <option value="trimestral">Trimestral</option>
           <option value="anual">Anual</option>
@@ -5352,19 +5353,26 @@ async function _cargarLastUpdated(){
     for(let k=0;k<ids.length;k+=CH){
       const chunk = ids.slice(k,k+CH);
       try{
-        const r = await mlGet('/items?ids='+chunk.join(',')+'&attributes=id,last_updated');
+        // v200: traemos en el mismo pedido: fecha modif + tiempo disponib (sale_terms)
+        // + precio y precio original (para detectar descuentos). Todo de una.
+        const r = await mlGet('/items?ids='+chunk.join(',')+'&attributes=id,last_updated,sale_terms,price,original_price');
         const arr = Array.isArray(r) ? r : [];
         arr.forEach(row=>{
           const b = row && row.body ? row.body : row;
-          if(b && b.id && b.last_updated){
+          if(b && b.id){
             const it = allItems.find(x=>x.id===b.id);
-            if(it) it.last_updated = b.last_updated;
+            if(it){
+              if(b.last_updated) it.last_updated = b.last_updated;
+              if(b.sale_terms !== undefined) it.sale_terms = b.sale_terms;   // tiempo disponib actualizado
+              if(b.price != null) it.price = b.price;                        // precio actual (con descuento)
+              if(b.original_price !== undefined) it.original_price = b.original_price; // precio sin descuento
+            }
           }
         });
       }catch(e){ /* si un lote falla, seguimos */ }
       hechos += chunk.length;
       // feedback en el botón
-      if(btn) btn.textContent = '📅 Cargando ' + Math.min(hechos,total) + '/' + total + '...';
+      if(btn) btn.textContent = '🔄 Actualizando ' + Math.min(hechos,total) + '/' + total + '...';
       // PAUSA entre lotes para NO saturar ML (250ms cada 20 publicaciones)
       await new Promise(r=>setTimeout(r,250));
       // refrescar la tabla cada 200 publicaciones para ver el progreso
@@ -5377,14 +5385,14 @@ async function _cargarLastUpdated(){
     }
     // guardar last_updated en el cache para no recargarlo cada vez
     try{ _saveDataCache && _saveDataCache(); }catch(e){}
-    console.log('[lastUpdated] cargado para', total, 'publicaciones');
-    showToast('✓ Fechas de modificación cargadas ('+total+' publicaciones)','success');
+    showToast('✓ Datos actualizados: fecha modif, tiempo disponib y descuentos ('+total+' publicaciones)','success');
+    console.log('[datosML] cargados (fecha+tiempo+descuentos) para', total, 'publicaciones');
   }catch(e){
-    console.warn('[lastUpdated]', e.message);
-    showToast('Error cargando fechas: '+e.message,'error');
+    console.warn('[datosML]', e.message);
+    showToast('Error cargando datos: '+e.message,'error');
   }finally{
     _cargandoFechas = false;
-    if(btn){ btn.disabled = false; btn.textContent = btn._txt || '📅 Cargar fechas modif.'; }
+    if(btn){ btn.disabled = false; btn.textContent = btn._txt || '🔄 Actualizar fechas/descuentos'; }
   }
 }
 
@@ -5828,7 +5836,7 @@ function _saveDataCache(){
     const ts = Date.now();
     // Items: solo campos esenciales para renderizado rápido (evitar exceder 5MB de localStorage)
     const itemsSlim = allItems.map(i => ({
-      id: i.id, title: i.title, price: i.price, status: i.status,
+      id: i.id, title: i.title, price: i.price, original_price: i.original_price, status: i.status,
       available_quantity: i.available_quantity, sold_quantity: i.sold_quantity,
       thumbnail: i.thumbnail, category_id: i.category_id,
       listing_type_id: i.listing_type_id, health: i.health,
@@ -6119,6 +6127,23 @@ function _onTabVisible(){
   try{ if(typeof _pollMessages === 'function') _pollMessages(); }catch{}
 }
 document.addEventListener('visibilitychange', _onTabVisible);
+
+// v200: GUARDADO INMEDIATO de Cuenta Impala al ocultar la pestaña o cerrar.
+// Antes el debounce de 8s podía perder cambios si cerrabas/cambiabas de PC
+// antes de que guardara. Ahora forzamos el guardado de lo pendiente.
+function _ctaGuardarUrgente(){
+  try{
+    if(typeof _ctaState !== 'undefined' && _ctaState.dirty && _ctaState.dirty.size && typeof ctaFlushDirty === 'function'){
+      clearTimeout(_ctaSaveTimer);
+      ctaFlushDirty();   // dispara el guardado ya
+    }
+  }catch(e){}
+}
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState === 'hidden') _ctaGuardarUrgente();
+});
+window.addEventListener('beforeunload', function(){ _ctaGuardarUrgente(); });
+window.addEventListener('pagehide', function(){ _ctaGuardarUrgente(); });
 window.addEventListener('focus', _onTabVisible);
 
 // v136: Mutex global para coordinar batches concurrentes.
@@ -7959,7 +7984,7 @@ function renderPubs(){
       <td style="text-align:center;font-size:10.5px;color:var(--text2);white-space:nowrap" title="${item.last_updated ? 'Modificada: '+fmtTs(item.last_updated) : 'Sin datos de modificación'}">${_seoFechaModCell(item)}</td>
       <td style="text-align:right">
         <div id="price-cell-${item.id}" style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
-          <span style="font-weight:600;color:var(--text);cursor:pointer" title="Clic para editar precio" onclick="startPriceEdit('${item.id}',${item.price||0})">$${(item.price||0).toLocaleString('es-AR')}</span>
+          ${_seoPrecioCell(item)}
           <button class="btn btn-ghost btn-xs" style="padding:2px 5px;font-size:10px;opacity:.5" title="Editar precio" onclick="startPriceEdit('${item.id}',${item.price||0})">✎</button>
         </div>
       </td>
@@ -8613,6 +8638,36 @@ function fmtTs(ts){
   return d.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric'});
 }
 
+// v200: ¿la publicación tiene descuento? (precio actual < precio original).
+// original_price viene de ML solo si cargaste los datos con el botón Actualizar.
+function _itemTieneDescuento(item){
+  const orig = +item.original_price || 0;
+  const actual = +item.price || 0;
+  return orig > 0 && actual > 0 && orig > actual;
+}
+function _itemDescuentoPct(item){
+  if(!_itemTieneDescuento(item)) return 0;
+  const orig = +item.original_price, actual = +item.price;
+  return Math.round((orig - actual) / orig * 100);
+}
+
+// v200: celda de precio. Sin descuento: precio normal. Con descuento: precio
+// original TACHADO arriba y el precio final con descuento + % abajo.
+function _seoPrecioCell(item){
+  const actual = +item.price || 0;
+  const id = item.id;
+  if(_itemTieneDescuento(item)){
+    const orig = +item.original_price;
+    const pct = _itemDescuentoPct(item);
+    return '<span style="display:inline-flex;flex-direction:column;align-items:flex-end;line-height:1.15;cursor:pointer" title="Clic para editar precio · tiene ' + pct + '% de descuento" onclick="startPriceEdit(\'' + id + '\',' + actual + ')">' +
+      '<span style="font-size:10px;color:var(--text3);text-decoration:line-through;text-decoration-color:#ef4444;text-decoration-thickness:1.5px">$' + orig.toLocaleString('es-AR') + '</span>' +
+      '<span style="font-weight:700;color:#16a34a">$' + actual.toLocaleString('es-AR') + '</span>' +
+      '<span style="font-size:9px;font-weight:700;color:#ef4444">-' + pct + '%</span>' +
+    '</span>';
+  }
+  return '<span style="font-weight:600;color:var(--text);cursor:pointer" title="Clic para editar precio" onclick="startPriceEdit(\'' + id + '\',' + actual + ')">$' + actual.toLocaleString('es-AR') + '</span>';
+}
+
 // v196: celda de "Fecha modificada" para la tabla de Publicaciones.
 // Muestra la fecha y, si hace mucho que no se toca, lo resalta (pierde posición).
 function _seoFechaModCell(item){
@@ -8781,6 +8836,21 @@ const SEO_SORT_COLUMNS = [
 // Este catálogo es la fuente de verdad — tanto el Analizador SEO como Alertas
 // lo consumen. Si querés agregar/modificar escenarios, hacelo acá.
 const SEO_SCENARIOS = {
+  // ── v200: Filtros de descuento (requieren cargar datos con el botón Actualizar) ──
+  'con_descuento': {
+    emoji: '🏷️', label: 'Con Descuento', color: '#16a34a',
+    description: 'Publicaciones que actualmente tienen un descuento aplicado (precio menor al original).',
+    actionMain:      'Verificá si los descuentos están generando más visitas y ventas.',
+    actionSecondary: 'Mantené el descuento en las que convierten y sacá el de las que no.',
+    filter: i => _itemTieneDescuento(i),
+  },
+  'sin_descuento': {
+    emoji: '🔖', label: 'Sin Descuento', color: '#6366f1',
+    description: 'Publicaciones a precio lleno, sin descuento. Candidatas a aplicar promo para mejorar visibilidad.',
+    actionMain:      'Probá aplicar un descuento estratégico para fomentar visitas y posicionamiento.',
+    actionSecondary: 'Priorizá las de buen stock y baja rotación para activar la demanda.',
+    filter: i => !_itemTieneDescuento(i),
+  },
   // ── Fusionados desde chips originales (prioridad emoji original) ────────────
   'sin_fotos': {
     emoji: '📷', label: 'Sin Fotos', color: '#f59e0b',
@@ -23283,9 +23353,9 @@ function _ctaEnsureChunk(ym) {
 function ctaMarkDirty(ym) {
   _ctaState.dirty.add(ym);
   clearTimeout(_ctaSaveTimer);
-  // v174: debounce más largo (8s) para agrupar varias ediciones en 1 sola
-  // escritura de KV y reducir el consumo de Cloudflare.
-  _ctaSaveTimer = setTimeout(ctaFlushDirty, 8000);
+  // v200: debounce de 3s (antes 8s). Más rápido para no perder cambios al
+  // cambiar de PC, sin disparar demasiadas escrituras de KV.
+  _ctaSaveTimer = setTimeout(ctaFlushDirty, 3000);
 }
 
 async function ctaFlushDirty() {
@@ -23669,8 +23739,10 @@ function ctaRenderChart() {
   const note = document.getElementById('cta-chart-note');
   let config;
 
-  if (mode === 'mensual' || mode === 'anual' || mode === 'trimestral') {
-    if (note) note.textContent = 'Ingresos, egresos y rentabilidad % · período seleccionado';
+  if (mode === 'diario' || mode === 'mensual' || mode === 'anual' || mode === 'trimestral') {
+    if (note) note.textContent = mode === 'diario'
+      ? 'Ingresos, egresos y rentabilidad % · por día del período seleccionado'
+      : 'Ingresos, egresos y rentabilidad % · período seleccionado';
     // v177: agrupa las operaciones del PERÍODO activo (no el resumen oficial).
     const [pf0, pf1] = _ctaPeriodoRango();
     const ops = [];
@@ -23679,6 +23751,7 @@ function ctaRenderChart() {
     }));
     const map = new Map();
     const keyOf = (f) => {
+      if (mode === 'diario') return f.slice(0, 10);     // YYYY-MM-DD
       if (mode === 'mensual') return f.slice(0, 7);
       if (mode === 'anual') return f.slice(0, 4);
       const m = parseInt(f.slice(5, 7), 10);
@@ -23693,23 +23766,24 @@ function ctaRenderChart() {
     let labels = [], ings = [], egs = [], netos = [];
     [...map.keys()].sort().forEach(k => {
       let lbl = k;
-      if (mode === 'mensual') lbl = k.slice(2).replace('-', '/');
+      if (mode === 'diario') lbl = k.slice(8) + '/' + k.slice(5, 7);   // DD/MM
+      else if (mode === 'mensual') lbl = k.slice(2).replace('-', '/');
       else if (mode.indexOf('trimestral') === 0 || k.indexOf('-Q') > 0) lbl = k.replace('-', ' ');
       labels.push(lbl); ings.push(map.get(k).i); egs.push(map.get(k).e); netos.push(map.get(k).i - map.get(k).e);
     });
     if (!labels.length) { labels = ['Sin datos']; ings = [0]; egs = [0]; netos = [0]; }
     config = {
-      type: mode === 'mensual' ? 'line' : 'bar',
+      type: (mode === 'mensual' || mode === 'diario') ? 'line' : 'bar',
       data: { labels, datasets: [
-        { label: 'Ingresos', data: ings, borderColor: '#10b981', backgroundColor: mode === 'mensual'
+        { label: 'Ingresos', data: ings, borderColor: '#10b981', backgroundColor: (mode === 'mensual' || mode === 'diario')
             ? (c => { const { ctx, chartArea } = c.chart; return chartArea ? _persoGrad(ctx, chartArea, '#10b981', '30', '03') : '#10b98120'; })
             : (c => { const { ctx, chartArea } = c.chart; return chartArea ? _persoGrad(ctx, chartArea, '#10b981', 'e8', '78') : '#10b981cc'; }),
-          borderWidth: 2.5, fill: mode === 'mensual', cubicInterpolationMode: 'monotone',
+          borderWidth: 2.5, fill: (mode === 'mensual' || mode === 'diario'), cubicInterpolationMode: 'monotone',
           pointRadius: 2.5, pointHoverRadius: 6, borderRadius: 8, borderSkipped: false, yAxisID: 'y' },
-        { label: 'Egresos', data: egs, borderColor: '#ef4444', backgroundColor: mode === 'mensual'
+        { label: 'Egresos', data: egs, borderColor: '#ef4444', backgroundColor: (mode === 'mensual' || mode === 'diario')
             ? (c => { const { ctx, chartArea } = c.chart; return chartArea ? _persoGrad(ctx, chartArea, '#ef4444', '24', '02') : '#ef444418'; })
             : (c => { const { ctx, chartArea } = c.chart; return chartArea ? _persoGrad(ctx, chartArea, '#ef4444', 'e8', '78') : '#ef4444cc'; }),
-          borderWidth: 2.5, fill: mode === 'mensual', cubicInterpolationMode: 'monotone',
+          borderWidth: 2.5, fill: (mode === 'mensual' || mode === 'diario'), cubicInterpolationMode: 'monotone',
           pointRadius: 2.5, pointHoverRadius: 6, borderRadius: 8, borderSkipped: false, yAxisID: 'y' },
         { type: 'line', label: 'Rentabilidad %', yAxisID: 'y1',
           data: ings.map((iv, k) => iv > 0 ? Math.round((netos[k] / iv) * 1000) / 10 : 0),
@@ -24686,6 +24760,32 @@ function _ctaReportData() {
   };
 }
 
+// v200: agrupa TODAS las operaciones (todo el historial) por año, para el
+// desglose anual del reporte. Devuelve por año: ingresos, egresos, ganancia,
+// unidades y rentabilidad.
+function _ctaReportPorAnio() {
+  const porAnio = {};
+  Object.values(_ctaState.chunks).forEach(ch => (ch || []).forEach(o => {
+    const f = o.fecha || ''; if (f.length < 4) return;
+    if (o.cancelada) return;
+    const anio = f.slice(0, 4);
+    if (!porAnio[anio]) porAnio[anio] = { ing: 0, eg: 0, uni: 0 };
+    const e = porAnio[anio];
+    if (o.tipo === 'ingreso') {
+      e.ing += (+o.monto || 0) + (+o.envio || 0);
+      (o.items || []).forEach(it => { e.uni += (+it.cant || 0); });
+    } else {
+      e.eg += (+o.monto || 0);
+    }
+  }));
+  return Object.keys(porAnio).sort().map(anio => {
+    const e = porAnio[anio];
+    const gan = e.ing - e.eg;
+    const rent = e.ing > 0 ? (gan / e.ing * 100) : 0;
+    return { anio, ing: e.ing, eg: e.eg, gan, uni: e.uni, rent };
+  });
+}
+
 function ctaExportarReporte() {
   const [, , periodoLabel] = _ctaPeriodoRango();
   const d = _ctaReportData();
@@ -24697,6 +24797,17 @@ function ctaExportarReporte() {
     unihist: _ctaReadKpi('cta-kpi-unihist'), stockval: _ctaReadKpi('cta-kpi-stockval'),
   };
   const fmtPct = (v, tot) => (v / tot * 100).toFixed(1) + '%';
+  // v200: desglose por año (todo el historial)
+  const porAnio = _ctaReportPorAnio();
+  const filaAnio = porAnio.map(a =>
+    '<tr><td><b>' + a.anio + '</b></td>' +
+    '<td style="text-align:right;color:#10b981">' + PERSO_FMT_MONEY(a.ing) + '</td>' +
+    '<td style="text-align:right;color:#ef4444">' + PERSO_FMT_MONEY(a.eg) + '</td>' +
+    '<td style="text-align:right;font-weight:700;color:#16a34a">' + PERSO_FMT_MONEY(a.gan) + '</td>' +
+    '<td style="text-align:right">' + a.uni + '</td>' +
+    '<td style="text-align:right">' + a.rent.toFixed(1) + '%</td></tr>'
+  ).join('');
+  const listaAnios = porAnio.map(a => a.anio + ': ingresos ' + PERSO_FMT_MONEY(a.ing) + ', egresos ' + PERSO_FMT_MONEY(a.eg) + ', ganancia ' + PERSO_FMT_MONEY(a.gan) + ', ' + a.uni + ' unidades, rentab. ' + a.rent.toFixed(1) + '%').join('\n   ');
   // Tablas
   const filaOrig = d.origenes.map(([n, v]) => '<tr><td>' + _persoEsc(n) + '</td><td style="text-align:right">' + PERSO_FMT_MONEY(v) + '</td><td style="text-align:right">' + fmtPct(v, d.totOrig) + '</td></tr>').join('');
   const filaProv = d.provincias.slice(0, 12).map(([n, v]) => '<tr><td>' + _persoEsc(n) + '</td><td style="text-align:right">' + PERSO_FMT_MONEY(v) + '</td><td style="text-align:right">' + fmtPct(v, d.totProv) + '</td></tr>').join('');
@@ -24720,7 +24831,14 @@ function ctaExportarReporte() {
     'DISTRIBUCIÓN POR CANALES (Orígenes): ' + (listaOrig || 'sin datos') + '\n' +
     'VENTAS POR PROVINCIA (Top 5): ' + (listaProv || 'sin datos') + '\n' +
     'VENTAS POR PRODUCTO: ' + (listaProd || 'sin datos') + '\n\n' +
-    'Con esta radiografía, ¿qué anomalías o cuellos de botella financieros detectas, y qué herramientas de automatización o IA me sugieres integrar en la gestión diaria para escalar la facturación?';
+    'DESGLOSE POR AÑO (todo el historial):\n   ' + (listaAnios || 'sin datos') + '\n\n' +
+    'ANÁLISIS DE INFLACIÓN REQUERIDO (MUY IMPORTANTE):\n' +
+    'Argentina tiene inflación muy alta, así que comparar montos nominales entre años engaña. Para cada año del desglose:\n' +
+    '   1. Buscá/indicá la inflación anual oficial de Argentina (IPC INDEC) de ese año.\n' +
+    '   2. Ajustá los ingresos y la ganancia de cada año a valores reales (descontando inflación), llevándolos todos a moneda constante del año más reciente.\n' +
+    '   3. Decime si el negocio creció, se mantuvo o cayó EN TÉRMINOS REALES año contra año (no solo nominal).\n' +
+    '   4. Calculá la rentabilidad real de cada año y si el margen mejoró o empeoró descontando inflación.\n\n' +
+    'Con esta radiografía y el ajuste por inflación, ¿qué anomalías o cuellos de botella financieros detectás, en qué años el crecimiento fue real y en cuáles fue solo nominal por la inflación, y qué herramientas de automatización o IA me sugerís integrar para escalar la facturación en términos reales?';
 
   const fecha = new Date().toLocaleString('es-AR');
   const css = 'body{font-family:Inter,Arial,sans-serif;color:#0f172a;max-width:820px;margin:24px auto;padding:0 18px;line-height:1.5}' +
@@ -24749,6 +24867,9 @@ function ctaExportarReporte() {
     '<div class="kpi"><div class="l">Unid. históricas</div><div class="v">' + k.unihist + '</div></div>' +
     '<div class="kpi"><div class="l">Stock valorizado</div><div class="v">' + k.stockval + '</div></div>' +
     '</div>' +
+    '<h2>📅 Desglose por año (todo el historial)</h2>' +
+    '<div style="font-size:11.5px;color:#64748b;margin-bottom:6px">Comparativa anual de ingresos, egresos y ganancia. Útil para ver la evolución real descontando la inflación de cada año.</div>' +
+    '<table><thead><tr><th>Año</th><th style="text-align:right">Ingresos</th><th style="text-align:right">Egresos</th><th style="text-align:right">Ganancia</th><th style="text-align:right">Unidades</th><th style="text-align:right">Rentab.</th></tr></thead><tbody>' + (filaAnio || '<tr><td colspan="6">Sin datos</td></tr>') + '</tbody></table>' +
     '<h2>Distribución por canales (Orígenes)</h2><table><thead><tr><th>Origen</th><th style="text-align:right">Monto</th><th style="text-align:right">%</th></tr></thead><tbody>' + (filaOrig || '<tr><td colspan="3">Sin datos</td></tr>') + '</tbody></table>' +
     '<h2>Ventas por provincia</h2><table><thead><tr><th>Provincia</th><th style="text-align:right">Monto</th><th style="text-align:right">%</th></tr></thead><tbody>' + (filaProv || '<tr><td colspan="3">Sin datos</td></tr>') + '</tbody></table>' +
     '<h2>Ventas por producto</h2><table><thead><tr><th>Producto</th><th style="text-align:right">Unidades</th><th style="text-align:right">Monto</th><th style="text-align:right">%</th></tr></thead><tbody>' + (filaProd || '<tr><td colspan="4">Sin datos</td></tr>') + '</tbody></table>' +
