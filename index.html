@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v201 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v202 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1345,6 +1345,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <button class="btn btn-ghost btn-sm" id="seo-multi-sort-btn" onclick="seoMultiSortToggle()" title="Ordenar por múltiples criterios en cascada">🔢 Orden avanzado<span id="seo-multi-sort-count" style="margin-left:4px;color:var(--accent);font-weight:700"></span></button>
         <button class="btn btn-ghost btn-sm" onclick="loadSEOMetrics()" id="seo-metrics-btn" title="Carga TODO desde ML: visitas reales, fecha de modificación, tiempo de disponibilidad y descuentos. Los datos quedan guardados y visibles (también en otras PCs) hasta que lo vuelvas a tocar. Pausado para no saturar.">📊 Cargar métricas</button>
         <button class="btn btn-ghost btn-sm" onclick="loadSEOMetricsFull()" id="seo-metrics-full-btn" title="Forzar refresh COMPLETO: borra el caché local y vuelve a pedir todas las métricas a ML. Más lento pero garantiza datos 100% frescos.">🔄 Refresh total</button>
+        <button class="btn btn-ghost btn-sm" onclick="abrirDescuentoMasivo()" id="seo-desc-masivo-btn" title="Aplicar un descuento propio a TODAS las publicaciones que tenés filtradas en este momento (usá los escenarios y la búsqueda para filtrar primero)." style="border:1px solid #16a34a;color:#16a34a;white-space:nowrap">🏷️ Descuento masivo</button>
         <button class="btn btn-ghost btn-sm" onclick="analyzeSEOAll()">↻ Actualizar</button>
         <button class="btn btn-primary btn-sm" onclick="seoExportOpen()" id="seo-export-btn" title="Exportar las publicaciones filtradas a un archivo .xlsx para subir a una IA y pedirle estrategia">📥 Exportar reporte</button>
         <button class="btn btn-ghost btn-sm" onclick="seoImportOpen()" id="seo-import-btn" title="Importar un .xlsx (con el mismo formato del reporte) para hacer cambios masivos en MercadoLibre: SKU, estado, precio, stock, código universal y tiempo de disponibilidad" style="border:1px solid var(--accent);color:var(--accent)">📤 Importar cambios</button>
@@ -4734,6 +4735,13 @@ async function mlPut(ep,body){
   if(r.status===401){showSessionExpired();throw new Error('401');}
   return r.json();
 }
+async function mlDelete(ep){
+  const r = await fetch(WORKER+'/api'+ep,{method:'DELETE',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'}});
+  if(r.status===401){showSessionExpired();throw new Error('401');}
+  // algunas respuestas DELETE vienen vacías
+  const t = await r.text();
+  try{ return t ? JSON.parse(t) : { ok: r.ok, status: r.status }; }catch(e){ return { ok: r.ok, status: r.status, raw: t }; }
+}
 async function tryRefreshToken(){
   const appId=localStorage.getItem('ml_active_app');
   const rt=localStorage.getItem('ml_refresh_'+appId)||localStorage.getItem('ml_ref_'+appId);
@@ -5439,16 +5447,26 @@ async function _cargarLastUpdated(soloVisibles){
     for(const it of objetivo){
       try{
         const pr = await mlGet('/items/'+it.id+'/prices');
-        // buscar el precio standard con regular_amount (precio tachado)
         const lst = (pr && Array.isArray(pr.prices)) ? pr.prices : [];
-        let regular = 0, venta = 0;
+        // El precio "ganador" (el que ve el comprador) puede ser standard o promotion.
+        // regular_amount = precio original tachado cuando hay promoción.
+        let regular = 0, venta = 0, promoVenta = 0;
         lst.forEach(p=>{
-          if(p.regular_amount && p.regular_amount > 0) regular = Math.max(regular, +p.regular_amount);
-          if(p.amount && (p.type==='standard'||p.type==='promotion')) venta = +p.amount;
+          const amt = +p.amount || 0;
+          const reg = +p.regular_amount || 0;
+          if(reg > 0) regular = Math.max(regular, reg);
+          if(p.type === 'promotion' && amt > 0) promoVenta = amt;   // precio con descuento
+          if(p.type === 'standard' && amt > 0) venta = amt;          // precio normal
         });
-        if(regular > 0) it._regularPrice = regular;
-        else it._regularPrice = 0;  // sin descuento confirmado
-        if(venta > 0) it.price = venta;
+        // El precio de venta real: si hay promoción vigente, ese; si no, el standard.
+        const precioFinal = promoVenta > 0 ? promoVenta : venta;
+        // Solo es descuento real si el regular es mayor que el precio final.
+        if(regular > 0 && precioFinal > 0 && regular > precioFinal){
+          it._regularPrice = regular;
+        } else {
+          it._regularPrice = 0;  // sin descuento
+        }
+        if(precioFinal > 0) it.price = precioFinal;
       }catch(e){ /* item sin prices o error, seguimos */ }
       pHechos++;
       if(btn) btn.textContent = '🔄 Descuentos '+pHechos+'/'+objetivo.length;
@@ -8715,6 +8733,250 @@ function fmtTs(ts){
   return d.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric'});
 }
 
+// v202: celda de precio para la tabla del ANALIZADOR SEO (usa seoStartPriceEdit).
+// Igual que _seoPrecioCell pero con el handler de edición de esa tabla.
+function _seoPrecioCellSEO(item){
+  const actual = +item.price || 0;
+  const id = item.id;
+  if(_itemTieneDescuento(item)){
+    const orig = _itemPrecioRegular(item);
+    const pct = _itemDescuentoPct(item);
+    return '<span style="display:inline-flex;flex-direction:column;align-items:flex-end;line-height:1.2;cursor:pointer" title="Clic para gestionar el descuento" onclick="abrirDescuentoIndividual(\'' + id + '\')">' +
+      '<span style="font-size:11px;color:var(--text3);text-decoration:line-through;text-decoration-color:#ef4444;text-decoration-thickness:1.5px">$' + orig.toLocaleString('es-AR') + '</span>' +
+      '<span style="font-size:13px;font-weight:700;color:#16a34a">$' + actual.toLocaleString('es-AR') + '</span>' +
+      '<span style="font-size:11px;font-weight:700;color:#ef4444">-' + pct + '%</span>' +
+    '</span>';
+  }
+  return '<span style="font-size:12px;font-weight:600;color:var(--text);cursor:pointer" onclick="abrirDescuentoIndividual(\'' + id + '\')" title="Clic para aplicar un descuento">$' + actual.toLocaleString('es-AR') + '</span>';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v202: APLICAR DESCUENTOS PROPIOS (PRICE_DISCOUNT) vía API de ML
+// Endpoint: POST /seller-promotions/items/{id}?app_version=v2
+// Body: { deal_price (precio con descuento), start_date, finish_date, promotion_type }
+// Requisitos ML: reputación verde, ≥1 venta, item activo, condición nuevo, no gratuita.
+// Máximo 21 días. El descuento mínimo suele ser 5%.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Aplica un descuento propio a UN item. pct = porcentaje (ej 15), dias = duración.
+async function aplicarDescuentoItem(itemId, pct, dias){
+  const item = (allItems||[]).find(i=>i.id===itemId);
+  if(!item) throw new Error('No se encontró la publicación');
+  const precioBase = +item.price || 0;
+  if(precioBase <= 0) throw new Error('Precio inválido');
+  if(pct < 5) throw new Error('El descuento mínimo es 5%');
+  if(pct > 80) throw new Error('El descuento máximo es 80%');
+  // precio con descuento (redondeado hacia abajo a entero)
+  const dealPrice = Math.floor(precioBase * (1 - pct/100));
+  // fechas: desde hoy hasta hoy+dias (formato YYYY-MM-DDT00:00:00)
+  const hoy = new Date();
+  const fin = new Date(); fin.setDate(fin.getDate() + Math.min(dias, 21));
+  const fmtFecha = (d, finDia) => {
+    const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), dd=String(d.getDate()).padStart(2,'0');
+    return y+'-'+m+'-'+dd+'T'+(finDia?'23:59:59':'00:00:00');
+  };
+  const body = {
+    deal_price: dealPrice,
+    start_date: fmtFecha(hoy, false),
+    finish_date: fmtFecha(fin, true),
+    promotion_type: 'PRICE_DISCOUNT',
+  };
+  const resp = await mlPost('/seller-promotions/items/'+itemId+'?app_version=v2', body);
+  // ML devuelve { price, original_price, offer_id } si fue OK, o { error/message } si falló
+  if(resp && (resp.error || resp.message) && !resp.offer_id && !resp.price){
+    const msg = resp.message || resp.error || 'Error desconocido';
+    throw new Error(_traducirErrorDescuento(msg, resp));
+  }
+  // actualizar el item localmente para reflejar el descuento al instante
+  item._regularPrice = precioBase;
+  item.price = dealPrice;
+  return { dealPrice, precioBase, pct, resp };
+}
+
+// Quita el descuento propio de un item.
+async function quitarDescuentoItem(itemId){
+  const resp = await mlDelete('/seller-promotions/items/'+itemId+'?promotion_type=PRICE_DISCOUNT&app_version=v2');
+  const item = (allItems||[]).find(i=>i.id===itemId);
+  if(item){
+    // al quitar, el precio vuelve al regular
+    if(item._regularPrice > 0){ item.price = item._regularPrice; item._regularPrice = 0; }
+  }
+  return resp;
+}
+
+// Traduce los errores típicos de ML a algo entendible.
+function _traducirErrorDescuento(msg, resp){
+  const m = (msg||'').toLowerCase();
+  if(m.includes('credibility') || m.includes('credible')) return 'ML rechazó el precio: el descuento es muy chico para considerarse creíble. Probá con un % mayor.';
+  if(m.includes('5 percent') || m.includes('below_5')) return 'El descuento debe ser de al menos 5%.';
+  if(m.includes('reputation') || m.includes('reputación')) return 'Tu reputación debe ser verde para aplicar descuentos.';
+  if(m.includes('not active') || m.includes('status')) return 'La publicación debe estar activa.';
+  if(m.includes('free') || m.includes('gratuita')) return 'Las publicaciones gratuitas no admiten descuento.';
+  if(m.includes('sale') || m.includes('venta')) return 'La publicación necesita al menos 1 venta para aplicar descuento.';
+  return 'ML rechazó el descuento: ' + msg;
+}
+
+// ── Modal de descuento INDIVIDUAL (al clic en el precio) ──
+function abrirDescuentoIndividual(itemId){
+  const item = (allItems||[]).find(i=>i.id===itemId);
+  if(!item){ showToast('No se encontró la publicación','error'); return; }
+  const tieneDesc = _itemTieneDescuento(item);
+  const precioBase = tieneDesc ? _itemPrecioRegular(item) : (+item.price||0);
+  const pctActual = tieneDesc ? _itemDescuentoPct(item) : 0;
+  _descIndividualId = itemId;
+
+  const ov = document.createElement('div');
+  ov.id = 'modal-desc-ind';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:14px;max-width:420px;width:100%;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.3)">' +
+    '<div style="font-size:16px;font-weight:800;color:#1e293b;margin-bottom:4px">🏷️ Aplicar descuento</div>' +
+    '<div style="font-size:12px;color:#64748b;margin-bottom:14px;line-height:1.4">' + _persoEsc((item.title||'').slice(0,70)) + '</div>' +
+    '<div style="background:#f8fafc;border-radius:10px;padding:12px;margin-bottom:14px">' +
+      '<div style="font-size:12px;color:#475569">Precio actual: <b style="color:#1e293b">$' + precioBase.toLocaleString('es-AR') + '</b></div>' +
+      (tieneDesc ? '<div style="font-size:11px;color:#f59e0b;margin-top:3px">Ya tiene ' + pctActual + '% de descuento aplicado</div>' : '') +
+    '</div>' +
+    '<label style="font-size:12px;font-weight:600;color:#334155;display:block;margin-bottom:5px">Porcentaje de descuento</label>' +
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
+      '<input type="range" id="desc-pct-range" min="5" max="60" value="15" style="flex:1" oninput="_descSyncPct(this.value)">' +
+      '<input type="number" id="desc-pct-num" min="5" max="80" value="15" style="width:64px;padding:6px;border:1px solid #cbd5e1;border-radius:8px;font-size:13px;text-align:center" oninput="_descSyncPct(this.value)">' +
+      '<span style="font-weight:700;color:#16a34a">%</span>' +
+    '</div>' +
+    '<div id="desc-preview" style="font-size:12.5px;color:#16a34a;font-weight:600;margin-bottom:14px">Nuevo precio: $' + Math.floor(precioBase*0.85).toLocaleString('es-AR') + '</div>' +
+    '<label style="font-size:12px;font-weight:600;color:#334155;display:block;margin-bottom:5px">Duración del descuento</label>' +
+    '<select id="desc-dias" style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:8px;font-size:13px;margin-bottom:16px">' +
+      '<option value="3">3 días</option>' +
+      '<option value="7" selected>7 días</option>' +
+      '<option value="14">14 días</option>' +
+      '<option value="21">21 días (máximo)</option>' +
+    '</select>' +
+    '<div style="display:flex;gap:8px">' +
+      (tieneDesc ? '<button onclick="_descQuitar()" style="flex:1;padding:10px;border:1px solid #fca5a5;background:#fef2f2;color:#b91c1c;border-radius:9px;font-weight:600;cursor:pointer">Quitar descuento</button>' : '') +
+      '<button onclick="_descCerrar()" style="padding:10px 14px;border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:9px;font-weight:600;cursor:pointer">Cancelar</button>' +
+      '<button id="desc-aplicar-btn" onclick="_descAplicar(' + precioBase + ')" style="flex:1;padding:10px;border:none;background:#16a34a;color:#fff;border-radius:9px;font-weight:700;cursor:pointer">Aplicar</button>' +
+    '</div>' +
+    '<div style="font-size:10.5px;color:#94a3b8;margin-top:10px;line-height:1.4">⚠️ Requiere reputación verde y al menos 1 venta. ML puede rechazar descuentos menores al 5% o que considere poco creíbles.</div>' +
+    '</div>';
+  document.body.appendChild(ov);
+  _descSyncPct(15);
+}
+let _descIndividualId = null;
+let _descBasePrice = 0;
+function _descSyncPct(v){
+  v = Math.max(5, Math.min(80, +v||5));
+  const range = document.getElementById('desc-pct-range');
+  const num = document.getElementById('desc-pct-num');
+  if(range && +range.value !== v && v<=60) range.value = v;
+  if(num && +num.value !== v) num.value = v;
+  const item = (allItems||[]).find(i=>i.id===_descIndividualId);
+  if(item){
+    const base = _itemTieneDescuento(item) ? _itemPrecioRegular(item) : (+item.price||0);
+    const nuevo = Math.floor(base * (1 - v/100));
+    const prev = document.getElementById('desc-preview');
+    if(prev) prev.textContent = 'Nuevo precio: $' + nuevo.toLocaleString('es-AR') + ' (ahorro $' + (base-nuevo).toLocaleString('es-AR') + ')';
+  }
+}
+function _descCerrar(){ const m=document.getElementById('modal-desc-ind'); if(m) m.remove(); }
+async function _descAplicar(){
+  const pct = +(document.getElementById('desc-pct-num')?.value||15);
+  const dias = +(document.getElementById('desc-dias')?.value||7);
+  const btn = document.getElementById('desc-aplicar-btn');
+  if(btn){ btn.disabled=true; btn.textContent='Aplicando...'; }
+  try{
+    const r = await aplicarDescuentoItem(_descIndividualId, pct, dias);
+    showToast('✓ Descuento de '+pct+'% aplicado · nuevo precio $'+r.dealPrice.toLocaleString('es-AR'),'success');
+    _descCerrar();
+    if(typeof renderSEOTable==='function') renderSEOTable();
+    if(typeof renderPubs==='function') renderPubs();
+  }catch(e){
+    showToast(e.message, 'error');
+    if(btn){ btn.disabled=false; btn.textContent='Aplicar'; }
+  }
+}
+async function _descQuitar(){
+  if(!confirm('¿Quitar el descuento de esta publicación?')) return;
+  try{
+    await quitarDescuentoItem(_descIndividualId);
+    showToast('✓ Descuento quitado','success');
+    _descCerrar();
+    if(typeof renderSEOTable==='function') renderSEOTable();
+    if(typeof renderPubs==='function') renderPubs();
+  }catch(e){ showToast('Error al quitar: '+e.message,'error'); }
+}
+
+// ── Modal de descuento MASIVO (todas las publicaciones filtradas) ──
+function abrirDescuentoMasivo(){
+  let items = [];
+  try{ items = (typeof seoGetFilteredItems==='function') ? seoGetFilteredItems() : []; }catch(e){}
+  // solo activas (las únicas que admiten descuento)
+  items = items.filter(i=>i.status==='active');
+  if(!items.length){ showToast('No hay publicaciones activas filtradas. Filtrá primero con los escenarios o la búsqueda.','info'); return; }
+  _descMasivoItems = items;
+
+  const ov = document.createElement('div');
+  ov.id = 'modal-desc-masivo';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
+  ov.innerHTML =
+    '<div style="background:#fff;border-radius:14px;max-width:440px;width:100%;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.3)">' +
+    '<div style="font-size:16px;font-weight:800;color:#1e293b;margin-bottom:4px">🏷️ Descuento masivo</div>' +
+    '<div style="font-size:12px;color:#64748b;margin-bottom:14px;line-height:1.4">Se aplicará a las <b>' + items.length + ' publicaciones activas</b> que tenés filtradas ahora mismo.</div>' +
+    '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:10px;margin-bottom:14px;font-size:11.5px;color:#92400e;line-height:1.4">⚠️ Esto aplica un descuento real en ML a todas esas publicaciones. Revisá que el filtro sea el correcto antes de continuar.</div>' +
+    '<label style="font-size:12px;font-weight:600;color:#334155;display:block;margin-bottom:5px">Porcentaje de descuento</label>' +
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">' +
+      '<input type="range" id="descm-pct-range" min="5" max="60" value="15" style="flex:1" oninput="_descmSyncPct(this.value)">' +
+      '<input type="number" id="descm-pct-num" min="5" max="80" value="15" style="width:64px;padding:6px;border:1px solid #cbd5e1;border-radius:8px;font-size:13px;text-align:center" oninput="_descmSyncPct(this.value)">' +
+      '<span style="font-weight:700;color:#16a34a">%</span>' +
+    '</div>' +
+    '<label style="font-size:12px;font-weight:600;color:#334155;display:block;margin-bottom:5px">Duración</label>' +
+    '<select id="descm-dias" style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:8px;font-size:13px;margin-bottom:16px">' +
+      '<option value="3">3 días</option>' +
+      '<option value="7" selected>7 días</option>' +
+      '<option value="14">14 días</option>' +
+      '<option value="21">21 días (máximo)</option>' +
+    '</select>' +
+    '<div id="descm-progreso" style="font-size:12px;color:#64748b;margin-bottom:12px;display:none"></div>' +
+    '<div style="display:flex;gap:8px">' +
+      '<button onclick="_descmCerrar()" style="padding:10px 14px;border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:9px;font-weight:600;cursor:pointer">Cancelar</button>' +
+      '<button id="descm-aplicar-btn" onclick="_descmAplicar()" style="flex:1;padding:10px;border:none;background:#16a34a;color:#fff;border-radius:9px;font-weight:700;cursor:pointer">Aplicar a ' + items.length + ' publicaciones</button>' +
+    '</div>' +
+    '</div>';
+  document.body.appendChild(ov);
+}
+let _descMasivoItems = [];
+function _descmSyncPct(v){
+  v = Math.max(5, Math.min(80, +v||5));
+  const range = document.getElementById('descm-pct-range');
+  const num = document.getElementById('descm-pct-num');
+  if(range && +range.value !== v && v<=60) range.value = v;
+  if(num && +num.value !== v) num.value = v;
+}
+function _descmCerrar(){ const m=document.getElementById('modal-desc-masivo'); if(m) m.remove(); }
+async function _descmAplicar(){
+  const pct = +(document.getElementById('descm-pct-num')?.value||15);
+  const dias = +(document.getElementById('descm-dias')?.value||7);
+  const btn = document.getElementById('descm-aplicar-btn');
+  const prog = document.getElementById('descm-progreso');
+  if(!confirm('¿Aplicar '+pct+'% de descuento a '+_descMasivoItems.length+' publicaciones? Esto es un cambio real en ML.')) return;
+  if(btn){ btn.disabled=true; }
+  if(prog){ prog.style.display='block'; }
+  let ok=0, fail=0; const errores=[];
+  for(let i=0;i<_descMasivoItems.length;i++){
+    const it = _descMasivoItems[i];
+    if(prog) prog.textContent = 'Aplicando '+(i+1)+'/'+_descMasivoItems.length+'... (✓'+ok+' ✗'+fail+')';
+    try{
+      await aplicarDescuentoItem(it.id, pct, dias);
+      ok++;
+    }catch(e){ fail++; errores.push((it.title||it.id).slice(0,30)+': '+e.message); }
+    await new Promise(r=>setTimeout(r,350));  // pausa entre cada uno para no saturar
+  }
+  if(prog) prog.textContent = 'Listo: ✓'+ok+' aplicados, ✗'+fail+' fallaron';
+  if(ok>0) showToast('✓ Descuento aplicado a '+ok+' publicaciones'+(fail?' ('+fail+' fallaron)':''),'success');
+  else showToast('No se pudo aplicar a ninguna ('+fail+' fallaron)','error');
+  if(errores.length && errores.length<=5) console.warn('[descMasivo] errores:', errores);
+  if(typeof renderSEOTable==='function') renderSEOTable();
+  setTimeout(()=>{ if(btn) btn.disabled=false; }, 500);
+}
+
 // v201: ¿la publicación tiene descuento? El precio "tachado" (sin descuento)
 // viene de /items/{id}/prices como regular_amount (lo guardamos en _regularPrice).
 // original_price del endpoint /items quedó obsoleto y suele venir null, por eso
@@ -8743,13 +9005,13 @@ function _seoPrecioCell(item){
   if(_itemTieneDescuento(item)){
     const orig = _itemPrecioRegular(item);
     const pct = _itemDescuentoPct(item);
-    return '<span style="display:inline-flex;flex-direction:column;align-items:flex-end;line-height:1.15;cursor:pointer" title="Clic para editar precio · tiene ' + pct + '% de descuento" onclick="startPriceEdit(\'' + id + '\',' + actual + ')">' +
-      '<span style="font-size:10px;color:var(--text3);text-decoration:line-through;text-decoration-color:#ef4444;text-decoration-thickness:1.5px">$' + orig.toLocaleString('es-AR') + '</span>' +
-      '<span style="font-weight:700;color:#16a34a">$' + actual.toLocaleString('es-AR') + '</span>' +
-      '<span style="font-size:9px;font-weight:700;color:#ef4444">-' + pct + '%</span>' +
+    return '<span style="display:inline-flex;flex-direction:column;align-items:flex-end;line-height:1.2;cursor:pointer" title="Clic para gestionar el descuento" onclick="abrirDescuentoIndividual(\'' + id + '\')">' +
+      '<span style="font-size:11px;color:var(--text3);text-decoration:line-through;text-decoration-color:#ef4444;text-decoration-thickness:1.5px">$' + orig.toLocaleString('es-AR') + '</span>' +
+      '<span style="font-size:13px;font-weight:700;color:#16a34a">$' + actual.toLocaleString('es-AR') + '</span>' +
+      '<span style="font-size:11px;font-weight:700;color:#ef4444">-' + pct + '%</span>' +
     '</span>';
   }
-  return '<span style="font-weight:600;color:var(--text);cursor:pointer" title="Clic para editar precio" onclick="startPriceEdit(\'' + id + '\',' + actual + ')">$' + actual.toLocaleString('es-AR') + '</span>';
+  return '<span style="font-weight:600;color:var(--text);cursor:pointer" title="Clic para aplicar un descuento" onclick="abrirDescuentoIndividual(\'' + id + '\')">$' + actual.toLocaleString('es-AR') + '</span>';
 }
 
 // v196: celda de "Fecha modificada" para la tabla de Publicaciones.
@@ -10956,9 +11218,7 @@ function renderSEOTable(){
       </td>
       <td style="text-align:center;padding:6px 4px" id="seo-pos-cell-${item.id}">${_seoThermoCellHTML(item.id)}</td>
       <td style="text-align:right;white-space:nowrap" id="seo-price-cell-${item.id}">
-        <span style="font-size:12px;font-weight:600;color:var(--text);cursor:pointer" 
-          onclick="seoStartPriceEdit('${item.id}',${item.price||0})" 
-          title="Clic para editar precio">$${(item.price||0).toLocaleString('es-AR')} ✎</span>
+        ${_seoPrecioCellSEO(item)}
       </td>
       <td style="text-align:center" id="seo-stock-cell-${item.id}">
         <span style="font-size:12px;font-weight:600;color:${(item.available_quantity??0)===0?'var(--red)':(item.available_quantity??0)<=3?'var(--amber)':'var(--text)'};cursor:pointer"
