@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v202 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v203 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -5356,16 +5356,25 @@ function _saveExtraData(){
   try{
     const map = {};
     (allItems||[]).forEach(i=>{
-      if(i.last_updated || i._regularPrice || (i.sale_terms && i.sale_terms.length)){
+      const m = (typeof itemMetrics!=='undefined' && itemMetrics[i.id]) ? itemMetrics[i.id] : null;
+      const tieneAlgo = i.last_updated || i._regularPrice || (i.sale_terms && i.sale_terms.length) || m;
+      if(tieneAlgo){
         map[i.id] = {
           lu: i.last_updated || null,
           rp: i._regularPrice || null,
           st: (i.sale_terms||[]).filter(t=>t.id==='MANUFACTURING_TIME').map(t=>({id:t.id,value_name:t.value_name})),
+          // v203: guardar también las métricas (visitas/ventas) para que queden visibles
+          m: m ? { v30:m.visits30||0, v7:m.visits||0, s60:m.sales60||0, s7:m.sales7||0, sold:m.sold||0, conv:m.conv||0 } : null,
         };
       }
     });
     localStorage.setItem(_EXTRA_DATA_KEY, JSON.stringify(map));
     localStorage.setItem(_EXTRA_DATA_TS_KEY, String(Date.now()));
+    // v203: el termómetro (fueguito/ranking) ya se guarda en SEO_THERMO_CACHE_KEY;
+    // nos aseguramos de persistirlo también acá si existe.
+    if(window._seoThermo){
+      try{ localStorage.setItem(SEO_THERMO_CACHE_KEY, JSON.stringify({ ts: Date.now(), items: window._seoThermo })); }catch(e){}
+    }
   }catch(e){ console.warn('[extraData] no se pudo guardar:', e.message); }
 }
 // v201: restaurar los datos extra al cargar (para que estén visibles aunque no
@@ -5381,10 +5390,22 @@ function _restoreExtraData(){
         if(d.lu && !i.last_updated) i.last_updated = d.lu;
         if(d.rp && !i._regularPrice) i._regularPrice = d.rp;
         if(d.st && d.st.length && !(i.sale_terms&&i.sale_terms.length)) i.sale_terms = d.st;
+        // v203: restaurar métricas (visitas/ventas) si no están en memoria
+        if(d.m && typeof itemMetrics!=='undefined' && !itemMetrics[i.id]){
+          itemMetrics[i.id] = { visits30:d.m.v30, visits:d.m.v7, sales60:d.m.s60, sales7:d.m.s7, sold:d.m.sold, conv:d.m.conv };
+        }
       }
     });
+    // v203: cargar también el termómetro (fueguito/ranking) guardado
+    if(typeof seoThermoLoadCache==='function') seoThermoLoadCache();
     const ts = parseInt(localStorage.getItem(_EXTRA_DATA_TS_KEY)||'0',10);
-    if(ts) console.log('[extraData] restaurado de hace', Math.round((Date.now()-ts)/3600000), 'horas');
+    if(ts){
+      const horas = Math.round((Date.now()-ts)/3600000);
+      console.log('[extraData] restaurado: métricas, descuentos, fechas y fueguito de hace '+horas+'h');
+    }
+    // refrescar las tablas para que se vea todo lo restaurado
+    if(typeof renderSEOTable==='function' && document.getElementById('section-seo')?.classList.contains('active')) renderSEOTable();
+    if(typeof renderPubs==='function' && document.getElementById('section-publicaciones')?.classList.contains('active')) renderPubs();
   }catch(e){ console.warn('[extraData] no se pudo restaurar:', e.message); }
 }
 
@@ -5458,15 +5479,17 @@ async function _cargarLastUpdated(soloVisibles){
           if(p.type === 'promotion' && amt > 0) promoVenta = amt;   // precio con descuento
           if(p.type === 'standard' && amt > 0) venta = amt;          // precio normal
         });
-        // El precio de venta real: si hay promoción vigente, ese; si no, el standard.
-        const precioFinal = promoVenta > 0 ? promoVenta : venta;
-        // Solo es descuento real si el regular es mayor que el precio final.
-        if(regular > 0 && precioFinal > 0 && regular > precioFinal){
+        // v203: El precio confiable y actualizado es it.price (de la carga de items).
+        // El "standard" de /prices puede venir cacheado/viejo, así que NO lo usamos
+        // para sobrescribir. Solo nos interesa detectar si hay PROMOCIÓN vigente.
+        if(promoVenta > 0 && regular > 0 && regular > promoVenta){
+          // hay descuento real: el precio con descuento es promoVenta, el tachado es regular
           it._regularPrice = regular;
+          it.price = promoVenta;
         } else {
-          it._regularPrice = 0;  // sin descuento
+          // sin promoción: dejamos it.price como está (actualizado) y sin tachado
+          it._regularPrice = 0;
         }
-        if(precioFinal > 0) it.price = precioFinal;
       }catch(e){ /* item sin prices o error, seguimos */ }
       pHechos++;
       if(btn) btn.textContent = '🔄 Descuentos '+pHechos+'/'+objetivo.length;
@@ -6076,7 +6099,8 @@ function restoreMetricsFromCache(){
       if(!id) continue;
       const entry = JSON.parse(localStorage.getItem(key)||'null');
       if(!entry || !entry.data) continue;
-      if(Date.now() - entry.ts > METRICS_CACHE_TTL) continue; // expirado — ignorar
+      // v203: restaurar SIEMPRE (aunque haya pasado el TTL) para que las métricas
+      // queden visibles. La antigüedad se muestra aparte; el usuario refresca cuando quiere.
       itemMetrics[id] = entry.data;
       restored++;
     }
@@ -8738,16 +8762,23 @@ function fmtTs(ts){
 function _seoPrecioCellSEO(item){
   const actual = +item.price || 0;
   const id = item.id;
+  const lapiz = '<span onclick="event.stopPropagation();seoStartPriceEdit(\'' + id + '\',' + actual + ')" title="Editar precio" style="cursor:pointer;font-size:11px;opacity:.5;margin-left:5px">✎</span>';
+  const descBtn = '<span onclick="event.stopPropagation();abrirDescuentoIndividual(\'' + id + '\')" title="Aplicar/gestionar descuento" style="cursor:pointer;font-size:12px;margin-left:4px">🏷️</span>';
   if(_itemTieneDescuento(item)){
     const orig = _itemPrecioRegular(item);
     const pct = _itemDescuentoPct(item);
-    return '<span style="display:inline-flex;flex-direction:column;align-items:flex-end;line-height:1.2;cursor:pointer" title="Clic para gestionar el descuento" onclick="abrirDescuentoIndividual(\'' + id + '\')">' +
-      '<span style="font-size:11px;color:var(--text3);text-decoration:line-through;text-decoration-color:#ef4444;text-decoration-thickness:1.5px">$' + orig.toLocaleString('es-AR') + '</span>' +
-      '<span style="font-size:13px;font-weight:700;color:#16a34a">$' + actual.toLocaleString('es-AR') + '</span>' +
-      '<span style="font-size:11px;font-weight:700;color:#ef4444">-' + pct + '%</span>' +
+    return '<span style="display:inline-flex;align-items:center;justify-content:flex-end;gap:2px">' +
+      '<span style="display:inline-flex;flex-direction:column;align-items:flex-end;line-height:1.2;cursor:pointer" title="Clic para gestionar el descuento" onclick="abrirDescuentoIndividual(\'' + id + '\')">' +
+        '<span style="font-size:11px;color:var(--text3);text-decoration:line-through;text-decoration-color:#ef4444;text-decoration-thickness:1px">$' + orig.toLocaleString('es-AR') + '</span>' +
+        '<span style="font-size:13px;font-weight:700;color:#16a34a">$' + actual.toLocaleString('es-AR') + '</span>' +
+        '<span style="font-size:11px;font-weight:700;color:#ef4444">-' + pct + '%</span>' +
+      '</span>' + lapiz +
     '</span>';
   }
-  return '<span style="font-size:12px;font-weight:600;color:var(--text);cursor:pointer" onclick="abrirDescuentoIndividual(\'' + id + '\')" title="Clic para aplicar un descuento">$' + actual.toLocaleString('es-AR') + '</span>';
+  return '<span style="display:inline-flex;align-items:center;justify-content:flex-end">' +
+    '<span style="font-size:12px;font-weight:600;color:var(--text)">$' + actual.toLocaleString('es-AR') + '</span>' +
+    lapiz + descBtn +
+  '</span>';
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -8838,16 +8869,16 @@ function abrirDescuentoIndividual(itemId){
     '</div>' +
     '<label style="font-size:12px;font-weight:600;color:#334155;display:block;margin-bottom:5px">Porcentaje de descuento</label>' +
     '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
-      '<input type="range" id="desc-pct-range" min="5" max="60" value="15" style="flex:1" oninput="_descSyncPct(this.value)">' +
-      '<input type="number" id="desc-pct-num" min="5" max="80" value="15" style="width:64px;padding:6px;border:1px solid #cbd5e1;border-radius:8px;font-size:13px;text-align:center" oninput="_descSyncPct(this.value)">' +
+      '<input type="range" id="desc-pct-range" min="5" max="60" value="5" style="flex:1" oninput="_descSyncPct(this.value)">' +
+      '<input type="number" id="desc-pct-num" min="5" max="80" value="5" style="width:64px;padding:6px;border:1px solid #cbd5e1;border-radius:8px;font-size:13px;text-align:center" oninput="_descSyncPct(this.value)">' +
       '<span style="font-weight:700;color:#16a34a">%</span>' +
     '</div>' +
-    '<div id="desc-preview" style="font-size:12.5px;color:#16a34a;font-weight:600;margin-bottom:14px">Nuevo precio: $' + Math.floor(precioBase*0.85).toLocaleString('es-AR') + '</div>' +
+    '<div id="desc-preview" style="font-size:12.5px;color:#16a34a;font-weight:600;margin-bottom:14px">Nuevo precio: $' + Math.floor(precioBase*0.95).toLocaleString('es-AR') + '</div>' +
     '<label style="font-size:12px;font-weight:600;color:#334155;display:block;margin-bottom:5px">Duración del descuento</label>' +
     '<select id="desc-dias" style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:8px;font-size:13px;margin-bottom:16px">' +
       '<option value="3">3 días</option>' +
-      '<option value="7" selected>7 días</option>' +
-      '<option value="14">14 días</option>' +
+      '<option value="7">7 días</option>' +
+      '<option value="14" selected>14 días</option>' +
       '<option value="21">21 días (máximo)</option>' +
     '</select>' +
     '<div style="display:flex;gap:8px">' +
@@ -8858,7 +8889,7 @@ function abrirDescuentoIndividual(itemId){
     '<div style="font-size:10.5px;color:#94a3b8;margin-top:10px;line-height:1.4">⚠️ Requiere reputación verde y al menos 1 venta. ML puede rechazar descuentos menores al 5% o que considere poco creíbles.</div>' +
     '</div>';
   document.body.appendChild(ov);
-  _descSyncPct(15);
+  _descSyncPct(5);
 }
 let _descIndividualId = null;
 let _descBasePrice = 0;
@@ -8878,8 +8909,8 @@ function _descSyncPct(v){
 }
 function _descCerrar(){ const m=document.getElementById('modal-desc-ind'); if(m) m.remove(); }
 async function _descAplicar(){
-  const pct = +(document.getElementById('desc-pct-num')?.value||15);
-  const dias = +(document.getElementById('desc-dias')?.value||7);
+  const pct = +(document.getElementById('desc-pct-num')?.value||5);
+  const dias = +(document.getElementById('desc-dias')?.value||14);
   const btn = document.getElementById('desc-aplicar-btn');
   if(btn){ btn.disabled=true; btn.textContent='Aplicando...'; }
   try{
@@ -8923,15 +8954,15 @@ function abrirDescuentoMasivo(){
     '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:10px;margin-bottom:14px;font-size:11.5px;color:#92400e;line-height:1.4">⚠️ Esto aplica un descuento real en ML a todas esas publicaciones. Revisá que el filtro sea el correcto antes de continuar.</div>' +
     '<label style="font-size:12px;font-weight:600;color:#334155;display:block;margin-bottom:5px">Porcentaje de descuento</label>' +
     '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">' +
-      '<input type="range" id="descm-pct-range" min="5" max="60" value="15" style="flex:1" oninput="_descmSyncPct(this.value)">' +
-      '<input type="number" id="descm-pct-num" min="5" max="80" value="15" style="width:64px;padding:6px;border:1px solid #cbd5e1;border-radius:8px;font-size:13px;text-align:center" oninput="_descmSyncPct(this.value)">' +
+      '<input type="range" id="descm-pct-range" min="5" max="60" value="5" style="flex:1" oninput="_descmSyncPct(this.value)">' +
+      '<input type="number" id="descm-pct-num" min="5" max="80" value="5" style="width:64px;padding:6px;border:1px solid #cbd5e1;border-radius:8px;font-size:13px;text-align:center" oninput="_descmSyncPct(this.value)">' +
       '<span style="font-weight:700;color:#16a34a">%</span>' +
     '</div>' +
     '<label style="font-size:12px;font-weight:600;color:#334155;display:block;margin-bottom:5px">Duración</label>' +
     '<select id="descm-dias" style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:8px;font-size:13px;margin-bottom:16px">' +
       '<option value="3">3 días</option>' +
-      '<option value="7" selected>7 días</option>' +
-      '<option value="14">14 días</option>' +
+      '<option value="7">7 días</option>' +
+      '<option value="14" selected>14 días</option>' +
       '<option value="21">21 días (máximo)</option>' +
     '</select>' +
     '<div id="descm-progreso" style="font-size:12px;color:#64748b;margin-bottom:12px;display:none"></div>' +
@@ -8952,8 +8983,8 @@ function _descmSyncPct(v){
 }
 function _descmCerrar(){ const m=document.getElementById('modal-desc-masivo'); if(m) m.remove(); }
 async function _descmAplicar(){
-  const pct = +(document.getElementById('descm-pct-num')?.value||15);
-  const dias = +(document.getElementById('descm-dias')?.value||7);
+  const pct = +(document.getElementById('descm-pct-num')?.value||5);
+  const dias = +(document.getElementById('descm-dias')?.value||14);
   const btn = document.getElementById('descm-aplicar-btn');
   const prog = document.getElementById('descm-progreso');
   if(!confirm('¿Aplicar '+pct+'% de descuento a '+_descMasivoItems.length+' publicaciones? Esto es un cambio real en ML.')) return;
@@ -9002,16 +9033,23 @@ function _itemDescuentoPct(item){
 function _seoPrecioCell(item){
   const actual = +item.price || 0;
   const id = item.id;
+  const lapiz = '<span onclick="event.stopPropagation();startPriceEdit(\'' + id + '\',' + actual + ')" title="Editar precio" style="cursor:pointer;font-size:11px;opacity:.5;margin-left:5px">✎</span>';
+  const descBtn = '<span onclick="event.stopPropagation();abrirDescuentoIndividual(\'' + id + '\')" title="Aplicar/gestionar descuento" style="cursor:pointer;font-size:12px;margin-left:4px">🏷️</span>';
   if(_itemTieneDescuento(item)){
     const orig = _itemPrecioRegular(item);
     const pct = _itemDescuentoPct(item);
-    return '<span style="display:inline-flex;flex-direction:column;align-items:flex-end;line-height:1.2;cursor:pointer" title="Clic para gestionar el descuento" onclick="abrirDescuentoIndividual(\'' + id + '\')">' +
-      '<span style="font-size:11px;color:var(--text3);text-decoration:line-through;text-decoration-color:#ef4444;text-decoration-thickness:1.5px">$' + orig.toLocaleString('es-AR') + '</span>' +
-      '<span style="font-size:13px;font-weight:700;color:#16a34a">$' + actual.toLocaleString('es-AR') + '</span>' +
-      '<span style="font-size:11px;font-weight:700;color:#ef4444">-' + pct + '%</span>' +
+    return '<span style="display:inline-flex;align-items:center;justify-content:flex-end;gap:2px">' +
+      '<span style="display:inline-flex;flex-direction:column;align-items:flex-end;line-height:1.2;cursor:pointer" title="Clic para gestionar el descuento" onclick="abrirDescuentoIndividual(\'' + id + '\')">' +
+        '<span style="font-size:11px;color:var(--text3);text-decoration:line-through;text-decoration-color:#ef4444;text-decoration-thickness:1px">$' + orig.toLocaleString('es-AR') + '</span>' +
+        '<span style="font-size:13px;font-weight:700;color:#16a34a">$' + actual.toLocaleString('es-AR') + '</span>' +
+        '<span style="font-size:11px;font-weight:700;color:#ef4444">-' + pct + '%</span>' +
+      '</span>' + lapiz +
     '</span>';
   }
-  return '<span style="font-weight:600;color:var(--text);cursor:pointer" title="Clic para aplicar un descuento" onclick="abrirDescuentoIndividual(\'' + id + '\')">$' + actual.toLocaleString('es-AR') + '</span>';
+  return '<span style="display:inline-flex;align-items:center;justify-content:flex-end">' +
+    '<span style="font-weight:600;color:var(--text)">$' + actual.toLocaleString('es-AR') + '</span>' +
+    lapiz + descBtn +
+  '</span>';
 }
 
 // v196: celda de "Fecha modificada" para la tabla de Publicaciones.
@@ -11962,9 +12000,11 @@ function seoThermoLoadCache(){
     if(!raw) return;
     const d = JSON.parse(raw);
     if(!d || !d.ts || !d.items) return;
-    if(Date.now() - d.ts > SEO_THERMO_CACHE_TTL_MS) return;
+    // v203: restaurar SIEMPRE el termómetro guardado (fueguito/ranking) aunque
+    // sea viejo, para que quede visible entre PCs. Se refresca al cargar métricas.
     window._seoThermo = d.items;
-    console.log('[SEOThermo] Cache cargado:', Object.keys(d.items).length, 'items');
+    const horas = Math.round((Date.now()-d.ts)/3600000);
+    console.log('[SEOThermo] Cache cargado:', Object.keys(d.items).length, 'items (hace '+horas+'h)');
   } catch(e){ /* ignore */ }
 }
 
