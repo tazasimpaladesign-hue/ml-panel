@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v203 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v204 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -977,6 +977,28 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     </div>
     <div style="position:relative;height:240px"><canvas id="chart-main"></canvas></div>
     <div id="dash-peak-info" style="font-size:11px;color:var(--text3);margin-top:6px;min-height:16px"></div>
+  </div>
+
+  <!-- ── v204: Embudo de ventas (izq) + Mapa de compradores (der) ── -->
+  <div class="g2 mb">
+    <div class="card" style="min-width:0">
+      <div class="card-hd">
+        <div>
+          <div class="card-title">🔻 Embudo de ventas — últimos 7 días</div>
+          <div class="card-sub">Comparado con los 7 días anteriores · ventas de ML</div>
+        </div>
+      </div>
+      <div id="dash-funnel"><div style="color:var(--text3);font-size:12px;padding:10px 0">Cargando...</div></div>
+    </div>
+    <div class="card" style="min-width:0">
+      <div class="card-hd">
+        <div>
+          <div class="card-title">🗺️ Mapa de compradores</div>
+          <div class="card-sub">Ventas e importe por provincia · datos de Cuenta Impala</div>
+        </div>
+      </div>
+      <div id="dash-map" style="position:relative;min-height:300px"><div style="color:var(--text3);font-size:12px;padding:10px 0">Cargando...</div></div>
+    </div>
   </div>
 
   <!-- ── Ventas por tipo (izq) + Distribución por categoría (der), mitad y mitad ── -->
@@ -1292,7 +1314,8 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <div class="mc-val" id="q-low">—</div><div class="mc-val" id="q-err">—</div>
   </div>
 
-  <div class="g60 mb">
+  <!-- v204: gráficos viejos ocultos (los IDs siguen existiendo para el JS) -->
+  <div class="g60 mb" style="display:none">
     <div class="card">
       <div class="card-hd"><div class="card-title">Distribución de scores SEO</div></div>
       <div style="position:relative;height:200px"><canvas id="chart-seo-dist"></canvas></div>
@@ -1300,6 +1323,37 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <div class="card">
       <div class="card-hd"><div class="card-title">Densidad de palabras clave</div></div>
       <div id="kw-density"></div>
+    </div>
+  </div>
+
+  <!-- v204: espejo de los 3 widgets del Resumen General -->
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px;min-width:0;overflow:hidden">
+    <div class="card" style="min-width:0;overflow:hidden;display:flex;flex-direction:column">
+      <div class="card-hd" style="flex-shrink:0">
+        <div class="card-title">🏆 Top publicaciones 30 días</div>
+        <a href="#publicaciones" class="btn btn-ghost btn-sm" onclick="showSection('publicaciones');return false;">Ver todas →</a>
+      </div>
+      <div id="seo-top-pubs" style="flex:1;max-height:480px;overflow-y:auto;min-height:0">
+        <div style="color:var(--text3);font-size:12px;padding:10px 0">Cargando...</div>
+      </div>
+    </div>
+    <div class="card" style="min-width:0;overflow:hidden;display:flex;flex-direction:column">
+      <div class="card-hd" style="flex-shrink:0">
+        <div class="card-title">🕐 Últimos 50 vendidos</div>
+        <span style="font-size:10px;padding:2px 6px;border-radius:10px;background:var(--green-g);color:var(--green);font-weight:700;border:1px solid var(--green)">LIVE</span>
+      </div>
+      <div id="seo-last50" style="flex:1;max-height:480px;overflow-y:auto;min-height:0">
+        <div style="color:var(--text3);font-size:12px;padding:10px 0">Cargando...</div>
+      </div>
+    </div>
+    <div class="card" style="min-width:0;overflow:hidden;display:flex;flex-direction:column">
+      <div class="card-hd" style="flex-shrink:0">
+        <div class="card-title">👀 Los más visitados 7 días</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadMostVisited(true)">↻ 7 días</button>
+      </div>
+      <div id="seo-most-visited" style="flex:1;max-height:480px;overflow-y:auto;min-height:0">
+        <div style="color:var(--text3);font-size:12px;padding:10px 0">Cargando...</div>
+      </div>
     </div>
   </div>
 
@@ -5398,6 +5452,10 @@ function _restoreExtraData(){
     });
     // v203: cargar también el termómetro (fueguito/ranking) guardado
     if(typeof seoThermoLoadCache==='function') seoThermoLoadCache();
+    // v204: los datos restaurados cambian los conteos de escenarios
+    try{ if(typeof seoInvalidateScenarioCounts==='function') seoInvalidateScenarioCounts(); }catch(e){}
+    if(typeof renderScenarioChips==='function' && document.getElementById('section-seo')?.classList.contains('active')) renderScenarioChips();
+    if(typeof renderDashFunnel==='function') renderDashFunnel();
     const ts = parseInt(localStorage.getItem(_EXTRA_DATA_TS_KEY)||'0',10);
     if(ts){
       const horas = Math.round((Date.now()-ts)/3600000);
@@ -5421,8 +5479,14 @@ async function _cargarLastUpdated(soloVisibles){
   const btn = document.getElementById('btn-cargar-fechas');
   if(btn){ btn.disabled = true; btn._txt = btn.textContent; }
   const refrescar = ()=>{
+    // v204: los datos nuevos (descuentos) cambian los conteos de los chips
+    try{ if(typeof seoInvalidateScenarioCounts==='function') seoInvalidateScenarioCounts(); }catch(e){}
     if(typeof renderPubs==='function' && document.getElementById('section-publicaciones')?.classList.contains('active')) renderPubs();
-    if(typeof renderSEOTable==='function' && document.getElementById('section-seo')?.classList.contains('active')) renderSEOTable();
+    if(document.getElementById('section-seo')?.classList.contains('active')){
+      if(typeof renderScenarioChips==='function') renderScenarioChips();
+      if(typeof renderSEOTable==='function') renderSEOTable();
+    }
+    if(typeof renderDashFunnel==='function') renderDashFunnel();
   };
   try{
     // ── PASO 1: fecha modif + tiempo disponib (multiget liviano, todos los items) ──
@@ -9582,6 +9646,14 @@ function _getScenarioCounts(){
   _scenarioCountsCache = counts;
   _scenarioCountsCacheKey = key;
   return counts;
+}
+
+// v204: invalida el cache de conteos de escenarios. Se llama cuando llegan
+// datos nuevos (descuentos, métricas) que cambian los conteos sin cambiar
+// la cantidad de items (el cache viejo mostraba 0 en Con Descuento).
+function seoInvalidateScenarioCounts(){
+  _scenarioCountsCache = null;
+  _scenarioCountsCacheKey = '';
 }
 
 // Estado: array de { col, dir } donde dir es 'asc' o 'desc'
@@ -26479,7 +26551,11 @@ function showSection(id){
 
   if(id==='dashboard' && token) renderDashboard();
   if(id==='publicaciones') renderPubs();
-  if(id==='seo'){ renderSEOSection(); updateMetricsTimestamp(); renderScenarioChips(); }
+  if(id==='seo'){
+    renderSEOSection(); updateMetricsTimestamp(); renderScenarioChips();
+    // v204: espejar los widgets del Resumen General (por si ya estaban renderizados)
+    try{ _dashMirror('dash-top-pubs','seo-top-pubs'); _dashMirror('dash-last50','seo-last50'); _dashMirror('dash-most-visited','seo-most-visited'); }catch(e){}
+  }
   if(id==='ventas') renderVentas();
   if(id==='preguntas') renderQuestions();
   if(id==='mensajes') renderMensajes();
@@ -28254,6 +28330,203 @@ function selectOptItem(id,title){
   });
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// v204: EMBUDO DE VENTAS + MAPA DE COMPRADORES + espejo de widgets en SEO
+// Todo con datos ya en memoria (0 llamadas extra a ML / Cloudflare).
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── Embudo de ventas (últimos 7 días vs 7 anteriores) ──
+function renderDashFunnel(){
+  const el = document.getElementById('dash-funnel');
+  if(!el) return;
+  try{
+    // Visitas: suma de visitas 7d de las métricas (si están cargadas)
+    let v7=0, vPrev=0, hayMetricas=false;
+    Object.values(itemMetrics||{}).forEach(m=>{
+      if(!m) return;
+      if((+m.visits||0) > 0 || (+m.visitsPrev||0) > 0) hayMetricas = true;
+      v7 += (+m.visits||0); vPrev += (+m.visitsPrev||0);
+    });
+    // Preguntas por fecha
+    const now=Date.now(), d7=now-7*86400000, d14=now-14*86400000;
+    let q7=0, qPrev=0;
+    (allQuestions||[]).forEach(q=>{
+      const t = q && q.date_created ? new Date(q.date_created).getTime() : 0;
+      if(!t) return;
+      if(t>=d7) q7++; else if(t>=d14) qPrev++;
+    });
+    // Ventas y concretadas (no canceladas) + facturación
+    let s7=0, sPrev=0, c7=0, cPrev=0, fact7=0, factPrev=0;
+    (allOrders||[]).forEach(o=>{
+      const t = o && o.date_created ? new Date(o.date_created).getTime() : 0;
+      if(!t) return;
+      const cancel = (o.status==='cancelled');
+      const monto = +o.total_amount||0;
+      if(t>=d7){ s7++; if(!cancel){ c7++; fact7+=monto; } }
+      else if(t>=d14){ sPrev++; if(!cancel){ cPrev++; factPrev+=monto; } }
+    });
+    const fmt = n => (+n||0).toLocaleString('es-AR');
+    const money = n => '$' + Math.round(+n||0).toLocaleString('es-AR');
+    const deltaTxt = (a,b)=>{
+      if(!b) return '';
+      const p = Math.round((a-b)/b*100);
+      return ' <b>' + (p>=0?'▲':'▼') + Math.abs(p) + '%</b>';
+    };
+    const niveles = [
+      { label:'Visitas',             val: hayMetricas? v7 : null, prev: hayMetricas? vPrev : null, c:'#4aaef7', ins:[0,9]  },
+      { label:'Preguntas',           val: q7, prev: qPrev, c:'#7ac943', ins:[9,18]  },
+      { label:'Ventas',              val: s7, prev: sPrev, c:'#f0994a', ins:[18,26] },
+      { label:'Ventas concretadas',  val: c7, prev: cPrev, c:'#ef5350', ins:[26,32] },
+    ];
+    let html = niveles.map(n=>{
+      const a=n.ins[0], b=n.ins[1];
+      const clip = 'polygon('+a+'% 0,'+(100-a)+'% 0,'+(100-b)+'% 100%,'+b+'% 100%)';
+      const valTxt = (n.val==null) ? '—' : fmt(n.val);
+      const prevTxt = (n.val==null) ? 'cargá métricas en el Analizador SEO'
+        : (n.prev!=null ? '7 días anteriores: '+fmt(n.prev)+deltaTxt(n.val,n.prev) : '');
+      return '<div style="clip-path:'+clip+';-webkit-clip-path:'+clip+';background:'+n.c+';text-align:center;padding:8px 4px 9px;color:#fff">'+
+        '<div style="font-size:11.5px;font-weight:700;opacity:.95">'+n.label+'</div>'+
+        '<div style="font-size:21px;font-weight:800;line-height:1.1">'+valTxt+'</div>'+
+        '<div style="font-size:10px;opacity:.92">'+prevTxt+'</div>'+
+      '</div>';
+    }).join('');
+    // Info adicional: conversión, ticket promedio, facturación, canceladas
+    const conv = (hayMetricas && v7>0) ? (c7/v7*100).toFixed(2)+'%' : '—';
+    const ticket = c7>0 ? money(fact7/c7) : '—';
+    const cancel7 = s7 - c7;
+    const st = 'flex:1;min-width:105px;background:var(--bg2,#f8fafc);border:1px solid var(--border,#e2e8f0);border-radius:9px;padding:7px 9px;text-align:center';
+    html += '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:11px">'+
+      '<div style="'+st+'"><div style="font-size:9.5px;color:var(--text3);font-weight:600">💰 FACTURACIÓN 7D</div><div style="font-size:13.5px;font-weight:800;color:var(--text)">'+money(fact7)+'</div><div style="font-size:9.5px;color:var(--text3)">'+(factPrev? 'anterior '+money(factPrev)+deltaTxt(fact7,factPrev):'')+'</div></div>'+
+      '<div style="'+st+'"><div style="font-size:9.5px;color:var(--text3);font-weight:600">🎯 CONVERSIÓN</div><div style="font-size:13.5px;font-weight:800;color:var(--text)">'+conv+'</div><div style="font-size:9.5px;color:var(--text3)">ventas / visitas</div></div>'+
+      '<div style="'+st+'"><div style="font-size:9.5px;color:var(--text3);font-weight:600">🧾 TICKET PROMEDIO</div><div style="font-size:13.5px;font-weight:800;color:var(--text)">'+ticket+'</div><div style="font-size:9.5px;color:var(--text3)">por venta concretada</div></div>'+
+      '<div style="'+st+'"><div style="font-size:9.5px;color:var(--text3);font-weight:600">❌ CANCELADAS 7D</div><div style="font-size:13.5px;font-weight:800;color:'+(cancel7>0?'#dc2626':'var(--text)')+'">'+cancel7+'</div><div style="font-size:9.5px;color:var(--text3)">de '+s7+' ventas</div></div>'+
+    '</div>';
+    el.innerHTML = html;
+  }catch(e){ console.warn('[funnel]', e.message); }
+}
+
+// ── Mapa de compradores: SVG liviano de Argentina + pines por provincia ──
+// Datos: operaciones de Cuenta Impala (ingresos no cancelados, por provincia).
+const _MAPA_AR_MAIN = 'M111.0,4.8 L151.5,8.0 L193.5,28.8 L235.5,60.8 L237.0,86.4 L259.5,96.0 L298.5,64.0 L304.5,84.8 L276.0,105.6 L255.0,132.8 L240.0,161.6 L234.0,185.6 L235.5,204.8 L252.0,216.0 L259.5,236.8 L247.5,264.0 L178.5,278.4 L175.5,308.8 L135.0,313.6 L145.5,332.8 L135.0,339.2 L127.5,376.0 L96.0,392.0 L121.5,420.8 L94.5,444.8 L75.0,470.4 L84.0,492.8 L60.0,488.0 L25.5,481.6 L12.0,464.0 L22.5,438.4 L34.5,408.0 L34.5,384.0 L33.0,353.6 L34.5,324.8 L39.0,294.4 L46.5,272.0 L54.0,249.6 L55.5,219.2 L60.0,192.0 L54.0,160.0 L61.5,128.0 L82.5,97.6 L82.5,75.2 L102.0,48.0 L103.5,24.0 L106.5,14.4 Z';
+const _MAPA_AR_TDF  = 'M84.0,499.2 L81.0,516.8 L102.0,532.8 L129.0,534.4 L133.5,518.4 L91.5,508.8 Z';
+const _PROV_COORDS = {
+  caba:[-34.6,-58.4], buenosaires:[-36.5,-60.0], catamarca:[-27.5,-66.9], chaco:[-26.4,-60.7],
+  chubut:[-43.7,-69.2], cordoba:[-31.4,-64.2], corrientes:[-28.7,-57.8], entrerios:[-32.0,-59.2],
+  formosa:[-24.9,-59.9], jujuy:[-23.3,-65.8], lapampa:[-37.1,-65.4], larioja:[-29.7,-67.2],
+  mendoza:[-34.6,-68.6], misiones:[-26.9,-54.6], neuquen:[-38.6,-70.1], rionegro:[-40.4,-67.0],
+  salta:[-24.3,-64.8], sanjuan:[-30.9,-68.9], sanluis:[-33.7,-66.3], santacruz:[-48.8,-69.9],
+  santafe:[-30.7,-60.9], santiagodelestero:[-27.8,-63.3], tierradelfuego:[-54.0,-67.0], tucuman:[-26.9,-65.4],
+};
+const _PROV_LABELS = {
+  caba:'CABA', buenosaires:'Buenos Aires', catamarca:'Catamarca', chaco:'Chaco', chubut:'Chubut',
+  cordoba:'Córdoba', corrientes:'Corrientes', entrerios:'Entre Ríos', formosa:'Formosa', jujuy:'Jujuy',
+  lapampa:'La Pampa', larioja:'La Rioja', mendoza:'Mendoza', misiones:'Misiones', neuquen:'Neuquén',
+  rionegro:'Río Negro', salta:'Salta', sanjuan:'San Juan', sanluis:'San Luis', santacruz:'Santa Cruz',
+  santafe:'Santa Fe', santiagodelestero:'Santiago del Estero', tierradelfuego:'Tierra del Fuego', tucuman:'Tucumán',
+};
+function _provNorm(s){
+  if(!s) return '';
+  const t = String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z]/g,'');
+  if(!t) return '';
+  if(t==='caba' || t.indexOf('capitalfederal')>=0 || t.indexOf('ciudadautonoma')>=0 || t.indexOf('ciudaddebuenosaires')>=0) return 'caba';
+  if(t.indexOf('buenosaires')>=0 || t==='bsas' || t==='bas' || t==='pba' || t==='gba') return 'buenosaires';
+  const keys = Object.keys(_PROV_COORDS);
+  for(const k of keys){ if(k!=='caba' && k!=='buenosaires' && t.indexOf(k)>=0) return k; }
+  return '';
+}
+function _mapPrj(lat,lon){ return [ (lon+74)*15, ((-lat)-21.5)*16 ]; }
+
+function renderDashMap(){
+  const el = document.getElementById('dash-map');
+  if(!el) return;
+  try{
+    // juntar ingresos no cancelados con provincia (Cuenta Impala)
+    const porProv = {};
+    let sinProv = 0, total = 0;
+    if(typeof _ctaState !== 'undefined' && _ctaState && _ctaState.chunks){
+      Object.values(_ctaState.chunks).forEach(ch => (ch||[]).forEach(o=>{
+        if(!o || o.tipo!=='ingreso' || o.cancelada) return;
+        total++;
+        const k = _provNorm(o.provincia);
+        if(!k){ sinProv++; return; }
+        if(!porProv[k]) porProv[k] = { c:0, m:0 };
+        porProv[k].c++;
+        porProv[k].m += (+o.monto||0) + (+o.envio||0);
+      }));
+    }
+    const provs = Object.keys(porProv);
+    if(!provs.length){
+      el.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:14px 6px;line-height:1.5">Sin datos de provincias todavía.<br>El mapa se arma con las operaciones de <b>Cuenta Impala</b> (campo Provincia de cada venta).</div>';
+      return;
+    }
+    const money = n => '$' + Math.round(+n||0).toLocaleString('es-AR');
+    // color y radio según cantidad
+    const colorDe = c => c>=100 ? '#1e3a8a' : (c>=25 ? '#a21caf' : (c>=8 ? '#2b8fe3' : '#7cc4f0'));
+    const radioDe = c => Math.min(17, 8 + Math.sqrt(c)*0.9);
+    let pines = '';
+    provs.sort((a,b)=>porProv[a].c-porProv[b].c);  // chicos primero, grandes arriba
+    for(const k of provs){
+      const d = porProv[k];
+      const xy = _mapPrj(_PROV_COORDS[k][0], _PROV_COORDS[k][1]);
+      const r = radioDe(d.c);
+      pines += '<g style="cursor:pointer" onmouseenter="_dashMapTip(this,1)" onmouseleave="_dashMapTip(this,0)" onclick="_dashMapTip(this,1)" data-n="'+_PROV_LABELS[k]+'" data-c="'+d.c+'" data-m="'+money(d.m)+'">'+
+        '<circle cx="'+xy[0]+'" cy="'+xy[1]+'" r="'+r.toFixed(1)+'" fill="'+colorDe(d.c)+'" stroke="#fff" stroke-width="1.6" opacity="0.93"></circle>'+
+        '<text x="'+xy[0]+'" y="'+(xy[1]+3)+'" text-anchor="middle" font-size="'+(d.c>=1000?7.5:9)+'" font-weight="800" fill="#fff" style="pointer-events:none">'+d.c+'</text>'+
+      '</g>';
+    }
+    el.innerHTML =
+      '<svg viewBox="0 0 315 545" style="width:100%;max-height:430px;display:block" xmlns="http://www.w3.org/2000/svg">'+
+        '<path d="'+_MAPA_AR_MAIN+'" fill="var(--bg2,#eef2f7)" stroke="var(--border2,#c9d4e0)" stroke-width="1.4"></path>'+
+        '<path d="'+_MAPA_AR_TDF+'"  fill="var(--bg2,#eef2f7)" stroke="var(--border2,#c9d4e0)" stroke-width="1.4"></path>'+
+        pines+
+      '</svg>'+
+      '<div id="dash-map-tip" style="display:none;position:absolute;z-index:10;background:#1e293b;color:#fff;border-radius:9px;padding:8px 11px;font-size:11.5px;line-height:1.5;box-shadow:0 6px 20px rgba(0,0,0,.3);pointer-events:none;max-width:170px"></div>'+
+      '<div style="font-size:10px;color:var(--text3);margin-top:4px">'+total+' ventas mapeadas'+(sinProv? ' · '+sinProv+' sin provincia':'')+' · pasá el mouse por un pin</div>';
+  }catch(e){ console.warn('[mapa]', e.message); }
+}
+function _dashMapTip(g, show){
+  const tip = document.getElementById('dash-map-tip');
+  const cont = document.getElementById('dash-map');
+  if(!tip || !cont) return;
+  if(!show){ tip.style.display='none'; return; }
+  tip.innerHTML = '<b>'+g.getAttribute('data-n')+'</b><br>Ventas: <b>'+g.getAttribute('data-c')+'</b><br>Importe: <b>'+g.getAttribute('data-m')+'</b>';
+  const cr = cont.getBoundingClientRect();
+  const gr = g.getBoundingClientRect();
+  let left = gr.left - cr.left + gr.width/2 + 8;
+  let top  = gr.top  - cr.top  - 10;
+  if(left > cr.width - 175) left = left - 190;
+  if(top < 0) top = 0;
+  tip.style.left = left + 'px';
+  tip.style.top  = top + 'px';
+  tip.style.display = 'block';
+}
+
+// ── Espejo de widgets del Resumen General → Analizador SEO ──
+function _dashMirror(src, dst){
+  const a = document.getElementById(src), b = document.getElementById(dst);
+  if(a && b) b.innerHTML = a.innerHTML;
+}
+(function(){
+  try{
+    if(typeof renderDashTopPubs==='function'){
+      const _o = renderDashTopPubs;
+      renderDashTopPubs = function(){ _o.apply(this, arguments); _dashMirror('dash-top-pubs','seo-top-pubs'); try{ renderDashFunnel(); }catch(e){} try{ renderDashMap(); }catch(e){} };
+    }
+    if(typeof renderLast50==='function'){
+      const _o2 = renderLast50;
+      renderLast50 = function(){ _o2.apply(this, arguments); _dashMirror('dash-last50','seo-last50'); };
+    }
+    if(typeof renderMostVisited==='function'){
+      const _o3 = renderMostVisited;
+      renderMostVisited = function(){ _o3.apply(this, arguments); _dashMirror('dash-most-visited','seo-most-visited'); };
+    }
+    if(typeof ctaRenderAll==='function'){
+      const _o4 = ctaRenderAll;
+      ctaRenderAll = function(){ _o4.apply(this, arguments); try{ renderDashMap(); }catch(e){} };
+    }
+  }catch(e){ console.warn('[v204 wrappers]', e.message); }
+})();
+
 // v198: liberar localStorage si está cerca del límite, ANTES de cargar datos.
 // El Radar de Aciertos (predicciones) puede crecer mucho y llenar la cuota,
 // impidiendo guardar el cache de publicaciones. Si detectamos poco espacio,
@@ -28269,17 +28542,25 @@ function _liberarEspacioSiNecesario(){
     }
     const mb = total / (1024*1024);
     console.log('[localStorage] uso aproximado:', mb.toFixed(2), 'MB');
-    // localStorage suele permitir ~5MB. Si pasamos 4MB, recortamos.
+    // v204: limpieza ESCALONADA. Antes se borraban las predicciones del Radar
+    // en cada arranque con >4MB, y por eso el Radar quedaba congelado y sin
+    // fallos. Ahora: primero los caches regenerables; las predicciones SOLO
+    // como último recurso (además están respaldadas en la nube).
+    const medir = ()=>{ let t=0; for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); t += (k.length + (localStorage.getItem(k)||'').length); } return t/(1024*1024); };
     if(mb > 4){
-      console.warn('[localStorage] cerca del límite ('+mb.toFixed(2)+'MB), recortando predicciones...');
-      // borrar las predicciones del Radar (se regeneran solas)
-      try{ localStorage.removeItem('mlp_seo_predictions_v1'); }catch(e){}
-      // borrar caches viejos que se regeneran
+      console.warn('[localStorage] cerca del límite ('+mb.toFixed(2)+'MB), recortando caches regenerables...');
+      // PASO 1: caches que se regeneran solos al cargar (no afectan al Radar)
       try{ localStorage.removeItem('mlp_items_v2'); }catch(e){}
       try{ localStorage.removeItem('mlp_orders_v1'); }catch(e){}
-      let after = 0;
-      for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); after += (k.length + (localStorage.getItem(k)||'').length); }
-      console.log('[localStorage] liberado, ahora:', (after/(1024*1024)).toFixed(2), 'MB');
+      let after = medir();
+      console.log('[localStorage] tras paso 1:', after.toFixed(2), 'MB');
+      // PASO 2 (último recurso): predicciones del Radar (respaldadas en KV)
+      if(after > 4.6){
+        console.warn('[localStorage] sigue lleno, recortando predicciones del Radar (respaldo en nube)...');
+        try{ localStorage.removeItem('mlp_seo_predictions_v1'); }catch(e){}
+        after = medir();
+      }
+      console.log('[localStorage] liberado, ahora:', after.toFixed(2), 'MB');
     }
   }catch(e){ console.warn('[localStorage] no se pudo medir:', e.message); }
 }
