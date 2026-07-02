@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v204 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v205 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -993,8 +993,8 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <div class="card" style="min-width:0">
       <div class="card-hd">
         <div>
-          <div class="card-title">🗺️ Mapa de compradores</div>
-          <div class="card-sub">Ventas e importe por provincia · datos de Cuenta Impala</div>
+          <div class="card-title">🗺️ Mapa de compradores — Histórico</div>
+          <div class="card-sub">Todas las ventas registradas en Cuenta Impala (histórico completo), por provincia</div>
         </div>
       </div>
       <div id="dash-map" style="position:relative;min-height:300px"><div style="color:var(--text3);font-size:12px;padding:10px 0">Cargando...</div></div>
@@ -7421,7 +7421,9 @@ function renderDashTopPubs(){
     el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:10px 0">Sin publicaciones cargadas</div>';
     return;
   }
-  const cutoff = Date.now() - (90*24*60*60*1000);
+  // v205: ventana REAL de 30 días (antes 90, mostraba ventas viejas).
+  // Se recalcula con cada carga de órdenes, así se actualiza solo cada día.
+  const cutoff = Date.now() - (30*24*60*60*1000);
   const salesMap = {};
   allOrders.filter(o =>
     ['paid','confirmed','delivered','shipped'].includes(o.status) &&
@@ -7435,7 +7437,7 @@ function renderDashTopPubs(){
 
   const ranked = Object.entries(salesMap).sort((a,b)=>b[1]-a[1]).slice(0,50);
   if(!ranked.length){
-    el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:10px 0">Sin ventas en los últimos 90 días.</div>';
+    el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:10px 0">Sin ventas en los últimos 30 días.</div>';
     return;
   }
 
@@ -28407,8 +28409,32 @@ function renderDashFunnel(){
 
 // ── Mapa de compradores: SVG liviano de Argentina + pines por provincia ──
 // Datos: operaciones de Cuenta Impala (ingresos no cancelados, por provincia).
-const _MAPA_AR_MAIN = 'M111.0,4.8 L151.5,8.0 L193.5,28.8 L235.5,60.8 L237.0,86.4 L259.5,96.0 L298.5,64.0 L304.5,84.8 L276.0,105.6 L255.0,132.8 L240.0,161.6 L234.0,185.6 L235.5,204.8 L252.0,216.0 L259.5,236.8 L247.5,264.0 L178.5,278.4 L175.5,308.8 L135.0,313.6 L145.5,332.8 L135.0,339.2 L127.5,376.0 L96.0,392.0 L121.5,420.8 L94.5,444.8 L75.0,470.4 L84.0,492.8 L60.0,488.0 L25.5,481.6 L12.0,464.0 L22.5,438.4 L34.5,408.0 L34.5,384.0 L33.0,353.6 L34.5,324.8 L39.0,294.4 L46.5,272.0 L54.0,249.6 L55.5,219.2 L60.0,192.0 L54.0,160.0 L61.5,128.0 L82.5,97.6 L82.5,75.2 L102.0,48.0 L103.5,24.0 L106.5,14.4 Z';
-const _MAPA_AR_TDF  = 'M84.0,499.2 L81.0,516.8 L102.0,532.8 L129.0,534.4 L133.5,518.4 L91.5,508.8 Z';
+const _MAPA_AR_PROV = {
+  buenosaires:'M179.4,303.7 178.4,305.0 176.4,304.2 177.4,302.0 179.4,303.7ZM179.8,301.2 178.2,298.1 179.8,298.8 179.8,301.2ZM181.2,282.4 182.0,283.8 178.5,281.4 181.2,282.4ZM233.3,200.1 234.3,203.0 231.5,204.6 233.2,205.9 231.9,211.4 233.3,212.4 235.3,210.5 249.7,218.4 253.1,223.0 249.5,228.2 250.3,233.5 255.9,238.2 258.6,236.8 259.6,238.3 260.0,246.3 247.7,261.3 246.6,265.9 235.0,271.9 212.7,277.4 187.2,280.2 179.6,279.0 177.6,277.0 174.6,276.6 174.4,278.4 175.9,279.3 174.6,281.7 176.1,284.1 175.1,284.1 179.6,285.9 175.7,285.0 179.2,287.2 178.3,293.1 175.4,293.0 174.6,299.1 172.7,300.9 176.0,304.8 175.0,306.7 177.3,306.0 174.9,310.0 168.3,312.7 163.4,308.1 159.2,307.4 159.4,206.6 184.3,206.0 196.4,193.0 202.9,193.9 205.6,188.1 215.4,194.7 221.0,195.5 230.4,200.8 233.3,200.1Z',
+  caba:'M235.3,210.5 233.3,212.4 231.6,210.5 232.9,208.4 235.3,210.5Z',
+  catamarca:'M119.2,76.1 117.6,80.4 122.0,83.2 122.0,86.4 117.1,93.1 120.3,94.3 121.1,98.6 122.4,100.7 124.5,101.1 126.4,104.8 129.8,101.8 132.5,102.5 133.8,108.4 132.3,114.3 133.6,115.5 134.5,124.7 136.8,128.9 135.6,129.8 136.0,133.8 132.9,137.0 129.0,138.3 123.1,124.0 114.7,117.8 115.0,115.8 111.2,110.5 105.4,108.3 102.2,109.7 92.6,110.1 91.0,106.0 88.6,106.5 83.4,104.0 83.5,99.9 73.0,100.4 77.8,89.9 81.2,90.6 85.1,88.6 85.4,86.4 81.1,79.3 81.4,76.9 83.9,74.3 80.9,63.6 82.6,58.6 92.9,60.5 111.6,60.4 112.6,65.8 108.8,66.8 108.0,69.7 113.7,78.0 116.9,74.6 119.2,76.1Z',
+  chaco:'M234.7,86.2 230.2,90.5 230.9,93.1 226.7,95.7 227.8,99.4 227.0,104.0 184.3,104.0 183.7,66.6 159.0,66.6 175.0,46.4 174.9,41.9 183.4,45.5 188.3,50.0 191.9,50.6 194.0,54.4 202.6,59.4 207.3,66.7 214.9,72.2 215.0,74.1 218.7,75.0 219.8,77.5 222.7,76.7 225.7,78.5 234.7,86.2Z',
+  chubut:'M134.2,328.2 137.1,331.1 142.8,332.1 141.0,334.8 143.3,335.1 148.4,334.8 149.0,332.3 144.9,331.8 153.5,329.2 156.0,332.8 156.3,337.5 154.9,340.8 148.9,342.1 146.2,340.4 147.0,338.2 143.4,336.1 139.0,336.9 134.8,339.7 140.3,342.8 145.5,343.7 135.9,347.8 130.0,354.6 132.2,360.6 130.4,363.2 131.8,365.9 129.6,369.3 124.7,371.4 124.3,373.9 127.2,374.9 126.0,376.5 117.0,375.9 112.5,377.4 112.9,378.7 111.2,378.2 112.1,379.4 106.1,380.1 100.0,385.8 99.5,388.6 96.3,392.0 35.3,392.0 35.4,390.5 33.6,389.5 33.8,384.8 37.7,384.0 37.4,382.5 40.3,380.3 36.2,375.7 28.9,374.4 28.7,372.5 40.5,372.7 43.2,368.5 41.8,366.8 32.1,366.0 32.1,361.7 35.1,358.8 32.8,356.4 34.3,353.6 30.7,351.1 31.5,349.1 33.6,348.9 33.7,346.7 29.2,345.7 27.8,344.0 27.9,336.9 29.4,335.7 28.0,332.6 29.9,330.0 33.4,329.9 33.5,328.0 134.2,328.2Z',
+  cordoba:'M178.7,138.5 178.1,143.3 182.2,147.7 178.2,161.7 176.4,163.5 176.7,170.2 183.9,180.7 183.3,184.5 167.2,206.1 159.4,206.6 159.2,216.0 133.7,216.0 133.0,187.3 136.8,177.9 136.2,173.0 132.1,173.2 130.4,169.0 123.6,166.1 123.5,153.5 129.0,138.3 132.9,137.0 135.9,134.0 135.7,129.3 146.2,126.8 152.8,130.4 158.0,130.4 159.2,132.3 175.7,132.4 178.7,138.5Z',
+  corrientes:'M270.5,93.3 269.7,95.2 272.4,102.5 275.7,106.3 273.4,107.7 274.7,110.2 271.4,110.0 271.5,111.4 265.7,116.5 263.6,121.1 261.2,122.1 254.7,131.0 251.1,132.7 250.1,135.7 245.4,139.1 245.2,141.3 241.6,144.8 242.9,147.9 236.6,140.1 231.0,138.4 224.9,139.3 221.4,141.5 215.1,141.4 216.3,126.1 217.3,123.3 222.0,120.4 223.7,114.0 223.7,106.8 226.6,105.1 227.4,102.6 226.7,95.7 232.3,92.5 239.7,92.2 252.1,95.8 261.8,95.3 264.0,97.4 267.7,93.0 270.5,93.3Z',
+  entrerios:'M242.9,147.9 242.9,150.5 241.3,151.1 241.4,155.9 238.9,159.6 240.2,162.3 237.0,166.3 238.6,172.5 236.7,176.5 237.8,184.8 233.5,185.6 233.8,188.8 232.0,191.9 233.3,200.1 230.4,200.8 221.0,195.5 215.4,194.7 202.6,185.9 198.4,176.9 200.1,169.1 199.2,166.8 200.3,163.5 203.8,162.8 207.5,159.2 214.2,149.3 215.7,145.2 215.1,141.4 221.4,141.5 224.9,139.3 231.0,138.4 236.6,140.1 242.9,147.9Z',
+  formosa:'M234.7,86.2 225.7,78.5 222.7,76.7 219.8,77.5 218.7,75.0 215.0,74.1 214.9,72.2 207.3,66.7 202.6,59.4 194.0,54.4 191.9,50.6 188.3,50.0 183.4,45.5 174.9,41.9 174.9,15.6 180.7,24.6 193.2,33.5 194.9,36.9 205.1,40.3 209.5,40.1 227.9,52.4 243.5,58.7 246.5,64.7 243.4,67.2 241.9,72.1 237.7,74.9 237.3,82.4 234.7,86.2Z',
+  jujuy:'M132.1,9.6 129.8,17.4 131.0,18.1 131.6,23.2 134.8,24.6 134.5,28.3 137.0,32.0 140.1,31.3 143.4,33.9 144.5,32.2 147.2,32.4 147.3,43.9 140.7,49.8 137.6,47.3 136.0,49.6 132.5,47.3 130.9,48.0 126.3,46.5 123.6,41.2 120.0,39.1 120.2,32.7 117.4,30.7 114.3,30.2 114.7,40.7 112.4,43.8 109.9,43.2 101.2,35.7 104.8,24.0 102.1,21.1 104.5,16.4 108.2,14.9 109.0,11.6 115.3,9.3 116.4,4.7 123.4,9.7 132.1,9.6Z',
+  lapampa:'M159.2,216.0 159.2,285.2 142.9,277.7 111.6,275.2 110.3,272.9 104.0,270.6 102.3,267.5 96.1,268.0 91.9,264.1 94.2,261.1 93.8,258.7 86.3,256.9 86.0,232.1 133.6,232.0 133.7,216.0 159.2,216.0Z',
+  larioja:'M129.0,138.3 123.5,153.5 123.6,166.1 109.0,166.0 107.2,162.2 104.3,160.4 103.8,150.3 102.1,147.4 85.1,131.1 74.8,129.9 75.9,125.0 74.9,122.4 76.3,120.0 72.2,113.5 65.2,110.4 72.2,103.2 73.0,100.4 82.5,99.8 83.6,100.1 83.4,104.0 88.6,106.5 91.0,106.0 92.6,110.1 102.2,109.7 105.4,108.3 111.2,110.5 115.0,115.8 114.7,117.8 123.1,124.0 129.0,138.3Z',
+  mendoza:'M99.1,172.2 102.1,180.2 102.7,190.8 108.8,201.0 107.8,206.2 111.8,214.8 112.4,221.5 110.7,232.0 86.0,232.1 86.3,256.9 83.6,256.6 82.1,255.0 75.2,253.8 73.4,251.1 64.4,249.8 62.8,248.0 63.2,245.8 54.3,237.2 53.6,221.7 51.3,220.2 54.2,218.7 55.3,211.9 59.1,204.7 62.5,203.9 61.3,196.4 63.2,190.4 62.4,188.2 59.8,188.8 58.5,187.0 60.0,182.0 57.7,179.8 56.2,173.0 64.9,172.2 66.0,169.8 72.2,167.3 76.1,169.2 76.7,173.4 79.7,173.4 89.2,169.1 92.5,171.8 99.1,172.2Z',
+  misiones:'M275.7,106.3 272.5,102.7 270.0,93.8 273.7,95.1 276.1,93.3 276.0,90.7 278.8,87.7 282.9,87.3 286.2,82.8 287.9,82.6 290.4,75.2 291.0,65.2 293.3,67.0 294.1,65.3 297.2,65.3 298.3,63.9 298.4,65.4 301.5,66.2 305.0,75.5 303.4,83.4 304.3,86.5 302.7,90.2 298.6,92.6 297.3,91.9 295.7,94.9 287.9,96.4 286.3,99.8 283.8,100.5 284.6,101.6 280.3,102.6 275.7,106.3Z',
+  neuquen:'M86.3,256.9 86.2,274.6 89.8,279.6 85.2,279.4 75.6,287.8 71.3,289.4 67.3,293.1 60.8,295.2 58.4,303.2 56.4,304.8 51.9,304.2 45.4,306.2 43.0,308.5 44.6,310.5 42.8,312.8 32.0,312.2 30.7,307.5 34.9,301.0 32.8,299.6 32.8,297.5 34.8,297.6 35.7,294.5 34.3,289.6 37.4,289.6 39.0,278.6 45.8,276.0 47.5,273.0 45.4,270.8 44.9,265.1 42.1,258.5 43.2,255.5 41.9,252.7 43.7,249.7 42.1,245.6 42.8,243.0 44.1,243.0 44.4,239.8 49.2,238.6 49.3,236.2 53.5,234.1 54.7,237.9 56.1,237.9 57.4,241.1 63.2,245.8 62.8,248.0 64.4,249.8 73.4,251.1 75.2,253.8 86.3,256.9Z',
+  rionegro:'M159.2,285.2 159.2,307.4 163.4,308.1 168.0,312.7 163.5,314.5 153.3,314.5 149.1,312.0 136.3,309.2 138.8,308.7 135.3,307.6 136.4,308.3 133.2,309.3 132.4,311.5 135.1,320.4 134.2,328.2 33.5,328.0 31.1,322.4 32.2,321.1 32.0,312.2 42.8,312.8 44.6,310.5 43.0,308.5 45.4,306.2 51.9,304.2 56.4,304.8 58.4,303.2 60.8,295.2 67.3,293.1 71.3,289.4 75.6,287.8 85.2,279.4 89.8,279.6 86.2,274.6 86.3,256.9 93.8,258.7 94.2,261.1 91.9,264.1 96.1,268.0 102.3,267.5 104.0,270.6 110.3,272.9 111.6,275.2 142.9,277.7 159.2,285.2Z',
+  salta:'M174.9,15.6 175.0,46.4 159.0,66.6 147.1,65.3 142.7,75.5 135.8,76.4 131.0,74.6 130.3,73.2 125.0,73.2 124.1,76.8 116.9,74.6 114.0,78.2 107.8,69.0 108.8,66.8 112.6,65.8 111.7,60.4 92.9,60.5 82.6,58.6 84.5,58.0 81.3,52.9 82.6,49.6 86.3,46.2 99.6,40.5 101.2,35.7 109.9,43.2 112.9,43.6 114.7,40.7 114.7,29.9 120.1,32.5 120.0,39.1 123.6,41.2 126.9,46.9 132.5,47.3 136.0,49.6 137.6,47.3 140.7,49.8 145.5,46.4 147.6,42.9 147.2,32.4 144.5,32.2 143.4,33.9 140.1,31.3 137.0,32.0 134.5,28.3 134.8,24.6 131.6,23.2 131.0,18.1 129.8,17.4 132.1,9.6 141.2,11.4 145.1,21.9 146.2,16.7 151.4,7.9 167.9,8.1 170.6,12.9 174.9,15.6Z',
+  sanjuan:'M109.0,166.0 99.5,165.7 99.1,172.2 92.5,171.8 89.2,169.1 79.7,173.4 76.7,173.4 76.1,169.2 72.2,167.3 66.0,169.8 64.9,172.2 55.2,172.5 54.2,168.6 55.7,168.8 56.3,167.1 52.9,165.1 51.2,161.1 51.5,156.9 52.8,153.5 53.6,154.5 56.0,152.6 54.9,151.0 57.4,141.8 60.9,141.7 62.5,138.6 60.3,137.2 61.3,132.9 59.4,124.8 62.9,121.6 65.2,110.4 72.2,113.5 76.3,120.0 74.9,122.4 75.9,125.0 74.8,129.9 85.1,131.1 102.1,147.4 103.8,150.3 104.3,160.4 107.2,162.2 109.0,166.0Z',
+  sanluis:'M109.0,166.0 125.4,166.3 131.2,169.8 132.1,173.2 136.2,173.0 136.8,177.9 133.0,187.3 133.6,232.0 110.7,232.0 112.4,221.5 111.8,214.8 107.8,206.2 108.8,201.0 102.7,190.8 102.1,180.2 99.1,172.2 99.5,165.7 109.0,166.0Z',
+  santacruz:'M96.3,392.0 95.6,394.6 98.6,401.1 108.2,408.1 120.3,409.1 123.8,411.3 124.0,416.2 122.3,419.9 114.2,421.8 121.5,420.3 123.6,423.2 121.1,423.1 121.2,425.8 118.4,426.0 114.9,429.6 103.3,434.8 102.0,437.1 96.7,440.3 92.5,446.1 95.9,444.3 94.0,452.5 91.6,455.9 84.9,457.9 78.9,451.7 81.3,454.9 74.8,456.1 81.5,455.6 84.7,458.4 76.8,461.3 73.9,465.0 73.0,470.5 68.8,473.3 72.5,471.6 75.6,480.9 65.8,482.0 70.4,481.5 72.6,482.2 72.0,483.0 75.4,481.9 84.6,493.5 83.5,494.2 82.8,492.7 60.7,488.1 30.5,487.5 30.3,485.5 23.2,480.8 26.1,475.9 23.9,473.7 25.8,472.1 25.5,466.4 18.7,465.9 12.3,468.0 10.5,460.8 6.9,457.8 7.8,456.1 6.4,454.9 8.0,452.1 6.2,448.6 8.1,444.9 13.5,444.4 12.2,443.4 14.7,440.0 21.1,436.7 21.3,431.2 25.5,429.6 24.9,425.1 21.8,422.7 24.8,417.7 24.6,415.2 27.4,414.5 29.6,411.2 31.8,411.5 29.9,409.0 31.3,408.0 30.8,405.0 34.8,402.5 33.6,395.9 31.3,394.3 35.3,392.0 96.3,392.0Z',
+  santafe:'M215.1,141.4 215.7,145.2 214.2,149.3 207.5,159.2 203.8,162.8 200.3,163.5 199.2,166.8 200.1,169.1 198.5,177.3 201.7,185.0 205.9,188.4 203.0,193.8 196.4,193.0 184.3,206.0 167.2,206.1 183.6,184.0 184.0,181.1 181.6,178.5 181.3,175.4 176.7,170.2 176.4,163.5 178.2,161.7 182.2,147.7 178.0,142.7 184.3,104.0 227.0,104.0 223.7,106.8 223.7,114.0 222.0,120.4 216.8,124.1 214.9,133.6 216.1,136.8 215.1,141.4Z',
+  santiagodelestero:'M159.0,66.6 183.7,66.6 184.2,67.9 184.3,104.0 178.7,138.5 175.7,132.4 159.2,132.3 158.0,130.4 152.8,130.4 146.2,126.8 136.8,128.9 134.5,124.7 133.6,115.5 132.3,114.3 133.9,110.8 132.5,102.5 135.0,100.5 134.0,97.6 135.5,96.2 134.1,95.6 136.8,93.0 139.9,84.9 142.5,82.8 143.6,72.5 147.1,65.3 159.0,66.6Z',
+  tierradelfuego:'M80.2,534.2 80.4,532.8 81.5,534.1 80.2,534.2ZM144.9,531.5 152.8,531.7 140.6,534.4 138.6,533.3 144.9,531.5ZM86.0,503.7 86.5,505.9 84.8,504.3 81.7,507.8 88.3,509.5 90.2,513.6 96.6,517.4 96.4,518.5 108.5,524.0 112.8,527.5 122.2,530.3 132.7,530.2 131.3,533.2 129.4,534.9 125.0,535.6 120.5,534.4 120.1,535.6 113.2,536.8 104.5,534.5 85.5,532.7 81.5,533.4 80.4,532.5 80.6,498.2 86.0,503.7Z',
+  tucuman:'M142.7,75.5 142.5,82.8 139.9,84.9 136.8,93.0 134.1,95.6 135.5,96.2 134.0,97.6 135.0,100.5 133.5,102.4 129.8,101.8 126.4,104.8 124.5,101.1 122.4,100.7 121.1,98.6 120.3,94.3 117.1,93.1 121.7,87.0 122.2,84.2 117.7,80.6 118.5,77.1 119.2,76.1 124.3,76.7 125.0,73.2 130.3,73.2 131.0,74.6 135.8,76.4 142.7,75.5Z'
+};
 const _PROV_COORDS = {
   caba:[-34.6,-58.4], buenosaires:[-36.5,-60.0], catamarca:[-27.5,-66.9], chaco:[-26.4,-60.7],
   chubut:[-43.7,-69.2], cordoba:[-31.4,-64.2], corrientes:[-28.7,-57.8], entrerios:[-32.0,-59.2],
@@ -28436,13 +28462,14 @@ function _provNorm(s){
 }
 function _mapPrj(lat,lon){ return [ (lon+74)*15, ((-lat)-21.5)*16 ]; }
 
+// v205: mapa CHOROPLETH — cada provincia delimitada y coloreada según sus
+// ventas (histórico de Cuenta Impala) + panel lateral permanente con los datos.
 function renderDashMap(){
   const el = document.getElementById('dash-map');
   if(!el) return;
   try{
-    // juntar ingresos no cancelados con provincia (Cuenta Impala)
     const porProv = {};
-    let sinProv = 0, total = 0;
+    let sinProv = 0, total = 0, totalImporte = 0;
     if(typeof _ctaState !== 'undefined' && _ctaState && _ctaState.chunks){
       Object.values(_ctaState.chunks).forEach(ch => (ch||[]).forEach(o=>{
         if(!o || o.tipo!=='ingreso' || o.cancelada) return;
@@ -28451,7 +28478,9 @@ function renderDashMap(){
         if(!k){ sinProv++; return; }
         if(!porProv[k]) porProv[k] = { c:0, m:0 };
         porProv[k].c++;
-        porProv[k].m += (+o.monto||0) + (+o.envio||0);
+        const imp = (+o.monto||0) + (+o.envio||0);
+        porProv[k].m += imp;
+        totalImporte += imp;
       }));
     }
     const provs = Object.keys(porProv);
@@ -28460,28 +28489,62 @@ function renderDashMap(){
       return;
     }
     const money = n => '$' + Math.round(+n||0).toLocaleString('es-AR');
-    // color y radio según cantidad
-    const colorDe = c => c>=100 ? '#1e3a8a' : (c>=25 ? '#a21caf' : (c>=8 ? '#2b8fe3' : '#7cc4f0'));
-    const radioDe = c => Math.min(17, 8 + Math.sqrt(c)*0.9);
-    let pines = '';
-    provs.sort((a,b)=>porProv[a].c-porProv[b].c);  // chicos primero, grandes arriba
-    for(const k of provs){
+    // escala de color por cantidad (relativa al máximo)
+    const maxC = Math.max(...provs.map(k=>porProv[k].c));
+    const PALETA = ['#bfdbfe','#7cc4f0','#2bb5a0','#f59e0b','#d13c9c','#e5484d'];
+    const colorDe = c => {
+      if(!c) return 'var(--bg2,#eef2f7)';
+      const r = c / maxC;
+      if(r >= 0.75) return PALETA[5];
+      if(r >= 0.45) return PALETA[4];
+      if(r >= 0.25) return PALETA[3];
+      if(r >= 0.10) return PALETA[2];
+      if(r >= 0.03) return PALETA[1];
+      return PALETA[0];
+    };
+    // SVG: todas las provincias delimitadas (las sin datos en gris neutro)
+    let svgPaths = '';
+    Object.keys(_MAPA_AR_PROV).forEach(k=>{
+      const d = porProv[k];
+      const fill = d ? colorDe(d.c) : 'var(--bg2,#eef2f7)';
+      const attrs = d
+        ? ' style="cursor:pointer" onmouseenter="_dashMapTip(this,1)" onmouseleave="_dashMapTip(this,0)" onclick="_dashMapTip(this,1)" data-n="'+_PROV_LABELS[k]+'" data-c="'+d.c+'" data-m="'+money(d.m)+'"'
+        : ' data-n="'+_PROV_LABELS[k]+'"';
+      svgPaths += '<path d="'+_MAPA_AR_PROV[k]+'" fill="'+fill+'" stroke="#fff" stroke-width="1.3" stroke-linejoin="round"'+attrs+'></path>';
+    });
+    // etiquetas con la cantidad sobre las provincias con datos (encima de todo)
+    let labels = '';
+    provs.forEach(k=>{
       const d = porProv[k];
       const xy = _mapPrj(_PROV_COORDS[k][0], _PROV_COORDS[k][1]);
-      const r = radioDe(d.c);
-      pines += '<g style="cursor:pointer" onmouseenter="_dashMapTip(this,1)" onmouseleave="_dashMapTip(this,0)" onclick="_dashMapTip(this,1)" data-n="'+_PROV_LABELS[k]+'" data-c="'+d.c+'" data-m="'+money(d.m)+'">'+
-        '<circle cx="'+xy[0]+'" cy="'+xy[1]+'" r="'+r.toFixed(1)+'" fill="'+colorDe(d.c)+'" stroke="#fff" stroke-width="1.6" opacity="0.93"></circle>'+
-        '<text x="'+xy[0]+'" y="'+(xy[1]+3)+'" text-anchor="middle" font-size="'+(d.c>=1000?7.5:9)+'" font-weight="800" fill="#fff" style="pointer-events:none">'+d.c+'</text>'+
-      '</g>';
-    }
+      labels += '<text x="'+xy[0]+'" y="'+(xy[1]+3)+'" text-anchor="middle" font-size="9.5" font-weight="800" fill="#0f172a" stroke="#fff" stroke-width="2.6" paint-order="stroke" style="pointer-events:none">'+d.c+'</text>';
+    });
+    // panel lateral permanente (estilo infografía): provincias ordenadas por importe
+    const ordenadas = provs.sort((a,b)=>porProv[b].m-porProv[a].m);
+    const filas = ordenadas.map(k=>{
+      const d = porProv[k];
+      const pct = totalImporte>0 ? (d.m/totalImporte*100) : 0;
+      return '<div style="display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:8px;background:var(--bg2,#f8fafc);border:1px solid var(--border,#e2e8f0);margin-bottom:4px">'+
+        '<span style="width:11px;height:11px;border-radius:3px;background:'+colorDe(d.c)+';flex-shrink:0;border:1px solid rgba(0,0,0,.12)"></span>'+
+        '<div style="flex:1;min-width:0">'+
+          '<div style="font-size:11px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+_PROV_LABELS[k]+'</div>'+
+          '<div style="font-size:9.5px;color:var(--text3)">'+d.c+' ventas · '+money(d.m)+'</div>'+
+        '</div>'+
+        '<div style="font-size:11px;font-weight:800;color:var(--text);flex-shrink:0">'+pct.toFixed(1)+'%</div>'+
+      '</div>';
+    }).join('');
     el.innerHTML =
-      '<svg viewBox="0 0 315 545" style="width:100%;max-height:430px;display:block" xmlns="http://www.w3.org/2000/svg">'+
-        '<path d="'+_MAPA_AR_MAIN+'" fill="var(--bg2,#eef2f7)" stroke="var(--border2,#c9d4e0)" stroke-width="1.4"></path>'+
-        '<path d="'+_MAPA_AR_TDF+'"  fill="var(--bg2,#eef2f7)" stroke="var(--border2,#c9d4e0)" stroke-width="1.4"></path>'+
-        pines+
-      '</svg>'+
-      '<div id="dash-map-tip" style="display:none;position:absolute;z-index:10;background:#1e293b;color:#fff;border-radius:9px;padding:8px 11px;font-size:11.5px;line-height:1.5;box-shadow:0 6px 20px rgba(0,0,0,.3);pointer-events:none;max-width:170px"></div>'+
-      '<div style="font-size:10px;color:var(--text3);margin-top:4px">'+total+' ventas mapeadas'+(sinProv? ' · '+sinProv+' sin provincia':'')+' · pasá el mouse por un pin</div>';
+      '<div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">'+
+        '<div style="flex:1.25;min-width:190px">'+
+          '<svg viewBox="0 0 315 545" style="width:100%;max-height:440px;display:block" xmlns="http://www.w3.org/2000/svg">'+svgPaths+labels+'</svg>'+
+        '</div>'+
+        '<div style="flex:1;min-width:170px;max-height:440px;overflow-y:auto">'+
+          '<div style="font-size:10px;font-weight:700;color:var(--text3);margin-bottom:6px;letter-spacing:.4px">VENTAS POR PROVINCIA · % DEL IMPORTE</div>'+
+          filas+
+        '</div>'+
+      '</div>'+
+      '<div id="dash-map-tip" style="display:none;position:absolute;z-index:10;background:#1e293b;color:#fff;border-radius:9px;padding:8px 11px;font-size:11.5px;line-height:1.5;box-shadow:0 6px 20px rgba(0,0,0,.3);pointer-events:none;max-width:180px"></div>'+
+      '<div style="font-size:10px;color:var(--text3);margin-top:5px">'+total+' ventas históricas mapeadas'+(sinProv? ' · '+sinProv+' sin provincia':'')+' · pasá el mouse por una provincia</div>';
   }catch(e){ console.warn('[mapa]', e.message); }
 }
 function _dashMapTip(g, show){
