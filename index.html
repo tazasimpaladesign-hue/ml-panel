@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v205 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v206 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -788,6 +788,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   <div class="sb-sec">Dashboard</div>
   <a class="nav active" href="#dashboard" id="nav-dashboard" onclick="showSection('dashboard');return false;"><span class="ni">⬡</span>Resumen general</a>
   <a class="nav" href="#cta" id="nav-cta" onclick="showSection('cta');return false;"><span class="ni">💼</span>Cuenta Impala</a>
+  <a class="nav" href="#economia" id="nav-economia" onclick="showSection('economia');return false;"><span class="ni">💰</span>Economía</a>
   <a class="nav" href="#ventas" id="nav-ventas" onclick="showSection('ventas');return false;"><span class="ni">🛍️</span>Mercado Libre Ventas<span class="nb nb-amber" id="nb-ventas" style="display:none">0</span></a>
   <a class="nav" href="#perso-wa" id="nav-perso-wa" onclick="showSection('perso-wa');return false;"><span class="ni">🎨</span>Whatsapp Diseños<span class="nb nb-amber" id="nb-perso" style="display:none">0</span></a>
   <a class="nav" href="#woo-seo" id="nav-woo-seo" onclick="showSection('woo-seo');return false;"><span class="ni">🟣</span>Web Tienda Impala<span class="nb nb-amber" id="nb-woo" style="display:none">0</span></a>
@@ -4347,6 +4348,48 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 </div>
 
 <!-- ═══════════════════════ GOOGLE TOOLS ═══════════════════════ -->
+<div id="section-economia" class="section fade-in">
+  <div class="hd">
+    <div>
+      <h1>💰 Economía</h1>
+      <p class="sub">Gastos fijos, servicios, impuestos y pagos del hogar y el negocio</p>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <select id="eco-year" onchange="ecoRender()" style="font-size:13px;padding:7px 10px;border-radius:9px;border:1px solid var(--border);background:var(--card);color:var(--text)"></select>
+      <button class="btn btn-ghost btn-sm" onclick="ecoAddGasto()">➕ Nuevo gasto</button>
+      <button class="btn btn-ghost btn-sm" onclick="ecoOpenGraf()">📈 Evolución</button>
+    </div>
+  </div>
+
+  <!-- KPIs del mes actual -->
+  <div id="eco-kpis" class="g4 mb"></div>
+
+  <!-- Grilla de gastos x meses -->
+  <div class="card mb" style="overflow:hidden">
+    <div class="card-hd">
+      <div>
+        <div class="card-title">Planilla de gastos <span id="eco-year-lbl"></span></div>
+        <div class="card-sub">Tocá una celda para cargar o cambiar el importe y su estado · los totales se calculan solos</div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;font-size:10.5px;color:var(--text3);flex-wrap:wrap">
+        <span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#16a34a;vertical-align:middle"></span> Pagado</span>
+        <span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#dc2626;vertical-align:middle"></span> Por pagar</span>
+        <span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#f59e0b;vertical-align:middle"></span> Estimado</span>
+        <span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--bg2,#e2e8f0);vertical-align:middle"></span> No aplica</span>
+      </div>
+    </div>
+    <div style="overflow-x:auto;max-height:600px;overflow-y:auto">
+      <table id="eco-table" style="border-collapse:collapse;font-size:11.5px;min-width:100%"></table>
+    </div>
+  </div>
+
+  <!-- Cierre anual -->
+  <div class="card">
+    <div class="card-hd"><div class="card-title">Resumen del año <span id="eco-year-lbl2"></span></div></div>
+    <div id="eco-summary" style="padding:4px 2px"></div>
+  </div>
+</div>
+
 <div id="section-proveedores" class="section fade-in">
   <div class="card">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">
@@ -26500,6 +26543,7 @@ const titles={
   dashboard:['Dashboard','Resumen general de tu tienda'],
   'perso-wa':['🎨 Personalizadas WA','Pedidos de diseño de la guía interactiva · clientes por WhatsApp'],
   cta:['💼 Cuenta Impala Design','Contabilidad: ingresos, egresos, stock y rentabilidad · ML + Woo + WA + manual'],
+  economia:['💰 Economía','Gastos fijos, servicios, impuestos y pagos del hogar y el negocio'],
   proveedores:['🏭 Proveedores','Agenda de contactos de proveedores · sincronizada en todas las PCs'],
   publicaciones:['📦 Publicaciones','Gestión de tu catálogo'],
   bulk:['✏️ Edición masiva','Modificá múltiples publicaciones a la vez'],
@@ -28589,6 +28633,418 @@ function _dashMirror(src, dst){
     }
   }catch(e){ console.warn('[v204 wrappers]', e.message); }
 })();
+
+const ECO_SEED_JSON = '[{"id":"g1","n":"Afip Monotributo Belén y Cristian","cat":"Impuestos","e":"📋","d":{"2025":[17956.0,24760.99,24760.99,24760.99,24760.99,24760.99,24760.99,28498.77,28498.77,28498.77,28498.77,28498.77],"2026":[28498.77,42452.25,42452.25,42452.25,42452.25,42452.25,null,null,null,null,null,null]}},{"id":"g2","n":"Aguasmend. Vista Olivo","cat":"Servicios","e":"💧","d":{"2013":[27.46,null,27.44,null,84.02,null,84.02,null,84.02,null,89.96,null],"2014":[null,null,105.36,null,105.36,null,131.5,null,145.68,null,22.13,null],"2015":[173.92,null,173.92,null,173.92,null,173.92,null,173.92,null,173.92,null],"2016":[173.92,null,173.92,null,173.92,null,173.92,null,173.92,null,173.92,null],"2017":[265.7,null,234.78,null,234.78,null,234.78,null,234.78,null,234.78,null],"2018":[234.78,null,234.78,null,306.86,null,333.76,null,362.1,null,390.32,null],"2019":[417.9,null,0.0,null,417.9,null,417.9,null,417.9,null,417.9,null],"2020":[417.9,null,939.92,null,939.92,545.74,545.74,469.96,469.96,null,null,473.25],"2021":[473.25,473.25,476.0,573.0,573.0,639.53,639.53,658.38,719.56,631.9,635.28,1225.04],"2022":[1225.04,1289.6,1289.6,1668.39,1668.4,1927.92,1927.92,1918.65,1918.65,1918.65,1918.65,2090.0],"2023":[2090.0,2773.58,2773.58,3562.96,3562.97,3233.59,3233.6,4215.97,4215.98,3926.15,3926.15,4803.2],"2024":[4803.2,8172.55,8172.55,10226.33,10226.33,13887.6,13887.6,17841.03,18087.2,21694.45,21694.45,26261.13],"2025":[26261.13,26640.86,26640.87,31156.26,31156.26,33479.1,33905.36,34461.04,34461.05,35512.27,35512.28,36573.78],"2026":[36174.12,35686.65,35720.4,41846.26,41880.64,41989.62,41549.35,null,null,null,null,null]}},{"id":"g3","n":"Aire Acondicionado Vero","cat":"Varios","e":"🛒","d":{"2018":[2600.0,2600.0,2600.0,2600.0,2600.0,2600.0,null,null,null,null,null,null]}},{"id":"g4","n":"Alquiler Adriana","cat":"Vivienda","e":"🏠","d":{"2013":[null,null,null,null,1500.0,1500.0,1500.0,1500.0,1500.0,null,null,null]}},{"id":"g5","n":"Auto Nissan Prestamo 24 cuotas","cat":"Créditos","e":"🏦","d":{"2026":[607660.15,605959.27,604216.01,602429.31,600599.0,598721.26,null,null,null,null,null,null]}},{"id":"g6","n":"BBVA Auto Nissan Prestamo 24 cuot","cat":"Créditos","e":"🏦","d":{"2025":[null,null,null,null,null,null,null,null,null,null,580789.69,609320.0]}},{"id":"g7","n":"Claro Belén 156056813","cat":"Servicios","e":"📶","d":{"2021":[499.5,1721.0,1189.0,655.0,262.0,262.0,262.0,304.0,304.0,614.0,304.0,530.0],"2022":[330.0,330.0,370.0,370.0,1850.0,419.98,419.98,419.98,990.0,508.38,765.0,580.0],"2023":[580.0,1200.0,1460.0,720.0,840.0,1264.06,2358.06,2833.72,2857.13,3498.47,3106.93,4321.28],"2024":[4900.47,3137.44,5546.39,5035.26,8868.29,6227.18,6780.15,8947.82,10042.67,12328.61,10854.77,11138.14],"2025":[14033.48,12105.0,9697.58,12827.99,10216.03,17088.0,17688.71,17982.01,15176.0,18774.0,19176.44,24997.92],"2026":[21968.0,18873.0,23431.26,24470.27,24884.07,24797.92,null,null,null,null,null,null]}},{"id":"g8","n":"Claro Cristian 156267166","cat":"Servicios","e":"📶","d":{"2021":[1009.78,1088.0,1132.0,655.0,262.0,262.0,262.0,304.0,304.0,304.0,304.0,330.0],"2022":[330.0,330.0,370.0,370.0,1850.0,419.98,419.98,419.98,890.0,507.53,500.0,580.0],"2023":[580.0,580.0,1040.0,720.0,840.0,1264.06,1368.06,3031.33,1638.34,1756.99,1958.51,3027.11],"2024":[2587.33,3115.05,4776.32,5029.67,5658.26,6215.52,6780.08,7187.81,7568.41,7956.63,8338.89,8635.1],"2025":[9010.45,9314.99,9684.07,9917.99,10208.99,14108.0,14584.29,14792.01,15176.0,15464.0,15793.43,18204.74],"2026":[18873.0,18873.0,19721.25,20602.31,21380.03,24789.23,null,null,null,null,null,null]}},{"id":"g9","n":"Contador Ezequiel Vargas","cat":"Profesionales","e":"🧮","d":{"2021":[null,null,null,null,2000.0,2000.0,2000.0,2000.0,2000.0,2000.0,2000.0,2000.0],"2022":[2000.0,2000.0,4000.0,4000.0,4000.0,4000.0,4000.0,4000.0,4000.0,4000.0,4000.0,5000.0],"2023":[5000.0,5000.0,5000.0,5000.0,5000.0,6500.0,6500.0,6500.0,8000.0,8000.0,8000.0,10000.0],"2024":[10000.0,10000.0,12500.0,12500.0,12500.0,12500.0,12500.0,20000.0,20000.0,20000.0,20000.0,25000.0],"2025":[25000.0,25000.0,25000.0,25000.0,32500.0,32500.0,32500.0,45000.0,45000.0,45000.0,45000.0,45000.0],"2026":[56000.0,56000.0,56000.0,56000.0,56000.0,64000.0,64000.0,null,null,null,null,null]}},{"id":"g10","n":"Contadora Belén Monotributo","cat":"Profesionales","e":"🧮","d":{"2017":[null,null,null,null,null,null,null,300.0,300.0,300.0,300.0,300.0],"2018":[300.0,300.0,300.0,300.0,300.0,300.0,300.0,300.0,300.0,300.0,300.0,300.0]}},{"id":"g11","n":"Convenio Multilateral","cat":"Impuestos","e":"📋","d":{"2022":[null,null,4259.98,2633.66,6710.98,8857.35,4811.76,6261.45,8989.32,4778.31,5761.09,18783.96],"2023":[16528.42,7203.01,4254.92,11520.49,6456.83,10868.42,20447.71,22305.31,27020.0,17529.0,18243.92,16299.37],"2024":[33996.43,22007.0,36928.11,43829.37,25517.58,38969.64,47101.01,51431.8,68759.32,51422.2,82107.55,26738.82],"2025":[74863.88,28393.48,82117.16,30011.41,35053.84,38532.99,56209.46,38150.2,48359.23,101641.19,112852.3,84421.19],"2026":[195754.24,84872.58,95890.0,63819.69,95203.24,107784.36,null,null,null,null,null,null]}},{"id":"g12","n":"Cuota Banco Auto","cat":"Créditos","e":"🏦","d":{"2013":[null,null,null,2100.0,2060.0,2060.0,2050.0,2100.0,2050.0,2000.0,2100.0,2100.0],"2014":[2100.0,2100.0,2200.0,2200.0,2600.0,500.0,2200.0,2300.0,1500.0,2200.0,1800.0,2000.0],"2015":[2100.0,2300.0,2300.0,2200.0,2200.0,2200.0,2200.0,2200.0,2200.0,2200.0,2200.0,2100.0],"2016":[2200.0,2200.0,2150.0,null,null,null,null,null,null,null,null,null]}},{"id":"g13","n":"Cuota Banco Casa","cat":"Créditos","e":"🏦","d":{"2013":["NA","NA","NA","NA","NA",2784.97,3247.72,3280.59,3208.98,3242.09,3258.17,3223.54],"2014":[3239.58,null,3237.89,3237.02,3221.65,3319.62,3252.0,3600.0,3232.69,3231.8,3256.35,3221.18],"2015":[3314.55,3256.01,3280.2,3297.45,3258.37,3277.44,3276.52,3296.86,3568.12,3274.67,3272.73,3289.67],"2016":[3502.04,3430.14,3452.99,3406.03,3157.87,3450.0,3400.99,3470.93,3435.62,3425.85,3504.42,3400.04],"2017":[3446.37,3454.14,3445.79,3460.16,3515.44,3424.45,3473.82,3505.38,3472.75,3496.09,3542.64,3495.18],"2018":[3625.98,3474.26,3476.48,3532.43,3563.54,3525.26,3559.57,3561.23,3598.98,3728.72,3688.86,3811.14],"2019":[3826.86,3840.53,3847.1,3870.96,4022.84,4036.08,4138.12,4034.33,4137.47,4174.46,4262.9,4391.11],"2020":[4390.02,4532.33,4978.34,4719.01,4959.84,5170.0,4855.0,5471.0,5656.0,5283.0,5468.0,5490.13],"2021":[5404.0,5642.0,5934.0,5665.0,6064.0,6206.0,5927.61,6069.94,6212.16,5925.0,6067.12,6066.16],"2022":[6145.28,6104.76,6121.69,6900.0,7010.19,7179.1,6902.84,7278.67,6900.84,7625.77,7993.62,7702.0],"2023":[8016.85,8015.72,8018.82,8020.78,9471.74,9266.6,9800.0,10475.71,10425.0,10893.74,11120.38,11419.73],"2024":[13173.0,12730.02,14376.0,14780.02,20231.5,21607.01,21607.01,22611.45,24457.89,25561.74,24866.06,26101.0],"2025":[26231.35,251335.75,null,null,null,null,null,null,null,null,null,null]}},{"id":"g14","n":"Diplomatura Belén","cat":"Educación","e":"🎓","d":{"2020":[null,null,2000.0,2000.0,2060.0,2060.0,0.0,0.0,0.0,0.0,null,null]}},{"id":"g15","n":"Directv","cat":"Suscripciones","e":"📺","d":{"2014":[null,null,null,-482.0,-555.0,-273.75,-273.75,-273.75,-300.0,-300.0,-300.0,-505.0],"2015":[-340.0,-340.0,-340.0,-340.0,-340.0,-373.5,-373.5,-360.0,-360.0,-396.0,-590.36,513.7],"2016":[-701.25,-701.25,-701.25,-739.75,-740.0,-851.25,-984.25,-851.25,-851.25,-1013.0,-766.75,-882.5],"2017":[-882.5,-758.0,-914.0,-914.0,-1315.0,-741.0,-741.0,-741.0,-741.0,-866.0,-866.0,-866.0],"2018":[-866.0,-866.0,-866.0,-866.0,-1470.0,-690.0,-695.0,-695.0,-695.0,-865.0,-865.0,-650.0],"2019":[-1315.0,-650.0,-1500.0,-1185.0,-1500.0,-2366.0,-1402.0,-1113.38,-1262.5,-2865.0,-1595.0,-2725.0],"2020":[-1935.0,-1385.0,-1385.0,-1695.0,-1695.0,-1695.0,-1695.0,-2245.0,-2283.0,-1867.0,-2400.0,-2400.0],"2021":[-1495.0,-1495.0,-770.68,-1616.0,-1843.0,-1846.0,-2858.0,-2858.0,-2903.0,-2903.0,-2072.0,-2393.0],"2022":[-3300.0,-2300.0,-2150.0,-2139.0,-4454.0,-2443.0,-2818.0,-2818.0,-2818.0,-2818.0,-2818.0,-3096.0],"2023":[-3096.0,-3096.0,-3877.0,-3877.0,-3877.0,-4443.0,-4443.0,-4443.0,-6093.0,-6473.0,-1996.0,-5370.0],"2024":[-6200.0,-6200.0,-6200.0,-6200.0,-9240.0,-16000.0,-26500.0,0.0,-8036.0,-15900.0,-20000.0,null]}},{"id":"g16","n":"Ecogas Vista Olivo","cat":"Servicios","e":"🔥","d":{"2014":[null,null,null,15.24,null,52.44,null,103.45,null,75.95,null,49.18],"2015":[null,52.96,null,68.22,null,67.67,null,111.52,null,133.53,null,105.27],"2016":[null,29.75,null,28.91,null,202.05,null,0.0,null,0.0,null,0.0],"2017":[null,143.9,null,152.18,null,248.22,null,852.98,null,198.7,null,773.64],"2018":[null,475.0,null,501.2,null,976.04,null,1908.37,1908.37,1584.3,null,1159.28],"2019":[null,1104.6,null,457.5,457.5,664.85,664.85,2657.5,2668.15,2160.76,2168.68,841.84],"2020":[1388.01,1191.25,1194.07,1056.5,1055.1,810.82,798.61,3191.09,3321.72,2849.02,2790.0,995.63],"2021":[1057.04,687.11,702.96,637.88,633.64,901.16,883.42,2959.35,2964.23,1791.21,2064.63,1124.0],"2022":[584.45,330.85,324.54,306.08,297.36,424.01,414.42,2539.41,2546.4,1390.57,2584.75,834.88],"2023":[203.97,494.49,472.03,446.0,439.21,902.92,871.72,6171.96,6150.96,6854.07,6875.88,2485.89],"2024":[1534.06,1614.68,1492.41,1087.92,3928.45,13089.18,13096.55,37096.24,37187.23,30110.79,30342.89,13840.12],"2025":[13521.06,13094.9,12782.4,13202.64,13158.72,14921.06,14944.14,49801.41,50416.14,37557.04,37557.04,19770.43],"2026":[19105.62,19307.9,18901.15,20660.21,20684.91,26327.75,26134.28,null,null,null,null,null]}},{"id":"g17","n":"Edemsa Vista Olivo","cat":"Servicios","e":"💡","d":{"2013":[null,null,76.0,null,76.0,null,75.0,null,76.0,null,33.0,null],"2014":[636.0,null,137.0,null,138.0,null,299.0,null,121.0,null,169.0,null],"2015":[145.0,null,302.0,null,162.0,null,272.0,null,278.0,null,107.0,null],"2016":[176.0,null,321.0,null,184.0,null,348.0,null,171.0,null,189.0,null],"2017":[356.0,null,518.0,null,318.0,null,456.0,null,337.0,null,334.0,null],"2018":[1992.0,null,2216.0,null,698.0,null,1330.0,null,1168.0,null,969.0,null],"2019":[2227.0,null,1881.5,1881.5,832.0,832.0,1027.0,1027.0,953.0,953.0,1168.0,1168.0],"2020":[2607.0,2607.0,2483.0,2483.0,1371.5,1371.5,123.0,61.5,1508.0,1508.0,1246.5,1246.5],"2021":[2750.5,2750.5,2892.5,2892.5,1454.5,1454.5,1389.5,1389.5,1593.5,1593.5,1634.0,1634.0],"2022":[3747.0,3747.0,2732.5,2732.5,2015.0,2015.0,6651.0,6651.0,2845.0,2845.0,3918.0,3918.0],"2023":[9876.5,9876.5,9110.0,9110.0,4571.0,4571.0,5076.0,5076.0,5849.5,5849.5,5922.5,5922.5],"2024":[18999.5,18999.5,41354.0,41354.0,19485.5,19485.5,28453.0,28453.0,37986.5,37986.5,50740.0,50740.0],"2025":[94123.5,94123.5,93850.0,93850.0,52268.5,52268.5,50654.5,50654.5,57178.0,57178.0,60296.0,60296.0],"2026":[115112.5,115112.5,134453.0,134453.0,63444.0,63444.0,null,null,null,null,null,null]}},{"id":"g18","n":"Escuela Danzas","cat":"Educación","e":"🎓","d":{"2025":[null,null,null,null,35000.0,38000.0,38500.0,38500.0,42500.0,42500.0,42500.0,63000.0],"2026":[null,null,65000.0,65000.0,65000.0,65000.0,null,null,null,null,null,null]}},{"id":"g19","n":"Escuela Northbridge","cat":"Educación","e":"🎓","d":{"2022":[null,null,15224.25,15224.25,20885.25,20885.25,22160.25,25404.0,25404.0,29544.0,29544.0,31043.25],"2023":[39175.0,42798.0,54112.0,55713.0,57263.0,64023.0,64023.0,136176.0,84411.0,88092.0,106842.0,104453.0],"2024":[107284.0,134641.0,203461.0,246495.0,267592.0,260759.0,271145.2,318693.35,330866.55,343509.6,354999.1,313975.0],"2025":[321510.0,330192.0,365542.0,374315.0,388164.0,445463.0,452144.0,459378.0,468107.0,477001.03,487018.0,410050.0],"2026":[387790.0,398648.0,513687.0,531152.0,1040398.0,568971.0,586040.0,null,null,null,null,null]}},{"id":"g20","n":"Estacionamiento Playa","cat":"Varios","e":"🛒","d":{"2013":[null,null,null,null,null,300.0,300.0,300.0,300.0,200.0,0.0,0.0]}},{"id":"g21","n":"Estefania Sucesión","cat":"Varios","e":"🛒","d":{"2020":[2500.0,2500.0,2500.0,2500.0,2500.0,2500.0,2500.0,2500.0,2500.0,2500.0,null,null]}},{"id":"g22","n":"Expensas Vista Olivo","cat":"Vivienda","e":"🏢","d":{"2013":[200.0,200.0,200.0,200.0,310.0,310.0,600.0,400.0,400.0,400.0,400.0,400.0],"2014":[400.0,400.0,400.0,580.0,580.0,580.0,580.0,580.0,580.0,750.0,750.0,750.0],"2015":[750.0,750.0,750.0,1000.0,1000.0,1000.0,1000.0,1000.0,1000.0,1325.0,1200.0,1325.0],"2016":[1200.0,1200.0,1200.0,1200.0,1440.0,1440.0,1440.0,1660.0,1560.0,1760.0,1660.0,1825.0],"2017":[1825.0,1870.0,1870.0,1825.0,1825.0,1825.0,1825.0,1825.0,1825.0,1825.0,1825.0,1825.0],"2018":[1825.0,1875.0,2000.0,1825.0,1825.0,1825.0,1875.0,1825.0,1825.0,1825.0,1825.0,1975.0],"2019":[1825.0,1825.0,2300.0,2300.0,2300.0,2530.0,2300.0,2300.0,2300.0,2300.0,2300.0,2300.0],"2020":[2300.0,2900.0,2900.0,2900.0,2900.0,2900.0,2900.0,2900.0,3550.0,2900.0,3190.0,3480.0],"2021":[3770.0,3770.0,3770.0,3770.0,3770.0,3770.0,3770.0,3770.0,4770.0,3770.0,3770.0,3770.0],"2022":[5500.0,5500.0,5500.0,5500.0,5500.0,5500.0,5500.0,7400.0,7400.0,7400.0,7400.0,7400.0],"2023":[7400.0,10000.0,10000.0,10000.0,10000.0,10000.0,13500.0,13500.0,13500.0,13500.0,18000.0,18000.0],"2024":[18000.0,47725.0,25000.0,25000.0,32000.0,32000.0,32000.0,38000.0,38000.0,84000.0,84000.0,84000.0],"2025":[55000.0,55000.0,55000.0,64000.0,64000.0,64000.0,80000.0,80000.0,80000.0,88000.0,88000.0,88000.0],"2026":[97000.0,97000.0,97000.0,125650.0,137650.0,137650.0,109000.0,null,null,null,null,null]}},{"id":"g23","n":"Facultad Belén","cat":"Educación","e":"🎓","d":{"2013":[null,null,null,null,1350.0,1350.0,null,null,null,null,null,null]}},{"id":"g24","n":"Flow Internet 20-","cat":"Servicios","e":"📶","d":{"2025":[37437.0,27718.77,27527.89,28514.73,29493.03,29232.0,39742.0,40060.0,40722.0,40722.0,42360.01,44208.0],"2026":[56025.0,57400.0,53562.51,55419.52,57556.0,59600.0,null,null,null,null,null,null]}},{"id":"g25","n":"Impuesto Inmobiliario","cat":"Impuestos","e":"🏛️","d":{"2013":["NA","NA",375.26,"NA","NA","NA","NA","NA","NA","NA","NA","NA"],"2014":[476.31,null,null,null,null,null,null,null,null,null,null,null],"2015":[null,null,545.16,null,null,null,null,null,null,null,null,null],"2016":[null,null,815.24,null,null,null,null,null,null,null,null,null],"2017":[null,null,1047.24,null,null,null,null,null,null,null,null,null],"2018":[null,null,1256.68,null,null,null,null,null,null,null,null,null],"2019":[null,null,325.26,null,331.78,null,338.28,null,344.78,null,351.29,null],"2020":[null,null,520.42,null,650.53,null,650.53,null,650.53,null,650.53,null],"2024":[null,2642.38,4467.95,null,4913.75,null,4888.55,null,5037.3,null,5558.0,5632.32],"2025":[null,45532.55,null,null,null,null,null,null,null,null,null,null],"2026":[null,9655.77,null,9962.0,null,10268.67,null,null,null,null,null,null]}},{"id":"g26","n":"Impuesto Inmobiliario Plan Pago","cat":"Impuestos","e":"🏛️","d":{"2022":[1454.51,1454.51,1454.51,1454.51,1454.51,1454.54,null,null,null,null,null,null],"2023":[null,null,null,null,null,null,null,null,null,null,null,4598.0],"2024":[4598.0,4598.0,4598.0,4598.0,4598.0,null,null,null,null,null,null,null]}},{"id":"g27","n":"Impuestos Adriana","cat":"Varios","e":"📌","d":{"2013":[null,null,null,null,200.0,100.0,200.0,0.0,0.0,null,null,null]}},{"id":"g28","n":"Jardin Angéles - Monotributo","cat":"Impuestos","e":"📋","d":{"2020":[null,null,3500.0,null,null,null,null,null,1346.0,1350.0,1347.0,2150.0]}},{"id":"g29","n":"Jardín Angeles","cat":"Educación","e":"🎓","d":{"2021":[null,null,null,null,null,null,null,10600.0,6600.0,6600.0,6600.0,6600.0]}},{"id":"g30","n":"Los Andes Pass Diario","cat":"Varios","e":"🛒","d":{"2014":[null,null,null,null,null,null,null,null,null,null,96.66,84.0],"2015":[113.0,113.0,105.0,130.0,110.0,130.0,130.0,149.0,162.0,162.0,162.0,162.0],"2016":[180.0,167.0,180.0,189.0,235.9,215.9,394.9,null,null,null,null,null]}},{"id":"g31","n":"Los Apostoles","cat":"Varios","e":"🛒","d":{"2013":[300.0,"NA","NA","NA","NA","NA",null,310.0,"NA","NA","NA","NA"],"2014":[null,null,380.0,null,null,null,420.0,null,null,null,null,null],"2015":[500.0,null,null,null,null,580.0,null,null,null,null,null,null],"2016":[740.0,null,null,null,null,840.0,null,null,null,null,null,null],"2017":[1150.0,null,null,null,null,1320.0,null,null,null,null,null,null],"2018":[1100.0,null,null,null,null,1200.0,null,null,null,null,null,null],"2019":[1350.0,null,null,null,null,1750.0,null,null,null,null,null,null],"2020":[2400.0,null,null,null,null,2900.0,null,null,null,null,null,3300.0],"2021":[null,null,null,null,null,null,4500.0,null,null,null,null,5100.0],"2022":[null,null,null,null,null,5400.0,null,null,null,null,null,9000.0],"2023":[null,null,null,null,null,10800.0,null,null,null,null,null,17400.0],"2024":[null,null,null,null,null,26400.0,null,null,null,null,null,33000.0],"2025":[null,null,null,null,null,33000.0,null,null,null,null,null,49800.0],"2026":[null,null,null,null,null,60000.0,null,null,null,null,null,null]}},{"id":"g32","n":"Mano de Obra Muebles P.Alta","cat":"Varios","e":"📌","d":{"2022":[null,null,null,null,null,null,35000.0,null,140000.0,null,null,null]}},{"id":"g33","n":"Mantenimiento Banco","cat":"Créditos","e":"🏦","d":{"2013":[null,null,null,null,null,35.0,32.28,39.41,36.02,37.91,38.0,26.46],"2014":[35.0,null,42.11,null,38.35,50.38,0.0,0.0,167.31,68.2,43.65,78.82],"2015":[85.45,43.99,319.8,102.55,141.63,122.56,123.48,153.14,181.88,325.33,127.27,110.33],"2016":[400.0,169.86,47.01,3.97,2.13,0.0,0.0,null,null,null,null,null]}},{"id":"g34","n":"Medical Hair","cat":"Varios","e":"📌","d":{"2019":[null,null,null,null,null,null,null,null,3000.0,3000.0,3000.0,3000.0],"2020":[3000.0,3000.0,3000.0,3000.0,3000.0,3000.0,3000.0,3500.0,3500.0,3500.0,0.0,3500.0],"2021":[3500.0,0.0,0.0,0.0,0.0,4500.0,4500.0,4500.0,4500.0,4500.0,4500.0,4500.0],"2022":[0.0,5500.0,0.0,0.0,6500.0,6500.0,6500.0,8000.0,0.0,8000.0,8000.0,8000.0],"2023":[null,8000.0,10000.0,null,null,null,null,null,null,null,null,null]}},{"id":"g35","n":"Monotributo Belén","cat":"Impuestos","e":"📋","d":{"2021":[2380.0,2380.0,2380.0,2380.0,1577.0,1200.0,1200.0,1200.0,1200.0,1200.0,1200.0,1200.0],"2022":[1566.0,555.0,555.0,555.0,0.0,0.0,0.0,0.0,0.0,0.0,949.0,949.0],"2023":[1636.83,2689.05,2689.05,2689.05,2689.05,2689.05,2689.05,1636.83,0.0,0.0,0.0,0.0],"2024":[null,null,6725.75,10177.84,10356.27,3452.09,4499.95,8700.0,8700.0,8700.0,8700.0,8700.0]}},{"id":"g36","n":"Movistar Belén 156056813","cat":"Servicios","e":"📶","d":{"2020":[664.0,409.5,423.04,509.42,510.68,499.5,513.45,521.24,499.5,499.5,499.5,499.5]}},{"id":"g37","n":"Movistar Cristian 156267166","cat":"Servicios","e":"📶","d":{"2020":[409.5,409.5,409.5,499.5,499.5,502.26,496.74,511.46,498.62,488.43,549.5,499.5]}},{"id":"g38","n":"Munic.L.Heras Tasas Mun.","cat":"Impuestos","e":"🏛️","d":{"2013":[null,null,null,null,null,null,247.2,null,null,null,null,null],"2014":[264.51,null,null,null,null,null,297.33,null,null,null,null,null],"2015":[371.33,null,null,null,null,null,401.04,null,null,null,null,null],"2016":[505.73,null,null,null,null,null,573.13,null,null,null,null,null],"2017":[681.6,null,null,null,null,null,757.5,null,null,null,null,null],"2018":[848.16,null,null,null,null,null,940.36,null,null,null,null,null],"2019":[null,1106.25,null,null,null,null,1301.16,null,null,null,null,null],"2020":[null,1561.35,null,null,null,null,1728.66,null,null,null,null,null],"2021":[null,null,null,null,null,null,2499.2,null,null,null,null,null],"2025":[null,null,152083.34,9021.0,9510.27,9393.0,245104.37,11660.0,12112.11,11990.0,12540.0,12540.0],"2026":[16818.89,16500.0,16500.0,16714.0,17600.0,17600.0,null,null,null,null,null,null]}},{"id":"g39","n":"Naranja Cristian","cat":"Tarjetas","e":"💳","d":{"2019":[10819.3,12791.91,15510.85,14983.39,17684.54,13966.76,22411.33,17312.94,17830.42,16652.96,21955.87,21159.97],"2020":[21000.0,19783.07,31520.37,34558.66,25668.96,37247.8,42625.44,48157.33,29653.59,34992.0,61836.22,63393.34],"2021":[68478.21,31937.5,54791.73,60392.5,67149.0,55228.0,60912.35,33105.27,49121.74,33224.79,49472.07,31591.17],"2022":[46312.54,52936.81,54682.78,44275.48,43591.21,36665.71,103882.0,112792.08,130512.34,141212.02,157297.84,147039.21],"2023":[93868.02,103682.16,196447.9,82783.0,108067.03,143801.06,166506.57,193554.1,208224.01,310926.64,455114.89,339993.67],"2024":[371960.0,555246.96,553975.46,582950.0,629572.4,862849.96,726383.95,739763.51,634872.17,985711.33,851101.42,1101768.62],"2025":[949672.4,1639400.62,784034.17,908454.62,702920.0,1151709.0,742283.84,1131274.83,1166649.99,1250474.38,867292.02,1395304.0]}},{"id":"g40","n":"Netflix Patagonia","cat":"Suscripciones","e":"📺","d":{"2026":[null,null,null,null,22650.0,22650.0,null,null,null,null,null,null]}},{"id":"g41","n":"Nevada Belén","cat":"Varios","e":"🛒","d":{"2013":[null,null,null,null,null,0.0,7.79,927.94,588.82,995.16,1725.01,1945.96],"2014":[1438.92,null,1970.46,1278.4,1774.3,641.7,649.26,780.53,692.45,937.8,1769.01,1919.94],"2015":[1974.28,1115.77,1281.71,1286.11,1855.0,2425.74,2325.67,1104.48,370.6,1102.08,2080.88,1950.79],"2016":[2279.99,1940.04,2370.0,1324.68,1704.72,1318.95,3387.53,3492.02,3723.46,5283.97,4811.92,4273.26],"2017":[4366.7,4095.55,4111.75,3047.1,3850.97,3978.15,3651.17,3931.23,4041.03,3995.03,null,null]}},{"id":"g42","n":"Nevada Cristian","cat":"Varios","e":"🛒","d":{"2013":[null,null,null,null,null,1582.17,1164.81,1125.59,346.07,1993.88,1910.03,2272.49],"2014":[2074.05,null,1757.32,2146.8,2719.3,2699.61,3040.02,2140.78,1609.51,664.91,695.85,850.49],"2015":[1542.65,2482.5,2865.94,2432.01,4521.29,2876.74,2620.76,4762.83,3996.16,4621.59,3221.16,3745.15],"2016":[3561.56,3149.78,3076.0,3492.43,3248.27,3926.0,6095.39,7061.02,5669.09,13866.39,3651.83,2916.21],"2017":[3741.3,4107.64,4049.02,4384.75,4579.77,4388.71,3624.86,4285.29,4228.59,3827.18,5583.07,4779.46],"2018":[3991.46,2776.5,3405.92,2447.01,3760.5,5371.27,3254.89,4567.96,4976.15,16498.82,8008.64,10952.29]}},{"id":"g43","n":"Obra Social","cat":"Varios","e":"📌","d":{"2021":[null,null,null,null,null,null,null,null,null,null,7565.4,12409.49],"2022":[13819.41,14134.91,13293.18,17145.83,15725.82,18754.13,19608.8,22310.12,21937.99,25415.61,24204.39,26114.0],"2023":[28229.76,29318.17,30689.3,33724.82,33139.8,35797.0,36495.3,40832.28,40366.16,40430.12,36891.22,32876.48],"2024":[60748.5,null,null,null,null,null,null,null,null,null,null,null]}},{"id":"g44","n":"Patente Auto","cat":"Impuestos","e":"🚗","d":{"2013":["NA","NA","NA","NA",470.83,"NA","NA",423.75,null,null,470.83,null],"2014":[null,null,2547.5,null,null,null,null,null,null,null,null,null],"2015":[null,null,766.32,836.42,null,852.96,null,954.98,null,876.02,null,null],"2016":[null,3226.2,null,null,null,null,null,null,null,null,null,null],"2017":[null,3165.0,null,null,null,null,null,null,null,null,null,null],"2018":[4000.0,2653.0,null,2705.7,null,2740.0,null,2793.1,null,null,null,null],"2019":[null,3496.5,null,3566.43,null,3636.36,null,3706.29,null,null,null,null],"2020":[null,4601.4,null,5752.0,null,5752.0,null,5752.0,null,null,2827.12,2827.12],"2021":[2827.12,2827.12,2827.12,2827.12,null,null,null,null,null,null,null,null],"2024":[null,34527.42,null,32637.84,null,null,35608.83,null,36740.63,null,39004.23,null],"2025":[null,null,44784.0,null,46546.56,null,48309.12,null,49851.36,null,null,172078.18],"2026":[null,null,150299.6,null,152914.09,null,null,null,null,null,null,null]}},{"id":"g45","n":"Patente Auto Plan Pago","cat":"Impuestos","e":"🚗","d":{"2022":[6537.35,6537.35,6537.35,6537.35,6537.35,6537.37,null,null,null,null,null,null],"2023":[null,null,null,null,null,null,null,null,null,null,null,27298.0],"2024":[27298.0,27298.0,27298.0,27298.0,27298.0,null,null,null,null,null,null,null]}},{"id":"g46","n":"Patente Auto-MULTA","cat":"Impuestos","e":"🚗","d":{"2023":[null,null,null,null,5100.0,null,null,null,null,null,null,null]}},{"id":"g47","n":"Patente Moto","cat":"Impuestos","e":"🚗","d":{"2013":["NA","NA","NA",88.0,"NA","NA","NA","NA","NA","NA","NA","NA"],"2014":[null,null,104.0,null,null,null,null,null,null,null,null,null],"2015":[null,null,null,145.0,null,null,null,null,null,null,null,null],"2016":[null,122.4,181.7,null,null,null,null,null,null,null,null,null],"2017":[null,229.7,null,null,null,null,null,null,null,null,null,null],"2018":[null,213.0,null,null,null,null,null,null,null,null,null,null],"2019":[null,240.0,null,null,null,null,null,null,null,null,null,null],"2020":[null,85.8,null,107.25,null,107.25,null,107.25,null,null,null,null]}},{"id":"g48","n":"Pavimento Vista Olivo","cat":"Impuestos","e":"🏛️","d":{"2013":[440.0,440.0,440.0,440.0,440.0,440.0,440.0,440.0,440.0,440.0,440.0,440.0],"2014":[440.0,440.0,440.0,440.0,440.0,null,null,null,null,null,null,null]}},{"id":"g49","n":"Personal Belén","cat":"Varios","e":"🛒","d":{"2013":[null,null,null,233.0,170.82,205.76,213.95,254.5,246.06,246.06,246.06,214.23]}},{"id":"g50","n":"Personal Belén 156056813","cat":"Varios","e":"🛒","d":{"2014":[252.02,null,209.24,155.52,265.23,249.47,151.0,183.05,56.37,111.82,109.87,110.41],"2015":[109.87,109.87,128.59,125.99,123.39,125.99,125.99,125.99,155.86,143.15,143.15,143.15],"2016":[143.15,143.15,189.56,171.36,171.36,171.36,171.36,171.36,171.36,171.36,196.56,196.56],"2017":[196.56,196.56,241.92,262.08,262.08,263.97,272.16,272.16,272.16,272.16,287.29,287.29],"2018":[287.29,287.29,351.01,351.01,351.01,351.01,351.01,389.99,389.99,389.99,389.99,389.99],"2019":[389.99,480.01,480.01,480.01,480.01,580.01,580.01,580.01,725.0,580.0,520.0,664.0]}},{"id":"g51","n":"Personal Cristian","cat":"Varios","e":"🛒","d":{"2013":["NA","NA","NA","NA","NA",352.68,246.06,246.06,249.38,null,278.78,268.49]}},{"id":"g52","n":"Personal Cristian 156267166","cat":"Varios","e":"🛒","d":{"2014":[261.51,261.51,261.51,261.51,317.89,300.33,300.33,288.78,184.42,230.57,216.94,203.31],"2015":[216.94,216.94,274.78,258.64,309.13,258.64,258.64,258.64,346.37,303.22,303.22,303.22],"2016":[303.22,303.22,335.28,342.37,342.37,342.37,341.97,342.37,342.37,391.56,144.55,196.56],"2017":[196.56,196.56,241.92,262.37,264.38,262.08,272.16,272.16,272.16,272.16,287.29,286.88],"2018":[287.29,287.29,351.01,351.01,351.01,358.96,351.01,389.99,389.99,389.99,389.99,389.99],"2019":[389.99,480.01,480.01,480.01,481.37,580.01,589.12,580.01,725.0,580.0,583.92,681.48]}},{"id":"g53","n":"Prestamo Mercado Pago","cat":"Créditos","e":"🏦","d":{"2020":[null,null,null,null,null,null,null,null,null,null,80692.17,80692.17],"2021":[80692.17,80692.17,80692.17,80692.17,80692.17,80692.17,80692.17,80692.17,80692.17,80692.17,80692.17,80692.17],"2022":[80692.17,80692.17,80692.17,80692.17,null,null,null,null,null,null,null,null]}},{"id":"g54","n":"Regatas Belén","cat":"Varios","e":"📌","d":{"2017":[650.0,650.0,490.0,490.0,570.0,570.0,570.0,570.0,null,null,null,null]}},{"id":"g55","n":"Regatas Cristian","cat":"Varios","e":"📌","d":{"2017":[650.0,650.0,490.0,490.0,570.0,570.0,570.0,570.0,570.0,570.0,630.0,630.0],"2018":[630.0,630.0,630.0,630.0,660.0,660.0,690.0,690.0,690.0,690.0,790.0,null]}},{"id":"g56","n":"Seguro Auto Nissan","cat":"Créditos","e":"🏦","d":{"2025":[null,null,null,null,null,null,null,null,null,112725.45,112725.45,112725.45],"2026":[114003.5,114003.5,244966.0,122483.0,127901.0,127901.0,null,null,null,null,null,null]}},{"id":"g57","n":"Seguro Auto deb Patagonia 01-","cat":"Seguros","e":"🛡️","d":{"2025":[null,null,null,null,76626.51,74570.0,75537.05,75271.15,72282.0,73000.0,null,null]}},{"id":"g58","n":"Seguro Casa Bici deb Patagonia 20-","cat":"Seguros","e":"🛡️","d":{"2025":[null,null,null,null,24560.0,24560.0,24558.0,24560.0,24560.0,24560.0,24560.0,24560.0],"2026":[24560.0,24560.0,24560.0,24560.0,24560.0,24560.0,null,null,null,null,null,null]}},{"id":"g59","n":"Seguro Trabajo deb Patagonia 20-","cat":"Seguros","e":"🛡️","d":{"2025":[null,null,null,null,18078.0,18078.0,18078.0,18100.0,18100.0,18100.0,18100.0,18100.0],"2026":[18100.0,18100.0,18100.0,30500.0,30500.0,30500.0,null,null,null,null,null,null]}},{"id":"g60","n":"Tarjeta Master Cristian Mpago","cat":"Tarjetas","e":"💳","d":{"2026":[null,52327.23,52327.23,52327.23,392692.0,409858.64,null,null,null,null,null,null]}},{"id":"g61","n":"Tarjeta Naranja Cristian","cat":"Tarjetas","e":"💳","d":{"2026":[1660000.0,1053636.8,1169926.0,945612.11,1527825.67,969613.75,null,null,null,null,null,null]}},{"id":"g62","n":"Tarjeta Ova Playstation 5","cat":"Tarjetas","e":"💳","d":{"2025":[null,null,null,null,null,null,null,null,115000.0,150000.0,150000.0,75000.0],"2026":[150000.0,150000.0,null,null,null,null,null,null,null,null,null,null]}},{"id":"g63","n":"Tarjeta Visa Patagonia Belén","cat":"Tarjetas","e":"💳","d":{"2026":[1098108.92,567000.0,608400.0,487552.44,592213.85,462252.0,null,null,null,null,null,null]}},{"id":"g64","n":"Telefónica - Cassatti","cat":"Servicios","e":"📶","d":{"2022":[1745.49,1757.45,1791.17,2079.07,2056.58,2090.95,2316.85,6050.0,8363.81,2900.0,2900.0,2900.0],"2023":[2900.0,2900.0,2900.0,2900.0,2900.0,3900.0,3900.0,3900.0,4600.0,4600.0,4600.0,6000.0],"2024":[6000.0,7500.0,7500.0,7500.0,9500.0,9500.0,9500.0,11500.0,11500.0,11500.0,13500.0,null]}},{"id":"g65","n":"Telefónica 4442624","cat":"Servicios","e":"📶","d":{"2014":[null,null,null,null,null,null,null,null,null,null,null,309.11],"2015":[229.94,260.82,257.94,231.64,243.57,233.9,232.87,237.29,241.98,257.34,180.96,472.13],"2016":[382.36,466.97,0.0,462.61,406.46,399.53,384.68,431.99,436.95,387.26,500.11,442.4],"2017":[252.78,408.0,624.84,296.33,577.95,614.61,593.9,572.65,572.64,594.71,652.45,723.05],"2018":[674.71,558.0,558.0,574.9,602.0,603.65,707.88,774.34,813.98,775.76,880.52,1100.83],"2019":[1109.64,1000.0,1000.0,1065.0,1035.91,1035.31,1214.09,1221.5,1135.57,1139.0,1137.75,2095.94],"2020":[2083.96,1583.96,1619.54,2125.0,2100.0,2070.0,1799.7,1609.76,1588.27,1587.77,1595.0,1576.22],"2021":[1570.89,1841.0,1886.21,1906.0,1798.0,2517.85,2334.42,2177.5,2353.63,2370.0,933.69,1608.28]}},{"id":"g66","n":"Visa Hipotecario","cat":"Tarjetas","e":"💳","d":{"2020":[null,null,null,null,null,null,null,null,3173.37,11916.0,91254.33,12598.19],"2021":[11548.31,12123.0,21848.0,20706.0,26670.1,18738.32,18199.88,20262.73,21462.17,15471.44,21352.57,4426.47],"2022":[9894.43,10378.0,14250.26,19147.98,20871.4,25622.78,41719.78,23182.37,42953.55,13726.14,9849.71,6103.82]}},{"id":"g67","n":"Visa Hipotecario - SEBASTIAN","cat":"Tarjetas","e":"💳","d":{"2023":[4023.55,4047.46,4050.0,36547.28,33297.0,25375.0,17000.0,null,null,null,null,null]}},{"id":"g68","n":"Visa Hsbc Tracker","cat":"Tarjetas","e":"💳","d":{"2017":[null,null,null,null,null,null,null,null,null,null,10330.38,9665.0],"2018":[11492.31,10231.9,10073.53,9885.88,9927.84,10457.84,10269.23,10159.0,10436.83,10258.5,10273.33,10764.37],"2019":[11020.05,10858.47,10609.04,10415.0,10579.47,10699.56,10790.54,10850.2,10898.27,10933.77,11323.49,11463.44],"2020":[11718.52,11499.12,11369.59,11345.05,11292.07,11379.81,11890.03,13192.44,13290.1,16774.0,18743.72,21075.26],"2021":[24747.27,24294.0,33048.0,27885.12,27388.0,30033.0,28913.47,33648.98,34823.35,33342.36,33654.31,19630.9],"2022":[22438.49,23308.34,28475.77,29709.14,27978.17,29416.13,36650.38,39059.78,36796.03,25899.87,25135.78,28034.15],"2023":[30825.62,29019.58,23506.15,25473.35,26704.72,37091.73,47657.15,63054.08,69337.0,117788.95,53319.96,51691.78],"2024":[298314.13,174542.36,264288.97,114944.6,197166.34,71646.5,99896.44,295463.06,128306.64,126000.0,null,null]}},{"id":"g69","n":"Visa Patagonia Belén","cat":"Tarjetas","e":"💳","d":{"2016":[null,null,null,null,null,null,null,null,7271.22,20424.23,6854.05,8146.82],"2017":[8318.43,9514.56,2506.5,6833.33,3512.62,3310.65,3099.76,2821.35,-4273.33,-1612.72,3611.8,5413.05],"2018":[5984.45,8907.74,11550.62,8853.11,8852.71,9243.13,5650.87,8937.94,9713.69,5579.22,7225.36,5925.69],"2019":[3245.59,519.44,3971.95,9064.33,7602.42,1871.99,4288.34,5718.79,5227.44,4596.96,5566.8,26737.36],"2020":[12335.67,10511.07,13197.96,16559.14,14660.02,11660.25,14477.15,11250.53,15651.83,19252.98,20915.3,14750.03],"2021":[15087.75,12689.0,18896.25,15691.13,17933.04,21612.08,14699.1,17196.99,13180.8,11008.56,20180.67,20538.18],"2022":[22039.19,7931.82,12183.28,16196.15,26747.52,21387.71,31066.2,32737.72,42567.62,37805.1,19688.09,18095.39],"2023":[21675.13,27731.14,35952.36,21566.32,62401.34,43457.75,45479.48,28683.62,87264.65,133587.48,130949.86,177801.35],"2024":[264229.0,359952.4,322583.67,205842.98,353534.4,228881.6,300996.71,218088.85,456215.0,246103.37,614856.63,406003.67],"2025":[373000.0,240297.77,679491.24,532703.0,614512.36,421350.4,516218.62,891846.75,890305.0,862867.0,874535.0,850993.0]}},{"id":"g70","n":"Visa Patagonia Cristian","cat":"Tarjetas","e":"💳","d":{"2016":[null,null,null,null,null,null,null,130.0,1.86,0.0,0.0,0.0]}}]';
+// ═══════════════════════════════════════════════════════════════════════════
+// v206: SECCIÓN ECONOMÍA — gastos fijos, servicios, impuestos y pagos.
+// Datos importados del Excel histórico (2013-2026). Persisten en localStorage
+// + nube (backup KV) para verse en cualquier PC. 0 llamadas extra a ML.
+// ═══════════════════════════════════════════════════════════════════════════
+const ECO_MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+const ECO_MESES_FULL = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+const ECO_CATS = {
+  'Servicios':'💡','Vivienda':'🏠','Impuestos':'🏛️','Tarjetas':'💳','Créditos':'🏦',
+  'Seguros':'🛡️','Educación':'🎓','Suscripciones':'📺','Profesionales':'🧮','Varios':'📌'
+};
+const ECO_LS_KEY = 'mlp_economia_v1';
+let _ecoState = { gastos: [], year: new Date().getFullYear(), dirty:false, saveTimer:null };
+
+// El seed (datos del Excel) se embebe aparte en ECO_SEED_JSON.
+function _ecoLoad(){
+  try{
+    const raw = localStorage.getItem(ECO_LS_KEY);
+    if(raw){ const d=JSON.parse(raw); if(d && Array.isArray(d.gastos)) return d.gastos; }
+  }catch(e){}
+  // primera vez: cargar el seed del Excel
+  try{ return JSON.parse(ECO_SEED_JSON); }catch(e){ return []; }
+}
+function _ecoSaveLS(){
+  try{ localStorage.setItem(ECO_LS_KEY, JSON.stringify({ gastos:_ecoState.gastos, savedAt:Date.now() })); }catch(e){}
+}
+function _ecoMarkDirty(){
+  _ecoState.dirty = true;
+  _ecoSaveLS();
+  clearTimeout(_ecoState.saveTimer);
+  _ecoState.saveTimer = setTimeout(_ecoFlush, 3000);
+}
+async function _ecoFlush(){
+  if(!_ecoState.dirty) return;
+  _ecoState.dirty = false;
+  try{
+    await fetch(WORKER + '/api/backup', {
+      method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+      body: JSON.stringify({ economia: { gastos:_ecoState.gastos, savedAt:Date.now() } })
+    });
+  }catch(e){ console.warn('[eco] guardar nube:', e.message); }
+}
+async function _ecoSyncDown(){
+  // traer de la nube y mergear (la nube gana si tiene más gastos con datos)
+  try{
+    const r = await fetch(WORKER + '/api/backup', { headers:{'Authorization':'Bearer '+token} });
+    const d = await r.json();
+    if(d && d.economia && Array.isArray(d.economia.gastos) && d.economia.gastos.length){
+      const localTs = (()=>{ try{ return JSON.parse(localStorage.getItem(ECO_LS_KEY)||'{}').savedAt||0; }catch(e){ return 0; } })();
+      if((d.economia.savedAt||0) >= localTs){
+        _ecoState.gastos = d.economia.gastos;
+        _ecoSaveLS();
+        if(document.getElementById('section-economia')?.classList.contains('active')) ecoRender();
+      }
+    }
+  }catch(e){}
+}
+
+// getter/setter de un valor: gasto.d[year][mes] = valor | 'NA' | null
+// estado por gasto+año+mes en gasto.st[year][mes] = 'pagado'|'porpagar'|'estimado'
+function _ecoVal(g, y, m){ const a=g.d && g.d[y]; return a ? a[m] : null; }
+function _ecoEst(g, y, m){ const a=g.st && g.st[y]; return a ? a[m] : null; }
+function _ecoSet(g, y, m, val, estado){
+  if(!g.d) g.d={};
+  if(!g.d[y]) g.d[y]=[null,null,null,null,null,null,null,null,null,null,null,null];
+  g.d[y][m] = val;
+  if(!g.st) g.st={};
+  if(!g.st[y]) g.st[y]=[null,null,null,null,null,null,null,null,null,null,null,null];
+  g.st[y][m] = estado || null;
+}
+
+function _ecoYears(){
+  const ys = new Set();
+  _ecoState.gastos.forEach(g=>{ if(g.d) Object.keys(g.d).forEach(y=>ys.add(+y)); });
+  const cy = new Date().getFullYear();
+  ys.add(cy);
+  return [...ys].sort((a,b)=>b-a);
+}
+
+// color de una celda según estado / valor
+function _ecoCellStyle(val, estado){
+  if(val==='NA') return 'background:var(--bg2,#eef2f7);color:var(--text3)';
+  if(val==null || val==='') return '';
+  if(estado==='porpagar') return 'background:#fee2e2;color:#991b1b;font-weight:700';
+  if(estado==='estimado') return 'background:#fef3c7;color:#92400e;font-weight:600';
+  if(estado==='pagado')   return 'background:#dcfce7;color:#166534';
+  return 'color:var(--text)';  // sin estado explícito: pagado por defecto (histórico)
+}
+const _ecoFmt = n => (n==null||n==='NA'||n==='') ? '' : '$'+Math.round(+n).toLocaleString('es-AR');
+
+function ecoRender(){
+  if(!_ecoState.gastos.length) _ecoState.gastos = _ecoLoad();
+  // selector de año
+  const sel = document.getElementById('eco-year');
+  const years = _ecoYears();
+  if(sel){
+    if(sel.options.length !== years.length){
+      sel.innerHTML = years.map(y=>'<option value="'+y+'">'+y+'</option>').join('');
+    }
+    if(!years.includes(_ecoState.year)) _ecoState.year = years[0];
+    sel.value = _ecoState.year;
+  }
+  const y = +_ecoState.year;
+  document.getElementById('eco-year-lbl') && (document.getElementById('eco-year-lbl').textContent = y);
+  document.getElementById('eco-year-lbl2') && (document.getElementById('eco-year-lbl2').textContent = y);
+
+  // gastos que tienen datos ese año (o todos si es el año actual)
+  const cy = new Date().getFullYear();
+  const gastos = _ecoState.gastos.filter(g => (g.d && g.d[y]) || y===cy)
+    .sort((a,b)=> (a.cat===b.cat ? a.n.localeCompare(b.n) : a.cat.localeCompare(b.cat)));
+
+  // ── Tabla ──
+  const tbl = document.getElementById('eco-table');
+  let html = '<thead><tr style="position:sticky;top:0;z-index:2">'+
+    '<th style="position:sticky;left:0;z-index:3;background:var(--card);text-align:left;padding:7px 9px;border-bottom:2px solid var(--border);min-width:210px">Gasto</th>'+
+    ECO_MESES.map((m,i)=>'<th style="background:var(--card);padding:7px 6px;border-bottom:2px solid var(--border);min-width:74px;'+(i===new Date().getMonth()&&y===cy?'color:var(--accent);font-weight:800':'')+'">'+m+'</th>').join('')+
+    '<th style="background:var(--card);padding:7px 8px;border-bottom:2px solid var(--border);min-width:90px">Total año</th>'+
+    '</tr></thead><tbody>';
+
+  let catActual='';
+  const totMes = new Array(12).fill(0);
+  gastos.forEach(g=>{
+    if(g.cat!==catActual){
+      catActual=g.cat;
+      html += '<tr><td colspan="14" style="background:var(--bg2,#f1f5f9);font-weight:700;font-size:10.5px;color:var(--text2);padding:4px 9px;letter-spacing:.3px;position:sticky;left:0">'+(ECO_CATS[g.cat]||'📌')+' '+g.cat.toUpperCase()+'</td></tr>';
+    }
+    let totG=0;
+    let cels='';
+    for(let m=0;m<12;m++){
+      const v=_ecoVal(g,y,m), st=_ecoEst(g,y,m);
+      if(typeof v==='number'){ totG+=v; totMes[m]+=v; }
+      const style=_ecoCellStyle(v,st);
+      cels += '<td onclick="ecoEditCell(\''+g.id+'\','+m+')" title="Clic para editar" style="text-align:right;padding:5px 6px;border-bottom:1px solid var(--border);cursor:pointer;white-space:nowrap;'+style+'">'+(v==='NA'?'—':_ecoFmt(v))+'</td>';
+    }
+    html += '<tr>'+
+      '<td style="position:sticky;left:0;background:var(--card);text-align:left;padding:5px 9px;border-bottom:1px solid var(--border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:210px" title="'+_persoEsc(g.n)+'">'+g.e+' '+_persoEsc(g.n)+'</td>'+
+      cels+
+      '<td style="text-align:right;padding:5px 8px;border-bottom:1px solid var(--border);font-weight:700;color:var(--text)">'+(totG?_ecoFmt(totG):'')+'</td>'+
+    '</tr>';
+  });
+  // fila de totales
+  const totAnual = totMes.reduce((a,b)=>a+b,0);
+  html += '<tr style="position:sticky;bottom:0"><td style="position:sticky;left:0;bottom:0;background:#1e293b;color:#fff;font-weight:800;padding:7px 9px">TOTAL MES</td>'+
+    totMes.map(t=>'<td style="background:#1e293b;color:#fff;text-align:right;padding:7px 6px;font-weight:700;font-size:10.5px">'+(t?_ecoFmt(t):'')+'</td>').join('')+
+    '<td style="background:#0f172a;color:#fff;text-align:right;padding:7px 8px;font-weight:800">'+_ecoFmt(totAnual)+'</td></tr>';
+  html += '</tbody>';
+  tbl.innerHTML = html;
+
+  ecoRenderKPIs(gastos, y, totMes);
+  ecoRenderSummary(y, totMes, totAnual);
+}
+
+function ecoRenderKPIs(gastos, y, totMes){
+  const cont = document.getElementById('eco-kpis');
+  if(!cont) return;
+  const cy=new Date().getFullYear(), cm=new Date().getMonth();
+  const mesRef = (y===cy) ? cm : 11;
+  // total del mes en curso
+  const totMesActual = totMes[mesRef]||0;
+  // estimado del mes: para gastos sin dato este mes, usar el último importe conocido
+  let estimado=0, pendientes=0, porPagar=0;
+  gastos.forEach(g=>{
+    const v=_ecoVal(g,y,mesRef), st=_ecoEst(g,y,mesRef);
+    if(typeof v==='number'){
+      estimado+=v;
+      if(st==='porpagar'||st==='estimado'){ porPagar+=v; pendientes++; }
+    } else if(v!=='NA'){
+      // sin dato: estimar con el último valor conocido de ese gasto
+      const ult=_ecoUltimoValor(g,y,mesRef);
+      if(ult>0){ estimado+=ult; }
+    }
+  });
+  const prom = totMes.filter(t=>t>0).length ? Math.round(totMes.filter(t=>t>0).reduce((a,b)=>a+b,0)/totMes.filter(t=>t>0).length) : 0;
+  const K=(emoji,lbl,val,sub,color)=>'<div class="card" style="padding:12px 14px"><div style="font-size:10.5px;color:var(--text3);font-weight:600">'+emoji+' '+lbl+'</div><div style="font-size:20px;font-weight:800;color:'+(color||'var(--text)')+';line-height:1.15;margin-top:2px">'+val+'</div><div style="font-size:10px;color:var(--text3)">'+sub+'</div></div>';
+  cont.innerHTML =
+    K('💸','GASTADO '+ECO_MESES_FULL[mesRef].toUpperCase(), _ecoFmt(totMesActual), (y===cy?'mes en curso':'diciembre'), 'var(--text)')+
+    K('🔮','ESTIMADO DEL MES', _ecoFmt(estimado), 'proyección con últimos importes', '#7c3aed')+
+    K('🔴','POR PAGAR / ESTIMADO', _ecoFmt(porPagar), pendientes+' pago(s) pendientes', porPagar>0?'#dc2626':'var(--text)')+
+    K('📊','PROMEDIO MENSUAL', _ecoFmt(prom), 'de los meses con gastos', 'var(--text)');
+}
+
+// último valor conocido de un gasto antes de (y,m) mirando meses anteriores y años previos
+function _ecoUltimoValor(g, y, m){
+  for(let mm=m-1; mm>=0; mm--){ const v=_ecoVal(g,y,mm); if(typeof v==='number') return v; }
+  const years=Object.keys(g.d||{}).map(Number).filter(yy=>yy<y).sort((a,b)=>b-a);
+  for(const yy of years){ for(let mm=11; mm>=0; mm--){ const v=_ecoVal(g,yy,mm); if(typeof v==='number') return v; } }
+  return 0;
+}
+
+function ecoRenderSummary(y, totMes, totAnual){
+  const cont=document.getElementById('eco-summary');
+  if(!cont) return;
+  // comparativa con año anterior
+  let prevTot=0;
+  _ecoState.gastos.forEach(g=>{ const a=g.d && g.d[y-1]; if(a) a.forEach(v=>{ if(typeof v==='number') prevTot+=v; }); });
+  const diff = prevTot>0 ? ((totAnual-prevTot)/prevTot*100) : null;
+  // top 5 gastos del año
+  const ranking = _ecoState.gastos.map(g=>{
+    const a=g.d && g.d[y]; let s=0; if(a) a.forEach(v=>{ if(typeof v==='number') s+=v; });
+    return {g, s};
+  }).filter(x=>x.s>0).sort((a,b)=>b.s-a.s).slice(0,5);
+  const money=n=>'$'+Math.round(n).toLocaleString('es-AR');
+  cont.innerHTML =
+    '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:12px">'+
+      '<div style="flex:1;min-width:150px"><div style="font-size:10.5px;color:var(--text3);font-weight:600">TOTAL '+y+'</div><div style="font-size:22px;font-weight:800">'+money(totAnual)+'</div></div>'+
+      (diff!=null?'<div style="flex:1;min-width:150px"><div style="font-size:10.5px;color:var(--text3);font-weight:600">VS '+(y-1)+' ('+money(prevTot)+')</div><div style="font-size:22px;font-weight:800;color:'+(diff>=0?'#dc2626':'#16a34a')+'">'+(diff>=0?'▲ ':'▼ ')+Math.abs(diff).toFixed(1)+'%</div></div>':'')+
+    '</div>'+
+    '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:6px">TOP 5 GASTOS DEL AÑO</div>'+
+    ranking.map((x,i)=>{
+      const pct=totAnual>0?(x.s/totAnual*100):0;
+      return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">'+
+        '<div style="font-size:12px;width:18px;color:var(--text3)">'+(i+1)+'</div>'+
+        '<div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+x.g.e+' '+_persoEsc(x.g.n)+'</div>'+
+          '<div style="height:5px;background:var(--bg2,#e2e8f0);border-radius:3px;margin-top:2px;overflow:hidden"><div style="height:100%;width:'+pct.toFixed(1)+'%;background:var(--accent)"></div></div></div>'+
+        '<div style="font-size:12px;font-weight:700;white-space:nowrap">'+money(x.s)+'</div>'+
+        '<div style="font-size:10.5px;color:var(--text3);width:42px;text-align:right">'+pct.toFixed(1)+'%</div>'+
+      '</div>';
+    }).join('')||'<div style="color:var(--text3);font-size:12px">Sin gastos cargados este año.</div>';
+}
+
+// ── Editor de celda (importe + estado) ──
+let _ecoEdit = { gid:null, mes:null };
+function ecoEditCell(gid, mes){
+  const g=_ecoState.gastos.find(x=>x.id===gid);
+  if(!g) return;
+  _ecoEdit={gid,mes};
+  const y=+_ecoState.year;
+  const v=_ecoVal(g,y,mes), st=_ecoEst(g,y,mes)||'pagado';
+  const ov=document.createElement('div');
+  ov.id='eco-cell-modal';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
+  const est = v==='NA' ? 'na' : st;
+  ov.innerHTML='<div style="background:var(--card);border-radius:14px;max-width:380px;width:100%;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.3)">'+
+    '<div style="font-size:15px;font-weight:800;color:var(--text);margin-bottom:2px">'+g.e+' '+_persoEsc(g.n)+'</div>'+
+    '<div style="font-size:12px;color:var(--text3);margin-bottom:14px">'+ECO_MESES_FULL[mes]+' '+y+'</div>'+
+    '<label style="font-size:12px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px">Importe</label>'+
+    '<input type="number" id="eco-inp-val" value="'+(typeof v==='number'?v:'')+'" placeholder="0" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:9px;font-size:15px;margin-bottom:14px;background:var(--bg2);color:var(--text)">'+
+    '<label style="font-size:12px;font-weight:600;color:var(--text2);display:block;margin-bottom:6px">Estado</label>'+
+    '<div id="eco-estado-btns" style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-bottom:16px">'+
+      _ecoEstBtn('pagado','✅ Pagado','#16a34a',est)+
+      _ecoEstBtn('porpagar','🔴 Por pagar','#dc2626',est)+
+      _ecoEstBtn('estimado','🟡 Estimado','#f59e0b',est)+
+      _ecoEstBtn('na','⬜ No aplica','#64748b',est)+
+    '</div>'+
+    '<div style="display:flex;gap:8px">'+
+      '<button onclick="_ecoCellClose()" style="padding:10px 14px;border:1px solid var(--border);background:var(--card);color:var(--text2);border-radius:9px;font-weight:600;cursor:pointer">Cancelar</button>'+
+      (typeof v==='number'||v==='NA'?'<button onclick="_ecoCellBorrar()" style="padding:10px;border:1px solid #fca5a5;background:#fef2f2;color:#b91c1c;border-radius:9px;font-weight:600;cursor:pointer">Borrar</button>':'')+
+      '<button onclick="_ecoCellSave()" style="flex:1;padding:10px;border:none;background:var(--accent);color:#fff;border-radius:9px;font-weight:700;cursor:pointer">Guardar</button>'+
+    '</div></div>';
+  document.body.appendChild(ov);
+  setTimeout(()=>document.getElementById('eco-inp-val')?.focus(),50);
+}
+let _ecoEstSel='pagado';
+function _ecoEstBtn(val,lbl,color,cur){
+  _ecoEstSel = (cur==='na'?'na':cur);
+  const active = cur===val;
+  return '<button onclick="_ecoPickEst(\''+val+'\')" data-est="'+val+'" style="padding:8px;border:2px solid '+(active?color:'var(--border)')+';background:'+(active?color+'22':'var(--card)')+';color:var(--text);border-radius:9px;font-size:11.5px;font-weight:600;cursor:pointer">'+lbl+'</button>';
+}
+function _ecoPickEst(val){
+  _ecoEstSel=val;
+  document.querySelectorAll('#eco-estado-btns button').forEach(b=>{
+    const v=b.getAttribute('data-est');
+    const colors={pagado:'#16a34a',porpagar:'#dc2626',estimado:'#f59e0b',na:'#64748b'};
+    const on=v===val;
+    b.style.borderColor=on?colors[v]:'var(--border)';
+    b.style.background=on?colors[v]+'22':'var(--card)';
+  });
+  // si es "no aplica", deshabilitar importe
+  const inp=document.getElementById('eco-inp-val');
+  if(inp){ inp.disabled=(val==='na'); inp.style.opacity=(val==='na')?'.5':'1'; }
+}
+function _ecoCellClose(){ document.getElementById('eco-cell-modal')?.remove(); }
+function _ecoCellSave(){
+  const g=_ecoState.gastos.find(x=>x.id===_ecoEdit.gid);
+  if(!g) return;
+  const y=+_ecoState.year, m=_ecoEdit.mes;
+  if(_ecoEstSel==='na'){ _ecoSet(g,y,m,'NA',null); }
+  else{
+    const val=parseFloat(document.getElementById('eco-inp-val').value);
+    if(isNaN(val)){ showToast('Ingresá un importe válido','error'); return; }
+    _ecoSet(g,y,m,val,_ecoEstSel);
+  }
+  _ecoMarkDirty();
+  _ecoCellClose();
+  ecoRender();
+}
+function _ecoCellBorrar(){
+  const g=_ecoState.gastos.find(x=>x.id===_ecoEdit.gid);
+  if(!g) return;
+  const y=+_ecoState.year, m=_ecoEdit.mes;
+  if(g.d && g.d[y]) g.d[y][m]=null;
+  if(g.st && g.st[y]) g.st[y][m]=null;
+  _ecoMarkDirty();
+  _ecoCellClose();
+  ecoRender();
+}
+
+// ── Nuevo gasto ──
+function ecoAddGasto(){
+  const ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
+  ov.id='eco-new-modal';
+  ov.innerHTML='<div style="background:var(--card);border-radius:14px;max-width:400px;width:100%;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.3)">'+
+    '<div style="font-size:15px;font-weight:800;color:var(--text);margin-bottom:14px">➕ Nuevo gasto</div>'+
+    '<label style="font-size:12px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px">Nombre</label>'+
+    '<input type="text" id="eco-new-name" placeholder="Ej: Netflix, Luz, Patente..." style="width:100%;padding:9px;border:1px solid var(--border);border-radius:9px;font-size:14px;margin-bottom:12px;background:var(--bg2);color:var(--text)">'+
+    '<label style="font-size:12px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px">Categoría</label>'+
+    '<select id="eco-new-cat" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:9px;font-size:14px;margin-bottom:16px;background:var(--bg2);color:var(--text)">'+
+      Object.keys(ECO_CATS).map(c=>'<option value="'+c+'">'+ECO_CATS[c]+' '+c+'</option>').join('')+
+    '</select>'+
+    '<div style="display:flex;gap:8px">'+
+      '<button onclick="document.getElementById(\'eco-new-modal\').remove()" style="padding:10px 14px;border:1px solid var(--border);background:var(--card);color:var(--text2);border-radius:9px;font-weight:600;cursor:pointer">Cancelar</button>'+
+      '<button onclick="_ecoNewSave()" style="flex:1;padding:10px;border:none;background:var(--accent);color:#fff;border-radius:9px;font-weight:700;cursor:pointer">Crear gasto</button>'+
+    '</div></div>';
+  document.body.appendChild(ov);
+  setTimeout(()=>document.getElementById('eco-new-name')?.focus(),50);
+}
+function _ecoNewSave(){
+  const name=(document.getElementById('eco-new-name').value||'').trim();
+  const cat=document.getElementById('eco-new-cat').value;
+  if(!name){ showToast('Poné un nombre','error'); return; }
+  const id='g'+Date.now();
+  _ecoState.gastos.push({ id, n:name, cat, e:ECO_CATS[cat]||'📌', d:{[_ecoState.year]:[null,null,null,null,null,null,null,null,null,null,null,null]}, st:{} });
+  _ecoMarkDirty();
+  document.getElementById('eco-new-modal')?.remove();
+  ecoRender();
+  showToast('✓ Gasto "'+name+'" creado','success');
+}
+
+// ── Gráfico de evolución ──
+let _ecoChart=null;
+function ecoOpenGraf(){
+  const ov=document.createElement('div');
+  ov.id='eco-graf-modal';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
+  const gastosConDatos=_ecoState.gastos.filter(g=>g.d&&Object.keys(g.d).length).sort((a,b)=>a.n.localeCompare(b.n));
+  ov.innerHTML='<div style="background:var(--card);border-radius:14px;max-width:820px;width:100%;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.3);max-height:90vh;overflow-y:auto">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'+
+      '<div style="font-size:16px;font-weight:800;color:var(--text)">📈 Evolución de gastos</div>'+
+      '<button onclick="_ecoGrafClose()" style="border:none;background:var(--bg2);width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:16px;color:var(--text2)">✕</button>'+
+    '</div>'+
+    '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">'+
+      '<select id="eco-graf-modo" onchange="_ecoGrafDraw()" style="padding:7px 10px;border:1px solid var(--border);border-radius:9px;font-size:13px;background:var(--bg2);color:var(--text)">'+
+        '<option value="total">Total anual (todos los gastos)</option>'+
+        '<option value="cat">Por categoría (anual)</option>'+
+        '<option value="gasto">Un gasto específico (mensual)</option>'+
+      '</select>'+
+      '<select id="eco-graf-gasto" onchange="_ecoGrafDraw()" style="padding:7px 10px;border:1px solid var(--border);border-radius:9px;font-size:13px;display:none;background:var(--bg2);color:var(--text);max-width:240px">'+
+        gastosConDatos.map(g=>'<option value="'+g.id+'">'+g.e+' '+_persoEsc(g.n)+'</option>').join('')+
+      '</select>'+
+    '</div>'+
+    '<div style="position:relative;height:360px"><canvas id="eco-graf-canvas"></canvas></div>'+
+  '</div>';
+  document.body.appendChild(ov);
+  document.getElementById('eco-graf-modo').addEventListener('change',function(){
+    document.getElementById('eco-graf-gasto').style.display = this.value==='gasto'?'block':'none';
+  });
+  _ecoGrafDraw();
+}
+function _ecoGrafClose(){ if(_ecoChart){_ecoChart.destroy();_ecoChart=null;} document.getElementById('eco-graf-modal')?.remove(); }
+function _ecoGrafDraw(){
+  const modo=document.getElementById('eco-graf-modo').value;
+  const cv=document.getElementById('eco-graf-canvas');
+  if(!cv||typeof Chart==='undefined') return;
+  if(_ecoChart){ _ecoChart.destroy(); _ecoChart=null; }
+  const years=_ecoYears().slice().reverse();
+  let datasets=[], labels=[];
+  const PAL=['#2563eb','#dc2626','#16a34a','#f59e0b','#7c3aed','#0891b2','#db2777','#65a30d','#ea580c','#0d9488'];
+  if(modo==='total'){
+    labels=years.map(String);
+    const data=years.map(y=>{ let s=0; _ecoState.gastos.forEach(g=>{const a=g.d&&g.d[y];if(a)a.forEach(v=>{if(typeof v==='number')s+=v;});}); return Math.round(s); });
+    datasets=[{label:'Gasto total anual',data,borderColor:'#2563eb',backgroundColor:'#2563eb22',fill:true,tension:.3}];
+  } else if(modo==='cat'){
+    labels=years.map(String);
+    const cats=Object.keys(ECO_CATS);
+    datasets=cats.map((c,i)=>({
+      label:(ECO_CATS[c]||'')+' '+c,
+      data:years.map(y=>{ let s=0; _ecoState.gastos.filter(g=>g.cat===c).forEach(g=>{const a=g.d&&g.d[y];if(a)a.forEach(v=>{if(typeof v==='number')s+=v;});}); return Math.round(s); }),
+      borderColor:PAL[i%PAL.length],backgroundColor:'transparent',tension:.3
+    })).filter(ds=>ds.data.some(v=>v>0));
+  } else {
+    const gid=document.getElementById('eco-graf-gasto').value;
+    const g=_ecoState.gastos.find(x=>x.id===gid);
+    if(g){
+      const ys=Object.keys(g.d||{}).map(Number).sort((a,b)=>a-b);
+      labels=[]; const data=[];
+      ys.forEach(y=>{ for(let m=0;m<12;m++){ const v=_ecoVal(g,y,m); if(typeof v==='number'){ labels.push(ECO_MESES[m]+' '+String(y).slice(2)); data.push(v); } } });
+      datasets=[{label:g.e+' '+g.n,data,borderColor:'#2563eb',backgroundColor:'#2563eb22',fill:true,tension:.3}];
+    }
+  }
+  _ecoChart=new Chart(cv.getContext('2d'),{
+    type:'line',
+    data:{labels,datasets},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:modo!=='total',labels:{font:{size:10},boxWidth:12}}},
+      scales:{y:{ticks:{callback:v=>'$'+(v/1000).toLocaleString('es-AR')+'k',font:{size:10}}},x:{ticks:{font:{size:9},maxRotation:60}}}}
+  });
+}
+
+// integrar en showSection + sync inicial
+(function(){
+  if(typeof showSection==='function'){
+    const _oss=showSection;
+    showSection=function(id){ _oss.apply(this,arguments); if(id==='economia'){ try{ ecoRender(); _ecoSyncDown(); }catch(e){ console.warn('[eco]',e.message); } } };
+  }
+  // guardado urgente al cerrar
+  window.addEventListener('beforeunload',()=>{ try{ _ecoFlush(); }catch(e){} });
+  document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden'){ try{ _ecoFlush(); }catch(e){} } });
+})();
+
 
 // v198: liberar localStorage si está cerca del límite, ANTES de cargar datos.
 // El Radar de Aciertos (predicciones) puede crecer mucho y llenar la cuota,
