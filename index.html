@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v206 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v207 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4362,7 +4362,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   </div>
 
   <!-- KPIs del mes actual -->
-  <div id="eco-kpis" class="g4 mb"></div>
+  <div id="eco-kpis" style="display:flex;gap:10px;flex-wrap:nowrap;overflow-x:auto;margin-bottom:14px"></div>
 
   <!-- Grilla de gastos x meses -->
   <div class="card mb" style="overflow:hidden">
@@ -28640,30 +28640,41 @@ const ECO_SEED_JSON = '[{"id":"g1","n":"Afip Monotributo Belén y Cristian","cat
 // Datos importados del Excel histórico (2013-2026). Persisten en localStorage
 // + nube (backup KV) para verse en cualquier PC. 0 llamadas extra a ML.
 // ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
+// v207: SECCIÓN ECONOMÍA — gastos fijos, servicios, impuestos y pagos.
+// Grilla cuadriculada tipo Excel. Modales con colores explícitos (legibles).
+// Cada año muestra SOLO sus gastos. Editar nombre + ocultar en años futuros.
+// Selección múltiple de celdas + aplicar color. 0 llamadas extra a ML.
+// ═══════════════════════════════════════════════════════════════════════════
 const ECO_MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 const ECO_MESES_FULL = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const ECO_CATS = {
   'Servicios':'💡','Vivienda':'🏠','Impuestos':'🏛️','Tarjetas':'💳','Créditos':'🏦',
   'Seguros':'🛡️','Educación':'🎓','Suscripciones':'📺','Profesionales':'🧮','Varios':'📌'
 };
+// Paleta de estados (colores explícitos, no variables — se usan en celdas y modales)
+const ECO_ESTADOS = {
+  pagado:   { bg:'#dcfce7', fg:'#166534', lbl:'✅ Pagado' },
+  porpagar: { bg:'#fee2e2', fg:'#991b1b', lbl:'🔴 Por pagar' },
+  estimado: { bg:'#fef3c7', fg:'#92400e', lbl:'🟡 Estimado' },
+  na:       { bg:'#e2e8f0', fg:'#64748b', lbl:'⬜ No aplica' },
+};
 const ECO_LS_KEY = 'mlp_economia_v1';
 let _ecoState = { gastos: [], year: new Date().getFullYear(), dirty:false, saveTimer:null };
+let _ecoSel = [];  // selección múltiple de celdas: [{gid, mes}]
 
-// El seed (datos del Excel) se embebe aparte en ECO_SEED_JSON.
 function _ecoLoad(){
   try{
     const raw = localStorage.getItem(ECO_LS_KEY);
     if(raw){ const d=JSON.parse(raw); if(d && Array.isArray(d.gastos)) return d.gastos; }
   }catch(e){}
-  // primera vez: cargar el seed del Excel
   try{ return JSON.parse(ECO_SEED_JSON); }catch(e){ return []; }
 }
 function _ecoSaveLS(){
   try{ localStorage.setItem(ECO_LS_KEY, JSON.stringify({ gastos:_ecoState.gastos, savedAt:Date.now() })); }catch(e){}
 }
 function _ecoMarkDirty(){
-  _ecoState.dirty = true;
-  _ecoSaveLS();
+  _ecoState.dirty = true; _ecoSaveLS();
   clearTimeout(_ecoState.saveTimer);
   _ecoState.saveTimer = setTimeout(_ecoFlush, 3000);
 }
@@ -28678,23 +28689,19 @@ async function _ecoFlush(){
   }catch(e){ console.warn('[eco] guardar nube:', e.message); }
 }
 async function _ecoSyncDown(){
-  // traer de la nube y mergear (la nube gana si tiene más gastos con datos)
   try{
     const r = await fetch(WORKER + '/api/backup', { headers:{'Authorization':'Bearer '+token} });
     const d = await r.json();
     if(d && d.economia && Array.isArray(d.economia.gastos) && d.economia.gastos.length){
       const localTs = (()=>{ try{ return JSON.parse(localStorage.getItem(ECO_LS_KEY)||'{}').savedAt||0; }catch(e){ return 0; } })();
       if((d.economia.savedAt||0) >= localTs){
-        _ecoState.gastos = d.economia.gastos;
-        _ecoSaveLS();
+        _ecoState.gastos = d.economia.gastos; _ecoSaveLS();
         if(document.getElementById('section-economia')?.classList.contains('active')) ecoRender();
       }
     }
   }catch(e){}
 }
 
-// getter/setter de un valor: gasto.d[year][mes] = valor | 'NA' | null
-// estado por gasto+año+mes en gasto.st[year][mes] = 'pagado'|'porpagar'|'estimado'
 function _ecoVal(g, y, m){ const a=g.d && g.d[y]; return a ? a[m] : null; }
 function _ecoEst(g, y, m){ const a=g.st && g.st[y]; return a ? a[m] : null; }
 function _ecoSet(g, y, m, val, estado){
@@ -28709,49 +28716,62 @@ function _ecoSet(g, y, m, val, estado){
 function _ecoYears(){
   const ys = new Set();
   _ecoState.gastos.forEach(g=>{ if(g.d) Object.keys(g.d).forEach(y=>ys.add(+y)); });
-  const cy = new Date().getFullYear();
-  ys.add(cy);
+  ys.add(new Date().getFullYear());
   return [...ys].sort((a,b)=>b-a);
 }
 
-// color de una celda según estado / valor
-function _ecoCellStyle(val, estado){
-  if(val==='NA') return 'background:var(--bg2,#eef2f7);color:var(--text3)';
+// ¿el gasto pertenece a ese año? Solo si tiene datos ese año, O si es un gasto
+// "vigente" (no oculto) y el año es el actual o futuro respecto a su último dato.
+function _ecoGastoEnAnio(g, y){
+  if(g.d && g.d[y]) return true;                    // tiene datos ese año
+  if(g.hidden) return false;                        // marcado como oculto a futuro
+  const cy = new Date().getFullYear();
+  if(y < cy) return false;                          // años pasados: solo si tenían datos
+  // año actual/futuro: mostrar si el gasto sigue vigente (tuvo datos hasta hace poco)
+  const years = g.d ? Object.keys(g.d).map(Number) : [];
+  if(!years.length) return y===cy;                  // gasto nuevo sin datos: solo año actual
+  const ultimoAnio = Math.max(...years);
+  return ultimoAnio >= (cy - 1);                    // vigente si tuvo datos el año pasado o después
+}
+
+function _ecoCellBg(val, estado){
+  if(val==='NA') return ECO_ESTADOS.na.bg;
   if(val==null || val==='') return '';
-  if(estado==='porpagar') return 'background:#fee2e2;color:#991b1b;font-weight:700';
-  if(estado==='estimado') return 'background:#fef3c7;color:#92400e;font-weight:600';
-  if(estado==='pagado')   return 'background:#dcfce7;color:#166534';
-  return 'color:var(--text)';  // sin estado explícito: pagado por defecto (histórico)
+  if(estado && ECO_ESTADOS[estado]) return ECO_ESTADOS[estado].bg;
+  return '';
+}
+function _ecoCellFg(val, estado){
+  if(val==='NA') return ECO_ESTADOS.na.fg;
+  if(estado && ECO_ESTADOS[estado]) return ECO_ESTADOS[estado].fg;
+  return 'var(--text)';
 }
 const _ecoFmt = n => (n==null||n==='NA'||n==='') ? '' : '$'+Math.round(+n).toLocaleString('es-AR');
 
 function ecoRender(){
   if(!_ecoState.gastos.length) _ecoState.gastos = _ecoLoad();
-  // selector de año
   const sel = document.getElementById('eco-year');
   const years = _ecoYears();
   if(sel){
-    if(sel.options.length !== years.length){
-      sel.innerHTML = years.map(y=>'<option value="'+y+'">'+y+'</option>').join('');
-    }
+    if(sel.options.length !== years.length) sel.innerHTML = years.map(y=>'<option value="'+y+'">'+y+'</option>').join('');
     if(!years.includes(_ecoState.year)) _ecoState.year = years[0];
     sel.value = _ecoState.year;
   }
   const y = +_ecoState.year;
-  document.getElementById('eco-year-lbl') && (document.getElementById('eco-year-lbl').textContent = y);
-  document.getElementById('eco-year-lbl2') && (document.getElementById('eco-year-lbl2').textContent = y);
+  const lbl1=document.getElementById('eco-year-lbl'); if(lbl1) lbl1.textContent=y;
+  const lbl2=document.getElementById('eco-year-lbl2'); if(lbl2) lbl2.textContent=y;
 
-  // gastos que tienen datos ese año (o todos si es el año actual)
-  const cy = new Date().getFullYear();
-  const gastos = _ecoState.gastos.filter(g => (g.d && g.d[y]) || y===cy)
+  // gastos de ESE año (solo los que corresponden)
+  const gastos = _ecoState.gastos.filter(g => _ecoGastoEnAnio(g, y))
     .sort((a,b)=> (a.cat===b.cat ? a.n.localeCompare(b.n) : a.cat.localeCompare(b.cat)));
 
-  // ── Tabla ──
+  // ── Tabla cuadriculada tipo Excel ──
   const tbl = document.getElementById('eco-table');
+  const cy=new Date().getFullYear(), cm=new Date().getMonth();
+  const BR='1px solid var(--border2,#c9d4e0)';  // borde de cuadrícula visible
   let html = '<thead><tr style="position:sticky;top:0;z-index:2">'+
-    '<th style="position:sticky;left:0;z-index:3;background:var(--card);text-align:left;padding:7px 9px;border-bottom:2px solid var(--border);min-width:210px">Gasto</th>'+
-    ECO_MESES.map((m,i)=>'<th style="background:var(--card);padding:7px 6px;border-bottom:2px solid var(--border);min-width:74px;'+(i===new Date().getMonth()&&y===cy?'color:var(--accent);font-weight:800':'')+'">'+m+'</th>').join('')+
-    '<th style="background:var(--card);padding:7px 8px;border-bottom:2px solid var(--border);min-width:90px">Total año</th>'+
+    '<th style="position:sticky;left:0;z-index:3;background:var(--bg4,#e9ebf0);text-align:left;padding:7px 9px;border:'+BR+';min-width:210px">Gasto</th>'+
+    ECO_MESES.map((m,i)=>'<th style="background:var(--bg4,#e9ebf0);padding:7px 6px;border:'+BR+';min-width:78px;'+(i===cm&&y===cy?'color:var(--accent);font-weight:800':'')+'">'+m+'</th>').join('')+
+    '<th style="background:var(--bg4,#e9ebf0);padding:7px 8px;border:'+BR+';min-width:92px">Total año</th>'+
     '</tr></thead><tbody>';
 
   let catActual='';
@@ -28759,32 +28779,84 @@ function ecoRender(){
   gastos.forEach(g=>{
     if(g.cat!==catActual){
       catActual=g.cat;
-      html += '<tr><td colspan="14" style="background:var(--bg2,#f1f5f9);font-weight:700;font-size:10.5px;color:var(--text2);padding:4px 9px;letter-spacing:.3px;position:sticky;left:0">'+(ECO_CATS[g.cat]||'📌')+' '+g.cat.toUpperCase()+'</td></tr>';
+      html += '<tr><td colspan="14" style="background:var(--bg3,#f1f5f9);font-weight:700;font-size:10.5px;color:var(--text2);padding:4px 9px;letter-spacing:.3px;position:sticky;left:0;border:'+BR+'">'+(ECO_CATS[g.cat]||'📌')+' '+g.cat.toUpperCase()+'</td></tr>';
     }
-    let totG=0;
-    let cels='';
+    let totG=0, cels='';
     for(let m=0;m<12;m++){
       const v=_ecoVal(g,y,m), st=_ecoEst(g,y,m);
       if(typeof v==='number'){ totG+=v; totMes[m]+=v; }
-      const style=_ecoCellStyle(v,st);
-      cels += '<td onclick="ecoEditCell(\''+g.id+'\','+m+')" title="Clic para editar" style="text-align:right;padding:5px 6px;border-bottom:1px solid var(--border);cursor:pointer;white-space:nowrap;'+style+'">'+(v==='NA'?'—':_ecoFmt(v))+'</td>';
+      const bg=_ecoCellBg(v,st), fg=_ecoCellFg(v,st);
+      const isSel = _ecoSel.some(s=>s.gid===g.id && s.mes===m);
+      const selStyle = isSel ? 'outline:2px solid var(--accent);outline-offset:-2px;' : '';
+      cels += '<td data-gid="'+g.id+'" data-mes="'+m+'" onclick="ecoCellClick(event,\''+g.id+'\','+m+')" title="Clic: editar · Ctrl/Shift+clic: seleccionar varias" style="text-align:right;padding:5px 7px;border:'+BR+';cursor:pointer;white-space:nowrap;'+(bg?'background:'+bg+';':'')+'color:'+fg+';'+selStyle+'">'+(v==='NA'?'—':_ecoFmt(v))+'</td>';
     }
     html += '<tr>'+
-      '<td style="position:sticky;left:0;background:var(--card);text-align:left;padding:5px 9px;border-bottom:1px solid var(--border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:210px" title="'+_persoEsc(g.n)+'">'+g.e+' '+_persoEsc(g.n)+'</td>'+
+      '<td style="position:sticky;left:0;background:var(--card);text-align:left;padding:5px 9px;border:'+BR+';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:210px">'+
+        '<span style="cursor:pointer" title="Clic para editar este gasto" onclick="ecoEditGasto(\''+g.id+'\')">'+g.e+' '+_persoEsc(g.n)+' <span style="opacity:.4;font-size:10px">✎</span></span>'+
+      '</td>'+
       cels+
-      '<td style="text-align:right;padding:5px 8px;border-bottom:1px solid var(--border);font-weight:700;color:var(--text)">'+(totG?_ecoFmt(totG):'')+'</td>'+
+      '<td style="text-align:right;padding:5px 8px;border:'+BR+';font-weight:700;color:var(--text);background:var(--bg2,#f8fafc)">'+(totG?_ecoFmt(totG):'')+'</td>'+
     '</tr>';
   });
-  // fila de totales
   const totAnual = totMes.reduce((a,b)=>a+b,0);
-  html += '<tr style="position:sticky;bottom:0"><td style="position:sticky;left:0;bottom:0;background:#1e293b;color:#fff;font-weight:800;padding:7px 9px">TOTAL MES</td>'+
-    totMes.map(t=>'<td style="background:#1e293b;color:#fff;text-align:right;padding:7px 6px;font-weight:700;font-size:10.5px">'+(t?_ecoFmt(t):'')+'</td>').join('')+
-    '<td style="background:#0f172a;color:#fff;text-align:right;padding:7px 8px;font-weight:800">'+_ecoFmt(totAnual)+'</td></tr>';
+  html += '<tr style="position:sticky;bottom:0"><td style="position:sticky;left:0;bottom:0;background:#1e293b;color:#fff;font-weight:800;padding:7px 9px;border:'+BR+'">TOTAL MES</td>'+
+    totMes.map(t=>'<td style="background:#1e293b;color:#fff;text-align:right;padding:7px 6px;font-weight:700;font-size:10.5px;border:'+BR+'">'+(t?_ecoFmt(t):'')+'</td>').join('')+
+    '<td style="background:#0f172a;color:#fff;text-align:right;padding:7px 8px;font-weight:800;border:'+BR+'">'+_ecoFmt(totAnual)+'</td></tr>';
   html += '</tbody>';
+  tbl.style.borderCollapse='collapse';
   tbl.innerHTML = html;
 
+  ecoRenderSelBar();
   ecoRenderKPIs(gastos, y, totMes);
   ecoRenderSummary(y, totMes, totAnual);
+}
+
+// ── Barra de selección múltiple ──
+function ecoRenderSelBar(){
+  let bar = document.getElementById('eco-sel-bar');
+  if(!_ecoSel.length){ if(bar) bar.style.display='none'; return; }
+  if(!bar){
+    bar = document.createElement('div');
+    bar.id='eco-sel-bar';
+    bar.style.cssText='position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:9998;background:#1e293b;color:#fff;padding:10px 16px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.3);display:flex;align-items:center;gap:10px;flex-wrap:wrap';
+    document.body.appendChild(bar);
+  }
+  bar.style.display='flex';
+  const colorBtn=(est)=>'<button onclick="ecoApplyColorSel(\''+est+'\')" title="'+ECO_ESTADOS[est].lbl+'" style="width:30px;height:30px;border-radius:7px;border:2px solid #fff3;background:'+ECO_ESTADOS[est].bg+';cursor:pointer;font-size:14px">'+ECO_ESTADOS[est].lbl.split(' ')[0]+'</button>';
+  bar.innerHTML = '<span style="font-size:12.5px;font-weight:600">'+_ecoSel.length+' celda(s) seleccionada(s)</span>'+
+    '<span style="font-size:11px;opacity:.8">Aplicar estado:</span>'+
+    colorBtn('pagado')+colorBtn('porpagar')+colorBtn('estimado')+colorBtn('na')+
+    '<button onclick="ecoClearSel()" style="background:#475569;color:#fff;border:none;border-radius:7px;padding:6px 12px;font-size:12px;cursor:pointer;font-weight:600">Limpiar</button>';
+}
+function ecoClearSel(){ _ecoSel=[]; ecoRender(); }
+function ecoApplyColorSel(estado){
+  _ecoSel.forEach(s=>{
+    const g=_ecoState.gastos.find(x=>x.id===s.gid);
+    if(!g) return;
+    const y=+_ecoState.year;
+    const v=_ecoVal(g,y,s.mes);
+    if(estado==='na'){ _ecoSet(g,y,s.mes,'NA',null); }
+    else if(typeof v==='number'){ _ecoSet(g,y,s.mes,v,estado); }
+    // si no hay valor y no es NA, solo marca el estado sin valor
+    else { _ecoSet(g,y,s.mes,v,estado); }
+  });
+  _ecoMarkDirty();
+  _ecoSel=[];
+  ecoRender();
+  showToast('✓ Estado aplicado a las celdas','success');
+}
+
+// clic en celda: normal = editar; ctrl/shift = seleccionar múltiple
+function ecoCellClick(ev, gid, mes){
+  if(ev.ctrlKey || ev.metaKey || ev.shiftKey){
+    ev.preventDefault();
+    const i=_ecoSel.findIndex(s=>s.gid===gid && s.mes===mes);
+    if(i>=0) _ecoSel.splice(i,1); else _ecoSel.push({gid,mes});
+    ecoRender();
+    return;
+  }
+  if(_ecoSel.length){ _ecoSel=[]; ecoRender(); return; }
+  ecoEditCell(gid, mes);
 }
 
 function ecoRenderKPIs(gastos, y, totMes){
@@ -28792,31 +28864,23 @@ function ecoRenderKPIs(gastos, y, totMes){
   if(!cont) return;
   const cy=new Date().getFullYear(), cm=new Date().getMonth();
   const mesRef = (y===cy) ? cm : 11;
-  // total del mes en curso
   const totMesActual = totMes[mesRef]||0;
-  // estimado del mes: para gastos sin dato este mes, usar el último importe conocido
-  let estimado=0, pendientes=0, porPagar=0;
+  let estimado=0, porPagar=0, pendientes=0;
   gastos.forEach(g=>{
     const v=_ecoVal(g,y,mesRef), st=_ecoEst(g,y,mesRef);
-    if(typeof v==='number'){
-      estimado+=v;
-      if(st==='porpagar'||st==='estimado'){ porPagar+=v; pendientes++; }
-    } else if(v!=='NA'){
-      // sin dato: estimar con el último valor conocido de ese gasto
-      const ult=_ecoUltimoValor(g,y,mesRef);
-      if(ult>0){ estimado+=ult; }
-    }
+    if(typeof v==='number'){ estimado+=v; if(st==='porpagar'||st==='estimado'){ porPagar+=v; pendientes++; } }
+    else if(v!=='NA'){ const ult=_ecoUltimoValor(g,y,mesRef); if(ult>0) estimado+=ult; }
   });
-  const prom = totMes.filter(t=>t>0).length ? Math.round(totMes.filter(t=>t>0).reduce((a,b)=>a+b,0)/totMes.filter(t=>t>0).length) : 0;
-  const K=(emoji,lbl,val,sub,color)=>'<div class="card" style="padding:12px 14px"><div style="font-size:10.5px;color:var(--text3);font-weight:600">'+emoji+' '+lbl+'</div><div style="font-size:20px;font-weight:800;color:'+(color||'var(--text)')+';line-height:1.15;margin-top:2px">'+val+'</div><div style="font-size:10px;color:var(--text3)">'+sub+'</div></div>';
+  const mesesConGasto = totMes.filter(t=>t>0);
+  const prom = mesesConGasto.length ? Math.round(mesesConGasto.reduce((a,b)=>a+b,0)/mesesConGasto.length) : 0;
+  const K=(emoji,lbl,val,sub,color)=>'<div style="flex:1;min-width:150px;background:var(--card);border:1px solid var(--border);border-radius:11px;padding:11px 13px"><div style="font-size:10px;color:var(--text3);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+emoji+' '+lbl+'</div><div style="font-size:18px;font-weight:800;color:'+(color||'var(--text)')+';line-height:1.15;margin-top:2px">'+val+'</div><div style="font-size:9.5px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sub+'</div></div>';
   cont.innerHTML =
     K('💸','GASTADO '+ECO_MESES_FULL[mesRef].toUpperCase(), _ecoFmt(totMesActual), (y===cy?'mes en curso':'diciembre'), 'var(--text)')+
     K('🔮','ESTIMADO DEL MES', _ecoFmt(estimado), 'proyección con últimos importes', '#7c3aed')+
-    K('🔴','POR PAGAR / ESTIMADO', _ecoFmt(porPagar), pendientes+' pago(s) pendientes', porPagar>0?'#dc2626':'var(--text)')+
-    K('📊','PROMEDIO MENSUAL', _ecoFmt(prom), 'de los meses con gastos', 'var(--text)');
+    K('🔴','POR PAGAR / ESTIM.', _ecoFmt(porPagar), pendientes+' pago(s) pendientes', porPagar>0?'#dc2626':'var(--text)')+
+    K('📊','PROMEDIO MENSUAL', _ecoFmt(prom), 'meses con gastos', 'var(--text)');
 }
 
-// último valor conocido de un gasto antes de (y,m) mirando meses anteriores y años previos
 function _ecoUltimoValor(g, y, m){
   for(let mm=m-1; mm>=0; mm--){ const v=_ecoVal(g,y,mm); if(typeof v==='number') return v; }
   const years=Object.keys(g.d||{}).map(Number).filter(yy=>yy<y).sort((a,b)=>b-a);
@@ -28827,11 +28891,9 @@ function _ecoUltimoValor(g, y, m){
 function ecoRenderSummary(y, totMes, totAnual){
   const cont=document.getElementById('eco-summary');
   if(!cont) return;
-  // comparativa con año anterior
   let prevTot=0;
   _ecoState.gastos.forEach(g=>{ const a=g.d && g.d[y-1]; if(a) a.forEach(v=>{ if(typeof v==='number') prevTot+=v; }); });
   const diff = prevTot>0 ? ((totAnual-prevTot)/prevTot*100) : null;
-  // top 5 gastos del año
   const ranking = _ecoState.gastos.map(g=>{
     const a=g.d && g.d[y]; let s=0; if(a) a.forEach(v=>{ if(typeof v==='number') s+=v; });
     return {g, s};
@@ -28839,77 +28901,75 @@ function ecoRenderSummary(y, totMes, totAnual){
   const money=n=>'$'+Math.round(n).toLocaleString('es-AR');
   cont.innerHTML =
     '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:12px">'+
-      '<div style="flex:1;min-width:150px"><div style="font-size:10.5px;color:var(--text3);font-weight:600">TOTAL '+y+'</div><div style="font-size:22px;font-weight:800">'+money(totAnual)+'</div></div>'+
+      '<div style="flex:1;min-width:150px"><div style="font-size:10.5px;color:var(--text3);font-weight:600">TOTAL '+y+'</div><div style="font-size:22px;font-weight:800;color:var(--text)">'+money(totAnual)+'</div></div>'+
       (diff!=null?'<div style="flex:1;min-width:150px"><div style="font-size:10.5px;color:var(--text3);font-weight:600">VS '+(y-1)+' ('+money(prevTot)+')</div><div style="font-size:22px;font-weight:800;color:'+(diff>=0?'#dc2626':'#16a34a')+'">'+(diff>=0?'▲ ':'▼ ')+Math.abs(diff).toFixed(1)+'%</div></div>':'')+
     '</div>'+
     '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:6px">TOP 5 GASTOS DEL AÑO</div>'+
-    ranking.map((x,i)=>{
+    (ranking.map((x,i)=>{
       const pct=totAnual>0?(x.s/totAnual*100):0;
       return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">'+
         '<div style="font-size:12px;width:18px;color:var(--text3)">'+(i+1)+'</div>'+
-        '<div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+x.g.e+' '+_persoEsc(x.g.n)+'</div>'+
-          '<div style="height:5px;background:var(--bg2,#e2e8f0);border-radius:3px;margin-top:2px;overflow:hidden"><div style="height:100%;width:'+pct.toFixed(1)+'%;background:var(--accent)"></div></div></div>'+
-        '<div style="font-size:12px;font-weight:700;white-space:nowrap">'+money(x.s)+'</div>'+
+        '<div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+x.g.e+' '+_persoEsc(x.g.n)+'</div>'+
+          '<div style="height:5px;background:var(--bg4,#e2e8f0);border-radius:3px;margin-top:2px;overflow:hidden"><div style="height:100%;width:'+pct.toFixed(1)+'%;background:var(--accent)"></div></div></div>'+
+        '<div style="font-size:12px;font-weight:700;color:var(--text);white-space:nowrap">'+money(x.s)+'</div>'+
         '<div style="font-size:10.5px;color:var(--text3);width:42px;text-align:right">'+pct.toFixed(1)+'%</div>'+
       '</div>';
-    }).join('')||'<div style="color:var(--text3);font-size:12px">Sin gastos cargados este año.</div>';
+    }).join('')||'<div style="color:var(--text3);font-size:12px">Sin gastos cargados este año.</div>');
+}
+
+// ═══ MODALES (colores explícitos, legibles en fondo claro) ═══
+const _ECO_MODAL_BG='#ffffff', _ECO_TXT='#0f172a', _ECO_TXT2='#334155', _ECO_TXT3='#64748b', _ECO_BRD='#cbd5e1', _ECO_INP_BG='#f8fafc';
+function _ecoModalShell(inner, maxw){
+  const ov=document.createElement('div');
+  ov.className='eco-modal-ov';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
+  ov.innerHTML='<div style="background:'+_ECO_MODAL_BG+';border-radius:14px;max-width:'+(maxw||400)+'px;width:100%;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.35);color:'+_ECO_TXT+'">'+inner+'</div>';
+  document.body.appendChild(ov);
+  return ov;
 }
 
 // ── Editor de celda (importe + estado) ──
-let _ecoEdit = { gid:null, mes:null };
+let _ecoEdit = { gid:null, mes:null }, _ecoEstSel='pagado';
 function ecoEditCell(gid, mes){
   const g=_ecoState.gastos.find(x=>x.id===gid);
   if(!g) return;
   _ecoEdit={gid,mes};
   const y=+_ecoState.year;
   const v=_ecoVal(g,y,mes), st=_ecoEst(g,y,mes)||'pagado';
-  const ov=document.createElement('div');
-  ov.id='eco-cell-modal';
-  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
-  const est = v==='NA' ? 'na' : st;
-  ov.innerHTML='<div style="background:var(--card);border-radius:14px;max-width:380px;width:100%;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.3)">'+
-    '<div style="font-size:15px;font-weight:800;color:var(--text);margin-bottom:2px">'+g.e+' '+_persoEsc(g.n)+'</div>'+
-    '<div style="font-size:12px;color:var(--text3);margin-bottom:14px">'+ECO_MESES_FULL[mes]+' '+y+'</div>'+
-    '<label style="font-size:12px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px">Importe</label>'+
-    '<input type="number" id="eco-inp-val" value="'+(typeof v==='number'?v:'')+'" placeholder="0" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:9px;font-size:15px;margin-bottom:14px;background:var(--bg2);color:var(--text)">'+
-    '<label style="font-size:12px;font-weight:600;color:var(--text2);display:block;margin-bottom:6px">Estado</label>'+
+  _ecoEstSel = (v==='NA')?'na':st;
+  const inner=
+    '<div style="font-size:15px;font-weight:800;margin-bottom:2px;color:'+_ECO_TXT+'">'+g.e+' '+_persoEsc(g.n)+'</div>'+
+    '<div style="font-size:12px;color:'+_ECO_TXT3+';margin-bottom:14px">'+ECO_MESES_FULL[mes]+' '+y+'</div>'+
+    '<label style="font-size:12px;font-weight:600;color:'+_ECO_TXT2+';display:block;margin-bottom:5px">Importe</label>'+
+    '<input type="number" id="eco-inp-val" value="'+(typeof v==='number'?v:'')+'" placeholder="0" style="width:100%;padding:9px;border:1px solid '+_ECO_BRD+';border-radius:9px;font-size:15px;margin-bottom:14px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+';box-sizing:border-box">'+
+    '<label style="font-size:12px;font-weight:600;color:'+_ECO_TXT2+';display:block;margin-bottom:6px">Estado</label>'+
     '<div id="eco-estado-btns" style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-bottom:16px">'+
-      _ecoEstBtn('pagado','✅ Pagado','#16a34a',est)+
-      _ecoEstBtn('porpagar','🔴 Por pagar','#dc2626',est)+
-      _ecoEstBtn('estimado','🟡 Estimado','#f59e0b',est)+
-      _ecoEstBtn('na','⬜ No aplica','#64748b',est)+
+      Object.keys(ECO_ESTADOS).map(k=>_ecoEstBtn(k,_ecoEstSel)).join('')+
     '</div>'+
     '<div style="display:flex;gap:8px">'+
-      '<button onclick="_ecoCellClose()" style="padding:10px 14px;border:1px solid var(--border);background:var(--card);color:var(--text2);border-radius:9px;font-weight:600;cursor:pointer">Cancelar</button>'+
+      '<button onclick="_ecoCellClose()" style="padding:10px 14px;border:1px solid '+_ECO_BRD+';background:#fff;color:'+_ECO_TXT2+';border-radius:9px;font-weight:600;cursor:pointer">Cancelar</button>'+
       (typeof v==='number'||v==='NA'?'<button onclick="_ecoCellBorrar()" style="padding:10px;border:1px solid #fca5a5;background:#fef2f2;color:#b91c1c;border-radius:9px;font-weight:600;cursor:pointer">Borrar</button>':'')+
-      '<button onclick="_ecoCellSave()" style="flex:1;padding:10px;border:none;background:var(--accent);color:#fff;border-radius:9px;font-weight:700;cursor:pointer">Guardar</button>'+
-    '</div></div>';
-  document.body.appendChild(ov);
-  setTimeout(()=>document.getElementById('eco-inp-val')?.focus(),50);
+      '<button onclick="_ecoCellSave()" style="flex:1;padding:10px;border:none;background:#4f8ef7;color:#fff;border-radius:9px;font-weight:700;cursor:pointer">Guardar</button>'+
+    '</div>';
+  _ecoModalShell(inner, 380);
+  setTimeout(()=>{ const i=document.getElementById('eco-inp-val'); if(i){i.focus();i.select();} },50);
 }
-let _ecoEstSel='pagado';
-function _ecoEstBtn(val,lbl,color,cur){
-  _ecoEstSel = (cur==='na'?'na':cur);
-  const active = cur===val;
-  return '<button onclick="_ecoPickEst(\''+val+'\')" data-est="'+val+'" style="padding:8px;border:2px solid '+(active?color:'var(--border)')+';background:'+(active?color+'22':'var(--card)')+';color:var(--text);border-radius:9px;font-size:11.5px;font-weight:600;cursor:pointer">'+lbl+'</button>';
+function _ecoEstBtn(val,cur){
+  const e=ECO_ESTADOS[val], active=cur===val;
+  return '<button onclick="_ecoPickEst(\''+val+'\')" data-est="'+val+'" style="padding:8px;border:2px solid '+(active?e.fg:_ECO_BRD)+';background:'+(active?e.bg:'#fff')+';color:'+_ECO_TXT+';border-radius:9px;font-size:11.5px;font-weight:600;cursor:pointer">'+e.lbl+'</button>';
 }
 function _ecoPickEst(val){
   _ecoEstSel=val;
   document.querySelectorAll('#eco-estado-btns button').forEach(b=>{
-    const v=b.getAttribute('data-est');
-    const colors={pagado:'#16a34a',porpagar:'#dc2626',estimado:'#f59e0b',na:'#64748b'};
-    const on=v===val;
-    b.style.borderColor=on?colors[v]:'var(--border)';
-    b.style.background=on?colors[v]+'22':'var(--card)';
+    const v=b.getAttribute('data-est'), e=ECO_ESTADOS[v], on=v===val;
+    b.style.borderColor=on?e.fg:_ECO_BRD; b.style.background=on?e.bg:'#fff';
   });
-  // si es "no aplica", deshabilitar importe
   const inp=document.getElementById('eco-inp-val');
   if(inp){ inp.disabled=(val==='na'); inp.style.opacity=(val==='na')?'.5':'1'; }
 }
-function _ecoCellClose(){ document.getElementById('eco-cell-modal')?.remove(); }
+function _ecoCellClose(){ document.querySelector('.eco-modal-ov')?.remove(); }
 function _ecoCellSave(){
-  const g=_ecoState.gastos.find(x=>x.id===_ecoEdit.gid);
-  if(!g) return;
+  const g=_ecoState.gastos.find(x=>x.id===_ecoEdit.gid); if(!g) return;
   const y=+_ecoState.year, m=_ecoEdit.mes;
   if(_ecoEstSel==='na'){ _ecoSet(g,y,m,'NA',null); }
   else{
@@ -28917,39 +28977,72 @@ function _ecoCellSave(){
     if(isNaN(val)){ showToast('Ingresá un importe válido','error'); return; }
     _ecoSet(g,y,m,val,_ecoEstSel);
   }
-  _ecoMarkDirty();
-  _ecoCellClose();
-  ecoRender();
+  _ecoMarkDirty(); _ecoCellClose(); ecoRender();
 }
 function _ecoCellBorrar(){
-  const g=_ecoState.gastos.find(x=>x.id===_ecoEdit.gid);
-  if(!g) return;
+  const g=_ecoState.gastos.find(x=>x.id===_ecoEdit.gid); if(!g) return;
   const y=+_ecoState.year, m=_ecoEdit.mes;
   if(g.d && g.d[y]) g.d[y][m]=null;
   if(g.st && g.st[y]) g.st[y][m]=null;
-  _ecoMarkDirty();
-  _ecoCellClose();
-  ecoRender();
+  _ecoMarkDirty(); _ecoCellClose(); ecoRender();
+}
+
+// ── Editar gasto: nombre, categoría, mostrar/ocultar a futuro ──
+function ecoEditGasto(gid){
+  const g=_ecoState.gastos.find(x=>x.id===gid); if(!g) return;
+  const inner=
+    '<div style="font-size:15px;font-weight:800;margin-bottom:14px;color:'+_ECO_TXT+'">✎ Editar gasto</div>'+
+    '<label style="font-size:12px;font-weight:600;color:'+_ECO_TXT2+';display:block;margin-bottom:5px">Nombre</label>'+
+    '<input type="text" id="eco-ed-name" value="'+_persoEsc(g.n).replace(/"/g,'&quot;')+'" style="width:100%;padding:9px;border:1px solid '+_ECO_BRD+';border-radius:9px;font-size:14px;margin-bottom:12px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+';box-sizing:border-box">'+
+    '<label style="font-size:12px;font-weight:600;color:'+_ECO_TXT2+';display:block;margin-bottom:5px">Categoría</label>'+
+    '<select id="eco-ed-cat" style="width:100%;padding:9px;border:1px solid '+_ECO_BRD+';border-radius:9px;font-size:14px;margin-bottom:14px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+'">'+
+      Object.keys(ECO_CATS).map(c=>'<option value="'+c+'" '+(c===g.cat?'selected':'')+'>'+ECO_CATS[c]+' '+c+'</option>').join('')+
+    '</select>'+
+    '<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:'+_ECO_TXT2+';margin-bottom:16px;cursor:pointer;background:'+_ECO_INP_BG+';padding:10px;border-radius:9px;border:1px solid '+_ECO_BRD+'">'+
+      '<input type="checkbox" id="eco-ed-hidden" '+(g.hidden?'checked':'')+' style="width:16px;height:16px">'+
+      '<span>Ocultar en la planilla de años futuros<br><span style="font-size:10.5px;color:'+_ECO_TXT3+'">(los datos históricos se conservan; deja de mostrarse en años nuevos)</span></span>'+
+    '</label>'+
+    '<div style="display:flex;gap:8px">'+
+      '<button onclick="_ecoCellClose()" style="padding:10px 14px;border:1px solid '+_ECO_BRD+';background:#fff;color:'+_ECO_TXT2+';border-radius:9px;font-weight:600;cursor:pointer">Cancelar</button>'+
+      '<button onclick="_ecoDelGasto(\''+gid+'\')" style="padding:10px;border:1px solid #fca5a5;background:#fef2f2;color:#b91c1c;border-radius:9px;font-weight:600;cursor:pointer">Eliminar</button>'+
+      '<button onclick="_ecoSaveGasto(\''+gid+'\')" style="flex:1;padding:10px;border:none;background:#4f8ef7;color:#fff;border-radius:9px;font-weight:700;cursor:pointer">Guardar</button>'+
+    '</div>';
+  _ecoModalShell(inner, 400);
+  setTimeout(()=>document.getElementById('eco-ed-name')?.focus(),50);
+}
+function _ecoSaveGasto(gid){
+  const g=_ecoState.gastos.find(x=>x.id===gid); if(!g) return;
+  const name=(document.getElementById('eco-ed-name').value||'').trim();
+  if(!name){ showToast('El nombre no puede quedar vacío','error'); return; }
+  g.n=name;
+  g.cat=document.getElementById('eco-ed-cat').value;
+  g.e=ECO_CATS[g.cat]||'📌';
+  g.hidden=document.getElementById('eco-ed-hidden').checked;
+  _ecoMarkDirty(); _ecoCellClose(); ecoRender();
+  showToast('✓ Gasto actualizado','success');
+}
+function _ecoDelGasto(gid){
+  if(!confirm('¿Eliminar este gasto y todos sus datos históricos? No se puede deshacer.')) return;
+  _ecoState.gastos=_ecoState.gastos.filter(x=>x.id!==gid);
+  _ecoMarkDirty(); _ecoCellClose(); ecoRender();
+  showToast('Gasto eliminado','success');
 }
 
 // ── Nuevo gasto ──
 function ecoAddGasto(){
-  const ov=document.createElement('div');
-  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
-  ov.id='eco-new-modal';
-  ov.innerHTML='<div style="background:var(--card);border-radius:14px;max-width:400px;width:100%;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.3)">'+
-    '<div style="font-size:15px;font-weight:800;color:var(--text);margin-bottom:14px">➕ Nuevo gasto</div>'+
-    '<label style="font-size:12px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px">Nombre</label>'+
-    '<input type="text" id="eco-new-name" placeholder="Ej: Netflix, Luz, Patente..." style="width:100%;padding:9px;border:1px solid var(--border);border-radius:9px;font-size:14px;margin-bottom:12px;background:var(--bg2);color:var(--text)">'+
-    '<label style="font-size:12px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px">Categoría</label>'+
-    '<select id="eco-new-cat" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:9px;font-size:14px;margin-bottom:16px;background:var(--bg2);color:var(--text)">'+
+  const inner=
+    '<div style="font-size:15px;font-weight:800;margin-bottom:14px;color:'+_ECO_TXT+'">➕ Nuevo gasto</div>'+
+    '<label style="font-size:12px;font-weight:600;color:'+_ECO_TXT2+';display:block;margin-bottom:5px">Nombre</label>'+
+    '<input type="text" id="eco-new-name" placeholder="Ej: Netflix, Luz, Patente..." style="width:100%;padding:9px;border:1px solid '+_ECO_BRD+';border-radius:9px;font-size:14px;margin-bottom:12px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+';box-sizing:border-box">'+
+    '<label style="font-size:12px;font-weight:600;color:'+_ECO_TXT2+';display:block;margin-bottom:5px">Categoría</label>'+
+    '<select id="eco-new-cat" style="width:100%;padding:9px;border:1px solid '+_ECO_BRD+';border-radius:9px;font-size:14px;margin-bottom:16px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+'">'+
       Object.keys(ECO_CATS).map(c=>'<option value="'+c+'">'+ECO_CATS[c]+' '+c+'</option>').join('')+
     '</select>'+
     '<div style="display:flex;gap:8px">'+
-      '<button onclick="document.getElementById(\'eco-new-modal\').remove()" style="padding:10px 14px;border:1px solid var(--border);background:var(--card);color:var(--text2);border-radius:9px;font-weight:600;cursor:pointer">Cancelar</button>'+
-      '<button onclick="_ecoNewSave()" style="flex:1;padding:10px;border:none;background:var(--accent);color:#fff;border-radius:9px;font-weight:700;cursor:pointer">Crear gasto</button>'+
-    '</div></div>';
-  document.body.appendChild(ov);
+      '<button onclick="_ecoCellClose()" style="padding:10px 14px;border:1px solid '+_ECO_BRD+';background:#fff;color:'+_ECO_TXT2+';border-radius:9px;font-weight:600;cursor:pointer">Cancelar</button>'+
+      '<button onclick="_ecoNewSave()" style="flex:1;padding:10px;border:none;background:#4f8ef7;color:#fff;border-radius:9px;font-weight:700;cursor:pointer">Crear gasto</button>'+
+    '</div>';
+  _ecoModalShell(inner, 400);
   setTimeout(()=>document.getElementById('eco-new-name')?.focus(),50);
 }
 function _ecoNewSave(){
@@ -28958,43 +29051,39 @@ function _ecoNewSave(){
   if(!name){ showToast('Poné un nombre','error'); return; }
   const id='g'+Date.now();
   _ecoState.gastos.push({ id, n:name, cat, e:ECO_CATS[cat]||'📌', d:{[_ecoState.year]:[null,null,null,null,null,null,null,null,null,null,null,null]}, st:{} });
-  _ecoMarkDirty();
-  document.getElementById('eco-new-modal')?.remove();
-  ecoRender();
+  _ecoMarkDirty(); _ecoCellClose(); ecoRender();
   showToast('✓ Gasto "'+name+'" creado','success');
 }
 
 // ── Gráfico de evolución ──
 let _ecoChart=null;
 function ecoOpenGraf(){
-  const ov=document.createElement('div');
-  ov.id='eco-graf-modal';
-  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
   const gastosConDatos=_ecoState.gastos.filter(g=>g.d&&Object.keys(g.d).length).sort((a,b)=>a.n.localeCompare(b.n));
-  ov.innerHTML='<div style="background:var(--card);border-radius:14px;max-width:820px;width:100%;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.3);max-height:90vh;overflow-y:auto">'+
+  const inner=
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'+
-      '<div style="font-size:16px;font-weight:800;color:var(--text)">📈 Evolución de gastos</div>'+
-      '<button onclick="_ecoGrafClose()" style="border:none;background:var(--bg2);width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:16px;color:var(--text2)">✕</button>'+
+      '<div style="font-size:16px;font-weight:800;color:'+_ECO_TXT+'">📈 Evolución de gastos</div>'+
+      '<button onclick="_ecoGrafClose()" style="border:none;background:#eef2f7;width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:16px;color:'+_ECO_TXT2+'">✕</button>'+
     '</div>'+
     '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">'+
-      '<select id="eco-graf-modo" onchange="_ecoGrafDraw()" style="padding:7px 10px;border:1px solid var(--border);border-radius:9px;font-size:13px;background:var(--bg2);color:var(--text)">'+
+      '<select id="eco-graf-modo" onchange="_ecoGrafModoChg()" style="padding:7px 10px;border:1px solid '+_ECO_BRD+';border-radius:9px;font-size:13px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+'">'+
         '<option value="total">Total anual (todos los gastos)</option>'+
         '<option value="cat">Por categoría (anual)</option>'+
         '<option value="gasto">Un gasto específico (mensual)</option>'+
       '</select>'+
-      '<select id="eco-graf-gasto" onchange="_ecoGrafDraw()" style="padding:7px 10px;border:1px solid var(--border);border-radius:9px;font-size:13px;display:none;background:var(--bg2);color:var(--text);max-width:240px">'+
+      '<select id="eco-graf-gasto" onchange="_ecoGrafDraw()" style="padding:7px 10px;border:1px solid '+_ECO_BRD+';border-radius:9px;font-size:13px;display:none;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+';max-width:240px">'+
         gastosConDatos.map(g=>'<option value="'+g.id+'">'+g.e+' '+_persoEsc(g.n)+'</option>').join('')+
       '</select>'+
     '</div>'+
-    '<div style="position:relative;height:360px"><canvas id="eco-graf-canvas"></canvas></div>'+
-  '</div>';
-  document.body.appendChild(ov);
-  document.getElementById('eco-graf-modo').addEventListener('change',function(){
-    document.getElementById('eco-graf-gasto').style.display = this.value==='gasto'?'block':'none';
-  });
+    '<div style="position:relative;height:360px;background:#fff"><canvas id="eco-graf-canvas"></canvas></div>';
+  _ecoModalShell(inner, 820);
   _ecoGrafDraw();
 }
-function _ecoGrafClose(){ if(_ecoChart){_ecoChart.destroy();_ecoChart=null;} document.getElementById('eco-graf-modal')?.remove(); }
+function _ecoGrafModoChg(){
+  const modo=document.getElementById('eco-graf-modo').value;
+  document.getElementById('eco-graf-gasto').style.display = modo==='gasto'?'block':'none';
+  _ecoGrafDraw();
+}
+function _ecoGrafClose(){ if(_ecoChart){_ecoChart.destroy();_ecoChart=null;} document.querySelector('.eco-modal-ov')?.remove(); }
 function _ecoGrafDraw(){
   const modo=document.getElementById('eco-graf-modo').value;
   const cv=document.getElementById('eco-graf-canvas');
@@ -29006,11 +29095,10 @@ function _ecoGrafDraw(){
   if(modo==='total'){
     labels=years.map(String);
     const data=years.map(y=>{ let s=0; _ecoState.gastos.forEach(g=>{const a=g.d&&g.d[y];if(a)a.forEach(v=>{if(typeof v==='number')s+=v;});}); return Math.round(s); });
-    datasets=[{label:'Gasto total anual',data,borderColor:'#2563eb',backgroundColor:'#2563eb22',fill:true,tension:.3}];
+    datasets=[{label:'Gasto total anual',data,borderColor:'#2563eb',backgroundColor:'rgba(37,99,235,.13)',fill:true,tension:.3}];
   } else if(modo==='cat'){
     labels=years.map(String);
-    const cats=Object.keys(ECO_CATS);
-    datasets=cats.map((c,i)=>({
+    datasets=Object.keys(ECO_CATS).map((c,i)=>({
       label:(ECO_CATS[c]||'')+' '+c,
       data:years.map(y=>{ let s=0; _ecoState.gastos.filter(g=>g.cat===c).forEach(g=>{const a=g.d&&g.d[y];if(a)a.forEach(v=>{if(typeof v==='number')s+=v;});}); return Math.round(s); }),
       borderColor:PAL[i%PAL.length],backgroundColor:'transparent',tension:.3
@@ -29022,15 +29110,15 @@ function _ecoGrafDraw(){
       const ys=Object.keys(g.d||{}).map(Number).sort((a,b)=>a-b);
       labels=[]; const data=[];
       ys.forEach(y=>{ for(let m=0;m<12;m++){ const v=_ecoVal(g,y,m); if(typeof v==='number'){ labels.push(ECO_MESES[m]+' '+String(y).slice(2)); data.push(v); } } });
-      datasets=[{label:g.e+' '+g.n,data,borderColor:'#2563eb',backgroundColor:'#2563eb22',fill:true,tension:.3}];
+      datasets=[{label:g.e+' '+g.n,data,borderColor:'#2563eb',backgroundColor:'rgba(37,99,235,.13)',fill:true,tension:.3}];
     }
   }
   _ecoChart=new Chart(cv.getContext('2d'),{
-    type:'line',
-    data:{labels,datasets},
+    type:'line', data:{labels,datasets},
     options:{responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{display:modo!=='total',labels:{font:{size:10},boxWidth:12}}},
-      scales:{y:{ticks:{callback:v=>'$'+(v/1000).toLocaleString('es-AR')+'k',font:{size:10}}},x:{ticks:{font:{size:9},maxRotation:60}}}}
+      plugins:{legend:{display:modo!=='total',labels:{color:'#334155',font:{size:10},boxWidth:12}}},
+      scales:{y:{ticks:{color:'#334155',callback:v=>'$'+(v/1000).toLocaleString('es-AR')+'k',font:{size:10}},grid:{color:'rgba(0,0,0,.06)'}},
+              x:{ticks:{color:'#334155',font:{size:9},maxRotation:60},grid:{color:'rgba(0,0,0,.04)'}}}}
   });
 }
 
@@ -29040,7 +29128,6 @@ function _ecoGrafDraw(){
     const _oss=showSection;
     showSection=function(id){ _oss.apply(this,arguments); if(id==='economia'){ try{ ecoRender(); _ecoSyncDown(); }catch(e){ console.warn('[eco]',e.message); } } };
   }
-  // guardado urgente al cerrar
   window.addEventListener('beforeunload',()=>{ try{ _ecoFlush(); }catch(e){} });
   document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden'){ try{ _ecoFlush(); }catch(e){} } });
 })();
