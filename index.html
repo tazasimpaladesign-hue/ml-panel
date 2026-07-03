@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v207 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v208 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4355,7 +4355,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <p class="sub">Gastos fijos, servicios, impuestos y pagos del hogar y el negocio</p>
     </div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <select id="eco-year" onchange="ecoRender()" style="font-size:13px;padding:7px 10px;border-radius:9px;border:1px solid var(--border);background:var(--card);color:var(--text)"></select>
+      <select id="eco-year" onchange="ecoChangeYear(this.value)" style="font-size:13px;padding:7px 10px;border-radius:9px;border:1px solid var(--border);background:var(--card);color:var(--text)"></select>
       <button class="btn btn-ghost btn-sm" onclick="ecoAddGasto()">➕ Nuevo gasto</button>
       <button class="btn btn-ghost btn-sm" onclick="ecoOpenGraf()">📈 Evolución</button>
     </div>
@@ -28658,6 +28658,8 @@ const ECO_ESTADOS = {
   porpagar: { bg:'#fee2e2', fg:'#991b1b', lbl:'🔴 Por pagar' },
   estimado: { bg:'#fef3c7', fg:'#92400e', lbl:'🟡 Estimado' },
   na:       { bg:'#e2e8f0', fg:'#64748b', lbl:'⬜ No aplica' },
+  gris:     { bg:'#334155', fg:'#ffffff', lbl:'⬛ Gris' },
+  blanco:   { bg:'',        fg:'#0f172a', lbl:'⬜ Sin color' },
 };
 const ECO_LS_KEY = 'mlp_economia_v1';
 let _ecoState = { gastos: [], year: new Date().getFullYear(), dirty:false, saveTimer:null };
@@ -28747,6 +28749,11 @@ function _ecoCellFg(val, estado){
 }
 const _ecoFmt = n => (n==null||n==='NA'||n==='') ? '' : '$'+Math.round(+n).toLocaleString('es-AR');
 
+function ecoChangeYear(y){
+  _ecoState.year = +y;
+  _ecoSel = [];
+  ecoRender();
+}
 function ecoRender(){
   if(!_ecoState.gastos.length) _ecoState.gastos = _ecoLoad();
   const sel = document.getElementById('eco-year');
@@ -28754,7 +28761,7 @@ function ecoRender(){
   if(sel){
     if(sel.options.length !== years.length) sel.innerHTML = years.map(y=>'<option value="'+y+'">'+y+'</option>').join('');
     if(!years.includes(_ecoState.year)) _ecoState.year = years[0];
-    sel.value = _ecoState.year;
+    if(+sel.value !== +_ecoState.year) sel.value = _ecoState.year;
   }
   const y = +_ecoState.year;
   const lbl1=document.getElementById('eco-year-lbl'); if(lbl1) lbl1.textContent=y;
@@ -28777,10 +28784,6 @@ function ecoRender(){
   let catActual='';
   const totMes = new Array(12).fill(0);
   gastos.forEach(g=>{
-    if(g.cat!==catActual){
-      catActual=g.cat;
-      html += '<tr><td colspan="14" style="background:var(--bg3,#f1f5f9);font-weight:700;font-size:10.5px;color:var(--text2);padding:4px 9px;letter-spacing:.3px;position:sticky;left:0;border:'+BR+'">'+(ECO_CATS[g.cat]||'📌')+' '+g.cat.toUpperCase()+'</td></tr>';
-    }
     let totG=0, cels='';
     for(let m=0;m<12;m++){
       const v=_ecoVal(g,y,m), st=_ecoEst(g,y,m);
@@ -28822,10 +28825,10 @@ function ecoRenderSelBar(){
     document.body.appendChild(bar);
   }
   bar.style.display='flex';
-  const colorBtn=(est)=>'<button onclick="ecoApplyColorSel(\''+est+'\')" title="'+ECO_ESTADOS[est].lbl+'" style="width:30px;height:30px;border-radius:7px;border:2px solid #fff3;background:'+ECO_ESTADOS[est].bg+';cursor:pointer;font-size:14px">'+ECO_ESTADOS[est].lbl.split(' ')[0]+'</button>';
+  const colorBtn=(est)=>'<button onclick="ecoApplyColorSel(\''+est+'\')" title="'+ECO_ESTADOS[est].lbl+'" style="width:30px;height:30px;border-radius:7px;border:2px solid #fff5;background:'+(ECO_ESTADOS[est].bg||'#ffffff')+';cursor:pointer;font-size:14px">'+ECO_ESTADOS[est].lbl.split(' ')[0]+'</button>';
   bar.innerHTML = '<span style="font-size:12.5px;font-weight:600">'+_ecoSel.length+' celda(s) seleccionada(s)</span>'+
     '<span style="font-size:11px;opacity:.8">Aplicar estado:</span>'+
-    colorBtn('pagado')+colorBtn('porpagar')+colorBtn('estimado')+colorBtn('na')+
+    colorBtn('pagado')+colorBtn('porpagar')+colorBtn('estimado')+colorBtn('gris')+colorBtn('na')+colorBtn('blanco')+
     '<button onclick="ecoClearSel()" style="background:#475569;color:#fff;border:none;border-radius:7px;padding:6px 12px;font-size:12px;cursor:pointer;font-weight:600">Limpiar</button>';
 }
 function ecoClearSel(){ _ecoSel=[]; ecoRender(); }
@@ -28836,9 +28839,8 @@ function ecoApplyColorSel(estado){
     const y=+_ecoState.year;
     const v=_ecoVal(g,y,s.mes);
     if(estado==='na'){ _ecoSet(g,y,s.mes,'NA',null); }
-    else if(typeof v==='number'){ _ecoSet(g,y,s.mes,v,estado); }
-    // si no hay valor y no es NA, solo marca el estado sin valor
-    else { _ecoSet(g,y,s.mes,v,estado); }
+    else if(estado==='blanco'){ _ecoSet(g,y,s.mes, (v==='NA'?null:v), null); }  // quita color, mantiene importe
+    else { _ecoSet(g,y,s.mes, (v==='NA'?null:v), estado); }  // aplica color, mantiene importe
   });
   _ecoMarkDirty();
   _ecoSel=[];
@@ -28865,11 +28867,20 @@ function ecoRenderKPIs(gastos, y, totMes){
   const cy=new Date().getFullYear(), cm=new Date().getMonth();
   const mesRef = (y===cy) ? cm : 11;
   const totMesActual = totMes[mesRef]||0;
-  let estimado=0, porPagar=0, pendientes=0;
+  // estimado del mes de referencia
+  let estimado=0;
   gastos.forEach(g=>{
-    const v=_ecoVal(g,y,mesRef), st=_ecoEst(g,y,mesRef);
-    if(typeof v==='number'){ estimado+=v; if(st==='porpagar'||st==='estimado'){ porPagar+=v; pendientes++; } }
+    const v=_ecoVal(g,y,mesRef);
+    if(typeof v==='number'){ estimado+=v; }
     else if(v!=='NA'){ const ult=_ecoUltimoValor(g,y,mesRef); if(ult>0) estimado+=ult; }
+  });
+  // v208: POR PAGAR = suma de TODAS las celdas rojas (porpagar) de TODO el año mostrado
+  let porPagar=0, pendientes=0;
+  gastos.forEach(g=>{
+    for(let m=0;m<12;m++){
+      const v=_ecoVal(g,y,m), st=_ecoEst(g,y,m);
+      if(st==='porpagar' && typeof v==='number'){ porPagar+=v; pendientes++; }
+    }
   });
   const mesesConGasto = totMes.filter(t=>t>0);
   const prom = mesesConGasto.length ? Math.round(mesesConGasto.reduce((a,b)=>a+b,0)/mesesConGasto.length) : 0;
@@ -28877,7 +28888,7 @@ function ecoRenderKPIs(gastos, y, totMes){
   cont.innerHTML =
     K('💸','GASTADO '+ECO_MESES_FULL[mesRef].toUpperCase(), _ecoFmt(totMesActual), (y===cy?'mes en curso':'diciembre'), 'var(--text)')+
     K('🔮','ESTIMADO DEL MES', _ecoFmt(estimado), 'proyección con últimos importes', '#7c3aed')+
-    K('🔴','POR PAGAR / ESTIM.', _ecoFmt(porPagar), pendientes+' pago(s) pendientes', porPagar>0?'#dc2626':'var(--text)')+
+    K('🔴','POR PAGAR ('+y+')', _ecoFmt(porPagar), pendientes+' pago(s) en rojo este año', porPagar>0?'#dc2626':'var(--text)')+
     K('📊','PROMEDIO MENSUAL', _ecoFmt(prom), 'meses con gastos', 'var(--text)');
 }
 
@@ -28935,8 +28946,9 @@ function ecoEditCell(gid, mes){
   if(!g) return;
   _ecoEdit={gid,mes};
   const y=+_ecoState.year;
-  const v=_ecoVal(g,y,mes), st=_ecoEst(g,y,mes)||'pagado';
-  _ecoEstSel = (v==='NA')?'na':st;
+  const v=_ecoVal(g,y,mes), st=_ecoEst(g,y,mes);
+  // v208: celda nueva (sin dato) arranca en "por pagar" (rojo) por defecto
+  _ecoEstSel = (v==='NA') ? 'na' : (st || (typeof v==='number' ? 'pagado' : 'porpagar'));
   const inner=
     '<div style="font-size:15px;font-weight:800;margin-bottom:2px;color:'+_ECO_TXT+'">'+g.e+' '+_persoEsc(g.n)+'</div>'+
     '<div style="font-size:12px;color:'+_ECO_TXT3+';margin-bottom:14px">'+ECO_MESES_FULL[mes]+' '+y+'</div>'+
@@ -28956,13 +28968,17 @@ function ecoEditCell(gid, mes){
 }
 function _ecoEstBtn(val,cur){
   const e=ECO_ESTADOS[val], active=cur===val;
-  return '<button onclick="_ecoPickEst(\''+val+'\')" data-est="'+val+'" style="padding:8px;border:2px solid '+(active?e.fg:_ECO_BRD)+';background:'+(active?e.bg:'#fff')+';color:'+_ECO_TXT+';border-radius:9px;font-size:11.5px;font-weight:600;cursor:pointer">'+e.lbl+'</button>';
+  const bg = active ? (e.bg||'#f1f5f9') : '#fff';
+  const fg = (val==='gris' && active) ? '#fff' : _ECO_TXT;
+  return '<button onclick="_ecoPickEst(\''+val+'\')" data-est="'+val+'" style="padding:8px;border:2px solid '+(active?(e.fg||'#334155'):_ECO_BRD)+';background:'+bg+';color:'+fg+';border-radius:9px;font-size:11.5px;font-weight:600;cursor:pointer">'+e.lbl+'</button>';
 }
 function _ecoPickEst(val){
   _ecoEstSel=val;
   document.querySelectorAll('#eco-estado-btns button').forEach(b=>{
     const v=b.getAttribute('data-est'), e=ECO_ESTADOS[v], on=v===val;
-    b.style.borderColor=on?e.fg:_ECO_BRD; b.style.background=on?e.bg:'#fff';
+    b.style.borderColor=on?(e.fg||'#334155'):_ECO_BRD;
+    b.style.background=on?(e.bg||'#f1f5f9'):'#fff';
+    b.style.color=(v==='gris'&&on)?'#fff':_ECO_TXT;
   });
   const inp=document.getElementById('eco-inp-val');
   if(inp){ inp.disabled=(val==='na'); inp.style.opacity=(val==='na')?'.5':'1'; }
@@ -28975,7 +28991,9 @@ function _ecoCellSave(){
   else{
     const val=parseFloat(document.getElementById('eco-inp-val').value);
     if(isNaN(val)){ showToast('Ingresá un importe válido','error'); return; }
-    _ecoSet(g,y,m,val,_ecoEstSel);
+    // "blanco" = sin color pero mantiene el importe (estado null)
+    const estado = (_ecoEstSel==='blanco') ? null : _ecoEstSel;
+    _ecoSet(g,y,m,val,estado);
   }
   _ecoMarkDirty(); _ecoCellClose(); ecoRender();
 }
@@ -29002,13 +29020,49 @@ function ecoEditGasto(gid){
       '<input type="checkbox" id="eco-ed-hidden" '+(g.hidden?'checked':'')+' style="width:16px;height:16px">'+
       '<span>Ocultar en la planilla de años futuros<br><span style="font-size:10.5px;color:'+_ECO_TXT3+'">(los datos históricos se conservan; deja de mostrarse en años nuevos)</span></span>'+
     '</label>'+
+    '<div style="border-top:1px solid #e2e8f0;margin:4px 0 12px;padding-top:12px">'+
+      '<label style="font-size:12px;font-weight:600;color:'+_ECO_TXT2+';display:block;margin-bottom:5px">🔗 Vincular / unificar con otro gasto</label>'+
+      '<div style="font-size:10.5px;color:'+_ECO_TXT3+';margin-bottom:6px">Si este gasto es el mismo que otro con distinto nombre en otros años, fusionalos en uno solo (se combinan los datos por año).</div>'+
+      '<div style="display:flex;gap:6px">'+
+        '<select id="eco-ed-merge" style="flex:1;padding:8px;border:1px solid '+_ECO_BRD+';border-radius:9px;font-size:12.5px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+'">'+
+          '<option value="">— elegí un gasto para fusionar —</option>'+
+          _ecoState.gastos.filter(x=>x.id!==gid).sort((a,b)=>a.n.localeCompare(b.n)).map(x=>'<option value="'+x.id+'">'+x.e+' '+_persoEsc(x.n)+'</option>').join('')+
+        '</select>'+
+        '<button onclick="_ecoMergeGasto(\''+gid+'\')" style="padding:8px 12px;border:1px solid #93c5fd;background:#eff6ff;color:#1d4ed8;border-radius:9px;font-weight:600;cursor:pointer;font-size:12.5px;white-space:nowrap">Fusionar</button>'+
+      '</div>'+
+    '</div>'+
     '<div style="display:flex;gap:8px">'+
       '<button onclick="_ecoCellClose()" style="padding:10px 14px;border:1px solid '+_ECO_BRD+';background:#fff;color:'+_ECO_TXT2+';border-radius:9px;font-weight:600;cursor:pointer">Cancelar</button>'+
       '<button onclick="_ecoDelGasto(\''+gid+'\')" style="padding:10px;border:1px solid #fca5a5;background:#fef2f2;color:#b91c1c;border-radius:9px;font-weight:600;cursor:pointer">Eliminar</button>'+
       '<button onclick="_ecoSaveGasto(\''+gid+'\')" style="flex:1;padding:10px;border:none;background:#4f8ef7;color:#fff;border-radius:9px;font-weight:700;cursor:pointer">Guardar</button>'+
     '</div>';
-  _ecoModalShell(inner, 400);
+  _ecoModalShell(inner, 420);
   setTimeout(()=>document.getElementById('eco-ed-name')?.focus(),50);
+}
+
+// v208: fusiona el gasto "otroId" DENTRO de "gid" (gid queda como el nombre final).
+// Combina los datos por año: si ambos tienen el mismo año, suma; si solo uno, lo copia.
+function _ecoMergeGasto(gid){
+  const otroId=document.getElementById('eco-ed-merge').value;
+  if(!otroId){ showToast('Elegí un gasto para fusionar','info'); return; }
+  const g=_ecoState.gastos.find(x=>x.id===gid);
+  const otro=_ecoState.gastos.find(x=>x.id===otroId);
+  if(!g||!otro) return;
+  if(!confirm('¿Fusionar "'+otro.n+'" dentro de "'+g.n+'"?\nLos datos de ambos se combinan por año y "'+otro.n+'" se elimina. No se puede deshacer.')) return;
+  if(!g.d) g.d={}; if(!g.st) g.st={};
+  Object.keys(otro.d||{}).forEach(y=>{
+    if(!g.d[y]){ g.d[y]=otro.d[y].slice(); if(otro.st&&otro.st[y]) g.st[y]=otro.st[y].slice(); }
+    else{
+      // ambos tienen el año: para cada mes, si g no tiene dato usa el de otro
+      for(let m=0;m<12;m++){
+        const vg=g.d[y][m], vo=otro.d[y][m];
+        if((vg==null||vg==='') && vo!=null){ g.d[y][m]=vo; if(otro.st&&otro.st[y]){ if(!g.st[y])g.st[y]=[]; g.st[y][m]=otro.st[y][m]; } }
+      }
+    }
+  });
+  _ecoState.gastos=_ecoState.gastos.filter(x=>x.id!==otroId);
+  _ecoMarkDirty(); _ecoCellClose(); ecoRender();
+  showToast('✓ Gastos fusionados en "'+g.n+'"','success');
 }
 function _ecoSaveGasto(gid){
   const g=_ecoState.gastos.find(x=>x.id===gid); if(!g) return;
