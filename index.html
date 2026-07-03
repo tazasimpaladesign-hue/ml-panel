@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v211 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v212 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -28978,6 +28978,103 @@ function ecoRenderKPIsSafe(){
   }catch(e){}
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// v212: INFLACIÓN (IPC INDEC vía ArgentinaDatos) — KPI + comparación en gráfico
+// Endpoint: https://api.argentinadatos.com/v1/finanzas/indices/inflacion
+// Devuelve [{fecha:'YYYY-MM-DD', valor:N}] (variación mensual %). Gratuito, oficial.
+// ═══════════════════════════════════════════════════════════════════════════
+const ECO_INFL_KEY = 'mlp_eco_infl_v1';
+let _ecoInfl = { serie:[], ts:0 };   // serie = [{fecha, valor}]
+
+function _ecoInflLoad(){
+  try{ const d=JSON.parse(localStorage.getItem(ECO_INFL_KEY)||'null'); if(d&&Array.isArray(d.serie)) _ecoInfl=d; }catch(e){}
+}
+function _ecoInflSave(){
+  try{ localStorage.setItem(ECO_INFL_KEY, JSON.stringify(_ecoInfl)); }catch(e){}
+}
+// trae la serie de inflación mensual (una vez por mes)
+async function _ecoInflFetch(force){
+  const dias = (Date.now()-(_ecoInfl.ts||0))/86400000;
+  if(!force && _ecoInfl.serie.length && dias<25) return;   // fresco (menos de 25 días)
+  try{
+    const r = await fetch('https://api.argentinadatos.com/v1/finanzas/indices/inflacion');
+    const arr = await r.json();
+    if(Array.isArray(arr) && arr.length){
+      _ecoInfl = { serie: arr, ts: Date.now() };
+      _ecoInflSave();
+      if(document.getElementById('section-economia')?.classList.contains('active')) ecoRenderKPIsSafe();
+    }
+  }catch(e){ console.warn('[eco] inflación fetch:', e.message); }
+}
+// último índice informado
+function _ecoInflUltimo(){
+  if(!_ecoInfl.serie.length) return null;
+  return _ecoInfl.serie[_ecoInfl.serie.length-1];
+}
+// buscar el valor de un mes/año concreto
+function _ecoInflDe(anio, mes){  // mes 1-12
+  const key = anio+'-'+String(mes).padStart(2,'0');
+  const row = _ecoInfl.serie.find(x=>x.fecha && x.fecha.slice(0,7)===key);
+  return row ? row.valor : null;
+}
+// acumulada de un año (compuesta)
+function _ecoInflAcumAnio(anio){
+  let factor=1, meses=0;
+  _ecoInfl.serie.forEach(x=>{
+    if(x.fecha && +x.fecha.slice(0,4)===anio){ factor*=(1+(+x.valor||0)/100); meses++; }
+  });
+  return meses? (factor-1)*100 : null;
+}
+
+// modal para explorar la inflación por mes/año
+function ecoInflConfig(){
+  const meses=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  // años disponibles en la serie
+  const anios=[...new Set(_ecoInfl.serie.map(x=>+x.fecha.slice(0,4)))].sort((a,b)=>b-a);
+  const ultimo=_ecoInflUltimo();
+  const inner=
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'+
+      '<div style="font-size:16px;font-weight:800;color:'+_ECO_TXT+'">📈 Inflación (IPC INDEC)</div>'+
+      '<button onclick="_ecoCellClose()" style="border:none;background:#eef2f7;width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:16px;color:'+_ECO_TXT2+'">✕</button>'+
+    '</div>'+
+    (ultimo?'<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:12px;margin-bottom:14px"><div style="font-size:11px;color:'+_ECO_TXT3+';font-weight:600">ÚLTIMO DATO INFORMADO</div><div style="font-size:24px;font-weight:800;color:#0369a1">'+(+ultimo.valor).toFixed(1)+'%</div><div style="font-size:11px;color:'+_ECO_TXT3+'">'+_ecoInflFechaLbl(ultimo.fecha)+' · variación mensual</div></div>':'<div style="color:'+_ECO_TXT3+';font-size:12px;margin-bottom:12px">Cargando datos de inflación...</div>')+
+    '<div style="font-size:12px;font-weight:600;color:'+_ECO_TXT2+';margin-bottom:8px">Consultar un mes específico</div>'+
+    '<div style="display:flex;gap:6px;margin-bottom:12px">'+
+      '<select id="eco-infl-mes" style="flex:1;padding:8px;border:1px solid '+_ECO_BRD+';border-radius:9px;font-size:13px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+'">'+
+        meses.map((m,i)=>'<option value="'+(i+1)+'">'+m+'</option>').join('')+
+      '</select>'+
+      '<select id="eco-infl-anio" style="flex:1;padding:8px;border:1px solid '+_ECO_BRD+';border-radius:9px;font-size:13px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+'">'+
+        anios.map(a=>'<option value="'+a+'">'+a+'</option>').join('')+
+      '</select>'+
+      '<button onclick="_ecoInflConsultar()" style="padding:8px 12px;border:1px solid #93c5fd;background:#eff6ff;color:#1d4ed8;border-radius:9px;font-weight:600;cursor:pointer;font-size:13px">Ver</button>'+
+    '</div>'+
+    '<div id="eco-infl-resultado" style="font-size:13px;color:'+_ECO_TXT+';min-height:24px;margin-bottom:10px"></div>'+
+    '<button onclick="_ecoInflRefrescar()" style="padding:9px 14px;border:1px solid '+_ECO_BRD+';background:#fff;color:'+_ECO_TXT2+';border-radius:9px;font-weight:600;cursor:pointer;font-size:12.5px">🔄 Actualizar datos</button>'+
+    '<div style="font-size:10.5px;color:'+_ECO_TXT3+';margin-top:10px">Fuente: INDEC vía ArgentinaDatos · se actualiza una vez al mes</div>';
+  _ecoModalShell(inner, 440);
+}
+function _ecoInflFechaLbl(fecha){
+  const meses=['','enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  const y=fecha.slice(0,4), m=+fecha.slice(5,7);
+  return meses[m]+' '+y;
+}
+function _ecoInflConsultar(){
+  const mes=+document.getElementById('eco-infl-mes').value;
+  const anio=+document.getElementById('eco-infl-anio').value;
+  const val=_ecoInflDe(anio,mes);
+  const acum=_ecoInflAcumAnio(anio);
+  const cont=document.getElementById('eco-infl-resultado');
+  const meses=['','Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  if(val==null){ cont.innerHTML='<span style="color:'+_ECO_TXT3+'">Sin dato para '+meses[mes]+' '+anio+' (todavía no publicado o fuera de rango).</span>'; return; }
+  cont.innerHTML='<b>'+meses[mes]+' '+anio+':</b> <span style="color:#0369a1;font-weight:800">'+(+val).toFixed(1)+'%</span> mensual'+(acum!=null?' · acumulado '+anio+': <b>'+acum.toFixed(1)+'%</b>':'');
+}
+async function _ecoInflRefrescar(){
+  showToast('Actualizando inflación...','info');
+  await _ecoInflFetch(true);
+  _ecoCellClose(); ecoInflConfig();
+  showToast('✓ Datos de inflación actualizados','success');
+}
+
 function ecoChangeYear(y){
   _ecoState.year = +y;
   _ecoSel = [];
@@ -28998,7 +29095,7 @@ function ecoRender(){
 
   // gastos de ESE año (solo los que corresponden)
   const gastos = _ecoState.gastos.filter(g => _ecoGastoEnAnio(g, y))
-    .sort((a,b)=> (a.cat===b.cat ? a.n.localeCompare(b.n) : a.cat.localeCompare(b.cat)));
+    .sort((a,b)=> (a.n||'').localeCompare(b.n||'','es',{sensitivity:'base'}));
 
   // ── Tabla cuadriculada tipo Excel ──
   const tbl = document.getElementById('eco-table');
@@ -29023,11 +29120,11 @@ function ecoRender(){
       cels += '<td data-gid="'+g.id+'" data-mes="'+m+'" onclick="ecoCellClick(event,\''+g.id+'\','+m+')" title="Clic: editar · Ctrl/Shift+clic: seleccionar varias" style="text-align:right;padding:5px 7px;border:'+BR+';cursor:pointer;white-space:nowrap;'+(bg?'background:'+bg+';':'')+'color:'+fg+';'+selStyle+'">'+(v==='NA'?'—':_ecoFmt(v))+'</td>';
     }
     html += '<tr>'+
-      '<td style="position:sticky;left:0;background:var(--card);text-align:left;padding:5px 9px;border:'+BR+';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:210px">'+
+      '<td style="position:sticky;left:0;background:var(--bg4,#e9ebf0);text-align:left;padding:5px 9px;border:'+BR+';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:210px">'+
         '<span style="cursor:pointer" title="Clic para editar este gasto" onclick="ecoEditGasto(\''+g.id+'\')">'+g.e+' '+_persoEsc(g.n)+' <span style="opacity:.4;font-size:10px">✎</span></span>'+
       '</td>'+
       cels+
-      '<td style="text-align:right;padding:5px 8px;border:'+BR+';font-weight:700;color:var(--text);background:var(--bg2,#f8fafc)">'+(totG?_ecoFmt(totG):'')+'</td>'+
+      '<td style="text-align:right;padding:5px 8px;border:'+BR+';font-weight:700;color:var(--text);background:var(--bg4,#e9ebf0)">'+(totG?_ecoFmt(totG):'')+'</td>'+
     '</tr>';
   });
   const totAnual = totMes.reduce((a,b)=>a+b,0);
@@ -29125,9 +29222,15 @@ function ecoRenderKPIs(gastos, y, totMes){
   const act=_ecoActivosTotales();
   const kActivos='<div onclick="ecoOpenIngresos()" title="Clic para ver/editar ingresos" style="flex:1;min-width:150px;background:var(--card);border:1px solid var(--border);border-radius:11px;padding:11px 13px;cursor:pointer"><div style="font-size:10px;color:var(--text3);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">🏦 ACTIVOS</div><div style="font-size:18px;font-weight:800;color:var(--text);line-height:1.15;margin-top:2px">$'+Math.round(act.pesos).toLocaleString('es-AR')+'</div><div style="font-size:11px;color:#16a34a;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">US$'+Math.round(act.dolares).toLocaleString('es-AR')+'</div></div>';
 
+  // KPI inflación (último índice, clic para explorar)
+  const inflU=_ecoInflUltimo();
+  const inflSub = inflU ? (_ecoInflFechaLbl(inflU.fecha)+' · mensual') : 'tocá para cargar';
+  const kInfl='<div onclick="ecoInflConfig()" title="Clic para ver inflación de meses anteriores" style="flex:1;min-width:150px;background:var(--card);border:1px solid var(--border);border-radius:11px;padding:11px 13px;cursor:pointer"><div style="font-size:10px;color:var(--text3);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">📈 INFLACIÓN</div><div style="font-size:18px;font-weight:800;color:#0369a1;line-height:1.15;margin-top:2px">'+(inflU?(+inflU.valor).toFixed(1)+'%':'—')+'</div><div style="font-size:9.5px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+inflSub+'</div></div>';
+
   cont.innerHTML =
     K('💸','GASTADO '+ECO_MESES_FULL[mesRef].toUpperCase(), _ecoFmt(totMesActual), (y===cy?'mes en curso':'diciembre'), 'var(--text)')+
     kDolar+
+    kInfl+
     kActivos+
     K('🔴','POR PAGAR ('+y+')', _ecoFmt(porPagar), pendientes+' pago(s) rojos + amarillos', porPagar>0?'#dc2626':'var(--text)')+
     K('📊','PROMEDIO MENSUAL', _ecoFmt(prom), 'meses con gastos', 'var(--text)');
@@ -29364,13 +29467,18 @@ function _ecoNewSave(){
 // ── Gráfico de evolución ──
 let _ecoChart=null;
 function ecoOpenGraf(){
-  const gastosConDatos=_ecoState.gastos.filter(g=>g.d&&Object.keys(g.d).length).sort((a,b)=>a.n.localeCompare(b.n));
+  const gastosConDatos=_ecoState.gastos.filter(g=>g.d&&Object.keys(g.d).length).sort((a,b)=>(a.n||'').localeCompare(b.n||'','es',{sensitivity:'base'}));
+  // rango de años/meses disponibles
+  const allYears=_ecoYears().slice().sort((a,b)=>a-b);
+  const yMin=allYears[0]||new Date().getFullYear(), yMax=allYears[allYears.length-1]||yMin;
+  const mesesOpt=ECO_MESES.map((m,i)=>'<option value="'+i+'">'+m+'</option>').join('');
+  const aniosOpt=(sel)=>allYears.map(a=>'<option value="'+a+'" '+(a===sel?'selected':'')+'>'+a+'</option>').join('');
   const inner=
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'+
       '<div style="font-size:16px;font-weight:800;color:'+_ECO_TXT+'">📈 Evolución de gastos</div>'+
       '<button onclick="_ecoGrafClose()" style="border:none;background:#eef2f7;width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:16px;color:'+_ECO_TXT2+'">✕</button>'+
     '</div>'+
-    '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">'+
+    '<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">'+
       '<select id="eco-graf-modo" onchange="_ecoGrafModoChg()" style="padding:7px 10px;border:1px solid '+_ECO_BRD+';border-radius:9px;font-size:13px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+'">'+
         '<option value="total">Total anual (todos los gastos)</option>'+
         '<option value="cat">Por categoría (anual)</option>'+
@@ -29380,13 +29488,26 @@ function ecoOpenGraf(){
         gastosConDatos.map(g=>'<option value="'+g.id+'">'+g.e+' '+_persoEsc(g.n)+'</option>').join('')+
       '</select>'+
     '</div>'+
-    '<div style="position:relative;height:360px;background:#fff"><canvas id="eco-graf-canvas"></canvas></div>';
-  _ecoModalShell(inner, 820);
-  _ecoGrafDraw();
+    // controles de período (solo para modo gasto)
+    '<div id="eco-graf-periodo" style="display:none;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center;font-size:12px;color:'+_ECO_TXT2+'">'+
+      '<span style="font-weight:600">Desde</span>'+
+      '<select id="eco-graf-mes-ini" onchange="_ecoGrafDraw()" style="padding:6px;border:1px solid '+_ECO_BRD+';border-radius:8px;font-size:12.5px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+'">'+mesesOpt+'</select>'+
+      '<select id="eco-graf-anio-ini" onchange="_ecoGrafDraw()" style="padding:6px;border:1px solid '+_ECO_BRD+';border-radius:8px;font-size:12.5px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+'">'+aniosOpt(yMin)+'</select>'+
+      '<span style="font-weight:600">hasta</span>'+
+      '<select id="eco-graf-mes-fin" onchange="_ecoGrafDraw()" style="padding:6px;border:1px solid '+_ECO_BRD+';border-radius:8px;font-size:12.5px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+'">'+mesesOpt+'</select>'+
+      '<select id="eco-graf-anio-fin" onchange="_ecoGrafDraw()" style="padding:6px;border:1px solid '+_ECO_BRD+';border-radius:8px;font-size:12.5px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+'">'+aniosOpt(yMax)+'</select>'+
+      '<label style="display:flex;align-items:center;gap:5px;cursor:pointer;margin-left:auto;background:#f0f9ff;padding:5px 10px;border-radius:8px;border:1px solid #bae6fd"><input type="checkbox" id="eco-graf-infl" onchange="_ecoGrafDraw()"><span style="font-weight:600;color:#0369a1">📈 Comparar con inflación</span></label>'+
+    '</div>'+
+    '<div style="position:relative;height:360px;background:#fff"><canvas id="eco-graf-canvas"></canvas></div>'+
+    '<div id="eco-graf-nota" style="font-size:11px;color:'+_ECO_TXT3+';margin-top:8px"></div>';
+  _ecoModalShell(inner, 860);
+  // setear mes fin al último mes con datos por defecto
+  setTimeout(()=>{ const mf=document.getElementById('eco-graf-mes-fin'); if(mf) mf.value=new Date().getMonth(); _ecoGrafDraw(); },30);
 }
 function _ecoGrafModoChg(){
   const modo=document.getElementById('eco-graf-modo').value;
   document.getElementById('eco-graf-gasto').style.display = modo==='gasto'?'block':'none';
+  document.getElementById('eco-graf-periodo').style.display = modo==='gasto'?'flex':'none';
   _ecoGrafDraw();
 }
 function _ecoGrafClose(){ if(_ecoChart){_ecoChart.destroy();_ecoChart=null;} document.querySelector('.eco-modal-ov')?.remove(); }
@@ -29412,19 +29533,53 @@ function _ecoGrafDraw(){
   } else {
     const gid=document.getElementById('eco-graf-gasto').value;
     const g=_ecoState.gastos.find(x=>x.id===gid);
+    const nota=document.getElementById('eco-graf-nota');
     if(g){
-      const ys=Object.keys(g.d||{}).map(Number).sort((a,b)=>a-b);
-      labels=[]; const data=[];
-      ys.forEach(y=>{ for(let m=0;m<12;m++){ const v=_ecoVal(g,y,m); if(typeof v==='number'){ labels.push(ECO_MESES[m]+' '+String(y).slice(2)); data.push(v); } } });
-      datasets=[{label:g.e+' '+g.n,data,borderColor:'#2563eb',backgroundColor:'rgba(37,99,235,.13)',fill:true,tension:.3}];
+      // rango de período elegido
+      const mi=+(document.getElementById('eco-graf-mes-ini')?.value||0);
+      const yi=+(document.getElementById('eco-graf-anio-ini')?.value||_ecoYears().slice(-1)[0]);
+      const mf=+(document.getElementById('eco-graf-mes-fin')?.value||11);
+      const yf=+(document.getElementById('eco-graf-anio-fin')?.value||new Date().getFullYear());
+      const desde=yi*12+mi, hasta=yf*12+mf;
+      labels=[]; const data=[]; const meses=[];
+      for(let t=Math.min(desde,hasta); t<=Math.max(desde,hasta); t++){
+        const y=Math.floor(t/12), m=t%12;
+        const v=_ecoVal(g,y,m);
+        labels.push(ECO_MESES[m]+' '+String(y).slice(2));
+        data.push(typeof v==='number'?v:null);
+        meses.push({y,m});
+      }
+      datasets=[{label:g.e+' '+g.n,data,borderColor:'#2563eb',backgroundColor:'rgba(37,99,235,.13)',fill:true,tension:.3,spanGaps:true,yAxisID:'y'}];
+      // comparación con inflación (acumulada desde el primer mes del período)
+      const comparar=document.getElementById('eco-graf-infl')?.checked;
+      if(comparar && _ecoInfl.serie.length){
+        // línea de inflación acumulada (%) desde el inicio del período
+        let factor=1; const inflData=[];
+        meses.forEach((mm,idx)=>{
+          if(idx>0){ const v=_ecoInflDe(mm.y,mm.m+1); if(v!=null) factor*=(1+v/100); }
+          inflData.push((factor-1)*100);
+        });
+        datasets.push({label:'Inflación acumulada %',data:inflData,borderColor:'#dc2626',backgroundColor:'transparent',borderDash:[5,4],tension:.3,yAxisID:'y1'});
+        // calcular la variación del gasto en el mismo período para comparar
+        const primero=data.find(v=>v!=null), ultimo=[...data].reverse().find(v=>v!=null);
+        if(primero>0 && ultimo>0){
+          const varGasto=((ultimo-primero)/primero*100);
+          const inflTotal=inflData[inflData.length-1];
+          const dif=varGasto-inflTotal;
+          if(nota) nota.innerHTML='En el período: tu gasto varió <b style="color:#2563eb">'+(varGasto>=0?'+':'')+varGasto.toFixed(1)+'%</b> · la inflación acumulada fue <b style="color:#dc2626">'+inflTotal.toFixed(1)+'%</b> · '+(dif>=0?'tu gasto subió <b>'+dif.toFixed(1)+' puntos por encima</b> de la inflación':'tu gasto quedó <b>'+Math.abs(dif).toFixed(1)+' puntos por debajo</b> de la inflación (ganaste poder de compra)');
+        } else if(nota){ nota.innerHTML=''; }
+      } else if(nota){ nota.innerHTML=''; }
     }
   }
+  const modoGasto = document.getElementById('eco-graf-modo').value==='gasto';
+  const compInfl = modoGasto && document.getElementById('eco-graf-infl')?.checked;
   _ecoChart=new Chart(cv.getContext('2d'),{
     type:'line', data:{labels,datasets},
     options:{responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{display:modo!=='total',labels:{color:'#334155',font:{size:10},boxWidth:12}}},
-      scales:{y:{ticks:{color:'#334155',callback:v=>'$'+(v/1000).toLocaleString('es-AR')+'k',font:{size:10}},grid:{color:'rgba(0,0,0,.06)'}},
-              x:{ticks:{color:'#334155',font:{size:9},maxRotation:60},grid:{color:'rgba(0,0,0,.04)'}}}}
+      plugins:{legend:{display:(modo!=='total'||compInfl),labels:{color:'#334155',font:{size:10},boxWidth:12}}},
+      scales:Object.assign({y:{position:'left',ticks:{color:'#334155',callback:v=>'$'+(v/1000).toLocaleString('es-AR')+'k',font:{size:10}},grid:{color:'rgba(0,0,0,.06)'}},
+              x:{ticks:{color:'#334155',font:{size:9},maxRotation:60},grid:{color:'rgba(0,0,0,.04)'}}},
+              compInfl?{y1:{position:'right',ticks:{color:'#dc2626',callback:v=>v.toFixed(0)+'%',font:{size:10}},grid:{drawOnChartArea:false}}}:{})}
   });
 }
 
@@ -29432,7 +29587,7 @@ function _ecoGrafDraw(){
 (function(){
   if(typeof showSection==='function'){
     const _oss=showSection;
-    showSection=function(id){ _oss.apply(this,arguments); if(id==='economia'){ try{ _ecoDolarLoad(); _ecoState.gastos.length||( _ecoState.gastos=_ecoLoad()); _ecoPintarVaciasGris(); ecoRender(); _ecoSyncDown(); _ecoDolarFetch(); }catch(e){ console.warn('[eco]',e.message); } } };
+    showSection=function(id){ _oss.apply(this,arguments); if(id==='economia'){ try{ _ecoDolarLoad(); _ecoInflLoad(); _ecoState.gastos.length||( _ecoState.gastos=_ecoLoad()); _ecoPintarVaciasGris(); ecoRender(); _ecoSyncDown(); _ecoDolarFetch(); _ecoInflFetch(); }catch(e){ console.warn('[eco]',e.message); } } };
   }
   window.addEventListener('beforeunload',()=>{ try{ _ecoFlush(); }catch(e){} });
   document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden'){ try{ _ecoFlush(); }catch(e){} } });
