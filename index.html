@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v208 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v209 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -28738,7 +28738,8 @@ function _ecoGastoEnAnio(g, y){
 
 function _ecoCellBg(val, estado){
   if(val==='NA') return ECO_ESTADOS.na.bg;
-  if(val==null || val==='') return '';
+  // v209: el estado (color) manda SIEMPRE, haya o no importe. Así el gris se ve
+  // incluso en celdas vacías.
   if(estado && ECO_ESTADOS[estado]) return ECO_ESTADOS[estado].bg;
   return '';
 }
@@ -28748,6 +28749,39 @@ function _ecoCellFg(val, estado){
   return 'var(--text)';
 }
 const _ecoFmt = n => (n==null||n==='NA'||n==='') ? '' : '$'+Math.round(+n).toLocaleString('es-AR');
+
+// v209: pinta de gris oscuro TODAS las celdas vacías (sin importe) desde 2013
+// hasta el mes actual del año en curso. Las celdas con dato o "No aplica" NO se tocan.
+// Se corre una sola vez (bandera), pero se puede volver a llamar manualmente.
+function _ecoPintarVaciasGris(force){
+  const FLAG='mlp_eco_gris_v1';
+  if(!force){ try{ if(localStorage.getItem(FLAG)) return; }catch(e){} }
+  const cy=new Date().getFullYear(), cm=new Date().getMonth();  // mes actual (0-11)
+  let pintadas=0;
+  _ecoState.gastos.forEach(g=>{
+    if(!g.d) return;
+    Object.keys(g.d).forEach(ys=>{
+      const y=+ys;
+      if(y<2013 || y>cy) return;
+      // año en curso: pintar hasta el mes ANTERIOR al actual (meses cerrados).
+      // Ej: en julio pinta hasta junio. Años pasados: los 12 meses.
+      const limite = (y===cy) ? (cm-1) : 11;
+      if(limite<0) return;
+      for(let m=0;m<=limite;m++){
+        const v=g.d[y][m];
+        // celda vacía (sin importe) y que no sea "No aplica"
+        if(v==null || v===''){
+          if(!g.st) g.st={};
+          if(!g.st[y]) g.st[y]=[null,null,null,null,null,null,null,null,null,null,null,null];
+          if(g.st[y][m]!=='gris'){ g.st[y][m]='gris'; pintadas++; }
+        }
+      }
+    });
+  });
+  if(pintadas>0){ _ecoMarkDirty(); }
+  try{ localStorage.setItem(FLAG,'1'); }catch(e){}
+  console.log('[eco] celdas vacías pintadas de gris:', pintadas);
+}
 
 function ecoChangeYear(y){
   _ecoState.year = +y;
@@ -28874,12 +28908,13 @@ function ecoRenderKPIs(gastos, y, totMes){
     if(typeof v==='number'){ estimado+=v; }
     else if(v!=='NA'){ const ult=_ecoUltimoValor(g,y,mesRef); if(ult>0) estimado+=ult; }
   });
-  // v208: POR PAGAR = suma de TODAS las celdas rojas (porpagar) de TODO el año mostrado
+  // v209: POR PAGAR = suma de celdas rojas (porpagar) + amarillas (estimado) de
+  // TODO el año mostrado. El KPI se sigue mostrando en rojo.
   let porPagar=0, pendientes=0;
   gastos.forEach(g=>{
     for(let m=0;m<12;m++){
       const v=_ecoVal(g,y,m), st=_ecoEst(g,y,m);
-      if(st==='porpagar' && typeof v==='number'){ porPagar+=v; pendientes++; }
+      if((st==='porpagar'||st==='estimado') && typeof v==='number'){ porPagar+=v; pendientes++; }
     }
   });
   const mesesConGasto = totMes.filter(t=>t>0);
@@ -28888,7 +28923,7 @@ function ecoRenderKPIs(gastos, y, totMes){
   cont.innerHTML =
     K('💸','GASTADO '+ECO_MESES_FULL[mesRef].toUpperCase(), _ecoFmt(totMesActual), (y===cy?'mes en curso':'diciembre'), 'var(--text)')+
     K('🔮','ESTIMADO DEL MES', _ecoFmt(estimado), 'proyección con últimos importes', '#7c3aed')+
-    K('🔴','POR PAGAR ('+y+')', _ecoFmt(porPagar), pendientes+' pago(s) en rojo este año', porPagar>0?'#dc2626':'var(--text)')+
+    K('🔴','POR PAGAR ('+y+')', _ecoFmt(porPagar), pendientes+' pago(s) rojos + amarillos', porPagar>0?'#dc2626':'var(--text)')+
     K('📊','PROMEDIO MENSUAL', _ecoFmt(prom), 'meses con gastos', 'var(--text)');
 }
 
@@ -29180,7 +29215,7 @@ function _ecoGrafDraw(){
 (function(){
   if(typeof showSection==='function'){
     const _oss=showSection;
-    showSection=function(id){ _oss.apply(this,arguments); if(id==='economia'){ try{ ecoRender(); _ecoSyncDown(); }catch(e){ console.warn('[eco]',e.message); } } };
+    showSection=function(id){ _oss.apply(this,arguments); if(id==='economia'){ try{ _ecoState.gastos.length||( _ecoState.gastos=_ecoLoad()); _ecoPintarVaciasGris(); ecoRender(); _ecoSyncDown(); }catch(e){ console.warn('[eco]',e.message); } } };
   }
   window.addEventListener('beforeunload',()=>{ try{ _ecoFlush(); }catch(e){} });
   document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden'){ try{ _ecoFlush(); }catch(e){} } });
