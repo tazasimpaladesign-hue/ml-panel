@@ -1,4 +1,4 @@
-<!DOCTYPE html> 
+<!DOCTYPE html>
 <html lang="es">
 <head>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>">
@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v209 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v210 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4357,6 +4357,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <select id="eco-year" onchange="ecoChangeYear(this.value)" style="font-size:13px;padding:7px 10px;border-radius:9px;border:1px solid var(--border);background:var(--card);color:var(--text)"></select>
       <button class="btn btn-ghost btn-sm" onclick="ecoAddGasto()">➕ Nuevo gasto</button>
+      <button class="btn btn-ghost btn-sm" onclick="ecoOpenIngresos()">💵 Ingresos</button>
       <button class="btn btn-ghost btn-sm" onclick="ecoOpenGraf()">📈 Evolución</button>
     </div>
   </div>
@@ -28668,12 +28669,12 @@ let _ecoSel = [];  // selección múltiple de celdas: [{gid, mes}]
 function _ecoLoad(){
   try{
     const raw = localStorage.getItem(ECO_LS_KEY);
-    if(raw){ const d=JSON.parse(raw); if(d && Array.isArray(d.gastos)) return d.gastos; }
+    if(raw){ const d=JSON.parse(raw); if(d && Array.isArray(d.gastos)){ if(Array.isArray(d.ingresos)) _ecoState.ingresos=d.ingresos; return d.gastos; } }
   }catch(e){}
   try{ return JSON.parse(ECO_SEED_JSON); }catch(e){ return []; }
 }
 function _ecoSaveLS(){
-  try{ localStorage.setItem(ECO_LS_KEY, JSON.stringify({ gastos:_ecoState.gastos, savedAt:Date.now() })); }catch(e){}
+  try{ localStorage.setItem(ECO_LS_KEY, JSON.stringify({ gastos:_ecoState.gastos, ingresos:_ecoState.ingresos||[], savedAt:Date.now() })); }catch(e){}
 }
 function _ecoMarkDirty(){
   _ecoState.dirty = true; _ecoSaveLS();
@@ -28686,7 +28687,7 @@ async function _ecoFlush(){
   try{
     await fetch(WORKER + '/api/backup', {
       method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
-      body: JSON.stringify({ economia: { gastos:_ecoState.gastos, savedAt:Date.now() } })
+      body: JSON.stringify({ economia: { gastos:_ecoState.gastos, ingresos:_ecoState.ingresos||[], savedAt:Date.now() } })
     });
   }catch(e){ console.warn('[eco] guardar nube:', e.message); }
 }
@@ -28694,14 +28695,21 @@ async function _ecoSyncDown(){
   try{
     const r = await fetch(WORKER + '/api/backup', { headers:{'Authorization':'Bearer '+token} });
     const d = await r.json();
-    if(d && d.economia && Array.isArray(d.economia.gastos) && d.economia.gastos.length){
+    if(d && d.economia && Array.isArray(d.economia.gastos)){
       const localTs = (()=>{ try{ return JSON.parse(localStorage.getItem(ECO_LS_KEY)||'{}').savedAt||0; }catch(e){ return 0; } })();
-      if((d.economia.savedAt||0) >= localTs){
-        _ecoState.gastos = d.economia.gastos; _ecoSaveLS();
+      const remoteTs = d.economia.savedAt||0;
+      // la nube gana si es más nueva o igual (y tiene datos)
+      if(remoteTs >= localTs && d.economia.gastos.length){
+        _ecoState.gastos = d.economia.gastos;
+        if(Array.isArray(d.economia.ingresos)) _ecoState.ingresos = d.economia.ingresos;
+        _ecoSaveLS();
+        console.log('[eco] sincronizado desde la nube (guardado remoto '+new Date(remoteTs).toLocaleString('es-AR')+')');
         if(document.getElementById('section-economia')?.classList.contains('active')) ecoRender();
+      } else {
+        console.log('[eco] local más nuevo que la nube, se conserva local');
       }
     }
-  }catch(e){}
+  }catch(e){ console.warn('[eco] sync down:', e.message); }
 }
 
 function _ecoVal(g, y, m){ const a=g.d && g.d[y]; return a ? a[m] : null; }
@@ -28781,6 +28789,174 @@ function _ecoPintarVaciasGris(force){
   if(pintadas>0){ _ecoMarkDirty(); }
   try{ localStorage.setItem(FLAG,'1'); }catch(e){}
   console.log('[eco] celdas vacías pintadas de gris:', pintadas);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v210: COTIZACIÓN DÓLAR + INGRESOS/ACTIVOS + sync robusto
+// ═══════════════════════════════════════════════════════════════════════════
+const ECO_DOLAR_KEY = 'mlp_eco_dolar_v1';
+let _ecoDolar = { compra:0, venta:0, ts:0, manual:false };
+
+function _ecoDolarLoad(){
+  try{ const d=JSON.parse(localStorage.getItem(ECO_DOLAR_KEY)||'null'); if(d) _ecoDolar=d; }catch(e){}
+}
+function _ecoDolarSave(){
+  try{ localStorage.setItem(ECO_DOLAR_KEY, JSON.stringify(_ecoDolar)); }catch(e){}
+}
+// trae la cotización oficial (compra/venta) de dolarapi.com. Solo si pasaron
+// +12h desde la última, o si nunca se trajo. No consume recursos propios.
+async function _ecoDolarFetch(force){
+  if(_ecoDolar.manual && !force) return;   // en modo manual no pisar
+  const hs = (Date.now()-(_ecoDolar.ts||0))/3600000;
+  if(!force && _ecoDolar.compra>0 && hs<12) return;  // fresco (menos de 12h)
+  try{
+    const r = await fetch('https://dolarapi.com/v1/dolares/oficial');
+    const d = await r.json();
+    if(d && d.compra){
+      _ecoDolar = { compra:+d.compra, venta:+d.venta, ts:Date.now(), manual:false };
+      _ecoDolarSave();
+      if(document.getElementById('section-economia')?.classList.contains('active')) ecoRender();
+    }
+  }catch(e){ console.warn('[eco] dolar fetch:', e.message); }
+}
+
+// modal de configuración del dólar: refrescar auto o poner manual
+function ecoDolarConfig(){
+  const cot=_ecoDolar.compra>0?_ecoDolar.compra:'';
+  const cotV=_ecoDolar.venta>0?_ecoDolar.venta:'';
+  const inner=
+    '<div style="font-size:15px;font-weight:800;margin-bottom:4px;color:'+_ECO_TXT+'">💵 Cotización del dólar oficial</div>'+
+    '<div style="font-size:11.5px;color:'+_ECO_TXT3+';margin-bottom:14px">Se actualiza sola cada 12h desde fuente oficial (BCRA vía dolarapi). También podés cargarla a mano.</div>'+
+    '<div style="display:flex;gap:10px;margin-bottom:14px">'+
+      '<div style="flex:1"><label style="font-size:12px;font-weight:600;color:'+_ECO_TXT2+';display:block;margin-bottom:5px">Compra</label>'+
+        '<input type="number" id="eco-dol-compra" value="'+cot+'" placeholder="0" style="width:100%;padding:9px;border:1px solid '+_ECO_BRD+';border-radius:9px;font-size:15px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+';box-sizing:border-box"></div>'+
+      '<div style="flex:1"><label style="font-size:12px;font-weight:600;color:'+_ECO_TXT2+';display:block;margin-bottom:5px">Venta</label>'+
+        '<input type="number" id="eco-dol-venta" value="'+cotV+'" placeholder="0" style="width:100%;padding:9px;border:1px solid '+_ECO_BRD+';border-radius:9px;font-size:15px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+';box-sizing:border-box"></div>'+
+    '</div>'+
+    '<a href="https://www.ambito.com/contenidos/dolar.html" target="_blank" style="font-size:11.5px;color:#1d4ed8;text-decoration:none;display:inline-block;margin-bottom:14px">🔗 Ver cotización en Ámbito Financiero</a>'+
+    '<div style="display:flex;gap:8px">'+
+      '<button onclick="_ecoDolarRefrescar()" style="padding:10px 12px;border:1px solid #93c5fd;background:#eff6ff;color:#1d4ed8;border-radius:9px;font-weight:600;cursor:pointer">🔄 Traer oficial</button>'+
+      '<button onclick="_ecoCellClose()" style="padding:10px 14px;border:1px solid '+_ECO_BRD+';background:#fff;color:'+_ECO_TXT2+';border-radius:9px;font-weight:600;cursor:pointer">Cancelar</button>'+
+      '<button onclick="_ecoDolarSaveManual()" style="flex:1;padding:10px;border:none;background:#4f8ef7;color:#fff;border-radius:9px;font-weight:700;cursor:pointer">Guardar manual</button>'+
+    '</div>';
+  _ecoModalShell(inner, 420);
+}
+async function _ecoDolarRefrescar(){
+  showToast('Trayendo cotización oficial...','info');
+  await _ecoDolarFetch(true);
+  _ecoCellClose();
+  if(_ecoDolar.compra>0) showToast('✓ Dólar actualizado: compra $'+_ecoDolar.compra.toLocaleString('es-AR'),'success');
+  else showToast('No se pudo traer la cotización, cargala a mano','error');
+  ecoRender();
+}
+function _ecoDolarSaveManual(){
+  const c=parseFloat(document.getElementById('eco-dol-compra').value);
+  const v=parseFloat(document.getElementById('eco-dol-venta').value);
+  if(isNaN(c)||c<=0){ showToast('Ingresá un valor de compra válido','error'); return; }
+  _ecoDolar={ compra:c, venta:(isNaN(v)?c:v), ts:Date.now(), manual:true };
+  _ecoDolarSave(); _ecoCellClose(); ecoRender();
+  showToast('✓ Cotización guardada manualmente','success');
+}
+
+// ── INGRESOS / ACTIVOS ──
+// _ecoState.ingresos = [{id, nombre, pesos, dolares, moneda:'pesos'|'dolares'}]
+function _ecoIngresos(){ if(!Array.isArray(_ecoState.ingresos)) _ecoState.ingresos=[]; return _ecoState.ingresos; }
+function _ecoActivosTotales(){
+  let pesos=0, dolares=0;
+  _ecoIngresos().forEach(i=>{ pesos+=(+i.pesos||0); dolares+=(+i.dolares||0); });
+  return { pesos, dolares };
+}
+function ecoOpenIngresos(){
+  const cot = _ecoDolar.compra>0 ? _ecoDolar.compra : 0;
+  const rows = _ecoIngresos().map(i=>_ecoIngresoRow(i)).join('');
+  const totales = _ecoActivosTotales();
+  const inner=
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'+
+      '<div style="font-size:16px;font-weight:800;color:'+_ECO_TXT+'">💵 Ingresos / Activos</div>'+
+      '<button onclick="_ecoCellClose()" style="border:none;background:#eef2f7;width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:16px;color:'+_ECO_TXT2+'">✕</button>'+
+    '</div>'+
+    '<div style="font-size:11px;color:'+_ECO_TXT3+';margin-bottom:12px">Cargá el importe en pesos o en dólares y se convierte solo con el oficial COMPRA ($'+(cot?cot.toLocaleString('es-AR'):'—')+').</div>'+
+    '<table style="width:100%;border-collapse:collapse;font-size:12.5px">'+
+      '<thead><tr style="background:#f1f5f9">'+
+        '<th style="text-align:left;padding:7px 8px;border:1px solid '+_ECO_BRD+';color:'+_ECO_TXT2+'">Nombre</th>'+
+        '<th style="padding:7px 8px;border:1px solid '+_ECO_BRD+';color:#1d4ed8;width:120px">Pesos</th>'+
+        '<th style="padding:7px 8px;border:1px solid '+_ECO_BRD+';color:#16a34a;width:120px">Dólares</th>'+
+        '<th style="width:34px;border:1px solid '+_ECO_BRD+'"></th>'+
+      '</tr></thead>'+
+      '<tbody id="eco-ing-tbody">'+rows+'</tbody>'+
+      '<tfoot><tr style="background:#1e293b;color:#fff;font-weight:800">'+
+        '<td style="padding:8px;border:1px solid '+_ECO_BRD+'">TOTAL</td>'+
+        '<td id="eco-ing-tot-pesos" style="padding:8px;border:1px solid '+_ECO_BRD+';text-align:right">$'+Math.round(totales.pesos).toLocaleString('es-AR')+'</td>'+
+        '<td id="eco-ing-tot-dolares" style="padding:8px;border:1px solid '+_ECO_BRD+';text-align:right">US$'+Math.round(totales.dolares).toLocaleString('es-AR')+'</td>'+
+        '<td style="border:1px solid '+_ECO_BRD+'"></td>'+
+      '</tr></tfoot>'+
+    '</table>'+
+    '<button onclick="_ecoIngAdd()" style="margin-top:12px;padding:9px 14px;border:1px dashed #93c5fd;background:#eff6ff;color:#1d4ed8;border-radius:9px;font-weight:600;cursor:pointer;font-size:13px">➕ Agregar ingreso</button>'+
+    '<div style="font-size:10.5px;color:'+_ECO_TXT3+';margin-top:10px">Los cambios se guardan solos y se sincronizan entre PCs.</div>';
+  _ecoModalShell(inner, 560);
+}
+function _ecoIngresoRow(i){
+  return '<tr data-iid="'+i.id+'">'+
+    '<td style="padding:3px;border:1px solid '+_ECO_BRD+'"><input value="'+(i.nombre||'').replace(/"/g,'&quot;')+'" oninput="_ecoIngEdit(\''+i.id+'\',\'nombre\',this.value)" placeholder="Ej: Banco Nación" style="width:100%;border:none;padding:6px;font-size:12.5px;background:transparent;color:'+_ECO_TXT+'"></td>'+
+    '<td style="padding:3px;border:1px solid '+_ECO_BRD+'"><input type="number" value="'+(i.pesos||'')+'" oninput="_ecoIngEdit(\''+i.id+'\',\'pesos\',this.value)" placeholder="0" style="width:100%;border:none;padding:6px;font-size:12.5px;text-align:right;background:transparent;color:'+_ECO_TXT+'"></td>'+
+    '<td style="padding:3px;border:1px solid '+_ECO_BRD+'"><input type="number" value="'+(i.dolares||'')+'" oninput="_ecoIngEdit(\''+i.id+'\',\'dolares\',this.value)" placeholder="0" style="width:100%;border:none;padding:6px;font-size:12.5px;text-align:right;background:transparent;color:'+_ECO_TXT+'"></td>'+
+    '<td style="text-align:center;border:1px solid '+_ECO_BRD+'"><button onclick="_ecoIngDel(\''+i.id+'\')" title="Eliminar" style="border:none;background:transparent;color:#dc2626;cursor:pointer;font-size:14px">🗑️</button></td>'+
+  '</tr>';
+}
+function _ecoIngAdd(){
+  _ecoIngresos().push({ id:'i'+Date.now(), nombre:'', pesos:0, dolares:0, moneda:'pesos' });
+  _ecoMarkDirty();
+  const tb=document.getElementById('eco-ing-tbody');
+  if(tb) tb.insertAdjacentHTML('beforeend', _ecoIngresoRow(_ecoIngresos()[_ecoIngresos().length-1]));
+}
+function _ecoIngEdit(id, campo, val){
+  const i=_ecoIngresos().find(x=>x.id===id); if(!i) return;
+  const cot = _ecoDolar.compra>0 ? _ecoDolar.compra : 0;
+  if(campo==='nombre'){ i.nombre=val; }
+  else if(campo==='pesos'){
+    i.pesos = parseFloat(val)||0; i.moneda='pesos';
+    // convertir a dólares con el oficial COMPRA
+    if(cot>0){ i.dolares = Math.round((i.pesos/cot)*100)/100; _ecoIngUpdCell(id,'dolares',i.dolares); }
+  }
+  else if(campo==='dolares'){
+    i.dolares = parseFloat(val)||0; i.moneda='dolares';
+    if(cot>0){ i.pesos = Math.round(i.dolares*cot); _ecoIngUpdCell(id,'pesos',i.pesos); }
+  }
+  _ecoIngUpdTotales();
+  _ecoMarkDirty();
+  // refrescar KPIs del panel de fondo
+  if(document.getElementById('section-economia')?.classList.contains('active')) ecoRenderKPIsSafe();
+}
+function _ecoIngUpdCell(id, campo, val){
+  const tr=document.querySelector('#eco-ing-tbody tr[data-iid="'+id+'"]');
+  if(!tr) return;
+  const idx = campo==='pesos'?1:2;
+  const inp=tr.children[idx].querySelector('input');
+  if(inp && document.activeElement!==inp) inp.value = val;
+}
+function _ecoIngUpdTotales(){
+  const t=_ecoActivosTotales();
+  const p=document.getElementById('eco-ing-tot-pesos'), d=document.getElementById('eco-ing-tot-dolares');
+  if(p) p.textContent='$'+Math.round(t.pesos).toLocaleString('es-AR');
+  if(d) d.textContent='US$'+Math.round(t.dolares).toLocaleString('es-AR');
+}
+function _ecoIngDel(id){
+  _ecoState.ingresos=_ecoIngresos().filter(x=>x.id!==id);
+  _ecoMarkDirty();
+  const tr=document.querySelector('#eco-ing-tbody tr[data-iid="'+id+'"]');
+  if(tr) tr.remove();
+  _ecoIngUpdTotales();
+  if(document.getElementById('section-economia')?.classList.contains('active')) ecoRenderKPIsSafe();
+}
+// refresco seguro de KPIs (sin re-render completo de la tabla)
+function ecoRenderKPIsSafe(){
+  try{
+    const y=+_ecoState.year;
+    const gastos=_ecoState.gastos.filter(g=>_ecoGastoEnAnio(g,y));
+    const totMes=new Array(12).fill(0);
+    gastos.forEach(g=>{ for(let m=0;m<12;m++){ const v=_ecoVal(g,y,m); if(typeof v==='number') totMes[m]+=v; } });
+    ecoRenderKPIs(gastos,y,totMes);
+  }catch(e){}
 }
 
 function ecoChangeYear(y){
@@ -28920,9 +29096,21 @@ function ecoRenderKPIs(gastos, y, totMes){
   const mesesConGasto = totMes.filter(t=>t>0);
   const prom = mesesConGasto.length ? Math.round(mesesConGasto.reduce((a,b)=>a+b,0)/mesesConGasto.length) : 0;
   const K=(emoji,lbl,val,sub,color)=>'<div style="flex:1;min-width:150px;background:var(--card);border:1px solid var(--border);border-radius:11px;padding:11px 13px"><div style="font-size:10px;color:var(--text3);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+emoji+' '+lbl+'</div><div style="font-size:18px;font-weight:800;color:'+(color||'var(--text)')+';line-height:1.15;margin-top:2px">'+val+'</div><div style="font-size:9.5px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sub+'</div></div>';
+  // KPI dólar (con botón de config manual)
+  const cot = _ecoDolar.compra>0 ? _ecoDolar.compra : 0;
+  const cotVenta = _ecoDolar.venta>0 ? _ecoDolar.venta : 0;
+  const dolarHs = _ecoDolar.ts ? Math.round((Date.now()-_ecoDolar.ts)/3600000) : null;
+  const dolarSub = cot>0 ? ('venta $'+cotVenta.toLocaleString('es-AR')+(_ecoDolar.manual?' · manual':(dolarHs!=null?' · hace '+dolarHs+'h':''))) : 'tocá para configurar';
+  const kDolar='<div onclick="ecoDolarConfig()" title="Clic para actualizar o configurar manualmente" style="flex:1;min-width:150px;background:var(--card);border:1px solid var(--border);border-radius:11px;padding:11px 13px;cursor:pointer"><div style="font-size:10px;color:var(--text3);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">💵 DÓLAR OFICIAL (compra)</div><div style="font-size:18px;font-weight:800;color:#16a34a;line-height:1.15;margin-top:2px">'+(cot>0?'$'+cot.toLocaleString('es-AR'):'—')+'</div><div style="font-size:9.5px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+dolarSub+'</div></div>';
+  // KPI activos (ingresos)
+  const act=_ecoActivosTotales();
+  const kActivos='<div onclick="ecoOpenIngresos()" title="Clic para ver/editar ingresos" style="flex:1;min-width:150px;background:var(--card);border:1px solid var(--border);border-radius:11px;padding:11px 13px;cursor:pointer"><div style="font-size:10px;color:var(--text3);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">🏦 ACTIVOS</div><div style="font-size:18px;font-weight:800;color:var(--text);line-height:1.15;margin-top:2px">$'+Math.round(act.pesos).toLocaleString('es-AR')+'</div><div style="font-size:11px;color:#16a34a;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">US$'+Math.round(act.dolares).toLocaleString('es-AR')+'</div></div>';
+
   cont.innerHTML =
     K('💸','GASTADO '+ECO_MESES_FULL[mesRef].toUpperCase(), _ecoFmt(totMesActual), (y===cy?'mes en curso':'diciembre'), 'var(--text)')+
+    kDolar+
     K('🔮','ESTIMADO DEL MES', _ecoFmt(estimado), 'proyección con últimos importes', '#7c3aed')+
+    kActivos+
     K('🔴','POR PAGAR ('+y+')', _ecoFmt(porPagar), pendientes+' pago(s) rojos + amarillos', porPagar>0?'#dc2626':'var(--text)')+
     K('📊','PROMEDIO MENSUAL', _ecoFmt(prom), 'meses con gastos', 'var(--text)');
 }
@@ -29215,7 +29403,7 @@ function _ecoGrafDraw(){
 (function(){
   if(typeof showSection==='function'){
     const _oss=showSection;
-    showSection=function(id){ _oss.apply(this,arguments); if(id==='economia'){ try{ _ecoState.gastos.length||( _ecoState.gastos=_ecoLoad()); _ecoPintarVaciasGris(); ecoRender(); _ecoSyncDown(); }catch(e){ console.warn('[eco]',e.message); } } };
+    showSection=function(id){ _oss.apply(this,arguments); if(id==='economia'){ try{ _ecoDolarLoad(); _ecoState.gastos.length||( _ecoState.gastos=_ecoLoad()); _ecoPintarVaciasGris(); ecoRender(); _ecoSyncDown(); _ecoDolarFetch(); }catch(e){ console.warn('[eco]',e.message); } } };
   }
   window.addEventListener('beforeunload',()=>{ try{ _ecoFlush(); }catch(e){} });
   document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden'){ try{ _ecoFlush(); }catch(e){} } });
@@ -30268,6 +30456,14 @@ const BKP_SECTIONS = {
     icon: '💬',
     get: () => typeof persoGetMsgs === 'function' ? (persoGetMsgs() || []) : [],
   },
+  economia: {
+    label: 'Economía — gastos e ingresos',
+    icon: '💰',
+    get: () => {
+      if(typeof _ecoState === 'undefined') return null;
+      return { gastos: _ecoState.gastos||[], ingresos: _ecoState.ingresos||[], savedAt: Date.now() };
+    },
+  },
   // v118: 'seoKeywords' eliminado del backup — el SEO Tracker viejo fue descontinuado
   // por bloqueo de ML a /sites/MLA/search. Reemplazado por Termómetro SEO que
   // calcula todo client-side desde visitas (sin estado persistido).
@@ -30420,6 +30616,14 @@ async function bkpApplyImport(data, selection){
     if(selection.calCustom && Array.isArray(data.calCustom))       localStorage.setItem('impala_cal_custom', JSON.stringify(data.calCustom));
     if(selection.bdays && Array.isArray(data.bdays))               localStorage.setItem('impala_cal_birthdays', JSON.stringify(data.bdays));
     if(selection.pcHistory && Array.isArray(data.pcHistory))       localStorage.setItem('impala_calc_history', JSON.stringify(data.pcHistory));
+    // v210: Economía — gastos e ingresos
+    if(selection.economia && data.economia && Array.isArray(data.economia.gastos) && typeof _ecoState !== 'undefined'){
+      _ecoState.gastos = data.economia.gastos;
+      if(Array.isArray(data.economia.ingresos)) _ecoState.ingresos = data.economia.ingresos;
+      try{ localStorage.setItem(ECO_LS_KEY, JSON.stringify({ gastos:_ecoState.gastos, ingresos:_ecoState.ingresos, savedAt:Date.now() })); }catch(e){}
+      if(typeof ecoRender === 'function' && document.getElementById('section-economia')?.classList.contains('active')) ecoRender();
+      console.log('[Backup] Economía restaurada: '+data.economia.gastos.length+' gastos, '+((data.economia.ingresos||[]).length)+' ingresos');
+    }
     // v157: Personalizadas WA — mensajes (localStorage) y pedidos (índice KV del Worker)
     if(selection.persoMsgs && Array.isArray(data.persoMsgs) && typeof persoSaveMsgs === 'function'){
       persoSaveMsgs(data.persoMsgs);
