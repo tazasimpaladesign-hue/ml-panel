@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v213 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v214 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -29168,10 +29168,25 @@ function _ecoMetCompute(ym, prevRow){
   return row;
 }
 
-// lista ordenada de yms (seed + agregados), ascendente
+// lista CONTINUA de yms: desde el primer mes con datos hasta el mes actual
+// (o el último cargado si es posterior). Rellena huecos y agrega los meses
+// nuevos automáticamente cuando avanza el calendario.
 function _ecoMetYms(){
   const met=_ecoMet();
-  return Object.keys(met).sort();
+  const keys=Object.keys(met).sort();
+  const now=new Date();
+  const cur=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+  if(!keys.length) return [cur];
+  const first=keys[0];
+  const last=(keys[keys.length-1] > cur)? keys[keys.length-1] : cur;
+  const out=[];
+  let y=+first.slice(0,4), m=+first.slice(5,7);
+  const ly=+last.slice(0,4), lm=+last.slice(5,7);
+  while(y<ly || (y===ly && m<=lm)){
+    out.push(y+'-'+String(m).padStart(2,'0'));
+    m++; if(m>12){ m=1; y++; }
+  }
+  return out;
 }
 
 // autocompletar el mes actual: crea la fila, ipc/dólar si corresponde
@@ -29233,18 +29248,35 @@ function ecoOpenMetricas(){
       'Tocá una celda editable (borde punteado) para cargar o corregir. El dólar del mes en curso se completa solo a partir del día 10 con el oficial compra. '+
       '<b>Ahorro %</b> = saldo del mes ÷ ingresos totales (tu capacidad de ahorro).'+
     '</div>';
-  _ecoModalShell(inner, 1250);
+  _ecoModalShell(inner, 1900);
   _ecoMetRedraw();
 }
+// colores por grupo de columnas (como el Excel: las relacionadas comparten color)
+const _ECO_MET_COL={ mes:'#e9ebf0', ipc:'#dbeafe', dolar:'#fef9c3', cris:'#dcfce7',
+  belen:'#fce7f3', ventas:'#ffedd5', taza:'#f3e8ff', difs:'#cffafe', gastos:'#fee2e2', tot:'#e0e7ff' };
 function _ecoMetHeaders(){
-  const th=(t,w,tip)=>'<th title="'+(tip||'')+'" style="position:sticky;top:0;background:#e9ebf0;color:#0f172a;padding:6px 5px;border:1px solid '+_ECO_BRD+';font-size:9.5px;white-space:nowrap;z-index:2;'+(w?'min-width:'+w+'px;':'')+'">'+t+'</th>';
-  return th('MES',72)+th('IPC %',44,'Inflación mensual INDEC (automático)')+th('Dólar $',56,'Cotización oficial compra del día 10 (o hábil siguiente)')+th('Δ $ %',44,'Variación del dólar vs mes anterior')+
-    th('Sueldo C $',72,'Sueldo Cristian en pesos')+th('Δ C %',44)+th('C US$',52)+
-    th('Sueldo B $',72,'Sueldo Belén en pesos')+th('Δ B %',44)+th('B US$',52)+
-    th('Ventas $',74,'Ingresos del mes de Cuenta Impala (automático)')+th('Ventas US$',58)+th('Taza US$',50,'Precio de venta Taza Mágica ÷ dólar')+
-    th('C−IPC',46,'Δ sueldo Cristian menos IPC (le ganó o perdió a la inflación)')+th('B−IPC',46,'Δ sueldo Belén menos IPC')+
-    th('Gastos $',76,'Planilla (sin Convenio/Contador/Monotributo) + egresos Cuenta Impala (automático)')+
-    th('Ing US$',56,'Ventas US$ + sueldos US$')+th('Gas US$',56,'Gastos ÷ dólar')+th('SALDO US$',62,'Ingresos − Gastos en dólares')+th('Ahorro %',50,'Saldo ÷ Ingresos totales');
+  const th=(t,w,tip,bg)=>'<th title="'+(tip||t)+'" style="position:sticky;top:0;background:'+(bg||'#e9ebf0')+';color:#0f172a;padding:6px 5px;border:1px solid '+_ECO_BRD+';font-size:9.5px;white-space:nowrap;z-index:2;'+(w?'min-width:'+w+'px;':'')+'">'+t+'</th>';
+  const C=_ECO_MET_COL;
+  return th('MES',72,'Mes y año',C.mes)+
+    th('IPC %',44,'Ipc Mensual (inflación INDEC, automático)',C.ipc)+
+    th('Dólar $',56,'Cotización Dólar del día 10 de cada mes o el próximo día hábil (oficial compra)',C.dolar)+
+    th('Δ $ %',44,'Diferencia % Dólar: variación en porcentaje del dólar en comparación al mes anterior',C.dolar)+
+    th('Sueldo C $',72,'Sueldo en $ Cristian (cobra en pesos)',C.cris)+
+    th('Δ C %',44,'Diferencia en % $ Sueldo Cristian en comparación al mes anterior',C.cris)+
+    th('C US$',52,'Sueldo en U$S Cristian: convertido a dólares con la cotización del mes',C.cris)+
+    th('Sueldo B $',72,'Sueldo en $ Belén (cobra en pesos)',C.belen)+
+    th('Δ B %',44,'Diferencia en % $ Sueldo Belén en comparación al mes anterior',C.belen)+
+    th('B US$',52,'Sueldo en U$S Belén: convertido a dólares con la cotización del mes',C.belen)+
+    th('Ventas $',74,'Ventas Impala: total de ventas de Cuenta Impala, solo ingresos del mes (automático)',C.ventas)+
+    th('Ventas US$',58,'Ventas en U$S Impala: convertidas a dólares con la cotización del mes',C.ventas)+
+    th('Taza US$',50,'Precio Taza Mágica en U$S: precio de venta convertido a dólares con la cotización del mes',C.taza)+
+    th('C−IPC',46,'Diferencia Cristian: % Sueldo menos el % Ipc (le ganó o perdió a la inflación)',C.difs)+
+    th('B−IPC',46,'Diferencia Belén: % Sueldo menos el % Ipc (le ganó o perdió a la inflación)',C.difs)+
+    th('Gastos $',76,'Gastos Totales: gastos del mes de la planilla de Economía (sin Convenio Multilateral, Contador Ezequiel ni Afip Monotributo) + egresos del mes de Cuenta Impala (automático)',C.gastos)+
+    th('Ing US$',56,'Ingresos Totales en U$S: Ventas en U$S Impala + Sueldo en U$S Belén + Sueldo en U$S Cristian',C.tot)+
+    th('Gas US$',56,'Gastos Totales en U$S: Gastos Totales dividido la cotización del dólar',C.tot)+
+    th('SALDO US$',62,'Saldo en U$S: Ingresos Totales en U$S menos Gastos Totales en U$S (saldo del mes, puede ser positivo o negativo)',C.tot)+
+    th('Ahorro %',50,'PORCENTAJE (tasa de ahorro): Saldo ÷ Ingresos Totales — qué porcentaje de tus ingresos lográs ahorrar',C.tot);
 }
 function _ecoMetRedraw(){
   const tb=document.getElementById('eco-met-tbody');
@@ -29255,36 +29287,36 @@ function _ecoMetRedraw(){
   yms.forEach(ym=>{ const r=_ecoMetCompute(ym, prev); rows.push(r); prev=r; });
   const MESES_C=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
   const lbl=ym=>MESES_C[+ym.slice(5,7)-1]+' '+ym.slice(0,4);
-  const tdC=(html,extra)=>'<td style="padding:4px 5px;border:1px solid '+_ECO_BRD+';text-align:right;white-space:nowrap;'+(extra||'')+'">'+html+'</td>';
-  const edit=(ym,campo,val,fmt,auto)=>{
+  const C=_ECO_MET_COL;
+  const tdC=(html,bg,extra)=>'<td style="padding:4px 5px;border:1px solid '+_ECO_BRD+';text-align:right;white-space:nowrap;background:'+(bg||'#fff')+';'+(extra||'')+'">'+html+'</td>';
+  const edit=(ym,campo,val,fmt,auto,bg)=>{
     const disp = (val==null)? '—' : fmt(val);
     const badge = auto? ' <span style="opacity:.55;font-size:8px" title="automático">⚙</span>' : '';
-    return '<td onclick="_ecoMetEdit(\''+ym+'\',\''+campo+'\')" style="padding:4px 5px;border:1px dashed #94a3b8;text-align:right;white-space:nowrap;cursor:pointer;background:#fdfdfd" title="Clic para editar">'+disp+badge+'</td>';
+    return '<td onclick="_ecoMetEdit(\''+ym+'\',\''+campo+'\')" style="padding:4px 5px;border:1px dashed #64748b;text-align:right;white-space:nowrap;cursor:pointer;background:'+(bg||'#fff')+'" title="Clic para editar">'+disp+badge+'</td>';
   };
-  tb.innerHTML = rows.slice().reverse().map((r,i)=>{
-    const bg=(i%2===0)?'#ffffff':'#f4f7fb';
+  tb.innerHTML = rows.slice().reverse().map(r=>{
     const saldoCol = r.saldo==null?'#94a3b8':(r.saldo>=0?'#16a34a':'#dc2626');
-    return '<tr style="background:'+bg+'">'+
-      '<td style="padding:4px 6px;border:1px solid '+_ECO_BRD+';font-weight:700;white-space:nowrap;position:sticky;left:0;background:#e9ebf0;z-index:1">'+lbl(r.ym)+'</td>'+
-      edit(r.ym,'ipc', r.ipc, n=>(+n).toFixed(1)+'%', r.ipcAuto)+
-      edit(r.ym,'d', r.d, n=>'$'+(+n).toLocaleString('es-AR'), false)+
-      tdC(_ECO_MET_FMTP(r.dDif),'color:'+_ecoMetPctColor(r.dDif))+
-      edit(r.ym,'sc', r.sc, n=>'$'+Math.round(n).toLocaleString('es-AR'), false)+
-      tdC(_ECO_MET_FMTP(r.scDif),'color:'+_ecoMetPctColor(r.scDif))+
-      tdC(r.scUsd==null?'—':Math.round(r.scUsd).toLocaleString('es-AR'))+
-      edit(r.ym,'sb', r.sb, n=>'$'+Math.round(n).toLocaleString('es-AR'), false)+
-      tdC(_ECO_MET_FMTP(r.sbDif),'color:'+_ecoMetPctColor(r.sbDif))+
-      tdC(r.sbUsd==null?'—':Math.round(r.sbUsd).toLocaleString('es-AR'))+
-      edit(r.ym,'v', r.v, n=>'$'+Math.round(n).toLocaleString('es-AR'), r.vAuto)+
-      tdC(r.vUsd==null?'—':Math.round(r.vUsd).toLocaleString('es-AR'))+
-      edit(r.ym,'tz', r.tzUsd, n=>(+n).toFixed(2), false)+
-      tdC(_ECO_MET_FMTP(r.nDif),'color:'+_ecoMetPctColor(r.nDif)+';font-weight:600')+
-      tdC(_ECO_MET_FMTP(r.oDif),'color:'+_ecoMetPctColor(r.oDif)+';font-weight:600')+
-      edit(r.ym,'g', r.g, n=>'$'+Math.round(n).toLocaleString('es-AR'), r.gAuto)+
-      tdC(r.qIng==null?'—':Math.round(r.qIng).toLocaleString('es-AR'),'font-weight:600')+
-      tdC(r.gUsd==null?'—':Math.round(r.gUsd).toLocaleString('es-AR'))+
-      tdC(r.saldo==null?'—':(r.saldo>=0?'+':'')+Math.round(r.saldo).toLocaleString('es-AR'),'color:'+saldoCol+';font-weight:800')+
-      tdC(_ECO_MET_FMTP(r.ahorro,1),'color:'+saldoCol+';font-weight:700')+
+    return '<tr>'+
+      '<td style="padding:4px 6px;border:1px solid '+_ECO_BRD+';font-weight:700;white-space:nowrap;position:sticky;left:0;background:'+C.mes+';z-index:1">'+lbl(r.ym)+'</td>'+
+      edit(r.ym,'ipc', r.ipc, n=>(+n).toFixed(1)+'%', r.ipcAuto, C.ipc)+
+      edit(r.ym,'d', r.d, n=>'$'+(+n).toLocaleString('es-AR'), false, C.dolar)+
+      tdC(_ECO_MET_FMTP(r.dDif),C.dolar,'color:'+_ecoMetPctColor(r.dDif))+
+      edit(r.ym,'sc', r.sc, n=>'$'+Math.round(n).toLocaleString('es-AR'), false, C.cris)+
+      tdC(_ECO_MET_FMTP(r.scDif),C.cris,'color:'+_ecoMetPctColor(r.scDif))+
+      tdC(r.scUsd==null?'—':Math.round(r.scUsd).toLocaleString('es-AR'),C.cris)+
+      edit(r.ym,'sb', r.sb, n=>'$'+Math.round(n).toLocaleString('es-AR'), false, C.belen)+
+      tdC(_ECO_MET_FMTP(r.sbDif),C.belen,'color:'+_ecoMetPctColor(r.sbDif))+
+      tdC(r.sbUsd==null?'—':Math.round(r.sbUsd).toLocaleString('es-AR'),C.belen)+
+      edit(r.ym,'v', r.v, n=>'$'+Math.round(n).toLocaleString('es-AR'), r.vAuto, C.ventas)+
+      tdC(r.vUsd==null?'—':Math.round(r.vUsd).toLocaleString('es-AR'),C.ventas)+
+      edit(r.ym,'tz', r.tzUsd, n=>(+n).toFixed(2), false, C.taza)+
+      tdC(_ECO_MET_FMTP(r.nDif),C.difs,'color:'+_ecoMetPctColor(r.nDif)+';font-weight:600')+
+      tdC(_ECO_MET_FMTP(r.oDif),C.difs,'color:'+_ecoMetPctColor(r.oDif)+';font-weight:600')+
+      edit(r.ym,'g', r.g, n=>'$'+Math.round(n).toLocaleString('es-AR'), r.gAuto, C.gastos)+
+      tdC(r.qIng==null?'—':Math.round(r.qIng).toLocaleString('es-AR'),C.tot,'font-weight:600')+
+      tdC(r.gUsd==null?'—':Math.round(r.gUsd).toLocaleString('es-AR'),C.tot)+
+      tdC(r.saldo==null?'—':(r.saldo>=0?'+':'')+Math.round(r.saldo).toLocaleString('es-AR'),C.tot,'color:'+saldoCol+';font-weight:800')+
+      tdC(_ECO_MET_FMTP(r.ahorro,1),C.tot,'color:'+saldoCol+';font-weight:700')+
     '</tr>';
   }).join('');
   _ecoMetResumen(rows);
@@ -29302,10 +29334,50 @@ function _ecoMetResumen(rows){
   const ahorro12=u12.length? u12.reduce((a,r)=>a+(r.ahorro||0),0)/u12.length : null;
   const box=(lbl,val,color,sub)=>'<div style="flex:1;min-width:130px;background:#f8fafc;border:1px solid '+_ECO_BRD+';border-radius:9px;padding:8px 10px"><div style="font-size:9px;color:'+_ECO_TXT3+';font-weight:700">'+lbl+'</div><div style="font-size:15px;font-weight:800;color:'+(color||_ECO_TXT)+'">'+val+'</div><div style="font-size:9px;color:'+_ECO_TXT3+'">'+(sub||'')+'</div></div>';
   const MESES_C=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  const lblYm=ym=>MESES_C[+ym.slice(5,7)-1]+' '+ym.slice(2,4);
+
+  // v214: KPIs extra — sueldo Cristian vs inflación (12 meses)
+  const conSc=rows.filter(r=>r.sc!=null&&r.sc>0);
+  let kSueldoIpc='', kSueldoUsd='';
+  if(conSc.length>=2){
+    const scNow=conSc[conSc.length-1];
+    const sc12=conSc.length>12? conSc[conSc.length-13] : conSc[0];
+    if(sc12.sc>0 && sc12.ym!==scNow.ym){
+      const scVar=(scNow.sc-sc12.sc)/sc12.sc*100;
+      // inflación acumulada compuesta en la misma ventana (después de sc12 hasta scNow)
+      let f=1, nIpc=0;
+      rows.forEach(r=>{ if(r.ym>sc12.ym && r.ym<=scNow.ym && r.ipc!=null){ f*=(1+r.ipc/100); nIpc++; } });
+      if(nIpc>0){
+        const ipcAcum=(f-1)*100;
+        const dif=scVar-ipcAcum;
+        kSueldoIpc=box('SUELDO C vs IPC ('+lblYm(sc12.ym)+'→'+lblYm(scNow.ym)+')',
+          (dif>=0?'+':'')+dif.toFixed(1)+' pts', dif>=0?'#16a34a':'#dc2626',
+          'sueldo '+_ECO_MET_FMTP(scVar)+' · ipc +'+ipcAcum.toFixed(1)+'%');
+      }
+    }
+    // sueldo C en dólares: último vs hace 12 meses
+    if(scNow.scUsd!=null){
+      const sc12u=(sc12.scUsd!=null&&sc12.ym!==scNow.ym)? sc12.scUsd : null;
+      const varU=sc12u? ((scNow.scUsd-sc12u)/sc12u*100) : null;
+      kSueldoUsd=box('SUELDO C EN US$ ('+lblYm(scNow.ym)+')',
+        'US$'+Math.round(scNow.scUsd).toLocaleString('es-AR'),
+        varU==null?_ECO_TXT:(varU>=0?'#16a34a':'#dc2626'),
+        varU==null?'':('vs '+lblYm(sc12.ym)+': '+_ECO_MET_FMTP(varU)));
+    }
+  }
+  // mejor y peor mes de los últimos 12
+  let kMejor='', kPeor='';
+  if(u12.length){
+    const mejor=u12.reduce((a,r)=>r.saldo>a.saldo?r:a);
+    const peor=u12.reduce((a,r)=>r.saldo<a.saldo?r:a);
+    kMejor=box('MEJOR MES (12m)','+US$'+Math.round(mejor.saldo).toLocaleString('es-AR'),'#16a34a',lblYm(mejor.ym)+' · ahorro '+_ECO_MET_FMTP(mejor.ahorro));
+    kPeor=box('PEOR MES (12m)',(peor.saldo>=0?'+':'')+'US$'+Math.round(peor.saldo).toLocaleString('es-AR'),peor.saldo>=0?'#16a34a':'#dc2626',lblYm(peor.ym)+' · ahorro '+_ECO_MET_FMTP(peor.ahorro));
+  }
   cont.innerHTML =
     (ult? box('ÚLTIMO SALDO ('+MESES_C[+ult.ym.slice(5,7)-1]+' '+ult.ym.slice(0,4)+')', (ult.saldo>=0?'+':'')+'US$'+Math.round(ult.saldo).toLocaleString('es-AR'), ult.saldo>=0?'#16a34a':'#dc2626', 'ahorro '+_ECO_MET_FMTP(ult.ahorro)) : '')+
     (prom12!=null? box('PROMEDIO 12 MESES', (prom12>=0?'+':'')+'US$'+Math.round(prom12).toLocaleString('es-AR'), prom12>=0?'#16a34a':'#dc2626', 'ahorro medio '+_ECO_MET_FMTP(ahorro12)) : '')+
-    (acum!=null? box('ACUMULADO '+anio, (acum>=0?'+':'')+'US$'+Math.round(acum).toLocaleString('es-AR'), acum>=0?'#16a34a':'#dc2626', anioRows.length+' mes(es)') : '');
+    (acum!=null? box('ACUMULADO '+anio, (acum>=0?'+':'')+'US$'+Math.round(acum).toLocaleString('es-AR'), acum>=0?'#16a34a':'#dc2626', anioRows.length+' mes(es)') : '')+
+    kSueldoIpc + kSueldoUsd + kMejor + kPeor;
 }
 // ── edición de celdas ──
 const _ECO_MET_CAMPOS={
