@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v214 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v215 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -28670,12 +28670,12 @@ let _ecoSel = [];  // selección múltiple de celdas: [{gid, mes}]
 function _ecoLoad(){
   try{
     const raw = localStorage.getItem(ECO_LS_KEY);
-    if(raw){ const d=JSON.parse(raw); if(d && Array.isArray(d.gastos)){ if(Array.isArray(d.ingresos)) _ecoState.ingresos=d.ingresos; if(d.metricas&&typeof d.metricas==='object') _ecoState.metricas=d.metricas; return d.gastos; } }
+    if(raw){ const d=JSON.parse(raw); if(d && Array.isArray(d.gastos)){ if(Array.isArray(d.ingresos)) _ecoState.ingresos=d.ingresos; if(d.metricas&&typeof d.metricas==='object') _ecoState.metricas=d.metricas; if(Array.isArray(d.acreditar)) _ecoState.acreditar=d.acreditar; if(Array.isArray(d.ahorros)) _ecoState.ahorros=d.ahorros; return d.gastos; } }
   }catch(e){}
   try{ return JSON.parse(ECO_SEED_JSON); }catch(e){ return []; }
 }
 function _ecoSaveLS(){
-  try{ localStorage.setItem(ECO_LS_KEY, JSON.stringify({ gastos:_ecoState.gastos, ingresos:_ecoState.ingresos||[], metricas:_ecoState.metricas||{}, savedAt:Date.now() })); }catch(e){}
+  try{ localStorage.setItem(ECO_LS_KEY, JSON.stringify({ gastos:_ecoState.gastos, ingresos:_ecoState.ingresos||[], metricas:_ecoState.metricas||{}, acreditar:_ecoState.acreditar||[], ahorros:_ecoState.ahorros||[], savedAt:Date.now() })); }catch(e){}
 }
 function _ecoMarkDirty(){
   _ecoState.dirty = true; _ecoSaveLS();
@@ -28688,7 +28688,7 @@ async function _ecoFlush(){
   try{
     await fetch(WORKER + '/api/backup', {
       method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
-      body: JSON.stringify({ economia: { gastos:_ecoState.gastos, ingresos:_ecoState.ingresos||[], metricas:_ecoState.metricas||{}, savedAt:Date.now() } })
+      body: JSON.stringify({ economia: { gastos:_ecoState.gastos, ingresos:_ecoState.ingresos||[], metricas:_ecoState.metricas||{}, acreditar:_ecoState.acreditar||[], ahorros:_ecoState.ahorros||[], savedAt:Date.now() } })
     });
   }catch(e){ console.warn('[eco] guardar nube:', e.message); }
 }
@@ -28704,6 +28704,8 @@ async function _ecoSyncDown(){
         _ecoState.gastos = d.economia.gastos;
         if(Array.isArray(d.economia.ingresos)) _ecoState.ingresos = d.economia.ingresos;
         if(d.economia.metricas && typeof d.economia.metricas==='object') _ecoState.metricas = d.economia.metricas;
+        if(Array.isArray(d.economia.acreditar)) _ecoState.acreditar = d.economia.acreditar;
+        if(Array.isArray(d.economia.ahorros)) _ecoState.ahorros = d.economia.ahorros;
         _ecoSaveLS();
         console.log('[eco] sincronizado desde la nube (guardado remoto '+new Date(remoteTs).toLocaleString('es-AR')+')');
         if(document.getElementById('section-economia')?.classList.contains('active')) ecoRender();
@@ -29117,6 +29119,18 @@ function _ecoMetGastosPlanilla(ym){
 // resumen cta (ventas ing / egresos eg) para un ym — usa el resumen del bootstrap
 function _ecoMetCta(ym){
   try{
+    // v215: recalcular SIEMPRE desde los chunks locales usando la fecha de cada
+    // operación (evita el desfasaje horario del resumen cacheado del bootstrap).
+    if(typeof _ctaState!=='undefined' && _ctaState && _ctaState.chunks && _ctaState.chunks[ym]){
+      const ch=_ctaState.chunks[ym]||[];
+      let ing=0, eg=0;
+      ch.forEach(o=>{
+        if(o.tipo==='ingreso'){ ing += (+o.monto||0) + (+o.envio||0); }
+        else { eg += (+o.monto||0); }
+      });
+      return { ing, eg };
+    }
+    // fallback: si no está el chunk local, usar el resumen del bootstrap
     if(typeof _ctaState!=='undefined' && _ctaState && _ctaState.resumen && _ctaState.resumen[ym]){
       const r=_ctaState.resumen[ym];
       return { ing:(+r.ing||0), eg:(+r.eg||0) };
@@ -29206,16 +29220,34 @@ function _ecoMetAutoFill(){
 // asegura que el resumen de cta esté disponible (bootstrap liviano si falta)
 async function _ecoMetEnsureCta(){
   try{
-    if(typeof _ctaState!=='undefined' && _ctaState && _ctaState.resumen && Object.keys(_ctaState.resumen).length) return;
-    const r=await fetch(WORKER+'/api/cta/bootstrap');
-    const d=await r.json();
-    if(d && d.ok && typeof _ctaState!=='undefined'){
-      _ctaState.resumen = d.resumen||{};
-      if(!_ctaState.months || !_ctaState.months.length) _ctaState.months=d.months||[];
-      // refrescar la tabla si el modal está abierto
-      if(document.getElementById('eco-met-tbody')) _ecoMetRedraw();
+    if(typeof _ctaState==='undefined' || !_ctaState) return;
+    // bootstrap si falta (para tener la lista de meses)
+    if(!_ctaState.resumen || !Object.keys(_ctaState.resumen).length){
+      const r=await fetch(WORKER+'/api/cta/bootstrap');
+      const d=await r.json();
+      if(d && d.ok){
+        _ctaState.resumen = d.resumen||{};
+        if(!_ctaState.months || !_ctaState.months.length) _ctaState.months=d.months||[];
+      }
     }
-  }catch(e){ console.warn('[met] cta bootstrap:', e.message); }
+    // v215: cargar los CHUNKS de cada mes visible en métricas, para poder
+    // recalcular ventas/egresos con la fecha local exacta (sin desfasaje).
+    const yms=_ecoMetYms();
+    if(!_ctaState.chunks) _ctaState.chunks={};
+    if(!_ctaState.loaded) _ctaState.loaded=new Set();
+    const need=yms.filter(ym=>!_ctaState.loaded.has(ym));
+    for(let i=0;i<need.length;i+=5){
+      await Promise.all(need.slice(i,i+5).map(async ym=>{
+        try{
+          const r=await fetch(WORKER+'/api/cta/ops/'+ym);
+          const d=await r.json();
+          _ctaState.chunks[ym]=(d.ok && Array.isArray(d.ops))?d.ops:[];
+          _ctaState.loaded.add(ym);
+        }catch(e){}
+      }));
+    }
+    if(document.getElementById('eco-met-tbody')) _ecoMetRedraw();
+  }catch(e){ console.warn('[met] cta ensure:', e.message); }
 }
 
 const _ECO_MET_FMT$ = n => (n==null)? '—' : '$'+Math.round(n).toLocaleString('es-AR');
@@ -29255,7 +29287,7 @@ function ecoOpenMetricas(){
 const _ECO_MET_COL={ mes:'#e9ebf0', ipc:'#dbeafe', dolar:'#fef9c3', cris:'#dcfce7',
   belen:'#fce7f3', ventas:'#ffedd5', taza:'#f3e8ff', difs:'#cffafe', gastos:'#fee2e2', tot:'#e0e7ff' };
 function _ecoMetHeaders(){
-  const th=(t,w,tip,bg)=>'<th title="'+(tip||t)+'" style="position:sticky;top:0;background:'+(bg||'#e9ebf0')+';color:#0f172a;padding:6px 5px;border:1px solid '+_ECO_BRD+';font-size:9.5px;white-space:nowrap;z-index:2;'+(w?'min-width:'+w+'px;':'')+'">'+t+'</th>';
+  const th=(t,w,tip,bg)=>'<th title="'+(tip||t)+'" style="position:sticky;top:0;background:'+(bg||'#e9ebf0')+';color:#0f172a;padding:6px 5px;border:1px solid '+_ECO_BRD+';font-size:9.5px;font-weight:800;white-space:nowrap;z-index:2;'+(w?'min-width:'+w+'px;':'')+'">'+t+'</th>';
   const C=_ECO_MET_COL;
   return th('MES',72,'Mes y año',C.mes)+
     th('IPC %',44,'Ipc Mensual (inflación INDEC, automático)',C.ipc)+
@@ -29288,11 +29320,11 @@ function _ecoMetRedraw(){
   const MESES_C=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
   const lbl=ym=>MESES_C[+ym.slice(5,7)-1]+' '+ym.slice(0,4);
   const C=_ECO_MET_COL;
-  const tdC=(html,bg,extra)=>'<td style="padding:4px 5px;border:1px solid '+_ECO_BRD+';text-align:right;white-space:nowrap;background:'+(bg||'#fff')+';'+(extra||'')+'">'+html+'</td>';
+  const tdC=(html,bg,extra)=>'<td style="padding:4px 5px;border:1px solid '+_ECO_BRD+';text-align:right;white-space:nowrap;font-weight:600;background:'+(bg||'#fff')+';'+(extra||'')+'">'+html+'</td>';
   const edit=(ym,campo,val,fmt,auto,bg)=>{
     const disp = (val==null)? '—' : fmt(val);
     const badge = auto? ' <span style="opacity:.55;font-size:8px" title="automático">⚙</span>' : '';
-    return '<td onclick="_ecoMetEdit(\''+ym+'\',\''+campo+'\')" style="padding:4px 5px;border:1px dashed #64748b;text-align:right;white-space:nowrap;cursor:pointer;background:'+(bg||'#fff')+'" title="Clic para editar">'+disp+badge+'</td>';
+    return '<td onclick="_ecoMetEdit(\''+ym+'\',\''+campo+'\')" style="padding:4px 5px;border:1px dashed #64748b;text-align:right;white-space:nowrap;cursor:pointer;font-weight:600;background:'+(bg||'#fff')+'" title="Clic para editar">'+disp+badge+'</td>';
   };
   tb.innerHTML = rows.slice().reverse().map(r=>{
     const saldoCol = r.saldo==null?'#94a3b8':(r.saldo>=0?'#16a34a':'#dc2626');
@@ -29437,6 +29469,116 @@ function _ecoMetAddMes(){
   _ecoMarkDirty();
   _ecoMetRedraw();
   showToast('Mes '+ym+' agregado','success');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v215: LISTAS EXTRA — "Activos a acreditarse" y "Ahorros" (mismo formato que
+// Activos). Cada una es una lista de {id,nombre,pesos,dolares} con conversión.
+// ═══════════════════════════════════════════════════════════════════════════
+// _ecoState.acreditar = [...], _ecoState.ahorros = [...]
+function _ecoLista(tipo){
+  if(!Array.isArray(_ecoState[tipo])) _ecoState[tipo]=[];
+  return _ecoState[tipo];
+}
+function _ecoListaTotales(tipo){
+  let pesos=0, dolares=0;
+  _ecoLista(tipo).forEach(i=>{ pesos+=(+i.pesos||0); dolares+=(+i.dolares||0); });
+  return { pesos, dolares };
+}
+const _ECO_LISTA_CFG={
+  acreditar:{ titulo:'⏳ Activos a acreditarse', desc:'Activos que vas a recibir en el futuro pero que todavía no tenés.' },
+  ahorros:{ titulo:'🐷 Ahorros', desc:'Activos que tenés ahorrados y no vas a tocar por un tiempo.' },
+};
+function ecoOpenLista(tipo){
+  const cfg=_ECO_LISTA_CFG[tipo]; if(!cfg) return;
+  const cot = _ecoDolar.compra>0 ? _ecoDolar.compra : 0;
+  const totales=_ecoListaTotales(tipo);
+  const rows=_ecoLista(tipo).slice().sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||'','es',{sensitivity:'base'})).map((i,idx)=>_ecoListaRow(tipo,i,idx)).join('');
+  const inner=
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'+
+      '<div style="font-size:16px;font-weight:800;color:'+_ECO_TXT+'">'+cfg.titulo+'</div>'+
+      '<button onclick="_ecoCellClose()" style="border:none;background:#eef2f7;width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:16px;color:'+_ECO_TXT2+'">✕</button>'+
+    '</div>'+
+    '<div style="font-size:11px;color:'+_ECO_TXT3+';margin-bottom:12px">'+cfg.desc+' Cargá pesos o dólares y se convierte solo con el oficial COMPRA ($'+(cot?cot.toLocaleString('es-AR'):'—')+').</div>'+
+    '<table style="width:100%;border-collapse:collapse;font-size:12.5px">'+
+      '<thead><tr style="background:#f1f5f9">'+
+        '<th style="text-align:left;padding:7px 8px;border:1px solid '+_ECO_BRD+';color:'+_ECO_TXT2+'">Nombre</th>'+
+        '<th style="padding:7px 8px;border:1px solid '+_ECO_BRD+';color:#1d4ed8;width:120px">Pesos</th>'+
+        '<th style="padding:7px 8px;border:1px solid '+_ECO_BRD+';color:#16a34a;width:120px">Dólares</th>'+
+        '<th style="width:34px;border:1px solid '+_ECO_BRD+'"></th>'+
+      '</tr></thead>'+
+      '<tbody id="eco-lista-tbody">'+rows+'</tbody>'+
+      '<tfoot><tr style="background:#1e293b;color:#fff;font-weight:800">'+
+        '<td style="padding:8px;border:1px solid '+_ECO_BRD+'">TOTAL</td>'+
+        '<td id="eco-lista-tot-pesos" style="padding:8px;border:1px solid '+_ECO_BRD+';text-align:right">$'+Math.round(totales.pesos).toLocaleString('es-AR')+'</td>'+
+        '<td id="eco-lista-tot-dolares" style="padding:8px;border:1px solid '+_ECO_BRD+';text-align:right">US$'+Math.round(totales.dolares).toLocaleString('es-AR')+'</td>'+
+        '<td style="border:1px solid '+_ECO_BRD+'"></td>'+
+      '</tr></tfoot>'+
+    '</table>'+
+    '<button onclick="_ecoListaAdd(\''+tipo+'\')" style="margin-top:12px;padding:9px 14px;border:1px dashed #93c5fd;background:#eff6ff;color:#1d4ed8;border-radius:9px;font-weight:600;cursor:pointer;font-size:13px">➕ Agregar</button>'+
+    '<div style="font-size:10.5px;color:'+_ECO_TXT3+';margin-top:10px">Se guarda solo y se sincroniza entre PCs.</div>';
+  _ecoModalShell(inner, 560);
+}
+function _ecoListaRow(tipo,i,idx){
+  const bg=(idx%2===0)?'#f8fafc':'#eef2f9';
+  return '<tr data-iid="'+i.id+'" style="background:'+bg+'">'+
+    '<td style="padding:3px;border:1px solid '+_ECO_BRD+'"><input value="'+(i.nombre||'').replace(/"/g,'&quot;')+'" oninput="_ecoListaEdit(\''+tipo+'\',\''+i.id+'\',\'nombre\',this.value)" placeholder="Ej: Plazo fijo" style="width:100%;border:none;padding:6px;font-size:12.5px;background:transparent;color:'+_ECO_TXT+'"></td>'+
+    '<td style="padding:3px;border:1px solid '+_ECO_BRD+'"><input type="text" inputmode="numeric" value="'+_ecoIngFmtNum(i.pesos)+'" oninput="_ecoListaEdit(\''+tipo+'\',\''+i.id+'\',\'pesos\',this.value)" onblur="_ecoListaFmtBlur(this,\''+tipo+'\',\''+i.id+'\',\'pesos\')" placeholder="0" style="width:100%;border:none;padding:6px;font-size:12.5px;text-align:right;background:transparent;color:'+_ECO_TXT+'"></td>'+
+    '<td style="padding:3px;border:1px solid '+_ECO_BRD+'"><input type="text" inputmode="numeric" value="'+_ecoIngFmtNum(i.dolares)+'" oninput="_ecoListaEdit(\''+tipo+'\',\''+i.id+'\',\'dolares\',this.value)" onblur="_ecoListaFmtBlur(this,\''+tipo+'\',\''+i.id+'\',\'dolares\')" placeholder="0" style="width:100%;border:none;padding:6px;font-size:12.5px;text-align:right;background:transparent;color:'+_ECO_TXT+'"></td>'+
+    '<td style="text-align:center;border:1px solid '+_ECO_BRD+'"><button onclick="_ecoListaDel(\''+tipo+'\',\''+i.id+'\')" title="Eliminar" style="border:none;background:transparent;color:#dc2626;cursor:pointer;font-size:14px">🗑️</button></td>'+
+  '</tr>';
+}
+function _ecoListaFmtBlur(inp,tipo,id,campo){
+  const i=_ecoLista(tipo).find(x=>x.id===id); if(!i) return;
+  inp.value=_ecoIngFmtNum(i[campo]);
+}
+function _ecoListaAdd(tipo){
+  _ecoLista(tipo).push({ id:'x'+Date.now(), nombre:'', pesos:0, dolares:0 });
+  _ecoMarkDirty();
+  _ecoListaRedraw(tipo);
+}
+function _ecoListaRedraw(tipo){
+  const tb=document.getElementById('eco-lista-tbody');
+  if(!tb) return;
+  const ord=_ecoLista(tipo).slice().sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||'','es',{sensitivity:'base'}));
+  tb.innerHTML=ord.map((i,idx)=>_ecoListaRow(tipo,i,idx)).join('');
+}
+function _ecoListaEdit(tipo,id,campo,val){
+  const i=_ecoLista(tipo).find(x=>x.id===id); if(!i) return;
+  const cot=_ecoDolar.compra>0?_ecoDolar.compra:0;
+  if(campo==='nombre'){ i.nombre=val; }
+  else if(campo==='pesos'){
+    i.pesos=_ecoIngParse(val);
+    if(cot>0){ i.dolares=Math.round((i.pesos/cot)*100)/100; _ecoListaUpdCell(id,'dolares',i.dolares); }
+  }
+  else if(campo==='dolares'){
+    i.dolares=_ecoIngParse(val);
+    if(cot>0){ i.pesos=Math.round(i.dolares*cot); _ecoListaUpdCell(id,'pesos',i.pesos); }
+  }
+  _ecoListaUpdTotales(tipo);
+  _ecoMarkDirty();
+  if(document.getElementById('section-economia')?.classList.contains('active')) ecoRenderKPIsSafe();
+}
+function _ecoListaUpdCell(id,campo,val){
+  const tr=document.querySelector('#eco-lista-tbody tr[data-iid="'+id+'"]');
+  if(!tr) return;
+  const idx=campo==='pesos'?1:2;
+  const inp=tr.children[idx].querySelector('input');
+  if(inp && document.activeElement!==inp) inp.value=_ecoIngFmtNum(val);
+}
+function _ecoListaUpdTotales(tipo){
+  const t=_ecoListaTotales(tipo);
+  const p=document.getElementById('eco-lista-tot-pesos'), d=document.getElementById('eco-lista-tot-dolares');
+  if(p) p.textContent='$'+Math.round(t.pesos).toLocaleString('es-AR');
+  if(d) d.textContent='US$'+Math.round(t.dolares).toLocaleString('es-AR');
+}
+function _ecoListaDel(tipo,id){
+  _ecoState[tipo]=_ecoLista(tipo).filter(x=>x.id!==id);
+  _ecoMarkDirty();
+  const tr=document.querySelector('#eco-lista-tbody tr[data-iid="'+id+'"]');
+  if(tr) tr.remove();
+  _ecoListaUpdTotales(tipo);
+  if(document.getElementById('section-economia')?.classList.contains('active')) ecoRenderKPIsSafe();
 }
 
 function ecoChangeYear(y){
@@ -29591,12 +29733,27 @@ function ecoRenderKPIs(gastos, y, totMes){
   const inflSub = inflU ? (_ecoInflFechaLbl(inflU.fecha)+' · mensual') : 'tocá para cargar';
   const kInfl='<div onclick="ecoInflConfig()" title="Clic para ver inflación de meses anteriores" style="flex:1;min-width:150px;background:var(--card);border:1px solid var(--border);border-radius:11px;padding:11px 13px;cursor:pointer"><div style="font-size:10px;color:var(--text3);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">📈 INFLACIÓN</div><div style="font-size:18px;font-weight:800;color:#0369a1;line-height:1.15;margin-top:2px">'+(inflU?(+inflU.valor).toFixed(1)+'%':'—')+'</div><div style="font-size:9.5px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+inflSub+'</div></div>';
 
+  // KPI SALDO = Activos − Por pagar (no cuenta acreditarse ni ahorros)
+  const saldoVal = (act.pesos||0) - (porPagar||0);
+  const saldoUsd = _ecoDolar.compra>0 ? saldoVal/_ecoDolar.compra : null;
+  const saldoColor = saldoVal>=0 ? '#16a34a' : '#dc2626';
+  const kSaldo='<div title="Activos menos Por pagar del año" style="flex:1;min-width:150px;background:var(--card);border:1px solid var(--border);border-radius:11px;padding:11px 13px"><div style="font-size:10px;color:var(--text3);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">⚖️ SALDO</div><div style="font-size:18px;font-weight:800;color:'+saldoColor+';line-height:1.15;margin-top:2px">'+(saldoVal>=0?'+':'')+'$'+Math.round(saldoVal).toLocaleString('es-AR')+'</div><div style="font-size:11px;color:'+saldoColor+';font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+(saldoUsd!=null?(saldoUsd>=0?'+':'')+'US$'+Math.round(saldoUsd).toLocaleString('es-AR'):'activos − por pagar')+'</div></div>';
+  // KPI Activos a acreditarse
+  const acr=_ecoListaTotales('acreditar');
+  const kAcreditar='<div onclick="ecoOpenLista(\'acreditar\')" title="Clic para ver/editar" style="flex:1;min-width:150px;background:var(--card);border:1px solid var(--border);border-radius:11px;padding:11px 13px;cursor:pointer"><div style="font-size:10px;color:var(--text3);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">⏳ A ACREDITARSE</div><div style="font-size:18px;font-weight:800;color:var(--text);line-height:1.15;margin-top:2px">$'+Math.round(acr.pesos).toLocaleString('es-AR')+'</div><div style="font-size:11px;color:#16a34a;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">US$'+Math.round(acr.dolares).toLocaleString('es-AR')+'</div></div>';
+  // KPI Ahorros
+  const aho=_ecoListaTotales('ahorros');
+  const kAhorros='<div onclick="ecoOpenLista(\'ahorros\')" title="Clic para ver/editar" style="flex:1;min-width:150px;background:var(--card);border:1px solid var(--border);border-radius:11px;padding:11px 13px;cursor:pointer"><div style="font-size:10px;color:var(--text3);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">🐷 AHORROS</div><div style="font-size:18px;font-weight:800;color:var(--text);line-height:1.15;margin-top:2px">$'+Math.round(aho.pesos).toLocaleString('es-AR')+'</div><div style="font-size:11px;color:#16a34a;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">US$'+Math.round(aho.dolares).toLocaleString('es-AR')+'</div></div>';
+
   cont.innerHTML =
     K('💸','GASTADO '+ECO_MESES_FULL[mesRef].toUpperCase(), _ecoFmt(totMesActual), (y===cy?'mes en curso':'diciembre'), 'var(--text)')+
     kDolar+
     kInfl+
     kActivos+
     K('🔴','POR PAGAR ('+y+')', _ecoFmt(porPagar), pendientes+' pago(s) rojos + amarillos', porPagar>0?'#dc2626':'var(--text)')+
+    kSaldo+
+    kAcreditar+
+    kAhorros+
     K('📊','PROMEDIO MENSUAL', _ecoFmt(prom), 'meses con gastos', 'var(--text)');
 }
 
@@ -31009,7 +31166,7 @@ const BKP_SECTIONS = {
     icon: '💰',
     get: () => {
       if(typeof _ecoState === 'undefined') return null;
-      return { gastos: _ecoState.gastos||[], ingresos: _ecoState.ingresos||[], metricas: _ecoState.metricas||{}, savedAt: Date.now() };
+      return { gastos: _ecoState.gastos||[], ingresos: _ecoState.ingresos||[], metricas: _ecoState.metricas||{}, acreditar: _ecoState.acreditar||[], ahorros: _ecoState.ahorros||[], savedAt: Date.now() };
     },
   },
   // v118: 'seoKeywords' eliminado del backup — el SEO Tracker viejo fue descontinuado
@@ -31169,6 +31326,8 @@ async function bkpApplyImport(data, selection){
       _ecoState.gastos = data.economia.gastos;
       if(Array.isArray(data.economia.ingresos)) _ecoState.ingresos = data.economia.ingresos;
       if(data.economia.metricas && typeof data.economia.metricas==='object') _ecoState.metricas = data.economia.metricas;
+      if(Array.isArray(data.economia.acreditar)) _ecoState.acreditar = data.economia.acreditar;
+      if(Array.isArray(data.economia.ahorros)) _ecoState.ahorros = data.economia.ahorros;
       try{ localStorage.setItem(ECO_LS_KEY, JSON.stringify({ gastos:_ecoState.gastos, ingresos:_ecoState.ingresos, metricas:_ecoState.metricas||{}, savedAt:Date.now() })); }catch(e){}
       if(typeof ecoRender === 'function' && document.getElementById('section-economia')?.classList.contains('active')) ecoRender();
       console.log('[Backup] Economía restaurada: '+data.economia.gastos.length+' gastos, '+((data.economia.ingresos||[]).length)+' ingresos');
