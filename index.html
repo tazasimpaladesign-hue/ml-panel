@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v216 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v218 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -34824,14 +34824,43 @@ details.guia .guia-cuerpo{padding:0 18px 16px;font-size:.88rem}
   <div class="tabs" role="tablist">
     <button class="tab activa" id="tab-individual" role="tab" aria-selected="true">✧ Carta individual</button>
     <button class="tab" id="tab-comparacion" role="tab" aria-selected="false">✧✧ Comparación (sinastría)</button>
+    <button class="tab" id="tab-numerologia" role="tab" aria-selected="false">№ Numerología</button>
   </div>
 
   <div class="forms" id="zona-forms">
+    <!-- ==================== NUMEROLOGÍA ==================== -->
+    <div class="ficha" data-rotulo="Numerología" id="ficha-num" style="display:none">
+      <div class="campo">
+        <label for="num-nombre">Nombre completo de nacimiento <span class="opc">(obligatorio)</span></label>
+        <input type="text" id="num-nombre" placeholder="Tal como figura en el acta: nombres + apellidos" maxlength="80">
+        <p class="micro-nota"><strong>Acá el nombre SÍ es el cálculo:</strong> la numerología trabaja sobre las letras del nombre de nacimiento (el del acta, con todos los nombres y apellidos). Las tildes y la ñ se normalizan solas.</p>
+      </div>
+      <div class="campo">
+        <label for="num-fecha">Fecha de nacimiento <span class="opc">(obligatorio)</span></label>
+        <input type="date" id="num-fecha">
+      </div>
+      <div class="fila">
+        <div class="campo">
+          <label for="num-actual">Nombre que usa hoy <span class="opc">(opcional)</span></label>
+          <input type="text" id="num-actual" placeholder="Si firma distinto al acta" maxlength="60">
+        </div>
+        <div class="campo">
+          <label for="num-casado">Apellido de casado/a <span class="opc">(opcional)</span></label>
+          <input type="text" id="num-casado" placeholder="Si corresponde" maxlength="40">
+        </div>
+      </div>
+      <div class="campo">
+        <label for="num-apodo">Apodo <span class="opc">(opcional)</span></label>
+        <input type="text" id="num-apodo" placeholder="Cómo lo llaman" maxlength="40">
+      </div>
+      <p class="micro-nota">Se calculan Camino de Vida, Destino, Alma, Personalidad, Madurez, Equilibrio, Pasión Oculta, Pináculos, Desafíos, Ciclos, Lecciones y Deudas kármicas, y Año / Mes / Día personal. Después podés preguntarle a la IA por cualquier fecha puntual.</p>
+    </div>
+
     <!-- ==================== ENTIDAD I ==================== -->
     <div class="ficha" data-rotulo="Entidad I" id="ficha-1">
       <div class="campo">
         <label for="nombre1">Nombre</label>
-        <input type="text" id="nombre1" placeholder="Ej.: Cristian / River Plate / Impala Design" maxlength="40">
+        <input type="text" id="nombre1" placeholder="Ej.: Ana Gómez / Real Madrid / Estudio Aurora" maxlength="40">
         <p class="micro-nota"><strong>El nombre no influye en el cálculo:</strong> es solo una etiqueta. La carta se construye únicamente con fecha, hora y lugar. (Analizar el nombre corresponde a la numerología, otra disciplina.)</p>
       </div>
       <div class="campo">
@@ -34880,7 +34909,7 @@ details.guia .guia-cuerpo{padding:0 18px 16px;font-size:.88rem}
     <div class="ficha" data-rotulo="Entidad II" id="ficha-2" style="display:none">
       <div class="campo">
         <label for="nombre2">Nombre</label>
-        <input type="text" id="nombre2" placeholder="Ej.: Belén / Boca Juniors / El Puma Pesca" maxlength="40">
+        <input type="text" id="nombre2" placeholder="Ej.: Lucas Ferrer / Manchester City / Café del Sol" maxlength="40">
         <p class="micro-nota"><strong>El nombre no influye en el cálculo:</strong> es solo una etiqueta.</p>
       </div>
       <div class="campo">
@@ -35897,14 +35926,18 @@ function poblarCiudades() {
 // ---- Tabs ----
 function setModo(m) {
   modo = m;
-  $('tab-individual').classList.toggle('activa', m === 'individual');
-  $('tab-comparacion').classList.toggle('activa', m === 'comparacion');
-  $('tab-individual').setAttribute('aria-selected', m === 'individual');
-  $('tab-comparacion').setAttribute('aria-selected', m === 'comparacion');
-  $('ficha-2').style.display = m === 'comparacion' ? '' : 'none';
-  $('ficha-evento').style.display = m === 'comparacion' ? '' : 'none';
+  const num = m === 'numerologia';
+  ['individual', 'comparacion', 'numerologia'].forEach(k => {
+    $('tab-' + k).classList.toggle('activa', m === k);
+    $('tab-' + k).setAttribute('aria-selected', m === k);
+  });
+  $('ficha-1').style.display = num ? 'none' : '';
+  $('ficha-2').style.display = (m === 'comparacion') ? '' : 'none';
+  $('ficha-evento').style.display = (m === 'comparacion') ? '' : 'none';
+  $('ficha-num').style.display = num ? '' : 'none';
   $('zona-forms').classList.toggle('doble', m === 'comparacion');
-  $('btn-calcular').textContent = m === 'comparacion' ? 'Trazar la sinastría' : 'Trazar la carta';
+  $('btn-calcular').textContent = num ? 'Calcular la numerología'
+    : (m === 'comparacion' ? 'Trazar la sinastría' : 'Trazar la carta');
   $('resultados').classList.remove('visible');
 }
 
@@ -36408,16 +36441,26 @@ function resumenCartaIA(carta) {
 /* ---- Chat IA ---- */
 let CTX_IA = { activo: false, cartas: [], modo: 'individual', historial: [] };
 
-function htmlChatIA() {
-  return '<h3 class="seccion-titulo" style="font-size:1.35rem">🔮 Preguntá sobre esta carta</h3>' +
-    '<p class="seccion-sub">La IA responde en base a los datos reales de la carta que trazaste. Preguntá lo que quieras: amor, trabajo, decisiones, compatibilidad, un año puntual…</p>' +
+function htmlChatIA(tipo) {
+  const esNum = tipo === 'numerologia';
+  const titulo = esNum ? '🔮 Preguntá sobre tu numerología' : '🔮 Preguntá sobre esta carta';
+  const sub = esNum
+    ? 'La IA responde como numeróloga profesional, usando únicamente los números ya calculados arriba. Podés pedirle el informe completo o preguntarle por una fecha puntual (por ejemplo: "¿cómo viene el 12 de marzo de 2027?").'
+    : 'La IA responde en base a los datos reales de la carta que trazaste. Preguntá lo que quieras: amor, trabajo, decisiones, compatibilidad, un año puntual…';
+  const vacio = esNum
+    ? 'Ejemplos: <em>"Generá mi informe completo"</em> · <em>"¿Cómo me va a ir en 2027?"</em> · <em>"¿Qué día de abril me conviene firmar?"</em>'
+    : 'Ejemplos: <em>"¿Cómo me va a ir este año en el trabajo?"</em> · <em>"¿Qué tipo de pareja me conviene?"</em> · <em>"¿Cuáles son mis mayores desafíos?"</em>';
+  const chips = esNum
+    ? ['Generá mi informe completo', '¿Cuál es mi misión de vida?', '¿Cómo viene este año para mí?', '¿Qué profesión me conviene?', '¿Cómo soy en el amor?']
+    : ['¿Cuáles son mis mayores fortalezas?', '¿Cómo me va este año?', '¿Qué debería trabajar de mí?', '¿Cómo soy en el amor?'];
+  return '<h3 class="seccion-titulo" style="font-size:1.35rem">' + titulo + '</h3>' +
+    '<p class="seccion-sub">' + sub + '</p>' +
     '<div class="ia-caja">' +
     '<div class="ia-mensajes" id="ia-mensajes">' +
-      '<div class="ia-vacio">Ejemplos: <em>"¿Cómo me va a ir este año en el trabajo?"</em> · <em>"¿Qué tipo de pareja me conviene?"</em> · <em>"¿Cuáles son mis mayores desafíos?"</em></div>' +
+      '<div class="ia-vacio">' + vacio + '</div>' +
     '</div>' +
     '<div class="ia-chips">' +
-      ['¿Cuáles son mis mayores fortalezas?', '¿Cómo me va este año?', '¿Qué debería trabajar de mí?', '¿Cómo soy en el amor?']
-        .map(q => '<button class="ia-chip" onclick="iaPregunta(this.textContent)">' + q + '</button>').join('') +
+      chips.map(q => '<button class="ia-chip" onclick="iaPregunta(this.textContent)">' + q + '</button>').join('') +
     '</div>' +
     '<div class="ia-entrada">' +
       '<input type="text" id="ia-input" placeholder="Escribí tu pregunta…" onkeydown="if(event.key===\\'Enter\\')iaEnviar()">' +
@@ -36437,7 +36480,7 @@ function iaAgregarMensaje(rol, texto, cargando) {
   div.className = 'ia-msg ' + rol + (cargando ? ' cargando' : '');
   div.innerHTML = rol === 'user'
     ? '<span class="ia-rol">Vos</span>' + esc(texto)
-    : '<span class="ia-rol">✦ Astrolabio</span>' + (cargando ? '<span class="ia-puntos"><i></i><i></i><i></i></span>' : texto.replace(/\\n/g, '<br>'));
+    : '<span class="ia-rol">✦ Astrolabio</span>' + (cargando ? '<span class="ia-puntos"><i></i><i></i><i></i></span>' : esc(iaLimpiarTexto(texto)).replace(/\\n/g, '<br>'));
   cont.appendChild(div);
   cont.scrollTop = cont.scrollHeight;
   return div;
@@ -36452,22 +36495,46 @@ async function iaEnviar() {
   iaAgregarMensaje('user', pregunta);
   const cargando = iaAgregarMensaje('bot', '', true);
 
-  // Construir contexto astrológico
-  let contexto;
-  if (CTX_IA.modo === 'comparacion') {
-    contexto = 'Es una SINASTRÍA (comparación de dos cartas).\\n\\n=== CARTA A ===\\n' + resumenCartaIA(CTX_IA.cartas[0]) +
-      '\\n\\n=== CARTA B ===\\n' + resumenCartaIA(CTX_IA.cartas[1]);
-  } else {
-    contexto = resumenCartaIA(CTX_IA.cartas[0]);
-  }
+  // ── Reglas de escritura comunes (legibilidad y ortografía) ──
+  const REGLAS = 'REGLAS DE ESCRITURA (obligatorias):\\n' +
+    '1) Escribí en español rioplatense correcto, tuteando con "vos". Ortografía y tildes impecables. Revisá cada palabra antes de responder.\\n' +
+    '2) PROHIBIDO usar símbolos, glifos o caracteres especiales de cualquier tipo: nada de simbolos astrologicos, ni emojis, ni flechas, ni asteriscos, ni almohadillas, ni markdown (nada de **negrita**, ## titulos ni guiones bajos). Se ven rotos en pantalla.\\n' +
+    '3) Escribí SIEMPRE los nombres con palabras: "Mercurio", "Luna", "Aries", "conjunción", "cuadratura". Nunca su símbolo.\\n' +
+    '4) Texto plano y prosa clara. Si necesitás enumerar, usá un guión simple al principio de la línea.\\n' +
+    '5) No uses palabras en otros idiomas ni inventes términos.\\n\\n';
 
-  const system = 'Sos un astrólogo profesional cálido y claro que habla en español rioplatense (usando "vos"). ' +
-    'Respondé preguntas basándote ÚNICA Y EXCLUSIVAMENTE en los datos de la carta astral que te paso a continuación. ' +
-    'No inventes posiciones planetarias: usá solo las que están en los datos. ' +
-    'Interpretá de forma concreta, aterrizada y útil para tomar decisiones, sin tecnicismos innecesarios; cuando uses un término astrológico, explicalo en una frase. ' +
-    'Sé honesto con lo positivo y lo desafiante. Si la carta no tiene hora (sin ascendente ni casas), aclaralo cuando sea relevante. ' +
-    'Respondé en 2-4 párrafos como máximo. Recordá que esto es orientativo y simbólico, no un determinante del futuro.\\n\\n' +
-    'DATOS DE LA CARTA:\\n' + contexto;
+  // ── Contexto según el modo ──
+  let contexto, system;
+  if (CTX_IA.modo === 'numerologia') {
+    contexto = resumenNumerologiaIA(CTX_IA.num);
+    system = 'Actuás como un numerólogo profesional serio, con formación en numerología pitagórica moderna ' +
+      '(la escuela de autores como Hans Decoz, Matthew Oliver Goodwin y Juno Jordan). Hablás en español rioplatense, usando "vos".\\n\\n' +
+      REGLAS +
+      'REGLAS DE INTERPRETACIÓN (obligatorias):\\n' +
+      '1) NO recalcules ningún número: usá EXCLUSIVAMENTE los valores que te entrego más abajo. Si un número no está en los datos, decilo en vez de inventarlo.\\n' +
+      '2) La única excepción es una fecha puntual que te pidan y que no esté en las tablas: en ese caso aplicá el método indicado al final de los datos y mostrá el cálculo paso a paso.\\n' +
+      '3) Relacioná los números entre sí (por ejemplo, cómo el Camino de Vida dialoga con el Destino y con el Año Personal). No los describas como compartimentos aislados ni repitas conceptos.\\n' +
+      '4) Hablá siempre en segunda persona, de forma directa y afirmativa. Evitá el lenguaje ambiguo: nada de "podría", "tal vez" o "quizás". Sé concreto.\\n' +
+      '5) Sé honesto con lo luminoso y con lo difícil. No adules.\\n' +
+      '6) Respondé con la extensión que pida la pregunta. Si te piden el informe completo, desarrollá en profundidad cubriendo: resumen general, personalidad, talentos, desafíos, trabajo, dinero, amor, relaciones, familia, salud emocional, misión de vida, ciclos, lecciones kármicas, año personal y consejos finales. Si es una pregunta puntual, respondé en 2 a 4 párrafos.\\n' +
+      '7) Aclarás, cuando corresponde, que la numerología es una herramienta simbólica de autoconocimiento y no una predicción determinista.\\n\\n' +
+      'DATOS YA CALCULADOS:\\n' + contexto;
+  } else {
+    if (CTX_IA.modo === 'comparacion') {
+      contexto = 'Es una SINASTRÍA (comparación de dos cartas).\\n\\n=== CARTA A ===\\n' + resumenCartaIA(CTX_IA.cartas[0]) +
+        '\\n\\n=== CARTA B ===\\n' + resumenCartaIA(CTX_IA.cartas[1]);
+    } else {
+      contexto = resumenCartaIA(CTX_IA.cartas[0]);
+    }
+    system = 'Sos un astrólogo profesional cálido y claro que habla en español rioplatense (usando "vos").\\n\\n' +
+      REGLAS +
+      'Respondé preguntas basándote ÚNICA Y EXCLUSIVAMENTE en los datos de la carta astral que te paso a continuación. ' +
+      'No inventes posiciones planetarias: usá solo las que están en los datos. ' +
+      'Interpretá de forma concreta, aterrizada y útil para tomar decisiones, sin tecnicismos innecesarios; cuando uses un término astrológico, explicalo en una frase. ' +
+      'Sé honesto con lo positivo y lo desafiante. Si la carta no tiene hora (sin ascendente ni casas), aclaralo cuando sea relevante. ' +
+      'Respondé en 2-4 párrafos como máximo. Recordá que esto es orientativo y simbólico, no un determinante del futuro.\\n\\n' +
+      'DATOS DE LA CARTA:\\n' + contexto;
+  }
 
   CTX_IA.historial.push({ role: 'user', content: pregunta });
 
@@ -36477,17 +36544,18 @@ async function iaEnviar() {
     //   con la siguiente automáticamente, así siempre responde algo.
     //   El puente window.parent.getAstroAuth() entrega { worker, token } del panel.
     let _endpoint, _cuerpo;
+    const _maxTok = CTX_IA.modo === 'numerologia' ? 2000 : IA_CONFIG.maxTokens;
     const _headers = { 'Content-Type': 'application/json' };
     const _auth = (window.parent && window.parent !== window && typeof window.parent.getAstroAuth === 'function')
       ? window.parent.getAstroAuth() : null;
     if (_auth && _auth.worker && _auth.token) {
       _endpoint = _auth.worker.replace(/\\/+$/, '') + '/ai';
       _headers['Authorization'] = 'Bearer ' + _auth.token;
-      _cuerpo = { system: system, messages: CTX_IA.historial, max_tokens: IA_CONFIG.maxTokens };
+      _cuerpo = { system: system, messages: CTX_IA.historial, max_tokens: _maxTok };
     } else {
       // Fallback standalone (vista previa Claude.ai o abierto fuera del panel)
       _endpoint = IA_CONFIG.endpoint || 'https://api.anthropic.com/v1/messages';
-      _cuerpo = { model: IA_CONFIG.modelo, max_tokens: IA_CONFIG.maxTokens, system: system, messages: CTX_IA.historial };
+      _cuerpo = { model: IA_CONFIG.modelo, max_tokens: _maxTok, system: system, messages: CTX_IA.historial };
     }
     const resp = await fetch(_endpoint, {
       method: 'POST',
@@ -36545,6 +36613,8 @@ async function renderIndividual(carta, transitoHoy) {
   h += htmlInterpretaciones(carta);
   h += '<h3 class="seccion-titulo" style="font-size:1.35rem">🌠 Tránsitos de hoy</h3>';
   h += htmlTransitos(carta, transitoHoy, 'Cielo del ' + fechaCorta(transitoHoy.fecha));
+  // Mercurio retrógrado (cálculo real de los períodos + impacto sobre esta carta)
+  h += await htmlMercurioRx(carta);
   // Ciclos y predicciones (cálculo en vivo)
   h += await htmlCiclos(carta);
   return h;
@@ -36617,6 +36687,10 @@ async function renderSinastria(cartaA, cartaB, transito, eventoInformado) {
       '<br><em style="color:var(--marfil-dim)">Basado en dignidades de Sol, Marte y Júpiter, aspectos internos y tránsitos del evento. Es un juego simbólico: no lo uses para apostar.</em></div></div>';
   }
 
+  // ---- Chat IA (reubicado: entre "Áreas de la relación" y los "Tránsitos") ----
+  CTX_IA = { activo: true, cartas: [cartaA, cartaB], modo: 'comparacion', historial: [] };
+  h += htmlChatIA();
+
   // ---- Tránsitos del evento sobre ambas cartas ----
   const tituloTr = eventoInformado
     ? '🌠 Cielo del evento (' + fechaCorta(transito.fecha) + ')'
@@ -36642,9 +36716,6 @@ async function renderSinastria(cartaA, cartaB, transito, eventoInformado) {
       ' y Marte en ' + marte.signo + ': su forma de luchar es con ' + DESCRIPCION_SIGNO[marte.signo].luz + '.</p></div>';
   };
   h += '<div class="interpretaciones">' + mini(cartaA) + mini(cartaB) + '</div>';
-  // Chat IA con contexto de ambas cartas
-  CTX_IA = { activo: true, cartas: [cartaA, cartaB], modo: 'comparacion', historial: [] };
-  h += htmlChatIA();
   return h;
 }
 
@@ -36699,6 +36770,29 @@ function renderGuia() {
 /* ---- Orquestador ---- */
 async function trazar() {
   $('zona-avisos').innerHTML = '';
+
+  // ---- Rama numerología ----
+  if (modo === 'numerologia') {
+    const dn = leerNumerologia();
+    if (!dn) { avisar('Para la numerología necesito el <strong>nombre completo de nacimiento</strong> y la <strong>fecha</strong>.', 'error'); return; }
+    const btnN = $('btn-calcular');
+    btnN.disabled = true;
+    btnN.textContent = 'Calculando los números…';
+    try {
+      const html = await renderNumerologiaFull(dn);
+      const contN = $('resultados');
+      contN.innerHTML = '<div class="acciones-resultado" data-noprint><button class="btn-pdf" onclick="descargarPDF()">📄 Descargar informe en PDF</button></div>' + html;
+      contN.classList.add('visible');
+      contN.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (err) {
+      avisar('No se pudo calcular la numerología: ' + esc(err.message), 'error');
+    } finally {
+      btnN.disabled = false;
+      btnN.textContent = 'Calcular la numerología';
+    }
+    return;
+  }
+
   const e1 = leerEntidad(1);
   if (!e1) { avisar('Ingresá la fecha de la <strong>Entidad I</strong>.', 'error'); return; }
   let e2 = null;
@@ -36753,6 +36847,744 @@ function descargarPDF() {
   window.print();
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+   MÓDULO v2 · Astrolabio
+   1) Sanitizador de texto de IA (sin símbolos, sin markdown)
+   2) Mercurio retrógrado (cálculo real + interpretación por carta)
+   3) NUMEROLOGÍA pitagórica (motor + informe + contexto para la IA)
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ---------- 1) SANITIZADOR DE SALIDA DE LA IA ----------
+   Los modelos a veces devuelven glifos (☿ ♃ △) o markdown (**negrita**)
+   que en pantalla salen ilegibles. Traducimos todo a palabras. */
+const IA_GLIFOS = {
+  '\\u2609': 'Sol', '\\u263C': 'Sol', '\\u263D': 'Luna', '\\u263E': 'Luna',
+  '\\u263F': 'Mercurio', '\\u2640': 'Venus', '\\u2642': 'Marte', '\\u2643': 'Jupiter',
+  '\\u2644': 'Saturno', '\\u2645': 'Urano', '\\u2646': 'Neptuno', '\\u2647': 'Pluton',
+  '\\u2648': 'Aries', '\\u2649': 'Tauro', '\\u264A': 'Geminis', '\\u264B': 'Cancer',
+  '\\u264C': 'Leo', '\\u264D': 'Virgo', '\\u264E': 'Libra', '\\u264F': 'Escorpio',
+  '\\u2650': 'Sagitario', '\\u2651': 'Capricornio', '\\u2652': 'Acuario', '\\u2653': 'Piscis',
+  '\\u260C': 'conjuncion', '\\u260D': 'oposicion', '\\u25B3': 'trigono', '\\u25A1': 'cuadratura',
+  '\\u26B9': 'sextil', '\\u2732': 'sextil', '\\u260A': 'Nodo Norte', '\\u260B': 'Nodo Sur'
+};
+
+// Normaliza una palabra para comparar (sin tildes, sin puntuación, minúscula)
+function _iaNorm(w) {
+  return String(w).normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')
+    .toLowerCase().replace(/[^a-z]/g, '');
+}
+
+// Si el modelo manda glifo + palabra ("♈ Aries"), al traducir queda "Aries Aries".
+// Esto colapsa la repetición y se queda con la versión bien escrita (la última).
+function _iaDedup(s) {
+  return s.split('\\n').map(linea => {
+    const out = [];
+    linea.split(/(\\s+)/).forEach(tok => {
+      if (/^\\s*$/.test(tok)) { out.push(tok); return; }
+      let iPrev = -1;
+      for (let i = out.length - 1; i >= 0; i--) {
+        if (!/^\\s*$/.test(out[i])) { iPrev = i; break; }
+      }
+      const nTok = _iaNorm(tok);
+      if (iPrev !== -1 && nTok && _iaNorm(out[iPrev]) === nTok) {
+        out.length = iPrev;          // descarta la repetida y el espacio intermedio
+        out.push(tok);
+      } else {
+        out.push(tok);
+      }
+    });
+    return out.join('');
+  }).join('\\n');
+}
+
+function iaLimpiarTexto(t) {
+  let s = String(t || '');
+  // Glifos astrológicos -> palabras
+  s = s.replace(/[\\u2609\\u263C\\u263D\\u263E\\u263F\\u2640-\\u2653\\u260A-\\u260D\\u25B3\\u25A1\\u26B9\\u2732]/g,
+    ch => (IA_GLIFOS[ch] ? ' ' + IA_GLIFOS[ch] + ' ' : ' '));
+  // Emojis y plano astral (salen como cuadraditos en algunos modelos)
+  s = s.replace(/[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]/g, '');
+  s = s.replace(/[\\uFE0F\\u200D\\u2190-\\u21FF\\u2700-\\u27BF\\u2B00-\\u2BFF\\u2022]/g, ' ');
+  // Markdown -> texto plano
+  s = s.replace(/\\*\\*(.*?)\\*\\*/g, '$1').replace(/__(.*?)__/g, '$1');
+  s = s.replace(/[*_\`#>]/g, '');
+  // Colapsar duplicados generados por la traducción de glifos
+  s = _iaDedup(s);
+  // Limpieza final de espacios
+  s = s.replace(/[ \\t]{2,}/g, ' ');
+  s = s.replace(/^[ \\t]+|[ \\t]+$/gm, '');
+  s = s.replace(/^-\\s*(?=\\S)/gm, '- ');
+  s = s.replace(/\\n{3,}/g, '\\n\\n');
+  return s.trim();
+}
+
+/* ---------- 2) MERCURIO RETRÓGRADO ---------- */
+
+// Detecta los períodos retrógrados reales de Mercurio recorriendo día a día.
+async function mercurioRetroPeriodos(dDesde, dias) {
+  const lonDe = async d => (await calcularPosicionesPlanetarias(d)).mercurio;
+  const per = [];
+  let prev = null, ini = null, enCurso = false;
+  let l0 = await lonDe(dDesde);
+  for (let k = 1; k <= dias; k++) {
+    const d = dDesde + k;
+    const l1 = await lonDe(d);
+    let delta = l1 - l0;
+    if (delta > 180) delta -= 360;
+    if (delta < -180) delta += 360;
+    const retro = delta < 0;
+    if (prev === null) {
+      if (retro) { ini = dDesde; enCurso = true; }
+    } else if (retro && !prev) {
+      ini = d - 1;
+    } else if (!retro && prev && ini !== null) {
+      per.push({ dIni: ini, dFin: d - 1, enCurso });
+      ini = null; enCurso = false;
+    }
+    prev = retro; l0 = l1;
+  }
+  if (ini !== null) per.push({ dIni: ini, dFin: dDesde + dias, abierto: true, enCurso });
+  return per;
+}
+
+// ¿Está la longitud L dentro del arco recorrido hacia atrás (de lonIni a lonFin)?
+function enArcoRetro(L, lonIni, lonFin) {
+  const span = (lonIni - lonFin + 360) % 360;   // largo del arco (grados)
+  const off  = (lonIni - L + 360) % 360;
+  return off <= span;
+}
+
+const MRX_ENTIDAD = {
+  persona: 'revisá contratos y mensajes antes de mandarlos, confirmá horarios y no firmes nada apurado. Es un tiempo excelente para retomar lo pendiente, corregir, reordenar y reencontrarte con gente del pasado.',
+  equipo: 'suelen aparecer errores de comunicación entre el cuerpo técnico y el plantel, fallas logísticas y decisiones arbitrales confusas. Conviene simplificar el plan de juego y no improvisar tácticas nuevas.',
+  empresa: 'es un mal momento para lanzar productos, firmar contratos grandes o cambiar sistemas. Es un momento ideal para auditar, corregir precios, revisar proveedores y reescribir lo que ya existe.',
+  proyecto: 'evitá lanzamientos y anuncios en estas fechas. Aprovechá para depurar, testear, corregir errores y dejar todo afinado para relanzar cuando Mercurio retome la marcha directa.'
+};
+
+async function htmlMercurioRx(carta) {
+  const hoy = new Date();
+  const dHoy = numeroDia(hoy.getUTCFullYear(), hoy.getUTCMonth() + 1, hoy.getUTCDate(), 12);
+  const periodos = await mercurioRetroPeriodos(dHoy - 45, 410);
+
+  const mercNatal = carta.planetas.find(p => p.clave === 'mercurio');
+  const ascIdx = carta.angulos ? signoDe(carta.angulos.asc).idx : null;
+  const casaDe = lon => ascIdx === null ? null : ((signoDe(lon).idx - ascIdx + 12) % 12) + 1;
+
+  let h = '<h3 class="seccion-titulo" style="font-size:1.35rem">\\u263F Mercurio retrógrado</h3>';
+  h += '<p class="seccion-sub">Cálculo real del movimiento aparente de Mercurio: fechas exactas y qué toca de <em>esta</em> carta en particular.</p>';
+
+  // Qué es
+  h += '<div class="sintesis"><h4>Qué es (y qué no es)</h4>';
+  h += '<p>Mercurio no se frena ni retrocede de verdad. Como la Tierra lo pasa por adentro en su órbita, durante unas tres semanas <strong>parece</strong> ir hacia atrás visto desde acá. Eso se llama movimiento retrógrado y ocurre <strong>tres o cuatro veces por año</strong>.</p>';
+  h += '<p>Mercurio rige lo que se dice, se escribe, se firma, se agenda, se compra, se vende y se traslada. Cuando está retrógrado, todo eso pide <strong>revisión</strong> en lugar de estreno: la palabra clave empieza con "re" (repasar, rehacer, revisar, retomar, reparar). No es una maldición ni un pronóstico de desastre: es un cambio de ritmo. Lo que se hace mal es lanzar cosas nuevas a las apuradas; lo que se hace bien es corregir lo que ya existe.</p>';
+  h += '<p><strong>En esta carta (' + esc(carta.nombre) + '), tipo ' + carta.tipo + ':</strong> ' + (MRX_ENTIDAD[carta.tipo] || MRX_ENTIDAD.persona) + '</p>';
+  h += '</div>';
+
+  // Mercurio natal
+  h += '<div class="interp"><h5>Tu Mercurio de nacimiento: ' + mercNatal.signo +
+    (mercNatal.casa ? ', casa ' + mercNatal.casa : '') + (mercNatal.retro ? ', retrógrado' : ', directo') + '</h5><p>';
+  if (mercNatal.retro) {
+    h += 'Naciste con <strong>Mercurio retrógrado</strong>. Eso significa que tu mente procesa hacia adentro: pensás antes de hablar, repasás, dudás y volvés sobre lo mismo hasta entenderlo de verdad. La buena noticia es que <strong>los períodos de Mercurio retrógrado te resultan más cómodos que a la mayoría</strong>: mientras el resto se traba, vos entrás en tu terreno natural. Son tus mejores semanas para escribir, corregir y pensar en profundidad.';
+  } else {
+    h += 'Tu Mercurio de nacimiento es <strong>directo</strong>: tu mente funciona hacia adelante, resuelve rápido y quiere respuestas ya. Por eso los períodos retrógrados te van a resultar especialmente molestos: te obligan a un ritmo que no es el tuyo. La estrategia es simple: en esas semanas bajá un cambio, confirmá todo dos veces y no tomes decisiones grandes por impulso.';
+  }
+  h += ' Su ubicación en <strong>' + mercNatal.signo + '</strong> indica cómo pensás y cómo comunicás: ' + DESCRIPCION_SIGNO[mercNatal.signo].luz + '. Bajo tensión, ' + DESCRIPCION_SIGNO[mercNatal.signo].sombra + '.';
+  if (mercNatal.casa) {
+    const c = CASAS[mercNatal.casa - 1];
+    h += ' Al caer en la <strong>casa ' + mercNatal.casa + ' (' + c.tema + ')</strong>, tu cabeza se ocupa sobre todo de ' + c.desc + '.';
+  }
+  h += '</p></div>';
+
+  // Períodos
+  if (!periodos.length) {
+    h += '<p class="seccion-sub">No se detectan períodos retrógrados de Mercurio en los próximos 12 meses.</p>';
+    return h;
+  }
+
+  h += '<h4 class="seccion-sub" style="font-size:1rem;color:var(--oro);margin-top:18px">Períodos que vienen (próximos 12 meses)</h4>';
+  h += '<div class="interpretaciones">';
+
+  for (const p of periodos) {
+    const posIni = await calcularPosicionesPlanetarias(p.dIni);
+    const posFin = await calcularPosicionesPlanetarias(p.dFin);
+    const lonIni = posIni.mercurio, lonFin = posFin.mercurio;
+    const sIni = signoDe(lonIni), sFin = signoDe(lonFin);
+    const fIni = fmtFechaCiclo(diaNumAFecha(p.dIni));
+    const fFin = fmtFechaCiclo(diaNumAFecha(p.dFin));
+    const dias = Math.round(p.dFin - p.dIni);
+    const activo = (dHoy >= p.dIni && dHoy <= p.dFin);
+
+    // Planetas natales barridos por el arco retrógrado
+    const tocados = carta.planetas.filter(pl => enArcoRetro(pl.lon, lonIni, lonFin));
+    // Casas involucradas
+    const casas = [...new Set([casaDe(lonIni), casaDe(lonFin)].filter(x => x !== null))];
+
+    h += '<div class="interp"' + (activo ? ' style="border-color:var(--tenso)"' : '') + '>';
+    h += '<h5>' + (activo ? 'AHORA MISMO: ' : '') + fIni + ' \\u2192 ' + fFin + '  (' + dias + ' días)</h5>';
+    h += '<p>Retrograda en <strong>' + sIni.nombre + '</strong>' +
+      (sFin.nombre !== sIni.nombre ? ' y retrocede hasta <strong>' + sFin.nombre + '</strong>' : '') + '. ';
+    h += 'El asunto del período es <strong>' + DESCRIPCION_SIGNO[sIni.nombre].luz + '</strong>: ahí es donde se te van a trabar los mensajes, los acuerdos y los tiempos, y también ahí es donde más te conviene revisar.</p>';
+
+    if (casas.length) {
+      h += '<p><strong>Áreas de tu vida afectadas:</strong> ' + casas.map(n => {
+        const c = CASAS[n - 1];
+        return 'casa ' + n + ' (' + c.tema.toLowerCase() + ': ' + c.desc + ')';
+      }).join(' y ') + '. Es el terreno concreto donde vas a sentir el período: ahí aparecen las demoras, las confusiones y también las segundas oportunidades.</p>';
+    } else {
+      h += '<p class="seccion-sub">Sin hora de nacimiento no se pueden calcular las casas, así que no se puede precisar el área exacta de la vida que toca. Con hora y lugar exactos, este bloque se vuelve mucho más específico.</p>';
+    }
+
+    if (tocados.length) {
+      h += '<p><strong>Toca tus planetas natales:</strong> ' + tocados.map(t => t.nombre + ' en ' + t.signo).join(', ') +
+        '. Mercurio pasa tres veces por ese punto (yendo, volviendo y yendo de nuevo), así que ese tema de tu carta se va a poner sobre la mesa, se va a revisar y recién después se va a resolver. ';
+      const tn = tocados.map(t => t.clave);
+      if (tn.includes('venus')) h += 'Con Venus involucrado, vuelven charlas pendientes de pareja, dinero o vínculos: no cierres nada en caliente. ';
+      if (tn.includes('marte')) h += 'Con Marte involucrado, cuidado con discusiones y decisiones impulsivas: la mecha está corta. ';
+      if (tn.includes('sol')) h += 'Con el Sol involucrado, se revisa tu identidad y tu dirección: buen momento para replantear el rumbo, no para anunciarlo. ';
+      if (tn.includes('luna')) h += 'Con la Luna involucrada, remueve memoria emocional y asuntos de familia o casa. ';
+      if (tn.includes('saturno')) h += 'Con Saturno involucrado, se reabren compromisos, contratos y responsabilidades: leé la letra chica. ';
+      if (tn.includes('mercurio')) h += 'Toca tu propio Mercurio natal: es un reinicio mental completo, de los que reordenan la cabeza. ';
+      h += '</p>';
+    } else {
+      h += '<p>No barre ningún planeta de tu carta: es un período de "ruido general" (el que afecta a todo el mundo), pero sin golpear un punto sensible tuyo. Lo vas a vivir más liviano.</p>';
+    }
+
+    h += '<p style="color:var(--marfil-dim);font-size:.85rem"><strong>Qué hacer:</strong> revisar, corregir, cerrar pendientes, hacer backups, confirmar reuniones. <strong>Qué no hacer:</strong> firmar contratos importantes, lanzar productos o campañas, comprar equipamiento electrónico caro, empezar sociedades. Si es inevitable, leelo dos veces y que lo revise alguien más.</p>';
+    h += '</div>';
+  }
+  h += '</div>';
+  h += '<p class="seccion-sub" style="margin-top:8px">Las fechas se calculan con el motor astronómico propio (precisión aproximada de un día en las estaciones). Es una lectura simbólica y orientativa.</p>';
+  return h;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   3) NUMEROLOGÍA PITAGÓRICA
+   Método: tabla pitagórica clásica (A=1..I=9, J=1...).
+   Camino de Vida por componentes (escuela Decoz/Goodwin).
+   Expresión, Alma y Personalidad por suma total del nombre de nacimiento.
+   Números maestros 11, 22 y 33 preservados donde corresponde.
+   Todas las interpretaciones son de redacción propia.
+   ═══════════════════════════════════════════════════════════════════ */
+
+const NUM_TABLA = { A:1,J:1,S:1, B:2,K:2,T:2, C:3,L:3,U:3, D:4,M:4,V:4,
+                    E:5,N:5,W:5, F:6,O:6,X:6, G:7,P:7,Y:7, H:8,Q:8,Z:8, I:9,R:9 };
+const MAESTROS = [11, 22, 33];
+
+function reducir(n) {           // conserva maestros
+  let x = n;
+  while (x > 9 && MAESTROS.indexOf(x) === -1) {
+    x = String(x).split('').reduce((a, b) => a + Number(b), 0);
+  }
+  return x;
+}
+function reducirSimple(n) {     // siempre 1..9
+  let x = n;
+  while (x > 9) x = String(x).split('').reduce((a, b) => a + Number(b), 0);
+  return x;
+}
+function base(n) { return MAESTROS.indexOf(n) !== -1 ? reducirSimple(n) : n; }
+
+// Traza de reducción (para detectar deudas kármicas 13/14/16/19)
+function traza(n) {
+  const t = [n];
+  let x = n;
+  while (x > 9 && MAESTROS.indexOf(x) === -1) {
+    x = String(x).split('').reduce((a, b) => a + Number(b), 0);
+    t.push(x);
+  }
+  return t;
+}
+
+// Normaliza: saca tildes, Ñ -> N, deja solo A-Z y separa por palabras
+function palabrasDe(nombre) {
+  return String(nombre || '')
+    .normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')
+    .toUpperCase().replace(/[^A-Z\\s]/g, ' ')
+    .split(/\\s+/).filter(Boolean);
+}
+
+// Y es vocal cuando no hay otra vocal en la palabra, o cuando queda entre
+// consonantes / al final después de consonante (criterio pitagórico habitual).
+function esVocal(palabra, i) {
+  const ch = palabra[i];
+  if ('AEIOU'.indexOf(ch) !== -1) return true;
+  if (ch !== 'Y') return false;
+  const otras = palabra.split('').some((c, j) => j !== i && 'AEIOU'.indexOf(c) !== -1);
+  if (!otras) return true;
+  const antes = i > 0 ? palabra[i - 1] : '';
+  const desp  = i < palabra.length - 1 ? palabra[i + 1] : '';
+  const esCons = c => c && 'AEIOU'.indexOf(c) === -1;
+  return esCons(antes) && (desp === '' || esCons(desp));
+}
+
+function analizarNombre(nombre) {
+  const palabras = palabrasDe(nombre);
+  const letras = [];
+  palabras.forEach(p => {
+    p.split('').forEach((ch, i) => {
+      letras.push({ ch, val: NUM_TABLA[ch] || 0, vocal: esVocal(p, i), palabra: p });
+    });
+  });
+  const sumaTot = letras.reduce((a, l) => a + l.val, 0);
+  const sumaVoc = letras.filter(l => l.vocal).reduce((a, l) => a + l.val, 0);
+  const sumaCon = letras.filter(l => !l.vocal).reduce((a, l) => a + l.val, 0);
+  const conteo = {};
+  for (let i = 1; i <= 9; i++) conteo[i] = 0;
+  letras.forEach(l => { if (l.val) conteo[l.val]++; });
+  const iniciales = palabras.map(p => NUM_TABLA[p[0]] || 0).reduce((a, b) => a + b, 0);
+  return { palabras, letras, sumaTot, sumaVoc, sumaCon, conteo, iniciales };
+}
+
+function calcularNumerologia(datos) {
+  const [anio, mes, dia] = datos.fecha.split('-').map(Number);
+  const an = analizarNombre(datos.nombre);
+
+  const rMes = reducir(mes), rDia = reducir(dia), rAnio = reducir(anio);
+  const totalCV = base(rMes) + base(rDia) + base(rAnio);
+  const caminoVida = reducir(totalCV);
+
+  const destino = reducir(an.sumaTot);          // Expresión
+  const alma = reducir(an.sumaVoc);             // Soul Urge
+  const personalidad = reducir(an.sumaCon);
+  const madurez = reducir(base(caminoVida) + base(destino));
+  const balance = reducirSimple(an.iniciales);
+  const cumple = dia;                            // Birthday number
+  const cumpleRed = reducir(dia);
+
+  // Pasión oculta = valor más repetido
+  let maxC = 0;
+  Object.keys(an.conteo).forEach(k => { if (an.conteo[k] > maxC) maxC = an.conteo[k]; });
+  const pasion = maxC === 0 ? [] : Object.keys(an.conteo).filter(k => an.conteo[k] === maxC).map(Number);
+  const lecciones = Object.keys(an.conteo).filter(k => an.conteo[k] === 0).map(Number);
+
+  // Pináculos (Decoz)
+  const p1 = reducir(base(rMes) + base(rDia));
+  const p2 = reducir(base(rDia) + base(rAnio));
+  const p3 = reducir(base(p1) + base(p2));
+  const p4 = reducir(base(rMes) + base(rAnio));
+  const fin1 = 36 - base(caminoVida);
+  const pinaculos = [
+    { n: p1, desde: 0, hasta: fin1 },
+    { n: p2, desde: fin1 + 1, hasta: fin1 + 9 },
+    { n: p3, desde: fin1 + 10, hasta: fin1 + 18 },
+    { n: p4, desde: fin1 + 19, hasta: null }
+  ];
+
+  // Desafíos (siempre dígito simple, sin maestros)
+  const sM = reducirSimple(mes), sD = reducirSimple(dia), sA = reducirSimple(anio);
+  const d1 = Math.abs(sM - sD), d2 = Math.abs(sD - sA), d3 = Math.abs(d1 - d2), d4 = Math.abs(sM - sA);
+  const desafios = [
+    { n: d1, desde: 0, hasta: fin1 },
+    { n: d2, desde: fin1 + 1, hasta: fin1 + 9 },
+    { n: d3, desde: fin1 + 10, hasta: fin1 + 18 },
+    { n: d4, desde: fin1 + 19, hasta: null }
+  ];
+
+  // Ciclos de vida
+  const ciclos = [
+    { n: reducir(mes), etiqueta: 'Formativo', desde: 0, hasta: fin1 },
+    { n: reducir(dia), etiqueta: 'Productivo', desde: fin1 + 1, hasta: fin1 + 27 },
+    { n: reducir(anio), etiqueta: 'Cosecha', desde: fin1 + 28, hasta: null }
+  ];
+
+  // Deudas kármicas
+  const deudas = [];
+  const chequear = (arr, origen) => arr.forEach(v => {
+    if ([13, 14, 16, 19].indexOf(v) !== -1 && !deudas.some(x => x.n === v && x.origen === origen)) {
+      deudas.push({ n: v, origen });
+    }
+  });
+  chequear(traza(totalCV), 'Camino de Vida');
+  chequear(traza(an.sumaTot), 'Destino / Expresión');
+  chequear(traza(an.sumaVoc), 'Número del Alma');
+  chequear(traza(an.sumaCon), 'Número de la Personalidad');
+  if ([13, 14, 16, 19].indexOf(dia) !== -1) deudas.push({ n: dia, origen: 'Día de nacimiento' });
+
+  // Edad y ciclos temporales
+  const hoy = new Date();
+  const anioAct = hoy.getFullYear(), mesAct = hoy.getMonth() + 1, diaAct = hoy.getDate();
+  let edad = anioAct - anio;
+  if (mesAct < mes || (mesAct === mes && diaAct < dia)) edad--;
+
+  const anioPersonalDe = a => reducirSimple(reducirSimple(mes) + reducirSimple(dia) + reducirSimple(a));
+  const anioPersonal = anioPersonalDe(anioAct);
+  const mesPersonal = reducirSimple(anioPersonal + mesAct);
+  const diaPersonal = reducirSimple(mesPersonal + diaAct);
+
+  const tablaAnios = [];
+  for (let k = 0; k < 9; k++) tablaAnios.push({ anio: anioAct + k, n: anioPersonalDe(anioAct + k) });
+  const tablaMeses = [];
+  for (let k = 0; k < 12; k++) {
+    const m = ((mesAct - 1 + k) % 12) + 1;
+    const a = anioAct + Math.floor((mesAct - 1 + k) / 12);
+    tablaMeses.push({ mes: m, anio: a, n: reducirSimple(anioPersonalDe(a) + m) });
+  }
+
+  return {
+    datos, anio, mes, dia, edad, an,
+    caminoVida, totalCV, destino, alma, personalidad, madurez, balance,
+    cumple, cumpleRed, pasion, lecciones, pinaculos, desafios, ciclos, deudas,
+    anioPersonal, mesPersonal, diaPersonal, tablaAnios, tablaMeses,
+    anioAct, mesAct, diaAct
+  };
+}
+
+/* ---------- Tablas interpretativas (redacción propia) ---------- */
+const NUM_ESENCIA = {
+  1:  { t: 'El iniciador',            luz: 'iniciativa, liderazgo y coraje para arrancar de cero',            som: 'terquedad, egocentrismo e impaciencia con el ritmo ajeno',       vb: 'liderar' },
+  2:  { t: 'El mediador',             luz: 'sensibilidad, diplomacia y una escucha muy fina',                 som: 'dependencia, miedo al conflicto y postergarse',                  vb: 'acompañar' },
+  3:  { t: 'El comunicador',          luz: 'creatividad, expresión y alegría contagiosa',                     som: 'dispersión, superficialidad y dejar cosas por la mitad',         vb: 'expresar' },
+  4:  { t: 'El constructor',          luz: 'orden, disciplina y capacidad de sostener en el tiempo',          som: 'rigidez, resistencia al cambio y exceso de control',             vb: 'construir' },
+  5:  { t: 'El explorador',           luz: 'libertad, adaptabilidad y olfato para la oportunidad',            som: 'inconstancia, impulsividad y fuga cuando la cosa aprieta',       vb: 'explorar' },
+  6:  { t: 'El responsable',          luz: 'cuidado, responsabilidad y sentido estético y familiar',          som: 'control disfrazado de ayuda, sacrificio excesivo y culpa',       vb: 'cuidar' },
+  7:  { t: 'El analista',             luz: 'profundidad, análisis y búsqueda honesta de la verdad',           som: 'aislamiento, frialdad y desconfianza',                           vb: 'comprender' },
+  8:  { t: 'El realizador',           luz: 'ambición, visión material y poder de gestión',                    som: 'dureza, obsesión por el resultado y trabajo sin freno',          vb: 'materializar' },
+  9:  { t: 'El humanista',            luz: 'compasión, amplitud de miras y visión de conjunto',               som: 'dispersión emocional, martirio y dificultad para soltar',        vb: 'entregar' },
+  11: { t: 'El inspirador (maestro)', luz: 'intuición altísima e inspiración que enciende a los demás',       som: 'ansiedad, hipersensibilidad y una exigencia irreal',             vb: 'inspirar' },
+  22: { t: 'El constructor maestro',  luz: 'visión enorme con capacidad real de ejecución: ideas hechas obra', som: 'presión aplastante y bloqueo frente a la magnitud de lo propio', vb: 'edificar' },
+  33: { t: 'El maestro del servicio', luz: 'entrega, docencia y amor puesto en obra concreta',                som: 'sobrecarga, olvido de sí y un idealismo que agota',              vb: 'servir' }
+};
+const NUM_MISION = {
+  1: 'aprender a sostener tu criterio propio sin pisar al otro, y animarte a empezar lo que nadie empieza',
+  2: 'aprender que unir, calmar y sostener también es una forma de poder, y hacerlo sin desaparecer',
+  3: 'aprender a poner tu voz en el mundo y terminar lo que empezás, en lugar de dispersarla',
+  4: 'aprender a construir algo sólido que quede en pie, sin volverte prisionero de tu propia estructura',
+  5: 'aprender a usar la libertad con dirección, y no como huida de todo lo que compromete',
+  6: 'aprender a cuidar sin controlar, y a dar sin vaciarte',
+  7: 'aprender a confiar sin dejar de pensar: bajar la verdad de la cabeza al vínculo',
+  8: 'aprender a manejar poder y dinero con ética, midiendo el éxito también en vida vivida',
+  9: 'aprender a dar sin esperar retorno y a soltar lo que ya cumplió su ciclo',
+  11: 'aprender a bancar tu propia sensibilidad y ponerla al servicio de otros, sin quemarte',
+  22: 'aprender a bajar a tierra una visión grande, ladrillo por ladrillo, sin rendirte a mitad de obra',
+  33: 'aprender a servir desde la abundancia y no desde el sacrificio'
+};
+const NUM_AMOR = {
+  1: 'necesitás admirar a tu pareja y que te dejen espacio para decidir. Te cuesta pedir ayuda y a veces confundís independencia con distancia. Te hace bien alguien seguro de sí mismo, que no te compita todo el tiempo.',
+  2: 'amás desde el detalle y la ternura, y te entregás muy fuerte. Tu riesgo es anularte para no perder al otro. Te hace bien alguien que te elija con claridad y te devuelva la mitad de lo que das.',
+  3: 'necesitás charla, humor y estímulo. Te aburre la rutina y te enamora la chispa. Tu riesgo es la superficialidad y el escape cuando hay que hablar en serio.',
+  4: 'amás con lealtad y hechos concretos, no con discursos. Sos de los que se quedan. Tu riesgo es la rigidez y confundir amor con obligación.',
+  5: 'necesitás libertad, movimiento y aire. Te ahoga el control. Tu riesgo es escaparte justo cuando el vínculo se pone profundo.',
+  6: 'sos el que sostiene, cuida y arma familia. Amás con una responsabilidad enorme. Tu riesgo es sobreproteger, controlar por amor y después reclamar factura.',
+  7: 'necesitás profundidad, silencio compartido y respeto por tu mundo interno. Te cuesta abrirte. Tu riesgo es analizar el vínculo en vez de vivirlo.',
+  8: 'amás con intensidad y querés construir algo sólido, también en lo material. Tu riesgo es llevar el modo trabajo a la pareja y medir el amor en logros.',
+  9: 'amás en grande, con compasión y sin mezquindad. Tu riesgo es idealizar a la otra persona y quedarte sosteniendo lo insostenible.',
+  11: 'sentís todo amplificado y captás lo que el otro ni dice. Tu riesgo es la hipersensibilidad y esperar una conexión perfecta que nadie puede dar.',
+  22: 'buscás una pareja que sea también socio de vida y de proyecto. Tu riesgo es que el proyecto se coma al vínculo.',
+  33: 'amás cuidando y enseñando. Tu riesgo es ponerte en el lugar de padre o madre de tu pareja y perder la igualdad.'
+};
+const NUM_TRABAJO = {
+  1: 'emprender, dirigir, abrir mercado, todo lo que exija decidir solo y bancarse el riesgo. Trabajás mal bajo un jefe que no admirás.',
+  2: 'mediar, negociar, coordinar equipos, atención al cliente, psicología, diplomacia, sociedades. Rendís mejor de a dos que solo.',
+  3: 'comunicación, ventas, escritura, docencia, diseño, marketing, espectáculo. Todo lo que sea poner algo en palabras o en imagen.',
+  4: 'administración, ingeniería, contabilidad, oficios, logística, sistemas. Todo lo que requiera método, precisión y continuidad.',
+  5: 'ventas, viajes, comercio exterior, prensa, turismo, todo lo que cambie seguido. La oficina fija te mata.',
+  6: 'salud, educación, gastronomía, estética, decoración, recursos humanos, negocio familiar. Todo lo que sea cuidar a alguien.',
+  7: 'investigación, análisis de datos, auditoría, derecho, ciencia, terapias, espiritualidad. Necesitás pensar sin que te apuren.',
+  8: 'negocios, finanzas, dirección, inmobiliaria, gestión a escala. Tenés cabeza para el dinero y para el poder.',
+  9: 'causas sociales, arte, salud, docencia, comunicación con propósito. Trabajás bien cuando lo que hacés le sirve a mucha gente.',
+  11: 'inspirar, enseñar, comunicar, terapias, arte, espiritualidad, liderazgo simbólico. Vendés ideas mejor que productos.',
+  22: 'construir empresas, instituciones, obras grandes, sistemas. Podés dejar algo que sobreviva a tu propio nombre.',
+  33: 'docencia, sanación, obra social, comunicación con vocación de servicio.'
+};
+const NUM_DINERO = {
+  1: 'ganás bien cuando mandás vos. Cuidado con gastar para demostrar.',
+  2: 'te cuesta cobrar lo que valés. Aprendé a poner precio sin pedir perdón.',
+  3: 'entra fácil y sale fácil. Tu tarea es la constancia y el ahorro.',
+  4: 'sos el mejor administrador del tablero. Riesgo: tacañez y miedo a invertir.',
+  5: 'ingresos variables y muchas fuentes. Necesitás un colchón fijo, sí o sí.',
+  6: 'gastás mucho en la familia y en la casa. Cuidado con financiar a otros.',
+  7: 'no te mueve el dinero, y por eso a veces te subvaluás. Cobrá tu conocimiento.',
+  8: 'es tu terreno natural: gestionás, multiplicás y arriesgás bien. Riesgo: apalancarte de más.',
+  9: 'ganás y repartís. Aprendé a poner límites antes de quedarte sin nada.',
+  11: 'el dinero llega por lo que inspirás, no por lo que producís en serie.',
+  22: 'podés manejar cifras y estructuras grandes. No te achiques.',
+  33: 'el dinero llega cuando dejás de sentir culpa por cobrar lo que das.'
+};
+const NUM_SALUD = {
+  1: 'cuando algo te supera, te ponés a la defensiva y te aislás en tu decisión. Tensión en cabeza y estómago.',
+  2: 'te tragás el conflicto para no romper la paz y eso se te acumula. Ansiedad y somatización.',
+  3: 'te dispersás o te reís del problema en vez de mirarlo. Riesgo: hablar mucho y sentir poco.',
+  4: 'te aferrás al control y a la rutina. Rigidez física, contracturas, mandíbula apretada.',
+  5: 'te fugás: viaje, cambio, exceso, cualquier cosa que corra el foco. Riesgo: conductas adictivas.',
+  6: 'te ocupás de todos menos de vos, y después estallás. Riesgo: cargar culpas ajenas.',
+  7: 'te encerrás a pensarlo y te desconectás del cuerpo. Riesgo: melancolía e insomnio.',
+  8: 'te tirás al trabajo hasta olvidar el problema. Riesgo: estrés, presión, agotamiento.',
+  9: 'te hacés cargo del dolor de todos y no procesás el propio. Riesgo: tristeza difusa.',
+  11: 'absorbés el clima emocional del ambiente como una esponja. Necesitás soledad para descargar.',
+  22: 'te exigís a la altura de tu visión y esa presión te aplasta. Bajá la vara y seguí.',
+  33: 'te vaciás cuidando. Aprender a recibir es tu medicina.'
+};
+const NUM_ANIO = {
+  1: 'año de siembra y arranque. Se abren puertas nuevas, se cierran etapas viejas. Es el momento de empezar, decidir y mostrarte. No es año para esperar.',
+  2: 'año de paciencia, vínculos y consolidación silenciosa. Las cosas maduran despacio. Se cocinan alianzas. Forzar el ritmo acá sale caro.',
+  3: 'año de expresión, visibilidad y disfrute. Buen momento para comunicar, mostrar, vender y socializar. Cuidado con dispersarte en mil frentes.',
+  4: 'año de trabajo duro y estructura. Se ordena, se construye base, se pagan deudas. Poco glamour y mucho resultado a futuro.',
+  5: 'año de cambio, movimiento e imprevistos. Aparecen oportunidades y tentaciones. Se recomienda flexibilidad y cero contratos rígidos.',
+  6: 'año de familia, casa, pareja y responsabilidades. Se asume el cuidado de algo o de alguien. Buen año para formalizar vínculos.',
+  7: 'año de introspección, estudio y revisión. Rinde poco hacia afuera y mucho hacia adentro. Es tiempo de aprender, no de conquistar.',
+  8: 'año de cosecha material, poder y dinero. Se recoge lo sembrado. Es el mejor año del ciclo para negociar, invertir y crecer económicamente.',
+  9: 'año de cierre, limpieza y despedida. Se termina lo que ya no va. No arranques nada grande: preparate para el ciclo nuevo que viene.'
+};
+const NUM_MES = {
+  1: 'arrancar e iniciar', 2: 'esperar, negociar y acompañar', 3: 'comunicar y mostrarse',
+  4: 'ordenar y trabajar firme', 5: 'moverse y adaptarse', 6: 'atender familia y compromisos',
+  7: 'estudiar, revisar y descansar', 8: 'cerrar negocios y cobrar', 9: 'terminar y soltar'
+};
+const NUM_DESAFIO = {
+  0: 'no tenés un desafío marcado en esta etapa: tenés todas las herramientas, y el desafío es justamente no dormirte y elegir con conciencia.',
+  1: 'animarte a decidir por vos mismo y sostener tu opinión sin que te tiemble la voz, sin caer en la imposición.',
+  2: 'no diluirte en el otro. Aprender a decir que no y a bancar el conflicto sin sentir que se rompe todo.',
+  3: 'terminar lo que empezás y hablar en serio de lo que te pasa, en vez de tapar con humor o dispersión.',
+  4: 'construir sin volverte rígido. Aprender a sostener el esfuerzo sin ahogarte en el control.',
+  5: 'no fugarte. Usar la libertad con dirección en vez de escapar de todo lo que compromete.',
+  6: 'ayudar sin controlar y sin sacrificarte. Aprender que cuidar no te da derecho a mandar.',
+  7: 'confiar. Salir del análisis y del aislamiento y animarte al vínculo real.',
+  8: 'manejar el poder y el dinero sin que te manejen a vos. Ni obsesión ni miedo: administración.'
+};
+const NUM_LECCION = {
+  1: 'te falta iniciativa y decisión propia: te cuesta arrancar solo y bancarte el mando. La vida te va a poner una y otra vez en situaciones donde no queda otra que decidir vos.',
+  2: 'te falta tacto, paciencia y capacidad de escuchar. Tenés que aprender a cooperar y a leer al otro antes de avanzar.',
+  3: 'te falta expresión: te cuesta mostrar lo que sentís y confiar en tu creatividad. Aprender a comunicar es la tarea.',
+  4: 'te falta método, orden y constancia. Vas a tener que aprender a laburar sostenido, aunque no te guste.',
+  5: 'te falta flexibilidad y apertura al cambio. Te aferrás a lo conocido y la vida te va a empujar a soltarlo.',
+  6: 'te falta compromiso y responsabilidad afectiva. Aprender a hacerte cargo del otro es la lección.',
+  7: 'te falta profundidad y estudio: vas por la superficie. Se te pide parar, pensar y buscar la verdad de fondo.',
+  8: 'te falta manejo del dinero, del poder y de la ambición. Aprender a administrarte es central en esta vida.',
+  9: 'te falta compasión y visión amplia: mirás muy desde tu ombligo. La lección es abrir el corazón y soltar.'
+};
+const NUM_DEUDA = {
+  13: 'Deuda 13/4 (el trabajo): en otro tiempo se eludió el esfuerzo, y ahora los resultados llegan solamente trabajando en serio y de forma sostenida. Los atajos no te van a funcionar: cada vez que quieras acortar camino, se te va a caer. La salida es orden, método y constancia, sin quejarte del esfuerzo.',
+  14: 'Deuda 14/5 (la libertad): hubo abuso de la libertad y de los placeres, y ahora la vida te pide moderación y adaptabilidad. Vas a enfrentar cambios bruscos, imprevistos y tentaciones. La salida es la disciplina en medio del caos y no usar el exceso como escape.',
+  16: 'Deuda 16/7 (el ego y el amor): esta es la más exigente. Traés derrumbes: cosas que se caen justo cuando parecían firmes, sobre todo cuando el ego se infla o cuando el vínculo se maneja con soberbia. Cada caída limpia. La salida es la humildad, la honestidad afectiva y reconstruir desde valores reales.',
+  19: 'Deuda 19/1 (el poder): se usó el poder para uno mismo, a costa de otros. Ahora la vida te va a poner solo, obligado a resolver por tus propios medios y a pedir ayuda cuando no sepas. La salida es la independencia sin egoísmo: liderar sirviendo, no dominando.'
+};
+const NUM_CICLO_ROTULO = {
+  Formativo: 'la infancia y la juventud, la etapa donde se forma el carácter y se cargan las mochilas',
+  Productivo: 'la etapa media de la vida: familia, carrera, construcción y realización concreta',
+  Cosecha: 'la madurez y la vejez: se recoge lo sembrado y se transmite lo aprendido'
+};
+
+function nEs(n) { return NUM_ESENCIA[n] || NUM_ESENCIA[reducirSimple(n)]; }
+function nGet(tabla, n) { return tabla[n] || tabla[reducirSimple(n)]; }
+function etapaTxt(x) { return x.hasta === null ? ('desde los ' + x.desde + ' años en adelante') : ('de los ' + x.desde + ' a los ' + x.hasta + ' años'); }
+
+/* ---------- Informe de numerología ---------- */
+function htmlNumerologia(P) {
+  const nombre = P.datos.nombre;
+  const cv = nEs(P.caminoVida), de = nEs(P.destino), al = nEs(P.alma), pe = nEs(P.personalidad), ma = nEs(P.madurez);
+  let h = '';
+
+  h += '<h2 class="seccion-titulo">' + esc(nombre) + '</h2>';
+  h += '<p class="seccion-sub">Numerología pitagórica \\u00b7 nacimiento: ' + P.dia + '/' + P.mes + '/' + P.anio + ' \\u00b7 ' + P.edad + ' años</p>';
+
+  // Núcleo
+  h += '<div class="heroes">';
+  const celda = (rot, n, sub) => '<div class="hero-signo"><div class="hero-glifo">' + n + '</div>' +
+    '<div class="hero-quien">' + rot + '</div><div class="hero-nombre-signo">' + sub + '</div></div>';
+  h += celda('Camino de Vida', P.caminoVida, cv.t);
+  h += celda('Destino', P.destino, de.t);
+  h += celda('Alma', P.alma, al.t);
+  h += celda('Personalidad', P.personalidad, pe.t);
+  h += '</div>';
+
+  // Resumen
+  h += '<h3 class="seccion-titulo" style="font-size:1.35rem">Resumen general</h3>';
+  h += '<div class="sintesis">';
+  h += '<p>Tu número más importante es el <strong>Camino de Vida ' + P.caminoVida + '</strong>: es la ruta que vas a recorrer sí o sí, la que marca el tipo de experiencias que se te repiten hasta que aprendés. Te define como <strong>' + cv.t.toLowerCase() + '</strong>: tu fuerza es ' + cv.luz + ', y tu trampa es ' + cv.som + '. Tu verbo es <strong>' + cv.vb + '</strong>.</p>';
+  h += '<p>Tu <strong>Destino ' + P.destino + '</strong> (también llamado número de Expresión) sale de tu nombre completo de nacimiento y dice con qué herramientas venís equipado: ' + de.luz + '. Tu <strong>Alma ' + P.alma + '</strong> (lo que te mueve por dentro, aunque no lo digas) busca ' + al.luz + '. Y tu <strong>Personalidad ' + P.personalidad + '</strong> es la máscara: lo primero que los demás ven de vos es ' + pe.luz + '.</p>';
+  if (base(P.caminoVida) === base(P.destino)) {
+    h += '<p><strong>Camino y Destino coinciden en la misma vibración:</strong> lo que viniste a hacer y las herramientas que traés apuntan al mismo lado. Es una vida muy enfocada, con poca contradicción interna, pero con el riesgo de la unilateralidad: si ese número se te desbalancea, no tenés otro que te compense.</p>';
+  } else {
+    h += '<p><strong>Camino y Destino son distintos:</strong> el camino te pide ' + cv.vb + ' y tus talentos te llevan a ' + de.vb + '. Esa fricción es tu motor: la vida te va a pedir cosas que no siempre coinciden con lo que te sale fácil, y ahí es donde crecés.</p>';
+  }
+  if (base(P.alma) !== base(P.personalidad)) {
+    h += '<p><strong>Hay distancia entre lo que sos por dentro (' + P.alma + ') y lo que mostrás (' + P.personalidad + '):</strong> la gente te lee distinto de lo que realmente sos. Eso te da privacidad, pero también te genera la sensación de que no te terminan de conocer.</p>';
+  } else {
+    h += '<p><strong>Tu Alma y tu Personalidad vibran igual:</strong> sos bastante transparente. Lo que ven de vos es lo que hay, y eso genera confianza rápida.</p>';
+  }
+  h += '</div>';
+
+  // Personalidad
+  h += '<h3 class="seccion-titulo" style="font-size:1.35rem">Personalidad, talentos y desafíos</h3>';
+  h += '<div class="dos-columnas">';
+  h += '<div class="columna-lista positiva"><h4>Fortalezas</h4><ul>' +
+    ['<li>' + cv.luz.charAt(0).toUpperCase() + cv.luz.slice(1) + ' (Camino ' + P.caminoVida + ')</li>',
+     '<li>' + de.luz.charAt(0).toUpperCase() + de.luz.slice(1) + ' (Destino ' + P.destino + ')</li>',
+     '<li>' + al.luz.charAt(0).toUpperCase() + al.luz.slice(1) + ' (Alma ' + P.alma + ')</li>'].join('') + '</ul></div>';
+  h += '<div class="columna-lista negativa"><h4>Debilidades</h4><ul>' +
+    ['<li>' + cv.som.charAt(0).toUpperCase() + cv.som.slice(1) + '</li>',
+     '<li>' + de.som.charAt(0).toUpperCase() + de.som.slice(1) + '</li>',
+     '<li>' + al.som.charAt(0).toUpperCase() + al.som.slice(1) + '</li>'].join('') + '</ul></div>';
+  h += '</div>';
+
+  h += '<div class="interpretaciones">';
+  h += '<div class="interp"><h5>Número de Madurez: ' + P.madurez + ' (' + ma.t + ')</h5><p>Es lo que se activa fuerte a partir de los 35 o 40 años, cuando el Camino de Vida y el Destino se funden. A partir de esa edad tu vida empieza a pedirte ' + ma.luz + '. Muchas de las decisiones importantes de tu segunda mitad van a girar alrededor de eso, incluso si en tu juventud no te interesaba.</p></div>';
+  h += '<div class="interp"><h5>Día de nacimiento: ' + P.cumple + (P.cumpleRed !== P.cumple ? ' (reduce a ' + P.cumpleRed + ')' : '') + '</h5><p>Es un talento específico, un regalo con el que venís: ' + nEs(P.cumpleRed).luz + '. Es la carta que tenés siempre a mano, la que podés jugar cuando el resto no alcanza.</p></div>';
+  h += '<div class="interp"><h5>Número de Equilibrio: ' + P.balance + '</h5><p>Es a lo que tenés que recurrir cuando estás desbordado o en crisis. Tu salida no es ni escaparte ni tragártelo: es apoyarte en ' + nEs(P.balance).luz + '. Cuando te pasa algo grave, esa es tu herramienta real.</p></div>';
+  if (P.pasion.length) {
+    h += '<div class="interp"><h5>Pasión Oculta: ' + P.pasion.join(' y ') + '</h5><p>Es el número que más se repite en tu nombre: un deseo intenso que te empuja aunque no lo declares. Te mueve fuertemente hacia ' + P.pasion.map(n => nEs(n).luz).join(' y hacia ') + '. Si esa energía no encuentra salida, se te vuelve obsesión.</p></div>';
+  }
+  h += '</div>';
+
+  // Trabajo y dinero
+  h += '<h3 class="seccion-titulo" style="font-size:1.35rem">Trabajo, vocación y dinero</h3>';
+  h += '<div class="sintesis">';
+  h += '<p><strong>Profesiones donde rendís:</strong> ' + nGet(NUM_TRABAJO, P.destino) + '</p>';
+  h += '<p><strong>Tu forma de trabajar (Camino ' + P.caminoVida + '):</strong> ' + nGet(NUM_TRABAJO, P.caminoVida) + '</p>';
+  h += '<p><strong>Dinero:</strong> ' + nGet(NUM_DINERO, P.caminoVida) + ' Y desde tus talentos (Destino ' + P.destino + '): ' + nGet(NUM_DINERO, P.destino) + '</p>';
+  h += '</div>';
+
+  // Amor
+  h += '<h3 class="seccion-titulo" style="font-size:1.35rem">Amor, relaciones y familia</h3>';
+  h += '<div class="sintesis">';
+  h += '<p><strong>Cómo amás (Alma ' + P.alma + '):</strong> ' + nGet(NUM_AMOR, P.alma) + '</p>';
+  h += '<p><strong>Cómo te ven al principio (Personalidad ' + P.personalidad + '):</strong> los demás te leen como alguien con ' + pe.luz + '. Esa primera impresión te abre puertas, pero también genera expectativas que después tenés que sostener.</p>';
+  h += '<p><strong>Compatibilidad:</strong> te llevás naturalmente con quienes vibran ' + [1,2,3,4,5,6,7,8,9].filter(n => (n + base(P.caminoVida)) % 2 === 0 || Math.abs(n - base(P.caminoVida)) === 3).slice(0, 4).join(', ') + '. Con los números iguales al tuyo hay entendimiento inmediato pero también competencia por el mismo lugar. Lo importante no es el número del otro: es si esa persona te deja ser tu Camino ' + P.caminoVida + ' sin cortarte las alas.</p>';
+  h += '</div>';
+
+  // Salud emocional
+  h += '<h3 class="seccion-titulo" style="font-size:1.35rem">Salud emocional</h3>';
+  h += '<div class="sintesis"><p><strong>Cómo enfrentás los problemas:</strong> ' + nGet(NUM_SALUD, P.caminoVida) + '</p>';
+  h += '<p><strong>Tu ancla en la crisis (Equilibrio ' + P.balance + '):</strong> ' + nGet(NUM_SALUD, P.balance) + ' Sabiendo esto, el antídoto es consciente: cuando te veas cayendo en ese patrón, forzate a hacer exactamente lo contrario.</p></div>';
+
+  // Misión
+  h += '<h3 class="seccion-titulo" style="font-size:1.35rem">Misión de vida</h3>';
+  h += '<div class="sintesis"><p>Viniste a <strong>' + nGet(NUM_MISION, P.caminoVida) + '</strong>. Esa es la tarea de fondo, la que aparece disfrazada una y otra vez en trabajos, parejas y crisis hasta que la resolvés.</p>';
+  h += '<p>Tu Madurez ' + P.madurez + ' le agrega el remate: en la segunda mitad de la vida, esa misión se completa cuando lográs ' + nGet(NUM_MISION, P.madurez) + '.</p></div>';
+
+  // Ciclos
+  h += '<h3 class="seccion-titulo" style="font-size:1.35rem">Ciclos de vida</h3>';
+  h += '<p class="seccion-sub">Las tres grandes estaciones. Hoy tenés ' + P.edad + ' años.</p>';
+  h += '<div class="interpretaciones">';
+  P.ciclos.forEach((c, i) => {
+    const act = P.edad >= c.desde && (c.hasta === null || P.edad <= c.hasta);
+    h += '<div class="interp"' + (act ? ' style="border-color:var(--oro)"' : '') + '><h5>' + (act ? 'ACTUAL \\u00b7 ' : '') + 'Ciclo ' + (i + 1) + ' (' + c.etiqueta + '): número ' + c.n + '</h5>' +
+      '<p>' + etapaTxt(c) + ' \\u2014 ' + NUM_CICLO_ROTULO[c.etiqueta] + '. La energía dominante es la del ' + c.n + ': ' + nEs(c.n).luz + '. Lo que hay que cuidar acá es ' + nEs(c.n).som + '.</p></div>';
+  });
+  h += '</div>';
+
+  // Pináculos
+  h += '<h3 class="seccion-titulo" style="font-size:1.35rem">Pináculos y desafíos</h3>';
+  h += '<p class="seccion-sub">Cada pináculo es una etapa con su logro y su prueba. El desafío es lo que hay que resolver en esa misma etapa.</p>';
+  h += '<div class="interpretaciones">';
+  P.pinaculos.forEach((pi, i) => {
+    const df = P.desafios[i];
+    const act = P.edad >= pi.desde && (pi.hasta === null || P.edad <= pi.hasta);
+    h += '<div class="interp"' + (act ? ' style="border-color:var(--oro)"' : '') + '>';
+    h += '<h5>' + (act ? 'ACTUAL \\u00b7 ' : '') + 'Pináculo ' + (i + 1) + ': ' + pi.n + ' \\u00b7 Desafío: ' + df.n + '</h5>';
+    h += '<p><strong>' + etapaTxt(pi) + '.</strong> El logro de esta etapa pasa por ' + nEs(pi.n).luz + ' (energía del ' + pi.n + '). ';
+    h += '<br><strong>El desafío ' + df.n + ':</strong> ' + NUM_DESAFIO[df.n] + '</p></div>';
+  });
+  h += '</div>';
+
+  // Kármico
+  h += '<h3 class="seccion-titulo" style="font-size:1.35rem">Lecciones y deudas kármicas</h3>';
+  if (P.lecciones.length) {
+    h += '<div class="sintesis"><h4>Lecciones kármicas (números ausentes en tu nombre): ' + P.lecciones.join(', ') + '</h4>';
+    P.lecciones.forEach(n => { h += '<p><strong>Lección ' + n + ':</strong> ' + NUM_LECCION[n] + '</p>'; });
+    h += '</div>';
+  } else {
+    h += '<div class="sintesis"><p><strong>No tenés lecciones kármicas:</strong> los nueve números aparecen en tu nombre. Traés el set completo de herramientas. La contra es que no tenés una carencia obvia que te obligue a enfocarte, y podés dispersarte creyendo que todo te sale.</p></div>';
+  }
+  if (P.deudas.length) {
+    h += '<div class="sintesis"><h4>Deudas kármicas detectadas</h4>';
+    P.deudas.forEach(d => { h += '<p><strong>' + d.n + ' (en ' + d.origen + '):</strong> ' + NUM_DEUDA[d.n] + '</p>'; });
+    h += '</div>';
+  } else {
+    h += '<p class="seccion-sub">No se detectan deudas kármicas (13, 14, 16 ni 19) en tus números principales.</p>';
+  }
+
+  // Tiempo
+  h += '<h3 class="seccion-titulo" style="font-size:1.35rem">Tu momento actual</h3>';
+  h += '<div class="sintesis">';
+  h += '<h4>Año Personal ' + P.anioPersonal + ' (' + P.anioAct + ')</h4>';
+  h += '<p>' + NUM_ANIO[P.anioPersonal] + '</p>';
+  h += '<h4>Mes Personal ' + P.mesPersonal + '</h4>';
+  h += '<p>Este mes la energía va de ' + NUM_MES[P.mesPersonal] + '. Dentro del año ' + P.anioPersonal + ', es el capítulo que te toca ahora.</p>';
+  h += '<h4>Día Personal ' + P.diaPersonal + '</h4>';
+  h += '<p>Hoy es un día para ' + NUM_MES[P.diaPersonal] + '. Sirve para elegir qué hacer y qué postergar en las próximas horas.</p>';
+  h += '</div>';
+
+  h += '<div class="dos-columnas">';
+  h += '<div class="columna-lista positiva"><h4>Próximos 9 años</h4><ul>' +
+    P.tablaAnios.map(t => '<li><strong>' + t.anio + ':</strong> año ' + t.n + ' \\u2014 ' + NUM_MES[t.n] + '</li>').join('') + '</ul></div>';
+  h += '<div class="columna-lista negativa"><h4>Próximos 12 meses</h4><ul>' +
+    P.tablaMeses.map(t => '<li><strong>' + String(t.mes).padStart(2, '0') + '/' + t.anio + ':</strong> mes ' + t.n + ' \\u2014 ' + NUM_MES[t.n] + '</li>').join('') + '</ul></div>';
+  h += '</div>';
+
+  // Consejos
+  h += '<h3 class="seccion-titulo" style="font-size:1.35rem">Consejos finales</h3>';
+  h += '<div class="sintesis">';
+  h += '<p><strong>Potenciá:</strong> ' + cv.luz + '. Es tu terreno, ahí ganás.</p>';
+  h += '<p><strong>Evitá:</strong> ' + cv.som + '. Es lo que te sabotea justo cuando estás por lograr algo.</p>';
+  h += '<p><strong>Este año (' + P.anioPersonal + '):</strong> ' + NUM_ANIO[P.anioPersonal] + '</p>';
+  h += '<p style="color:var(--marfil-dim);font-size:.85rem">Método: tabla pitagórica clásica. Camino de Vida por reducción de componentes (mes, día y año por separado); Expresión, Alma y Personalidad por suma total del nombre de nacimiento. Se preservan los números maestros 11, 22 y 33. La numerología es una herramienta simbólica de autoconocimiento, no una predicción del futuro.</p>';
+  h += '</div>';
+
+  return h;
+}
+
+/* ---------- Resumen para la IA ---------- */
+function resumenNumerologiaIA(P) {
+  const l = [];
+  l.push('PERSONA: ' + P.datos.nombre + ' (nombre completo de nacimiento).');
+  if (P.datos.actual)  l.push('Nombre que usa actualmente: ' + P.datos.actual + '.');
+  if (P.datos.casado)  l.push('Apellido de casado/a: ' + P.datos.casado + '.');
+  if (P.datos.apodo)   l.push('Apodo: ' + P.datos.apodo + '.');
+  l.push('FECHA DE NACIMIENTO: ' + P.dia + '/' + P.mes + '/' + P.anio + '. Edad actual: ' + P.edad + ' años.');
+  l.push('FECHA DE HOY: ' + P.diaAct + '/' + P.mesAct + '/' + P.anioAct + '.');
+  l.push('');
+  l.push('NUMEROS YA CALCULADOS (no los recalcules, usalos tal cual):');
+  l.push('- Camino de Vida: ' + P.caminoVida);
+  l.push('- Destino / Expresion: ' + P.destino);
+  l.push('- Alma (Soul Urge): ' + P.alma);
+  l.push('- Personalidad: ' + P.personalidad);
+  l.push('- Madurez: ' + P.madurez);
+  l.push('- Dia de nacimiento (Birthday): ' + P.cumple + ' (reduce a ' + P.cumpleRed + ')');
+  l.push('- Numero de Equilibrio (Balance): ' + P.balance);
+  l.push('- Pasion Oculta: ' + (P.pasion.length ? P.pasion.join(', ') : 'ninguna marcada'));
+  l.push('- Lecciones karmicas (numeros ausentes en el nombre): ' + (P.lecciones.length ? P.lecciones.join(', ') : 'ninguna'));
+  l.push('- Deudas karmicas: ' + (P.deudas.length ? P.deudas.map(d => d.n + ' en ' + d.origen).join('; ') : 'ninguna'));
+  l.push('- Pinaculos: ' + P.pinaculos.map((p, i) => 'P' + (i + 1) + '=' + p.n + ' (' + etapaTxt(p) + ')').join('; '));
+  l.push('- Desafios: ' + P.desafios.map((d, i) => 'D' + (i + 1) + '=' + d.n + ' (' + etapaTxt(d) + ')').join('; '));
+  l.push('- Ciclos de vida: ' + P.ciclos.map((c, i) => 'C' + (i + 1) + '=' + c.n + ' ' + c.etiqueta + ' (' + etapaTxt(c) + ')').join('; '));
+  l.push('- Año Personal ' + P.anioAct + ': ' + P.anioPersonal);
+  l.push('- Mes Personal actual: ' + P.mesPersonal);
+  l.push('- Dia Personal de hoy: ' + P.diaPersonal);
+  l.push('');
+  l.push('TABLA DE AÑOS PERSONALES: ' + P.tablaAnios.map(t => t.anio + '=' + t.n).join(', ') + '.');
+  l.push('TABLA DE MESES PERSONALES (proximos 12): ' + P.tablaMeses.map(t => t.mes + '/' + t.anio + '=' + t.n).join(', ') + '.');
+  l.push('');
+  l.push('METODO PARA FECHAS PUNTUALES (usalo solo si te preguntan por una fecha que no esta en las tablas):');
+  l.push('Año Personal = reducir(reducir(' + P.mes + ') + reducir(' + P.dia + ') + reducir(año consultado)) a un digito del 1 al 9.');
+  l.push('Mes Personal = reducir(Año Personal + numero del mes) a un digito.');
+  l.push('Dia Personal = reducir(Mes Personal + numero del dia) a un digito.');
+  return l.join('\\n');
+}
+
+/* ---------- Formulario y orquestación de numerología ---------- */
+function leerNumerologia() {
+  const nombre = $('num-nombre').value.trim();
+  const fecha = $('num-fecha').value;
+  if (!nombre || !fecha) return null;
+  if (palabrasDe(nombre).length === 0) return null;
+  return {
+    nombre,
+    fecha,
+    actual: $('num-actual').value.trim(),
+    casado: $('num-casado').value.trim(),
+    apodo:  $('num-apodo').value.trim()
+  };
+}
+
+async function renderNumerologiaFull(datos) {
+  const P = calcularNumerologia(datos);
+  let h = htmlNumerologia(P);
+  CTX_IA = { activo: true, cartas: [], modo: 'numerologia', num: P, historial: [] };
+  h += htmlChatIA('numerologia');
+  return h;
+}
+
 /* ---- Init ---- */
 document.addEventListener('DOMContentLoaded', () => {
   poblarZonas();
@@ -36760,6 +37592,7 @@ document.addEventListener('DOMContentLoaded', () => {
   renderGuia();
   $('tab-individual').addEventListener('click', () => setModo('individual'));
   $('tab-comparacion').addEventListener('click', () => setModo('comparacion'));
+  $('tab-numerologia').addEventListener('click', () => setModo('numerologia'));
   $('btn-calcular').addEventListener('click', trazar);
 });
 
