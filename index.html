@@ -799,6 +799,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   <a class="nav" href="#bulk" id="nav-bulk" onclick="showSection('bulk');return false;"><span class="ni">✏️</span>Edición masiva</a>
 
   <div class="sb-sec">SEO & IA</div>
+  <a class="nav" href="#astrolabio" id="nav-astrolabio" onclick="showSection('astrolabio');return false;"><span class="ni">🔮</span>Astrolabio</a>
   <a class="nav" href="#seo" id="nav-seo" onclick="showSection('seo');return false;"><span class="ni">🔍</span>Analizador SEO</a>
   <a class="nav" href="#ia" id="nav-ia" onclick="showSection('ia');return false;"><span class="ni">🤖</span>Chat IA<span class="nb nb-new">PRO</span></a>
   <a class="nav" href="#asistente-ia" id="nav-asistente-ia" onclick="showSection('asistente-ia');return false;"><span class="ni">🧠</span>Asistente IA</a>
@@ -1265,6 +1266,11 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     </div>
   </div>
 
+</div>
+
+<!-- ═══════════════════════ ASTROLABIO ═══════════════════════ -->
+<div id="section-astrolabio" class="section fade-in">
+  <iframe id="astro-frame" title="Astrolabio" scrolling="no" style="width:100%;border:0;min-height:640px;display:block;background:transparent;overflow:hidden"></iframe>
 </div>
 
 <!-- ═══════════════════════ SEO ANALIZADOR ═══════════════════════ -->
@@ -26549,6 +26555,7 @@ const titles={
   proveedores:['🏭 Proveedores','Agenda de contactos de proveedores · sincronizada en todas las PCs'],
   publicaciones:['📦 Publicaciones','Gestión de tu catálogo'],
   bulk:['✏️ Edición masiva','Modificá múltiples publicaciones a la vez'],
+  astrolabio:['🔮 Astrolabio','Cartas astrales con IA · astrólogo experto que responde en base a tu carta'],
   seo:['🔍 Analizador SEO','Score y optimización de títulos'],
   ia:['🤖 Chat IA','Experto en ML Argentina 2026 · Tazas con diseño'],
   'asistente-ia':['🧠 Asistente IA','Cerebro estratégico · IA predictiva + coaching operativo'],
@@ -26597,6 +26604,7 @@ function showSection(id){
   // nueva sección visible (clonar/sincronizar)
   document.dispatchEvent(new CustomEvent('section:changed', { detail: { id } }));
 
+  if(id==='astrolabio' && typeof astroInit==='function') astroInit();
   if(id==='dashboard' && token) renderDashboard();
   if(id==='publicaciones') renderPubs();
   if(id==='seo'){
@@ -34470,5 +34478,2326 @@ _startAutoSave();
 })();
 
 </script>
+
+<!-- ═══════════════════ ASTROLABIO · integracion (v217) ═══════════════════ -->
+<script>
+/* Puente de autenticacion: el iframe (srcdoc, mismo origen) pide { worker, token }
+   al panel para usar la IA gratuita del worker (/ai) con fallback multi-proveedor. */
+window.getAstroAuth = function(){
+  try { return { worker: WORKER, token: token }; }
+  catch(e){ return { worker: '', token: '' }; }
+};
+
+/* HTML completo de Astrolabio embebido como srcdoc (aislado del panel). */
+const ASTRO_SRCDOC = `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Astrolabio — Cartas natales y sinastría</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500&family=Spectral:wght@300;400;500&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   ASTROLABIO v2 — tema "grabado celeste": noche profunda + oro antiguo
+   ============================================================ */
+:root{
+  --noche:#0b0e1a; --noche-2:#111527; --noche-3:#1a2038; --linea:#2a3152;
+  --oro:#d8b65c; --oro-suave:#a08a4e; --celeste:#7fa8d9;
+  --marfil:#e9e4d4; --marfil-dim:#9a97a8;
+  --armonico:#6baf8d; --tenso:#c96b5a; --neutro:#b9a26b;
+  --radius:10px;
+  --font-display:'Cormorant Garamond', Georgia, serif;
+  --font-body:'Spectral', Georgia, serif;
+  --font-mono:'IBM Plex Mono', ui-monospace, monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  background:var(--noche); color:var(--marfil);
+  font-family:var(--font-body); font-weight:300; line-height:1.6; min-height:100vh;
+  background-image:
+    radial-gradient(1px 1px at 12% 22%, rgba(233,228,212,.55) 50%, transparent 51%),
+    radial-gradient(1px 1px at 78% 12%, rgba(233,228,212,.4) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 55% 38%, rgba(216,182,92,.5) 50%, transparent 51%),
+    radial-gradient(1px 1px at 32% 72%, rgba(233,228,212,.35) 50%, transparent 51%),
+    radial-gradient(1px 1px at 88% 62%, rgba(127,168,217,.4) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 8% 88%, rgba(233,228,212,.3) 50%, transparent 51%),
+    radial-gradient(1px 1px at 65% 85%, rgba(233,228,212,.4) 50%, transparent 51%),
+    radial-gradient(ellipse 1200px 600px at 50% -10%, rgba(42,49,82,.55), transparent 70%);
+  background-attachment:fixed;
+}
+.wrap{max-width:1060px;margin:0 auto;padding:28px 18px 80px}
+
+/* ---------- cabecera ---------- */
+header{text-align:center;padding:26px 0 10px}
+.eyebrow{font-family:var(--font-mono);font-size:.68rem;letter-spacing:.35em;text-transform:uppercase;color:var(--oro-suave)}
+h1{font-family:var(--font-display);font-weight:600;font-size:clamp(2.4rem,6vw,3.6rem);letter-spacing:.02em;color:var(--marfil);line-height:1.1;margin:.2em 0 .1em}
+h1 .glifo{color:var(--oro);font-weight:500}
+.subtitulo{color:var(--marfil-dim);font-size:1.02rem;max-width:560px;margin:0 auto}
+.filete{width:220px;height:14px;margin:18px auto 6px;position:relative}
+.filete::before{content:"";position:absolute;left:0;right:0;top:50%;height:1px;background:linear-gradient(90deg,transparent,var(--oro-suave) 20%,var(--oro-suave) 80%,transparent)}
+.filete::after{content:"✦";position:absolute;left:50%;top:50%;transform:translate(-50%,-52%);color:var(--oro);background:var(--noche);padding:0 10px;font-size:.8rem}
+
+/* ---------- pestañas ---------- */
+.tabs{display:flex;justify-content:center;margin:26px 0 22px}
+.tab{font-family:var(--font-mono);font-size:.78rem;letter-spacing:.14em;text-transform:uppercase;background:transparent;color:var(--marfil-dim);border:1px solid var(--linea);padding:11px 22px;cursor:pointer;transition:all .2s}
+.tab:first-child{border-radius:var(--radius) 0 0 var(--radius);border-right:none}
+.tab:last-child{border-radius:0 var(--radius) var(--radius) 0}
+.tab.activa{background:var(--noche-3);color:var(--oro);border-color:var(--oro-suave)}
+.tab:focus-visible{outline:2px solid var(--celeste);outline-offset:2px}
+
+/* ---------- formularios ---------- */
+.forms{display:grid;grid-template-columns:1fr;gap:16px;margin-bottom:16px}
+.forms.doble{grid-template-columns:1fr 1fr}
+@media(max-width:720px){.forms.doble{grid-template-columns:1fr}}
+.ficha{background:var(--noche-2);border:1px solid var(--linea);border-radius:var(--radius);padding:20px 20px 14px;position:relative}
+.ficha::before{content:attr(data-rotulo);position:absolute;top:-9px;left:16px;background:var(--noche-2);padding:0 8px;font-family:var(--font-mono);font-size:.65rem;letter-spacing:.25em;text-transform:uppercase;color:var(--oro-suave);border-left:1px solid var(--linea);border-right:1px solid var(--linea)}
+.ficha.evento{border-color:rgba(127,168,217,.4);margin-bottom:16px}
+.ficha.evento::before{color:var(--celeste)}
+.campo{margin-bottom:12px}
+.campo label{display:block;font-family:var(--font-mono);font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;color:var(--marfil-dim);margin-bottom:5px}
+.campo label .opc{color:var(--oro-suave);text-transform:none;letter-spacing:0}
+.campo input,.campo select{width:100%;background:var(--noche);border:1px solid var(--linea);border-radius:6px;color:var(--marfil);font-family:var(--font-mono);font-size:.9rem;padding:9px 11px;transition:border-color .2s}
+.campo input:focus,.campo select:focus{outline:none;border-color:var(--oro-suave)}
+.campo input:disabled,.campo select:disabled{opacity:.45}
+.campo input::-webkit-calendar-picker-indicator{filter:invert(.85) sepia(.3)}
+.fila{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(max-width:420px){.fila{grid-template-columns:1fr}}
+.micro-nota{font-size:.78rem;color:var(--marfil-dim);font-style:italic;margin-top:3px;line-height:1.45}
+.micro-nota strong{color:var(--oro-suave);font-weight:500}
+
+.acciones{text-align:center;margin:8px 0 34px}
+.btn-calcular{font-family:var(--font-display);font-size:1.25rem;font-weight:600;letter-spacing:.06em;background:linear-gradient(180deg,#e5c675,var(--oro) 55%,#b3913f);color:#241d08;border:none;border-radius:var(--radius);padding:13px 46px;cursor:pointer;transition:transform .15s, box-shadow .2s;box-shadow:0 0 0 1px rgba(216,182,92,.35), 0 6px 24px rgba(216,182,92,.15)}
+.btn-calcular:hover{transform:translateY(-1px);box-shadow:0 0 0 1px rgba(216,182,92,.5),0 8px 30px rgba(216,182,92,.25)}
+.btn-calcular:focus-visible{outline:2px solid var(--celeste);outline-offset:3px}
+.btn-calcular:active{transform:translateY(0)}
+.btn-calcular:disabled{opacity:.6;cursor:wait}
+
+/* ---------- avisos ---------- */
+.aviso{border:1px solid;border-radius:var(--radius);padding:11px 15px;margin:0 0 16px;font-size:.88rem;display:flex;gap:10px;align-items:flex-start}
+.aviso.advertencia{border-color:rgba(216,182,92,.45);background:rgba(216,182,92,.06);color:#e0c98a}
+.aviso.error{border-color:rgba(201,107,90,.5);background:rgba(201,107,90,.08);color:#e09a8c}
+.aviso .ico{flex-shrink:0}
+
+/* ---------- resultados ---------- */
+#resultados{display:none}
+#resultados.visible{display:block;animation:aparecer .5s ease}
+@keyframes aparecer{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){#resultados.visible{animation:none}*{transition:none!important}}
+.seccion-titulo{font-family:var(--font-display);font-weight:600;font-size:1.7rem;color:var(--marfil);text-align:center;margin:34px 0 4px}
+.seccion-sub{text-align:center;color:var(--marfil-dim);font-size:.9rem;margin-bottom:20px}
+
+/* ---------- HERO del signo ---------- */
+.heroes{display:flex;justify-content:center;align-items:stretch;gap:22px;flex-wrap:wrap;margin:22px 0 8px}
+.hero-vs{align-self:center;font-family:var(--font-display);font-size:2rem;color:var(--oro-suave)}
+.hero-signo{background:var(--noche-2);border:1px solid var(--oro-suave);border-radius:var(--radius);padding:24px 26px 20px;text-align:center;max-width:330px;flex:1;min-width:250px;position:relative;overflow:hidden}
+.hero-signo::before{content:"";position:absolute;inset:6px;border:1px solid rgba(216,182,92,.2);border-radius:6px;pointer-events:none}
+.hero-glifo{width:96px;height:96px;margin:0 auto 10px;border-radius:50%;border:2px solid var(--oro);display:flex;align-items:center;justify-content:center;font-size:3.1rem;color:var(--oro);background:radial-gradient(circle at 35% 30%, rgba(216,182,92,.18), transparent 70%);box-shadow:0 0 26px rgba(216,182,92,.22), inset 0 0 18px rgba(216,182,92,.08)}
+.hero-signo.b .hero-glifo{border-color:var(--celeste);color:var(--celeste);box-shadow:0 0 26px rgba(127,168,217,.25), inset 0 0 18px rgba(127,168,217,.08)}
+.hero-quien{font-family:var(--font-mono);font-size:.68rem;letter-spacing:.22em;text-transform:uppercase;color:var(--marfil-dim)}
+.hero-nombre-signo{font-family:var(--font-display);font-weight:700;font-size:2rem;color:var(--marfil);line-height:1.15}
+.hero-meta{font-family:var(--font-mono);font-size:.72rem;color:var(--oro-suave);letter-spacing:.12em;text-transform:uppercase;margin:2px 0 8px}
+.hero-perfil{font-size:.9rem;color:var(--marfil);text-align:left}
+.hero-asc{margin-top:10px;padding-top:9px;border-top:1px dashed var(--linea);font-size:.85rem;color:var(--celeste)}
+.hero-asc .g{font-size:1.05rem}
+
+/* datos principales (chips) */
+.datos-chips{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin:6px 0 22px}
+.dato-chip{display:flex;align-items:center;gap:11px;background:var(--noche-2);border:1px solid var(--linea);border-radius:var(--radius);padding:11px 14px}
+.dato-ico{font-size:1.5rem;flex-shrink:0;filter:saturate(.9)}
+.dato-txt{display:flex;flex-direction:column;min-width:0}
+.dato-rotulo{font-family:var(--font-mono);font-size:.6rem;letter-spacing:.14em;text-transform:uppercase;color:var(--oro-suave)}
+.dato-valor{font-family:var(--font-display);font-size:1.18rem;font-weight:600;color:var(--marfil);line-height:1.2}
+.dato-sub{font-size:.74rem;color:var(--marfil-dim)}
+.sintesis.modo-amor{border-color:rgba(201,107,90,.35)}
+.sintesis.modo-amor h4{color:#e09a8c}
+.sintesis.modo-trabajo{border-color:rgba(138,154,91,.35)}
+.sintesis.modo-trabajo h4{color:#a8bd6b}
+
+/* rueda */
+.rueda-caja{display:flex;justify-content:center;margin:10px 0 26px}
+.rueda-caja svg{max-width:520px;width:100%;height:auto}
+.leyenda{display:flex;justify-content:center;gap:26px;font-family:var(--font-mono);font-size:.72rem;color:var(--marfil-dim);margin:-14px 0 20px;flex-wrap:wrap}
+.leyenda .punto{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:-1px}
+
+/* tarjetas de planetas */
+.grilla-planetas{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;margin-bottom:26px}
+.tarjeta-planeta{background:var(--noche-2);border:1px solid var(--linea);border-radius:var(--radius);padding:14px 15px;transition:border-color .2s}
+.tarjeta-planeta:hover{border-color:var(--oro-suave)}
+.tp-cab{display:flex;align-items:baseline;gap:8px;margin-bottom:4px}
+.tp-glifo{font-size:1.35rem;color:var(--oro)}
+.tp-nombre{font-family:var(--font-display);font-weight:600;font-size:1.12rem}
+.tp-retro{font-family:var(--font-mono);font-size:.62rem;color:var(--tenso);border:1px solid rgba(201,107,90,.4);border-radius:4px;padding:1px 5px;margin-left:auto}
+.tp-pos{font-family:var(--font-mono);font-size:.84rem;color:var(--celeste)}
+.tp-pos .signo-glifo{color:var(--marfil)}
+.tp-casa{font-family:var(--font-mono);font-size:.7rem;color:var(--oro-suave);margin-top:3px}
+.tp-cuspide{font-size:.74rem;color:var(--oro-suave);font-style:italic;margin-top:3px}
+
+/* balances */
+.balances{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+@media(max-width:640px){.balances{grid-template-columns:1fr}}
+.balance{background:var(--noche-2);border:1px solid var(--linea);border-radius:var(--radius);padding:16px 18px}
+.balance h4{font-family:var(--font-mono);font-size:.68rem;letter-spacing:.2em;text-transform:uppercase;color:var(--oro-suave);margin-bottom:10px}
+.barra-linea{display:flex;align-items:center;gap:10px;margin-bottom:7px;font-size:.85rem}
+.barra-linea .rotulo{width:82px;flex-shrink:0;color:var(--marfil-dim)}
+.barra-pista{flex:1;height:7px;background:var(--noche);border-radius:4px;overflow:hidden}
+.barra-relleno{height:100%;border-radius:4px;background:var(--oro-suave);transition:width .6s ease}
+.barra-linea .valor{width:20px;text-align:right;font-family:var(--font-mono);font-size:.78rem;color:var(--marfil-dim)}
+
+/* síntesis profunda */
+.sintesis{background:var(--noche-2);border:1px solid var(--linea);border-radius:var(--radius);padding:18px 20px;margin-bottom:26px}
+.sintesis h4{font-family:var(--font-display);font-size:1.2rem;font-weight:600;color:var(--oro);margin-bottom:6px}
+.sintesis p{font-size:.92rem;margin-bottom:8px}
+.sintesis p:last-child{margin-bottom:0}
+.sintesis .dato{color:var(--celeste)}
+
+/* aspectos */
+.lista-aspectos{display:flex;flex-direction:column;gap:8px;margin-bottom:28px}
+.aspecto{background:var(--noche-2);border:1px solid var(--linea);border-left:3px solid var(--neutro);border-radius:6px;padding:10px 14px;font-size:.9rem}
+.aspecto.armonico{border-left-color:var(--armonico)}
+.aspecto.tenso{border-left-color:var(--tenso)}
+.asp-linea{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.aspecto .glifos{font-size:1.1rem;color:var(--oro);white-space:nowrap}
+.aspecto .detalle{flex:1;min-width:180px}
+.aspecto .orbe{font-family:var(--font-mono);font-size:.72rem;color:var(--marfil-dim);white-space:nowrap}
+.aspecto .tipo-tag{font-family:var(--font-mono);font-size:.66rem;letter-spacing:.08em;text-transform:uppercase;padding:2px 7px;border-radius:4px;white-space:nowrap}
+.tipo-tag.armonico{color:var(--armonico);border:1px solid rgba(107,175,141,.4)}
+.tipo-tag.tenso{color:var(--tenso);border:1px solid rgba(201,107,90,.4)}
+.tipo-tag.neutro{color:var(--neutro);border:1px solid rgba(185,162,107,.4)}
+.asp-explica{margin-top:7px;padding-top:7px;border-top:1px dashed var(--linea);font-size:.84rem;color:var(--marfil-dim);line-height:1.55}
+.asp-explica strong{color:var(--marfil);font-weight:500}
+
+/* interpretaciones */
+.interpretaciones{display:flex;flex-direction:column;gap:10px;margin-bottom:30px}
+.interp{background:var(--noche-2);border:1px solid var(--linea);border-radius:var(--radius);padding:14px 18px}
+.interp h5{font-family:var(--font-display);font-size:1.08rem;font-weight:600;color:var(--oro);margin-bottom:3px}
+.interp p{font-size:.92rem;color:var(--marfil)}
+.interp p em{color:var(--marfil-dim)}
+
+/* casas */
+.casas-grilla{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;margin-bottom:26px}
+.casa-item{background:var(--noche-2);border:1px solid var(--linea);border-radius:8px;padding:11px 13px;font-size:.84rem}
+.casa-item .casa-num{font-family:var(--font-mono);font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;color:var(--oro-suave)}
+.casa-item .casa-signo{font-family:var(--font-display);font-weight:600;font-size:1.02rem;color:var(--marfil)}
+.casa-item .casa-tema{color:var(--marfil-dim);font-size:.8rem}
+.casa-item .casa-planetas{margin-top:4px;color:var(--celeste);font-size:.86rem}
+
+/* marcador sinastría */
+.marcador{background:var(--noche-2);border:1px solid var(--linea);border-radius:var(--radius);padding:24px;text-align:center;margin-bottom:24px}
+.marcador .cifra{font-family:var(--font-display);font-size:3.4rem;font-weight:700;color:var(--oro);line-height:1}
+.marcador .escala{font-family:var(--font-mono);font-size:.7rem;color:var(--marfil-dim);letter-spacing:.15em;text-transform:uppercase}
+.marcador .lectura{max-width:520px;margin:10px auto 0;font-size:.95rem;color:var(--marfil)}
+
+/* áreas de la relación */
+.areas{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:26px}
+@media(max-width:680px){.areas{grid-template-columns:1fr}}
+.area{background:var(--noche-2);border:1px solid var(--linea);border-radius:var(--radius);padding:15px 17px}
+.area .area-cab{display:flex;align-items:center;gap:9px;margin-bottom:6px}
+.area .area-ico{font-size:1.2rem}
+.area h5{font-family:var(--font-display);font-size:1.08rem;font-weight:600;color:var(--marfil);flex:1}
+.area .area-num{font-family:var(--font-mono);font-size:.95rem;color:var(--oro)}
+.area .barra-pista{margin-bottom:7px;height:8px}
+.area p{font-size:.84rem;color:var(--marfil-dim)}
+.area .sin-datos{font-style:italic}
+
+.dos-columnas{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:26px}
+@media(max-width:640px){.dos-columnas{grid-template-columns:1fr}}
+.columna-lista{background:var(--noche-2);border:1px solid var(--linea);border-radius:var(--radius);padding:16px 18px}
+.columna-lista h4{font-family:var(--font-display);font-size:1.15rem;font-weight:600;margin-bottom:8px}
+.columna-lista.positiva h4{color:var(--armonico)}
+.columna-lista.negativa h4{color:var(--tenso)}
+.columna-lista ul{list-style:none}
+.columna-lista li{font-size:.88rem;padding:5px 0;border-bottom:1px dashed var(--linea)}
+.columna-lista li:last-child{border-bottom:none}
+.columna-lista .vacio{color:var(--marfil-dim);font-style:italic}
+
+/* pronóstico */
+.pronostico{background:var(--noche-2);border:1px solid var(--linea);border-radius:var(--radius);padding:22px;margin-bottom:26px}
+.pronostico h4{font-family:var(--font-display);font-size:1.3rem;font-weight:600;color:var(--marfil);text-align:center;margin-bottom:16px}
+.prob-barras{display:flex;height:38px;border-radius:8px;overflow:hidden;margin-bottom:10px;font-family:var(--font-mono);font-size:.78rem}
+.prob-seg{display:flex;align-items:center;justify-content:center;color:#10131f;font-weight:500;min-width:44px;transition:width .6s ease}
+.prob-seg.a{background:var(--oro)}
+.prob-seg.empate{background:#5d6685;color:var(--marfil)}
+.prob-seg.b{background:var(--celeste)}
+.prob-rotulos{display:flex;justify-content:space-between;font-size:.8rem;color:var(--marfil-dim)}
+.pronostico .desglose{margin-top:14px;font-size:.86rem;color:var(--marfil-dim)}
+.pronostico .desglose strong{color:var(--marfil);font-weight:500}
+
+/* tránsitos */
+.transitos-cab{background:linear-gradient(180deg, rgba(127,168,217,.08), transparent);border:1px solid rgba(127,168,217,.3);border-radius:var(--radius);padding:14px 18px;margin-bottom:14px;font-size:.9rem}
+.transitos-cab strong{color:var(--celeste);font-weight:500}
+
+/* guía educativa */
+details.guia{background:var(--noche-2);border:1px solid var(--linea);border-radius:var(--radius);margin-bottom:12px;overflow:hidden}
+details.guia summary{cursor:pointer;padding:14px 18px;font-family:var(--font-display);font-size:1.15rem;font-weight:600;color:var(--oro);list-style:none;display:flex;align-items:center;gap:10px}
+details.guia summary::-webkit-details-marker{display:none}
+details.guia summary::after{content:"▾";margin-left:auto;color:var(--marfil-dim);transition:transform .2s}
+details.guia[open] summary::after{transform:rotate(180deg)}
+details.guia .guia-cuerpo{padding:0 18px 16px;font-size:.88rem}
+.guia-item{padding:8px 0;border-bottom:1px dashed var(--linea);display:flex;gap:12px;align-items:baseline}
+.guia-item:last-child{border-bottom:none}
+.guia-item .g{font-size:1.15rem;color:var(--oro);width:26px;flex-shrink:0;text-align:center}
+.guia-item .t{color:var(--marfil-dim)}
+.guia-item .t strong{color:var(--marfil);font-weight:500}
+
+/* pie */
+.pie-nota{text-align:center;font-size:.78rem;color:var(--marfil-dim);border-top:1px solid var(--linea);padding-top:18px;margin-top:30px;font-style:italic}
+.tecnico{font-family:var(--font-mono);font-size:.68rem;color:#565d78;text-align:center;margin-top:8px}
+
+/* botón PDF */
+.acciones-resultado{text-align:center;margin:10px 0 4px}
+.btn-pdf{font-family:var(--font-mono);font-size:.78rem;letter-spacing:.08em;background:transparent;color:var(--oro);border:1px solid var(--oro-suave);border-radius:var(--radius);padding:9px 20px;cursor:pointer;transition:all .2s}
+.btn-pdf:hover{background:rgba(216,182,92,.1)}
+
+/* ciclos */
+.ciclo-card{background:var(--noche-2);border:1px solid var(--linea);border-radius:var(--radius);padding:16px 18px;margin-bottom:12px}
+.ciclo-cab{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+.ciclo-ico{font-size:1.35rem}
+.ciclo-cab h4{font-family:var(--font-display);font-size:1.2rem;font-weight:600;color:var(--oro)}
+.ciclo-card p{font-size:.9rem}
+.ciclo-lista{list-style:none;margin-top:8px}
+.ciclo-lista li{font-size:.88rem;padding:6px 0;border-bottom:1px dashed var(--linea)}
+.ciclo-lista li:last-child{border-bottom:none}
+.ciclo-lista li.destacado{color:var(--celeste)}
+.ciclo-lista li em{color:var(--marfil-dim)}
+
+/* chat IA */
+.ia-caja{background:var(--noche-2);border:1px solid rgba(127,168,217,.3);border-radius:var(--radius);padding:16px;margin-bottom:26px}
+.ia-mensajes{min-height:60px;max-height:420px;overflow-y:auto;display:flex;flex-direction:column;gap:10px;margin-bottom:12px;padding-right:4px}
+.ia-vacio{color:var(--marfil-dim);font-size:.86rem;text-align:center;padding:14px 8px;line-height:1.8}
+.ia-vacio em{color:var(--celeste);font-style:normal;background:var(--noche);padding:2px 7px;border-radius:5px;display:inline-block;margin:2px}
+.ia-msg{padding:11px 14px;border-radius:12px;font-size:.9rem;max-width:88%;position:relative}
+.ia-msg .ia-rol{display:block;font-family:var(--font-mono);font-size:.6rem;letter-spacing:.12em;text-transform:uppercase;margin-bottom:4px;opacity:.7}
+.ia-msg.user{align-self:flex-end;background:var(--noche-3);border:1px solid var(--linea);border-bottom-right-radius:3px}
+.ia-msg.user .ia-rol{color:var(--oro-suave)}
+.ia-msg.bot{align-self:flex-start;background:linear-gradient(180deg,rgba(127,168,217,.1),rgba(127,168,217,.04));border:1px solid rgba(127,168,217,.3);border-bottom-left-radius:3px}
+.ia-msg.bot .ia-rol{color:var(--celeste)}
+.ia-puntos{display:inline-flex;gap:4px}
+.ia-puntos i{width:6px;height:6px;border-radius:50%;background:var(--celeste);animation:pulso 1.2s infinite ease-in-out}
+.ia-puntos i:nth-child(2){animation-delay:.2s}
+.ia-puntos i:nth-child(3){animation-delay:.4s}
+@keyframes pulso{0%,60%,100%{opacity:.3}30%{opacity:1}}
+.ia-chips{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:10px}
+.ia-chip{font-family:var(--font-body);font-size:.8rem;background:var(--noche);color:var(--marfil-dim);border:1px solid var(--linea);border-radius:20px;padding:6px 13px;cursor:pointer;transition:all .2s}
+.ia-chip:hover{border-color:var(--celeste);color:var(--celeste)}
+.ia-entrada{display:flex;gap:8px}
+.ia-entrada input{flex:1;background:var(--noche);border:1px solid var(--linea);border-radius:8px;color:var(--marfil);font-family:var(--font-body);font-size:.92rem;padding:11px 13px}
+.ia-entrada input:focus{outline:none;border-color:var(--celeste)}
+.ia-entrada button{font-family:var(--font-display);font-size:1.05rem;font-weight:600;background:var(--celeste);color:#0b0e1a;border:none;border-radius:8px;padding:0 22px;cursor:pointer;transition:opacity .2s}
+.ia-entrada button:hover{opacity:.9}
+.ia-entrada button:disabled{opacity:.5;cursor:wait}
+.ia-nota{font-size:.78rem;color:var(--marfil-dim);margin-top:10px;line-height:1.5}
+.ia-nota code{background:var(--noche);padding:1px 5px;border-radius:4px;font-family:var(--font-mono);font-size:.9em;color:var(--oro-suave)}
+
+/* ---------- impresión / PDF ---------- */
+@media print{
+  body{background:#fff !important;color:#1a1a1a !important;background-image:none !important}
+  .wrap{max-width:100%;padding:0}
+  header .eyebrow,.filete,.tabs,.forms,.ficha,#zona-forms,.acciones,#zona-avisos,.ficha-evento,
+  [data-noprint],.ia-chips,.ia-entrada,.ia-nota,#zona-guia,details.guia summary::after{display:none !important}
+  h1,.seccion-titulo,.hero-nombre-signo,.interp h5,.sintesis h4,.ciclo-cab h4,.balance h4{color:#1a1a1a !important}
+  .subtitulo,.seccion-sub,.dato-sub,.tp-casa,.casa-item .casa-tema,.asp-explica{color:#555 !important}
+  .ficha,.tarjeta-planeta,.balance,.sintesis,.interp,.aspecto,.casa-item,.marcador,.area,.columna-lista,
+  .ciclo-card,.hero-signo,.dato-chip,.ia-caja,.ia-mensajes,.pronostico,.transitos-cab,details.guia{
+    background:#fff !important;border:1px solid #ccc !important;box-shadow:none !important;break-inside:avoid}
+  .dato-valor,.tp-nombre,.tp-pos,.hero-meta,.dato-rotulo,.casa-item .casa-signo,.aspecto .detalle,.ia-msg{color:#1a1a1a !important}
+  .hero-glifo{border-color:#999 !important;color:#333 !important;box-shadow:none !important;background:none !important}
+  .seccion-titulo{break-after:avoid}
+  .ia-mensajes{max-height:none !important;overflow:visible !important}
+  details.guia[open]{break-inside:avoid}
+  .pie-nota,.tecnico{color:#777 !important}
+  a{color:#1a1a1a !important;text-decoration:none}
+}
+.modo-impresion #zona-forms,.modo-impresion .tabs,.modo-impresion .acciones{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Cartas · Sinastría · Tránsitos · Ciclos · IA</div>
+    <h1><span class="glifo">☉</span> Astrolabio <span class="glifo">☽</span></h1>
+    <p class="subtitulo">Cartas natales y comparación astrológica para personas, equipos, empresas o proyectos. Cálculo planetario real, sin depender de APIs externas.</p>
+    <div class="filete"></div>
+  </header>
+
+  <div class="tabs" role="tablist">
+    <button class="tab activa" id="tab-individual" role="tab" aria-selected="true">✧ Carta individual</button>
+    <button class="tab" id="tab-comparacion" role="tab" aria-selected="false">✧✧ Comparación (sinastría)</button>
+  </div>
+
+  <div class="forms" id="zona-forms">
+    <!-- ==================== ENTIDAD I ==================== -->
+    <div class="ficha" data-rotulo="Entidad I" id="ficha-1">
+      <div class="campo">
+        <label for="nombre1">Nombre</label>
+        <input type="text" id="nombre1" placeholder="Ej.: Cristian / River Plate / Impala Design" maxlength="40">
+        <p class="micro-nota"><strong>El nombre no influye en el cálculo:</strong> es solo una etiqueta. La carta se construye únicamente con fecha, hora y lugar. (Analizar el nombre corresponde a la numerología, otra disciplina.)</p>
+      </div>
+      <div class="campo">
+        <label for="tipo1">Tipo de entidad</label>
+        <select id="tipo1">
+          <option value="persona">Persona</option>
+          <option value="equipo">Equipo deportivo</option>
+          <option value="empresa">Empresa / marca</option>
+          <option value="proyecto">Proyecto / evento</option>
+        </select>
+      </div>
+      <div class="fila">
+        <div class="campo">
+          <label for="fecha1">Fecha de nacimiento / fundación</label>
+          <input type="date" id="fecha1" required>
+        </div>
+        <div class="campo">
+          <label for="hora1">Horario <span class="opc">(opcional)</span></label>
+          <input type="time" id="hora1">
+        </div>
+      </div>
+      <div class="fila">
+        <div class="campo">
+          <label for="tz1">Zona horaria del dato</label>
+          <select id="tz1"></select>
+        </div>
+        <div class="campo">
+          <label for="ciudad1">Lugar <span class="opc">(opcional)</span></label>
+          <select id="ciudad1"></select>
+        </div>
+      </div>
+      <div class="fila" id="latlon-1" style="display:none">
+        <div class="campo">
+          <label for="lat1">Latitud</label>
+          <input type="number" id="lat1" step="0.01" min="-90" max="90" placeholder="-32.89">
+        </div>
+        <div class="campo">
+          <label for="lon1">Longitud</label>
+          <input type="number" id="lon1" step="0.01" min="-180" max="180" placeholder="-68.85">
+        </div>
+      </div>
+      <p class="micro-nota" id="nota-1">Sin horario se asume 12:00 UTC y la Luna lleva un margen de ±6°. <strong>Ascendente y Casas requieren horario + lugar</strong>, porque dependen de la rotación de la Tierra: cambian de signo cada ~2 horas según desde dónde se mire el cielo.</p>
+    </div>
+
+    <!-- ==================== ENTIDAD II ==================== -->
+    <div class="ficha" data-rotulo="Entidad II" id="ficha-2" style="display:none">
+      <div class="campo">
+        <label for="nombre2">Nombre</label>
+        <input type="text" id="nombre2" placeholder="Ej.: Belén / Boca Juniors / El Puma Pesca" maxlength="40">
+        <p class="micro-nota"><strong>El nombre no influye en el cálculo:</strong> es solo una etiqueta.</p>
+      </div>
+      <div class="campo">
+        <label for="tipo2">Tipo de entidad</label>
+        <select id="tipo2">
+          <option value="persona">Persona</option>
+          <option value="equipo">Equipo deportivo</option>
+          <option value="empresa">Empresa / marca</option>
+          <option value="proyecto">Proyecto / evento</option>
+        </select>
+      </div>
+      <div class="fila">
+        <div class="campo">
+          <label for="fecha2">Fecha de nacimiento / fundación</label>
+          <input type="date" id="fecha2">
+        </div>
+        <div class="campo">
+          <label for="hora2">Horario <span class="opc">(opcional)</span></label>
+          <input type="time" id="hora2">
+        </div>
+      </div>
+      <div class="fila">
+        <div class="campo">
+          <label for="tz2">Zona horaria del dato</label>
+          <select id="tz2"></select>
+        </div>
+        <div class="campo">
+          <label for="ciudad2">Lugar <span class="opc">(opcional)</span></label>
+          <select id="ciudad2"></select>
+        </div>
+      </div>
+      <div class="fila" id="latlon-2" style="display:none">
+        <div class="campo">
+          <label for="lat2">Latitud</label>
+          <input type="number" id="lat2" step="0.01" min="-90" max="90" placeholder="-34.60">
+        </div>
+        <div class="campo">
+          <label for="lon2">Longitud</label>
+          <input type="number" id="lon2" step="0.01" min="-180" max="180" placeholder="-58.38">
+        </div>
+      </div>
+      <p class="micro-nota" id="nota-2">Sin horario se asume 12:00 UTC y la Luna lleva un margen de ±6°. <strong>Ascendente y Casas requieren horario + lugar.</strong></p>
+    </div>
+  </div>
+
+  <!-- ==================== EVENTO (solo comparación) ==================== -->
+  <div class="ficha evento" data-rotulo="⚔ Evento / Encuentro — opcional" id="ficha-evento" style="display:none">
+    <p class="micro-nota" style="margin-bottom:12px">Si esta comparación es por un <strong>partido, encuentro o cita concreta</strong>, cargá acá cuándo y dónde ocurre. El sistema calculará los <strong>tránsitos</strong> (el cielo de ese momento) sobre ambas cartas: eso sí influye en el análisis y en el pronóstico. Si lo dejás vacío, se usan los tránsitos de hoy.</p>
+    <div class="fila">
+      <div class="campo">
+        <label for="fecha-ev">Fecha del evento</label>
+        <input type="date" id="fecha-ev">
+      </div>
+      <div class="campo">
+        <label for="hora-ev">Horario <span class="opc">(opcional)</span></label>
+        <input type="time" id="hora-ev">
+      </div>
+    </div>
+    <div class="fila">
+      <div class="campo">
+        <label for="tz-ev">Zona horaria del evento</label>
+        <select id="tz-ev"></select>
+      </div>
+      <div class="campo">
+        <label for="ciudad-ev">Lugar del evento <span class="opc">(opcional)</span></label>
+        <select id="ciudad-ev"></select>
+      </div>
+    </div>
+    <div class="fila" id="latlon-ev" style="display:none">
+      <div class="campo">
+        <label for="lat-ev">Latitud</label>
+        <input type="number" id="lat-ev" step="0.01" min="-90" max="90">
+      </div>
+      <div class="campo">
+        <label for="lon-ev">Longitud</label>
+        <input type="number" id="lon-ev" step="0.01" min="-180" max="180">
+      </div>
+    </div>
+  </div>
+
+  <div id="zona-avisos"></div>
+
+  <div class="acciones">
+    <button class="btn-calcular" id="btn-calcular">Trazar la carta</button>
+  </div>
+
+  <div id="resultados"></div>
+
+  <!-- ==================== GUÍA EDUCATIVA (siempre visible) ==================== -->
+  <h3 class="seccion-titulo" style="font-size:1.35rem">📖 Guía para no astrólogos</h3>
+  <p class="seccion-sub">Abrí cada sección para entender qué significa lo que ves en los resultados.</p>
+  <div id="zona-guia"></div>
+
+  <p class="pie-nota">Astrolabio es una herramienta de análisis simbólico con fines recreativos y de reflexión. Los pronósticos deportivos y de compatibilidad no constituyen predicciones reales ni consejo para apuestas o decisiones importantes.</p>
+  <p class="tecnico">Motor de efemérides: algoritmos de aproximación de Schlyter (precisión ≈ ±1°) · Ascendente y casas: signos enteros (Whole Sign) · Reemplazable por Swiss Ephemeris vía API (ver comentarios en el código)</p>
+</div>
+
+<script>
+"use strict";
+/* ================================================================
+   ASTROLABIO · Motor de cálculo + UI
+   ================================================================ */
+
+/* ================= CONFIGURACIÓN DE LA IA =================
+   La IA usa la API de mensajes de Anthropic. Dentro de la vista
+   previa de Claude.ai funciona directo (sin clave). Para tu sitio
+   publicado (GitHub Pages / WordPress), poné acá la URL de tu
+   Cloudflare Worker que haga de proxy a api.anthropic.com — el
+   mismo patrón que ya usás en Panel Maestro. El Worker debe recibir
+   el body {model, max_tokens, system, messages} y reenviarlo con
+   tu x-api-key + anthropic-version, devolviendo el JSON tal cual. */
+const IA_CONFIG = {
+  endpoint: '',                 // '' = usa api.anthropic.com (solo en vista previa). Ej.: 'https://tu-worker.workers.dev/astro-chat'
+  modelo: 'claude-sonnet-4-6',
+  maxTokens: 1024
+};
+
+/* ================================================================
+   ARQUITECTURA (3 capas separadas):
+     1) EFEMÉRIDES  -> calcularPosicionesPlanetarias(fecha, horaUTCdecimal)
+     2) ASTROLOGÍA  -> signos, aspectos, sinastría, dignidades
+     3) RENDER/UI   -> DOM, SVG de la rueda, tarjetas
+
+   CÓMO CONECTAR UNA API REAL (Swiss Ephemeris) EN EL FUTURO:
+   La única función que hay que reemplazar es
+   \`calcularPosicionesPlanetarias(d)\`. Hoy usa aproximaciones de
+   Paul Schlyter (~±1° de precisión, suficiente para signos).
+   Para usar tu Cloudflare Worker + Swiss Ephemeris:
+
+     async function calcularPosicionesPlanetarias(fechaISO, horaUTC){
+       const r = await fetch(WORKER + '/api/ephemeris?date=' + fechaISO + '&ut=' + horaUTC);
+       const j = await r.json();
+       return j.planets; // [{key:'sol', lon: 123.45, retro:false}, ...]
+     }
+
+   Todo lo demás (aspectos, sinastría, render) queda igual porque
+   consume solo longitudes eclípticas geocéntricas en grados 0-360.
+   ================================================================ */
+
+/* ================= CAPA 1 · EFEMÉRIDES ================= */
+
+const RAD = Math.PI / 180;
+const rev = x => { x = x % 360; return x < 0 ? x + 360 : x; };
+const sind = x => Math.sin(x * RAD);
+const cosd = x => Math.cos(x * RAD);
+const atan2d = (y, x) => rev(Math.atan2(y, x) / RAD);
+
+// Día desde J2000 (época 2000-ene-0.0 TD, esquema de Schlyter)
+function numeroDia(anio, mes, dia, horaUTC) {
+  const d = 367 * anio
+    - Math.floor((7 * (anio + Math.floor((mes + 9) / 12))) / 4)
+    + Math.floor((275 * mes) / 9)
+    + dia - 730530;
+  return d + horaUTC / 24;
+}
+
+// Resuelve la ecuación de Kepler por iteración
+function anomExcentrica(M, e) {
+  let E = M + (e / RAD) * sind(M) * (1 + e * cosd(M));
+  for (let i = 0; i < 12; i++) {
+    const dE = (E - (e / RAD) * sind(E) - M) / (1 - e * cosd(E));
+    E -= dE;
+    if (Math.abs(dE) < 1e-6) break;
+  }
+  return E;
+}
+
+// Posición del Sol (geocéntrica). Devuelve lon y componentes rectangulares.
+function posicionSol(d) {
+  const w = rev(282.9404 + 4.70935e-5 * d);
+  const e = 0.016709 - 1.151e-9 * d;
+  const M = rev(356.0470 + 0.9856002585 * d);
+  const E = anomExcentrica(M, e);
+  const xv = cosd(E) - e;
+  const yv = Math.sqrt(1 - e * e) * sind(E);
+  const v = atan2d(yv, xv);
+  const r = Math.sqrt(xv * xv + yv * yv);
+  const lon = rev(v + w);
+  return { lon, r, xs: r * cosd(lon), ys: r * sind(lon), Ms: M, ws: w };
+}
+
+// Posición de la Luna con las perturbaciones principales (~±0.5°)
+function posicionLuna(d, sol) {
+  const N = rev(125.1228 - 0.0529538083 * d);
+  const i = 5.1454;
+  const w = rev(318.0634 + 0.1643573223 * d);
+  const a = 60.2666;
+  const e = 0.054900;
+  const M = rev(115.3654 + 13.0649929509 * d);
+
+  const E = anomExcentrica(M, e);
+  const xv = a * (cosd(E) - e);
+  const yv = a * Math.sqrt(1 - e * e) * sind(E);
+  const v = atan2d(yv, xv);
+  const r = Math.sqrt(xv * xv + yv * yv);
+
+  // A coordenadas eclípticas
+  const xh = r * (cosd(N) * cosd(v + w) - sind(N) * sind(v + w) * cosd(i));
+  const yh = r * (sind(N) * cosd(v + w) + cosd(N) * sind(v + w) * cosd(i));
+  const zh = r * sind(v + w) * sind(i);
+  let lon = atan2d(yh, xh);
+  let lat = Math.atan2(zh, Math.sqrt(xh * xh + yh * yh)) / RAD;
+
+  // Perturbaciones (términos mayores de Schlyter)
+  const Ls = rev(sol.Ms + sol.ws);        // longitud media del Sol
+  const Lm = rev(M + w + N);              // longitud media de la Luna
+  const Mm = M;
+  const Ms = sol.Ms;
+  const D = rev(Lm - Ls);                 // elongación media
+  const F = rev(Lm - N);                  // argumento de latitud
+
+  lon += -1.274 * sind(Mm - 2 * D)
+       + 0.658 * sind(2 * D)
+       - 0.186 * sind(Ms)
+       - 0.059 * sind(2 * Mm - 2 * D)
+       - 0.057 * sind(Mm - 2 * D + Ms)
+       + 0.053 * sind(Mm + 2 * D)
+       + 0.046 * sind(2 * D - Ms)
+       + 0.041 * sind(Mm - Ms)
+       - 0.035 * sind(D)
+       - 0.031 * sind(Mm + Ms)
+       - 0.015 * sind(2 * F - 2 * D)
+       + 0.011 * sind(Mm - 4 * D);
+
+  return { lon: rev(lon), lat };
+}
+
+// Elementos orbitales de los planetas (Schlyter)
+const ELEMENTOS = {
+  mercurio: d => ({ N: 48.3313 + 3.24587e-5 * d, i: 7.0047 + 5.0e-8 * d, w: 29.1241 + 1.01444e-5 * d, a: 0.387098, e: 0.205635 + 5.59e-10 * d, M: 168.6562 + 4.0923344368 * d }),
+  venus:    d => ({ N: 76.6799 + 2.4659e-5 * d, i: 3.3946 + 2.75e-8 * d, w: 54.8910 + 1.38374e-5 * d, a: 0.723330, e: 0.006773 - 1.302e-9 * d, M: 48.0052 + 1.6021302244 * d }),
+  marte:    d => ({ N: 49.5574 + 2.11081e-5 * d, i: 1.8497 - 1.78e-8 * d, w: 286.5016 + 2.92961e-5 * d, a: 1.523688, e: 0.093405 + 2.516e-9 * d, M: 18.6021 + 0.5240207766 * d }),
+  jupiter:  d => ({ N: 100.4542 + 2.76854e-5 * d, i: 1.3030 - 1.557e-7 * d, w: 273.8777 + 1.64505e-5 * d, a: 5.20256, e: 0.048498 + 4.469e-9 * d, M: 19.8950 + 0.0830853001 * d }),
+  saturno:  d => ({ N: 113.6634 + 2.3898e-5 * d, i: 2.4886 - 1.081e-7 * d, w: 339.3939 + 2.97661e-5 * d, a: 9.55475, e: 0.055546 - 9.499e-9 * d, M: 316.9670 + 0.0334442282 * d }),
+  urano:    d => ({ N: 74.0005 + 1.3978e-5 * d, i: 0.7733 + 1.9e-8 * d, w: 96.6612 + 3.0565e-5 * d, a: 19.18171 - 1.55e-8 * d, e: 0.047318 + 7.45e-9 * d, M: 142.5905 + 0.011725806 * d }),
+  neptuno:  d => ({ N: 131.7806 + 3.0173e-5 * d, i: 1.7700 - 2.55e-7 * d, w: 272.8461 - 6.027e-6 * d, a: 30.05826 + 3.313e-8 * d, e: 0.008606 + 2.15e-9 * d, M: 260.2471 + 0.005995147 * d })
+};
+
+// Posición heliocéntrica -> geocéntrica de un planeta clásico
+function posicionPlaneta(clave, d, sol) {
+  const el = ELEMENTOS[clave](d);
+  const N = rev(el.N), i = el.i, w = rev(el.w), a = el.a, e = el.e, M = rev(el.M);
+  const E = anomExcentrica(M, e);
+  const xv = a * (cosd(E) - e);
+  const yv = a * Math.sqrt(1 - e * e) * sind(E);
+  const v = atan2d(yv, xv);
+  const r = Math.sqrt(xv * xv + yv * yv);
+
+  let xh = r * (cosd(N) * cosd(v + w) - sind(N) * sind(v + w) * cosd(i));
+  let yh = r * (sind(N) * cosd(v + w) + cosd(N) * sind(v + w) * cosd(i));
+  let zh = r * sind(v + w) * sind(i);
+
+  let lonh = atan2d(yh, xh);
+  let lath = Math.atan2(zh, Math.sqrt(xh * xh + yh * yh)) / RAD;
+
+  // Perturbaciones principales de Júpiter/Saturno (mejoran ~1°)
+  if (clave === 'jupiter' || clave === 'saturno' || clave === 'urano') {
+    const Mj = rev(19.8950 + 0.0830853001 * d);
+    const Msat = rev(316.9670 + 0.0334442282 * d);
+    const Mu = rev(142.5905 + 0.011725806 * d);
+    let dLon = 0;
+    if (clave === 'jupiter') {
+      dLon = -0.332 * sind(2 * Mj - 5 * Msat - 67.6)
+             - 0.056 * sind(2 * Mj - 2 * Msat + 21)
+             + 0.042 * sind(3 * Mj - 5 * Msat + 21)
+             - 0.036 * sind(Mj - 2 * Msat)
+             + 0.022 * cosd(Mj - Msat)
+             + 0.023 * sind(2 * Mj - 3 * Msat + 52)
+             - 0.016 * sind(Mj - 5 * Msat - 69);
+    } else if (clave === 'saturno') {
+      dLon = 0.812 * sind(2 * Mj - 5 * Msat - 67.6)
+             - 0.229 * cosd(2 * Mj - 4 * Msat - 2)
+             + 0.119 * sind(Mj - 2 * Msat - 3)
+             + 0.046 * sind(2 * Mj - 6 * Msat - 69)
+             + 0.014 * sind(Mj - 3 * Msat + 32);
+    } else {
+      dLon = 0.040 * sind(Msat - 2 * Mu + 6)
+             + 0.035 * sind(Msat - 3 * Mu + 33)
+             - 0.015 * sind(Mj - Mu + 20);
+    }
+    lonh = rev(lonh + dLon);
+  }
+
+  // Reconstruir rectangulares con la longitud corregida y pasar a geocéntrico
+  xh = r * cosd(lonh) * cosd(lath);
+  yh = r * sind(lonh) * cosd(lath);
+  const xg = xh + sol.xs;
+  const yg = yh + sol.ys;
+  return { lon: atan2d(yg, xg) };
+}
+
+// Plutón: serie empírica de Schlyter (válida ~1900-2100)
+function posicionPluton(d, sol) {
+  const S = rev(50.03 + 0.033459652 * d);
+  const P = rev(238.95 + 0.003968789 * d);
+  const lonh = rev(238.9508 + 0.00400703 * d
+    - 19.799 * sind(P) + 19.848 * cosd(P)
+    + 0.897 * sind(2 * P) - 4.956 * cosd(2 * P)
+    + 0.610 * sind(3 * P) + 1.211 * cosd(3 * P)
+    - 0.341 * sind(4 * P) - 0.190 * cosd(4 * P)
+    + 0.128 * sind(5 * P) - 0.034 * cosd(5 * P)
+    - 0.038 * sind(6 * P) + 0.031 * cosd(6 * P)
+    + 0.020 * sind(S - P) - 0.010 * cosd(S - P));
+  const lath = -3.9082
+    - 5.453 * sind(P) - 14.975 * cosd(P)
+    - 1.673 * sind(2 * P) - 27.34 * cosd(2 * P)
+    - 0.198 * sind(3 * P) + 0.896 * cosd(3 * P)
+    + 0.028 * sind(4 * P) + 0.103 * cosd(4 * P)
+    + 0.006 * sind(5 * P) - 0.038 * cosd(5 * P);
+  const r = 40.72 + 6.68 * sind(P) + 6.90 * cosd(P)
+    - 1.18 * sind(2 * P) - 0.03 * cosd(2 * P)
+    + 0.15 * sind(3 * P) - 0.14 * cosd(3 * P);
+  const xh = r * cosd(lonh) * cosd(lath);
+  const yh = r * sind(lonh) * cosd(lath);
+  const xg = xh + sol.xs;
+  const yg = yh + sol.ys;
+  return { lon: atan2d(yg, xg) };
+}
+
+/* Punto de entrada de la capa de efemérides.
+   REEMPLAZAR ESTA FUNCIÓN para conectar Swiss Ephemeris (ver cabecera). */
+async function calcularPosicionesPlanetarias(d) {
+  const sol = posicionSol(d);
+  const luna = posicionLuna(d, sol);
+  const res = {
+    sol: sol.lon,
+    luna: luna.lon,
+    mercurio: posicionPlaneta('mercurio', d, sol).lon,
+    venus: posicionPlaneta('venus', d, sol).lon,
+    marte: posicionPlaneta('marte', d, sol).lon,
+    jupiter: posicionPlaneta('jupiter', d, sol).lon,
+    saturno: posicionPlaneta('saturno', d, sol).lon,
+    urano: posicionPlaneta('urano', d, sol).lon,
+    neptuno: posicionPlaneta('neptuno', d, sol).lon,
+    pluton: posicionPluton(d, sol).lon
+  };
+  return res;
+}
+
+/* ================= CAPA 1b · ASCENDENTE Y CASAS =================
+   El Ascendente es el grado del zodíaco que sube por el horizonte
+   este en el momento y lugar exactos. Requiere hora + lat/lon.
+   Casas: sistema de signos enteros (Whole Sign). */
+
+const OBLICUIDAD = 23.4393; // oblicuidad de la eclíptica (grados, aprox. época actual)
+const tand = x => Math.tan(x * RAD);
+
+// Tiempo sidéreo de Greenwich en grados para el día d (época Schlyter: d=0 => JD 2451543.5)
+function gmstGrados(d) {
+  const D = d - 1.5; // días desde J2000.0 (JD 2451545.0)
+  return rev(280.46061837 + 360.98564736629 * D);
+}
+
+// Ascendente y Medio Cielo (longitudes eclípticas)
+function calcularAscendente(d, latitud, longitudEste) {
+  const ramc = rev(gmstGrados(d) + longitudEste); // ascensión recta del MC
+  const eps = OBLICUIDAD;
+  const asc = atan2d(cosd(ramc), -(sind(ramc) * cosd(eps) + tand(latitud) * sind(eps)));
+  const mc = atan2d(sind(ramc), cosd(ramc) * cosd(eps));
+  return { asc: rev(asc), mc: rev(mc) };
+}
+
+/* ================= CAPA 2 · ASTROLOGÍA ================= */
+
+const SIGNOS = [
+  { nombre: 'Aries', glifo: '♈', elemento: 'Fuego', modalidad: 'Cardinal' },
+  { nombre: 'Tauro', glifo: '♉', elemento: 'Tierra', modalidad: 'Fijo' },
+  { nombre: 'Géminis', glifo: '♊', elemento: 'Aire', modalidad: 'Mutable' },
+  { nombre: 'Cáncer', glifo: '♋', elemento: 'Agua', modalidad: 'Cardinal' },
+  { nombre: 'Leo', glifo: '♌', elemento: 'Fuego', modalidad: 'Fijo' },
+  { nombre: 'Virgo', glifo: '♍', elemento: 'Tierra', modalidad: 'Mutable' },
+  { nombre: 'Libra', glifo: '♎', elemento: 'Aire', modalidad: 'Cardinal' },
+  { nombre: 'Escorpio', glifo: '♏', elemento: 'Agua', modalidad: 'Fijo' },
+  { nombre: 'Sagitario', glifo: '♐', elemento: 'Fuego', modalidad: 'Mutable' },
+  { nombre: 'Capricornio', glifo: '♑', elemento: 'Tierra', modalidad: 'Cardinal' },
+  { nombre: 'Acuario', glifo: '♒', elemento: 'Aire', modalidad: 'Fijo' },
+  { nombre: 'Piscis', glifo: '♓', elemento: 'Agua', modalidad: 'Mutable' }
+];
+
+const PLANETAS = [
+  { clave: 'sol', nombre: 'Sol', glifo: '\\u2609', peso: 1.6,
+    rolPersona: 'la identidad, la vitalidad y el propósito central',
+    rolOrg: 'la identidad de la organización, su estilo de liderazgo y su misión visible' },
+  { clave: 'luna', nombre: 'Luna', glifo: '\\u263D', peso: 1.6,
+    rolPersona: 'las emociones, los hábitos y las necesidades afectivas',
+    rolOrg: 'el clima interno, la relación con su gente/hinchada y sus reacciones instintivas' },
+  { clave: 'mercurio', nombre: 'Mercurio', glifo: '\\u263F', peso: 1.3,
+    rolPersona: 'la mente, la comunicación y la forma de aprender',
+    rolOrg: 'la comunicación, la táctica y la circulación de información' },
+  { clave: 'venus', nombre: 'Venus', glifo: '\\u2640', peso: 1.3,
+    rolPersona: 'el afecto, los vínculos y lo que se valora',
+    rolOrg: 'las alianzas, la imagen pública y la capacidad de seducir a su audiencia' },
+  { clave: 'marte', nombre: 'Marte', glifo: '\\u2642', peso: 1.3,
+    rolPersona: 'la energía, la iniciativa y el modo de luchar',
+    rolOrg: 'la agresividad competitiva, el empuje y la manera de atacar' },
+  { clave: 'jupiter', nombre: 'Júpiter', glifo: '\\u2643', peso: 1.0,
+    rolPersona: 'la expansión, la suerte y la visión de futuro',
+    rolOrg: 'el crecimiento, la fortuna y las oportunidades de expansión' },
+  { clave: 'saturno', nombre: 'Saturno', glifo: '\\u2644', peso: 1.0,
+    rolPersona: 'la estructura, los límites y las lecciones de madurez',
+    rolOrg: 'la disciplina, la estructura defensiva y las pruebas de resistencia' },
+  { clave: 'urano', nombre: 'Urano', glifo: '\\u2645', peso: 0.6,
+    rolPersona: 'la originalidad, los cambios súbitos y la independencia',
+    rolOrg: 'la innovación, los giros inesperados y las rupturas de esquema' },
+  { clave: 'neptuno', nombre: 'Neptuno', glifo: '\\u2646', peso: 0.6,
+    rolPersona: 'la imaginación, la sensibilidad y los ideales',
+    rolOrg: 'la mística, el relato colectivo y también las zonas difusas o confusas' },
+  { clave: 'pluton', nombre: 'Plutón', glifo: '\\u2647', peso: 0.6,
+    rolPersona: 'la transformación profunda, el poder y la regeneración',
+    rolOrg: 'el poder de fondo, las crisis transformadoras y la capacidad de renacer' }
+];
+
+const PLANETA_POR_CLAVE = Object.fromEntries(PLANETAS.map(p => [p.clave, p]));
+
+const DESCRIPCION_SIGNO = {
+  'Aries': { luz: 'empuje pionero, coraje y arranque inmediato', sombra: 'impaciencia e impulsividad',
+    perfil: 'Signo de fuego cardinal regido por Marte: energía de arranque, competencia y conquista. Va al frente, decide rápido y prefiere pedir perdón antes que permiso. Su desafío es sostener lo que empieza y medir el impulso.' },
+  'Tauro': { luz: 'constancia, solidez y sentido práctico', sombra: 'terquedad y resistencia al cambio',
+    perfil: 'Signo de tierra fijo regido por Venus: construye lento y seguro, valora lo concreto, el confort y la lealtad. Difícil de mover cuando decide algo, para bien y para mal. Su desafío es soltar y adaptarse a los cambios.' },
+  'Géminis': { luz: 'versatilidad, curiosidad y agilidad mental', sombra: 'dispersión e inconstancia',
+    perfil: 'Signo de aire mutable regido por Mercurio: mente rápida, mil intereses, talento para comunicar y conectar mundos. Se aburre fácil de la rutina. Su desafío es profundizar en lugar de picotear.' },
+  'Cáncer': { luz: 'sensibilidad protectora, memoria e intuición', sombra: 'humor cambiante y actitud defensiva',
+    perfil: 'Signo de agua cardinal regido por la Luna: protege lo suyo, tiene memoria emocional enorme e intuición fina. La pertenencia y el hogar (o la hinchada, o el equipo) son su motor. Su desafío es no encerrarse en el caparazón.' },
+  'Leo': { luz: 'carisma, generosidad y presencia magnética', sombra: 'orgullo y necesidad de reconocimiento',
+    perfil: 'Signo de fuego fijo regido por el Sol: brilla, lidera y contagia entusiasmo. Generoso con los suyos, necesita escenario y reconocimiento. Su desafío es que el orgullo no le tape la escucha.' },
+  'Virgo': { luz: 'precisión, análisis y vocación de servicio', sombra: 'exceso de crítica y perfeccionismo',
+    perfil: 'Signo de tierra mutable regido por Mercurio: detallista, eficiente, mejora todo lo que toca. El orden y el método son su superpoder. Su desafío es no paralizarse buscando la perfección ni criticar de más.' },
+  'Libra': { luz: 'diplomacia, equilibrio y sentido estético', sombra: 'indecisión y dependencia del otro',
+    perfil: 'Signo de aire cardinal regido por Venus: busca armonía, alianzas y juego limpio; tiene ojo estético y talento para negociar. Su desafío es decidir sin depender de la aprobación ajena.' },
+  'Escorpio': { luz: 'intensidad, estrategia y poder de regeneración', sombra: 'desconfianza y tendencia al control',
+    perfil: 'Signo de agua fijo regido por Marte y Plutón: todo o nada, estratega, capaz de renacer de cualquier crisis. Ve lo que otros esconden. Su desafío es confiar y aflojar el control.' },
+  'Sagitario': { luz: 'optimismo, visión amplia y espíritu aventurero', sombra: 'exageración y falta de tacto',
+    perfil: 'Signo de fuego mutable regido por Júpiter: apunta lejos, cree en grande y contagia optimismo. Amante de viajes, apuestas y horizontes nuevos. Su desafío es la mesura y cumplir lo que promete.' },
+  'Capricornio': { luz: 'ambición ordenada, disciplina y resistencia', sombra: 'rigidez y frialdad calculadora',
+    perfil: 'Signo de tierra cardinal regido por Saturno: escala la montaña paso a paso, con estrategia y aguante. El tiempo juega a su favor. Su desafío es no sacrificar lo humano en nombre del objetivo.' },
+  'Acuario': { luz: 'originalidad, visión colectiva e independencia', sombra: 'distancia emocional y rebeldía porque sí',
+    perfil: 'Signo de aire fijo regido por Saturno y Urano: piensa distinto, se adelanta a su época y trabaja para el colectivo. Libre por definición. Su desafío es conectar con la emoción y no solo con las ideas.' },
+  'Piscis': { luz: 'empatía, imaginación y capacidad de fluir', sombra: 'evasión y límites difusos',
+    perfil: 'Signo de agua mutable regido por Júpiter y Neptuno: sensible, imaginativo, capaz de leer el ambiente sin palabras. Artista y soñador. Su desafío es poner límites y bajar los sueños a tierra.' }
+};
+
+const CASAS = [
+  { num: 1, tema: 'Identidad y apariencia', desc: 'cómo se presenta al mundo, la primera impresión, el estilo personal' },
+  { num: 2, tema: 'Recursos y dinero', desc: 'lo que posee y valora: ingresos, bienes, talentos propios' },
+  { num: 3, tema: 'Comunicación y entorno', desc: 'la mente cotidiana, hermanos, vecinos, estudios cortos, mensajes' },
+  { num: 4, tema: 'Hogar y raíces', desc: 'la familia, el origen, la casa, la base emocional' },
+  { num: 5, tema: 'Creatividad y placer', desc: 'el juego, el romance, los hijos, el arte, el riesgo divertido' },
+  { num: 6, tema: 'Trabajo y salud', desc: 'la rutina, el servicio, los hábitos, el cuidado del cuerpo' },
+  { num: 7, tema: 'Pareja y socios', desc: 'los vínculos uno a uno: pareja, socios comerciales, rivales declarados' },
+  { num: 8, tema: 'Crisis y recursos compartidos', desc: 'la sexualidad profunda, herencias, deudas, transformaciones' },
+  { num: 9, tema: 'Viajes y filosofía', desc: 'los horizontes lejanos: viajes largos, estudios superiores, creencias' },
+  { num: 10, tema: 'Carrera e imagen pública', desc: 'la vocación, el reconocimiento social, la cima profesional' },
+  { num: 11, tema: 'Amigos y proyectos colectivos', desc: 'los grupos, las redes, las causas compartidas, el futuro' },
+  { num: 12, tema: 'Interioridad y cierre de ciclos', desc: 'lo oculto, el descanso, la espiritualidad, lo que se suelta' }
+];
+
+// Dignidades esenciales (Sol, Marte, Júpiter) para el índice competitivo
+const DIGNIDADES = {
+  sol:     { domicilio: ['Leo'], exaltacion: ['Aries'], caida: ['Libra'], exilio: ['Acuario'] },
+  marte:   { domicilio: ['Aries', 'Escorpio'], exaltacion: ['Capricornio'], caida: ['Cáncer'], exilio: ['Libra', 'Tauro'] },
+  jupiter: { domicilio: ['Sagitario', 'Piscis'], exaltacion: ['Cáncer'], caida: ['Capricornio'], exilio: ['Géminis', 'Virgo'] }
+};
+
+const ASPECTOS_DEF = [
+  { nombre: 'Conjunción', angulo: 0, orbe: 8, naturaleza: 'neutro', simbolo: '☌',
+    accion: 'fusiona ambas energías: actúan como una sola fuerza, para bien o para mal' },
+  { nombre: 'Sextil', angulo: 60, orbe: 4, naturaleza: 'armonico', simbolo: '⚹',
+    accion: 'abre una oportunidad: las energías cooperan si se las activa con iniciativa' },
+  { nombre: 'Cuadratura', angulo: 90, orbe: 6, naturaleza: 'tenso', simbolo: '□',
+    accion: 'genera fricción: las energías chocan y exigen ajustes y esfuerzo' },
+  { nombre: 'Trígono', angulo: 120, orbe: 6, naturaleza: 'armonico', simbolo: '△',
+    accion: 'fluye con naturalidad: las energías se apoyan entre sí sin esfuerzo' },
+  { nombre: 'Oposición', angulo: 180, orbe: 8, naturaleza: 'tenso', simbolo: '☍',
+    accion: 'crea un tira y afloje: dos polos enfrentados que piden encontrar equilibrio' }
+];
+
+// Orbes reducidos para tránsitos (más exigentes que los natales)
+const ORBES_TRANSITO = { 0: 5, 60: 3, 90: 4, 120: 4, 180: 5 };
+
+// Ciudades preset [nombre, lat, lon]
+const CIUDADES = [
+  ['— Sin lugar —', null, null],
+  ['Mendoza, AR', -32.89, -68.85],
+  ['Buenos Aires, AR', -34.60, -58.38],
+  ['Córdoba, AR', -31.42, -64.18],
+  ['Rosario, AR', -32.95, -60.64],
+  ['San Juan, AR', -31.54, -68.54],
+  ['Santiago, CL', -33.45, -70.67],
+  ['Montevideo, UY', -34.90, -56.16],
+  ['São Paulo, BR', -23.55, -46.63],
+  ['Río de Janeiro, BR', -22.91, -43.17],
+  ['Lima, PE', -12.05, -77.04],
+  ['Bogotá, CO', 4.71, -74.07],
+  ['Ciudad de México, MX', 19.43, -99.13],
+  ['Miami, US', 25.76, -80.19],
+  ['Nueva York, US', 40.71, -74.01],
+  ['Los Ángeles, US', 34.05, -118.24],
+  ['Madrid, ES', 40.42, -3.70],
+  ['Barcelona, ES', 41.39, 2.17],
+  ['Londres, GB', 51.51, -0.13],
+  ['París, FR', 48.86, 2.35],
+  ['Roma, IT', 41.90, 12.50],
+  ['Doha, QA', 25.29, 51.53],
+  ['Otra (ingresar lat/lon)', 'manual', 'manual']
+];
+
+// Áreas de análisis comparativo según los tipos de entidad
+function areasParaTipos(tipoA, tipoB) {
+  const ambosPersonas = tipoA === 'persona' && tipoB === 'persona';
+  const ambosEquipos = tipoA === 'equipo' && tipoB === 'equipo';
+  if (ambosPersonas) return [
+    { icono: '❤', nombre: 'Amor y romance', pares: [['venus','marte'],['venus','venus'],['sol','luna'],['luna','venus'],['sol','venus']],
+      desc: 'Venus (afecto), la Luna (emoción) y el Sol (identidad): la química romántica y el "nos entendemos sin hablar".' },
+    { icono: '🔥', nombre: 'Atracción y sexualidad', pares: [['marte','venus'],['marte','marte'],['marte','pluton'],['venus','pluton'],['luna','marte']],
+      desc: 'Marte (deseo) y Plutón (intensidad) sobre Venus y la Luna: el magnetismo físico y la pasión.' },
+    { icono: '💬', nombre: 'Comunicación', pares: [['mercurio','mercurio'],['mercurio','luna'],['mercurio','sol'],['mercurio','venus'],['mercurio','jupiter']],
+      desc: 'Mercurio es la palabra: cómo conversan, se entienden, discuten y se ríen juntos.' },
+    { icono: '🤝', nombre: 'Amistad y diversión', pares: [['sol','jupiter'],['venus','jupiter'],['sol','sol'],['luna','luna'],['jupiter','jupiter'],['sol','urano']],
+      desc: 'Júpiter (alegría, aventura) y los contactos Sol-Sol y Luna-Luna: el disfrute de compartir.' },
+    { icono: '⚓', nombre: 'Estabilidad y compromiso', pares: [['saturno','sol'],['saturno','luna'],['saturno','venus'],['saturno','saturno'],['saturno','marte']],
+      desc: 'Saturno es el pegamento de largo plazo: da estructura y durabilidad, aunque a veces se sienta como exigencia.' },
+    { icono: '🌊', nombre: 'Conexión emocional', pares: [['luna','luna'],['luna','sol'],['luna','neptuno'],['venus','neptuno'],['luna','venus']],
+      desc: 'La Luna y Neptuno: la empatía, la contención y la sensación de hogar con el otro.' }
+  ];
+  if (ambosEquipos) return [
+    { icono: '⚔', nombre: 'Duelo competitivo', pares: [['marte','marte'],['marte','sol'],['sol','sol'],['marte','saturno']],
+      desc: 'Marte contra Marte: el choque de estilos de lucha. Aspectos tensos = partido caliente y trabado.' },
+    { icono: '🧠', nombre: 'Batalla táctica', pares: [['mercurio','mercurio'],['mercurio','saturno'],['mercurio','marte'],['mercurio','urano']],
+      desc: 'Mercurio (táctica) y Saturno (defensa): quién lee mejor el juego del otro.' },
+    { icono: '🍀', nombre: 'Factor fortuna', pares: [['jupiter','sol'],['jupiter','marte'],['jupiter','jupiter'],['sol','urano'],['marte','urano']],
+      desc: 'Júpiter (suerte) y Urano (sorpresa): rebotes, pelotazos providenciales y goles de otro partido.' },
+    { icono: '🏟', nombre: 'Clima del encuentro', pares: [['luna','luna'],['luna','marte'],['luna','sol'],['luna','pluton']],
+      desc: 'Las Lunas: el ánimo de las hinchadas y la carga emocional del duelo.' }
+  ];
+  // Combinaciones con empresas / proyectos (o mixtas)
+  return [
+    { icono: '📜', nombre: 'Sociedad y acuerdos', pares: [['saturno','sol'],['saturno','jupiter'],['saturno','saturno'],['sol','sol']],
+      desc: 'Saturno rige los contratos y compromisos: si sostiene bien, la alianza dura.' },
+    { icono: '💬', nombre: 'Comunicación y operación', pares: [['mercurio','mercurio'],['mercurio','sol'],['mercurio','saturno'],['mercurio','marte']],
+      desc: 'Mercurio: la coordinación diaria, los mails, la logística y los malentendidos posibles.' },
+    { icono: '📈', nombre: 'Crecimiento conjunto', pares: [['jupiter','jupiter'],['jupiter','sol'],['jupiter','venus'],['jupiter','marte']],
+      desc: 'Júpiter: la capacidad de expandirse juntos y multiplicar oportunidades.' },
+    { icono: '👑', nombre: 'Poder y control', pares: [['pluton','sol'],['pluton','marte'],['saturno','marte'],['pluton','saturno']],
+      desc: 'Plutón y Saturno: quién manda, cómo se reparte el control y dónde pueden aparecer luchas de poder.' },
+    { icono: '🎨', nombre: 'Afinidad de estilo', pares: [['venus','venus'],['venus','sol'],['venus','luna'],['venus','mercurio']],
+      desc: 'Venus: el gusto compartido, la estética y la facilidad para caerse bien.' }
+  ];
+}
+
+function signoDe(lon) {
+  const idx = Math.floor(rev(lon) / 30);
+  return { ...SIGNOS[idx], idx, grado: rev(lon) - idx * 30 };
+}
+
+// Calcula una carta completa para una entidad
+async function calcularCarta(entidad) {
+  const [anio, mes, dia] = entidad.fecha.split('-').map(Number);
+  let horaUTC, conHora;
+  if (entidad.hora) {
+    const [h, m] = entidad.hora.split(':').map(Number);
+    horaUTC = h + m / 60 - entidad.tz;
+    conHora = true;
+  } else {
+    horaUTC = 12;
+    conHora = false;
+  }
+  const d = numeroDia(anio, mes, dia, horaUTC);
+  const pos = await calcularPosicionesPlanetarias(d);
+  const posManiana = await calcularPosicionesPlanetarias(d + 1);
+
+  // Ascendente y casas: solo con hora + lugar
+  const conLugar = entidad.lat !== null && entidad.lon !== null && !isNaN(entidad.lat) && !isNaN(entidad.lon);
+  let angulos = null, signoAscIdx = null;
+  if (conHora && conLugar) {
+    angulos = calcularAscendente(d, entidad.lat, entidad.lon);
+    signoAscIdx = signoDe(angulos.asc).idx;
+  }
+
+  const planetas = PLANETAS.map(p => {
+    const lon = pos[p.clave];
+    const s = signoDe(lon);
+    let delta = posManiana[p.clave] - lon;
+    if (delta > 180) delta -= 360;
+    if (delta < -180) delta += 360;
+    const retro = delta < 0 && p.clave !== 'sol' && p.clave !== 'luna';
+    const enCuspide = s.grado < 1 || s.grado > 29;
+    // Casa por signos enteros: casa 1 = signo del Ascendente
+    const casa = signoAscIdx === null ? null : ((s.idx - signoAscIdx + 12) % 12) + 1;
+    return { ...p, lon, signo: s.nombre, glifoSigno: s.glifo, grado: s.grado,
+             elemento: s.elemento, modalidad: s.modalidad, retro, enCuspide, casa };
+  });
+
+  return { ...entidad, conHora, conLugar, angulos, planetas, d };
+}
+
+// Posiciones "en tránsito" para una fecha de evento (o hoy)
+async function calcularTransito(evento) {
+  const [anio, mes, dia] = evento.fecha.split('-').map(Number);
+  let horaUTC;
+  if (evento.hora) {
+    const [h, m] = evento.hora.split(':').map(Number);
+    horaUTC = h + m / 60 - evento.tz;
+  } else {
+    horaUTC = 12;
+  }
+  const d = numeroDia(anio, mes, dia, horaUTC);
+  const pos = await calcularPosicionesPlanetarias(d);
+  const planetas = PLANETAS.map(p => {
+    const s = signoDe(pos[p.clave]);
+    return { ...p, lon: pos[p.clave], signo: s.nombre, glifoSigno: s.glifo, grado: s.grado };
+  });
+  let angulos = null;
+  const conLugar = evento.lat !== null && evento.lon !== null && !isNaN(evento.lat) && !isNaN(evento.lon);
+  if (evento.hora && conLugar) angulos = calcularAscendente(d, evento.lat, evento.lon);
+  return { ...evento, planetas, angulos, d };
+}
+
+// Aspectos entre dos listas de planetas
+function calcularAspectos(planetasA, planetasB, mismaCarta, orbesCustom) {
+  const lista = [];
+  for (let i = 0; i < planetasA.length; i++) {
+    const j0 = mismaCarta ? i + 1 : 0;
+    for (let j = j0; j < planetasB.length; j++) {
+      const pa = planetasA[i], pb = planetasB[j];
+      let dif = Math.abs(rev(pa.lon) - rev(pb.lon));
+      if (dif > 180) dif = 360 - dif;
+      for (const asp of ASPECTOS_DEF) {
+        const orbeMax = orbesCustom ? orbesCustom[asp.angulo] : asp.orbe;
+        const orbe = Math.abs(dif - asp.angulo);
+        if (orbe <= orbeMax) {
+          lista.push({ a: pa, b: pb, aspecto: asp, orbe, exactitud: 1 - orbe / orbeMax });
+          break;
+        }
+      }
+    }
+  }
+  lista.sort((x, y) => x.orbe - y.orbe);
+  return lista;
+}
+
+function naturalezaEfectiva(item) {
+  if (item.aspecto.naturaleza !== 'neutro') return item.aspecto.naturaleza;
+  const duros = ['marte', 'saturno', 'pluton', 'urano'];
+  const blandos = ['venus', 'jupiter', 'sol', 'luna'];
+  const claves = [item.a.clave, item.b.clave];
+  if (claves.every(c => blandos.includes(c))) return 'armonico';
+  if (claves.every(c => duros.includes(c))) return 'tenso';
+  return 'neutro';
+}
+
+function puntajeSinastria(aspectos) {
+  let suma = 0, pesoTotal = 0;
+  for (const it of aspectos) {
+    const nat = naturalezaEfectiva(it);
+    const base = nat === 'armonico' ? 3 : nat === 'tenso' ? -2.6 : 0.6;
+    const peso = (it.a.peso + it.b.peso) / 2 * (0.5 + 0.5 * it.exactitud);
+    suma += base * peso;
+    pesoTotal += peso;
+  }
+  if (pesoTotal === 0) return 50;
+  const crudo = suma / pesoTotal;
+  const p = Math.round(50 + crudo * 17);
+  return Math.max(5, Math.min(97, p));
+}
+
+// Puntaje 0-100 de un área temática de la relación
+function puntajeArea(area, aspectos) {
+  let suma = 0, n = 0;
+  for (const it of aspectos) {
+    const par = area.pares.some(([x, y]) =>
+      (it.a.clave === x && it.b.clave === y) || (it.a.clave === y && it.b.clave === x));
+    if (!par) continue;
+    const nat = naturalezaEfectiva(it);
+    const base = nat === 'armonico' ? 1 : nat === 'tenso' ? -1 : 0.35;
+    suma += base * (0.5 + 0.5 * it.exactitud);
+    n++;
+  }
+  if (n === 0) return { valor: null, n: 0 };
+  const valor = Math.round(Math.max(5, Math.min(95, 50 + (suma / Math.sqrt(n)) * 26)));
+  return { valor, n };
+}
+
+function textoArea(valor) {
+  if (valor === null) return 'Sin contactos planetarios relevantes en esta área: terreno neutro, ni ayuda ni traba desde la sinastría.';
+  if (valor >= 75) return 'Área muy favorecida: los planetas se apoyan con fuerza acá.';
+  if (valor >= 60) return 'Buen terreno, con más apoyo que fricción.';
+  if (valor >= 45) return 'Zona mixta: hay conexión pero también roces que gestionar.';
+  if (valor >= 30) return 'Área desafiada: predominan los contactos tensos, requiere trabajo consciente.';
+  return 'Zona de alta fricción: acá es donde más van a saltar chispas.';
+}
+
+// Índice de vitalidad competitiva (con tránsitos opcionales del evento)
+function indiceCompetitivo(carta, transito) {
+  let puntos = 0;
+  const detalle = [];
+  for (const clave of ['sol', 'marte', 'jupiter']) {
+    const p = carta.planetas.find(x => x.clave === clave);
+    const dig = DIGNIDADES[clave];
+    if (dig.domicilio.includes(p.signo)) { puntos += 3; detalle.push(p.nombre + ' en ' + p.signo + ' (domicilio, +3)'); }
+    else if (dig.exaltacion.includes(p.signo)) { puntos += 2; detalle.push(p.nombre + ' en ' + p.signo + ' (exaltación, +2)'); }
+    else if (dig.caida.includes(p.signo)) { puntos -= 2; detalle.push(p.nombre + ' en ' + p.signo + ' (caída, −2)'); }
+    else if (dig.exilio.includes(p.signo)) { puntos -= 2; detalle.push(p.nombre + ' en ' + p.signo + ' (exilio, −2)'); }
+  }
+  const internos = calcularAspectos(carta.planetas, carta.planetas, true);
+  for (const it of internos) {
+    const toca = ['sol', 'marte', 'jupiter'].some(c => it.a.clave === c || it.b.clave === c);
+    if (!toca) continue;
+    const nat = naturalezaEfectiva(it);
+    if (nat === 'armonico') puntos += 1;
+    else if (nat === 'tenso') puntos -= 0.7;
+  }
+  // Tránsitos del evento sobre Sol, Marte y Júpiter natales
+  if (transito) {
+    const claves = ['sol', 'marte', 'jupiter'];
+    const natales = carta.planetas.filter(p => claves.includes(p.clave));
+    const aspTr = calcularAspectos(transito.planetas, natales, false, ORBES_TRANSITO);
+    let bono = 0;
+    for (const it of aspTr) {
+      const nat = naturalezaEfectiva(it);
+      if (nat === 'armonico') bono += 0.8 * (0.5 + 0.5 * it.exactitud);
+      else if (nat === 'tenso') bono -= 0.6 * (0.5 + 0.5 * it.exactitud);
+    }
+    if (Math.abs(bono) > 0.05) detalle.push('Tránsitos del evento: ' + (bono > 0 ? '+' : '') + bono.toFixed(1));
+    puntos += bono;
+  }
+  return { puntos, detalle };
+}
+
+function probabilidades(scoreA, scoreB) {
+  const dif = scoreA - scoreB;
+  let pEmpate = 0.30 - Math.abs(dif) * 0.014;
+  pEmpate = Math.max(0.12, Math.min(0.30, pEmpate));
+  const pA = (1 - pEmpate) / (1 + Math.exp(-dif * 0.28));
+  const pB = 1 - pEmpate - pA;
+  return { pA, pEmpate, pB };
+}
+
+// Explicación en lenguaje llano de un aspecto
+function explicarAspecto(it, nomA, nomB, esOrgA, esOrgB) {
+  const rolA = esOrgA ? it.a.rolOrg : it.a.rolPersona;
+  const rolB = esOrgB ? it.b.rolOrg : it.b.rolPersona;
+  const quienA = nomA ? ' de ' + nomA : '';
+  const quienB = nomB ? ' de ' + nomB : '';
+  return 'La ' + it.aspecto.nombre.toLowerCase() + ' ' + it.aspecto.accion + '. ' +
+    '<strong>' + it.a.nombre + quienA + '</strong> representa ' + rolA + '; ' +
+    '<strong>' + it.b.nombre + quienB + '</strong> representa ' + rolB + '.';
+}
+
+/* ================= CAPA 2b · DOMINANCIAS, POLARIDAD, AMOR, TRABAJO ================= */
+
+const POLARIDAD = { Fuego: 'Yang', Aire: 'Yang', Tierra: 'Yin', Agua: 'Yin' };
+const PESO_DOM = { sol: 3, luna: 3, mercurio: 2, venus: 2, marte: 2, jupiter: 1.5, saturno: 1.5, urano: 1, neptuno: 1, pluton: 1 };
+const CASAS_ANGULARES = [1, 4, 7, 10];
+
+// Cómo ama cada Venus (por signo)
+const VENUS_AMOR = {
+  'Aries': 'ama con fuego y conquista: directo, apasionado, va al frente y se aburre de lo tibio',
+  'Tauro': 'ama con los sentidos y la constancia: busca estabilidad, contacto físico y lealtad a prueba de todo',
+  'Géminis': 'ama con la palabra y el juego: necesita charla, humor y variedad para no aburrirse',
+  'Cáncer': 'ama protegiendo y siendo protegido: busca ternura, hogar y seguridad emocional',
+  'Leo': 'ama con el corazón abierto y en grande: necesita admiración, romanticismo y sentirse elegido',
+  'Virgo': 'ama en los detalles y el cuidado cotidiano: demuestra afecto haciendo cosas concretas por el otro',
+  'Libra': 'ama la armonía y el vínculo mismo: busca pareja, equilibrio, belleza y reciprocidad',
+  'Escorpio': 'ama con intensidad total o nada: busca fusión, entrega absoluta y verdad profunda',
+  'Sagitario': 'ama con libertad y aventura: necesita un compañero de ruta, no un carcelero',
+  'Capricornio': 'ama con compromiso serio y a largo plazo: demuestra afecto con hechos y responsabilidad',
+  'Acuario': 'ama desde la amistad y la libertad: necesita espacio, complicidad mental y un vínculo poco convencional',
+  'Piscis': 'ama con entrega romántica e idealizada: busca almas gemelas, ternura y conexión casi mística'
+};
+
+// Lenguaje afectivo según el elemento de Venus
+const LENGUAJE_AFECTIVO = {
+  Fuego: 'gestos apasionados y demostraciones espontáneas (aventuras, sorpresas, intensidad)',
+  Tierra: 'actos de servicio y presencia concreta (hacer cosas por el otro, regalos útiles, contacto físico)',
+  Aire: 'palabras y conversación (charlas largas, mensajes, ideas compartidas, humor)',
+  Agua: 'contención emocional y cuidado (empatía, ternura, momentos íntimos, sentirse comprendido)'
+};
+
+// Vocación según el elemento del Sol / Medio Cielo
+const VOCACION_ELEMENTO = {
+  Fuego: { rasgo: 'liderar, emprender e inspirar', profesiones: 'emprendedurismo, deporte, dirección, ventas, entretenimiento, todo lo que implique iniciativa y protagonismo' },
+  Tierra: { rasgo: 'construir, gestionar y producir resultados tangibles', profesiones: 'finanzas, administración, oficios, gastronomía, inmuebles, ingeniería, todo lo que dé fruto concreto' },
+  Aire: { rasgo: 'comunicar, conectar ideas y personas', profesiones: 'comunicación, docencia, tecnología, diseño, comercio, redes, todo lo que mueva información' },
+  Agua: { rasgo: 'cuidar, sentir y crear desde la emoción', profesiones: 'salud, psicología, arte, hospitalidad, trabajo social, todo lo que toque lo humano y lo sensible' }
+};
+
+// Relación con el dinero según Saturno / casa 2
+const DINERO_SIGNO = {
+  'Aries': 'gana rápido y gasta rápido; mejor con ingresos por iniciativa propia',
+  'Tauro': 'muy buen manejo del dinero: ahorra, acumula y construye patrimonio con paciencia',
+  'Géminis': 'múltiples fuentes de ingreso; le va bien diversificando, pero debe cuidar la dispersión',
+  'Cáncer': 'ahorra por seguridad; el dinero está ligado a lo emocional y al hogar',
+  'Leo': 'genera bien y gasta con generosidad; le gusta la calidad y darse gustos',
+  'Virgo': 'ordenado y previsor; lleva las cuentas al detalle y optimiza cada peso',
+  'Libra': 'gasta en estética y en compartir; le cuesta decidir y a veces se endeuda por otros',
+  'Escorpio': 'intenso con el dinero: o mucho control o crisis; talento para recursos ajenos e inversiones',
+  'Sagitario': 'optimista y arriesgado; gana en grande pero puede exagerar el gasto y la apuesta',
+  'Capricornio': 'el mejor para el largo plazo: disciplina, ahorro estratégico y crecimiento sostenido',
+  'Acuario': 'ingresos poco convencionales; le va bien con lo tecnológico y lo colectivo',
+  'Piscis': 'relación difusa con el dinero: generoso hasta el descuido, debe poner estructura'
+};
+
+// Calcula todas las dominancias con pesos clásicos
+function calcularDominancias(carta) {
+  const porSigno = {}, porElemento = { Fuego: 0, Tierra: 0, Aire: 0, Agua: 0 },
+    porModalidad = { Cardinal: 0, Fijo: 0, Mutable: 0 }, porCasa = {}, porPolaridad = { Yang: 0, Yin: 0 };
+  for (const p of carta.planetas) {
+    const w = PESO_DOM[p.clave] || 1;
+    porSigno[p.signo] = (porSigno[p.signo] || 0) + w;
+    porElemento[p.elemento] += w;
+    porModalidad[p.modalidad] += w;
+    porPolaridad[POLARIDAD[p.elemento]] += w;
+    if (p.casa) porCasa[p.casa] = (porCasa[p.casa] || 0) + w;
+  }
+  // El Ascendente pesa fuerte en signo/elemento/modalidad/polaridad
+  if (carta.angulos) {
+    const sAsc = signoDe(carta.angulos.asc);
+    porSigno[sAsc.nombre] = (porSigno[sAsc.nombre] || 0) + 3;
+    porElemento[sAsc.elemento] += 3;
+    porModalidad[sAsc.modalidad] += 3;
+    porPolaridad[POLARIDAD[sAsc.elemento]] += 3;
+  }
+
+  // Planeta dominante: peso base + aspectos + angularidad + dignidad
+  const internos = calcularAspectos(carta.planetas, carta.planetas, true);
+  const cuentaAsp = {};
+  for (const it of internos) { cuentaAsp[it.a.clave] = (cuentaAsp[it.a.clave] || 0) + 1; cuentaAsp[it.b.clave] = (cuentaAsp[it.b.clave] || 0) + 1; }
+  let mejorPlaneta = null, mejorScore = -1;
+  for (const p of carta.planetas) {
+    let score = (PESO_DOM[p.clave] || 1) + (cuentaAsp[p.clave] || 0) * 0.5;
+    if (p.casa && CASAS_ANGULARES.includes(p.casa)) score += 2;
+    const dig = DIGNIDADES[p.clave];
+    if (dig) {
+      if (dig.domicilio.includes(p.signo)) score += 1.5;
+      else if (dig.exaltacion.includes(p.signo)) score += 1;
+    }
+    if (score > mejorScore) { mejorScore = score; mejorPlaneta = p; }
+  }
+
+  const top = obj => Object.entries(obj).sort((a, b) => b[1] - a[1])[0];
+  const total = Object.values(porElemento).reduce((a, b) => a + b, 0);
+  const pctElemento = {};
+  for (const [k, v] of Object.entries(porElemento)) pctElemento[k] = Math.round(v / total * 100);
+  const totalPol = porPolaridad.Yang + porPolaridad.Yin;
+
+  const casaDomNum = Object.keys(porCasa).length ? Number(top(porCasa)[0]) : null;
+
+  return {
+    signoDom: top(porSigno)[0],
+    elementoDom: top(porElemento)[0],
+    modalidadDom: top(porModalidad)[0],
+    planetaDom: mejorPlaneta,
+    casaDom: casaDomNum,
+    pctElemento,
+    pctModalidad: (() => { const t = Object.values(porModalidad).reduce((a, b) => a + b, 0); const o = {}; for (const [k, v] of Object.entries(porModalidad)) o[k] = Math.round(v / t * 100); return o; })(),
+    polaridad: { Yang: Math.round(porPolaridad.Yang / totalPol * 100), Yin: Math.round(porPolaridad.Yin / totalPol * 100) },
+    porElemento, porModalidad, porCasa
+  };
+}
+
+// Signo del Descendente (casa 7): lo que se busca en el otro
+function signoDescendente(carta) {
+  if (!carta.angulos) return null;
+  return signoDe(rev(carta.angulos.asc + 180));
+}
+
+/* ================= CAPA 2c · CICLOS Y PREDICCIONES =================
+   Retorno de Saturno, Revolución Solar y pronóstico anual.
+   Todo se calcula con el mismo motor de efemérides (offline). */
+
+// Convierte el "número de día" de Schlyter a fecha del calendario.
+// Epoca: d=0 => 1999-12-31 0:00 UTC => JD 2451543.5
+function jdAFecha(jd) {
+  jd += 0.5;
+  const Z = Math.floor(jd), F = jd - Z;
+  let A = Z;
+  if (Z >= 2299161) { const al = Math.floor((Z - 1867216.25) / 36524.25); A = Z + 1 + al - Math.floor(al / 4); }
+  const B = A + 1524, C = Math.floor((B - 122.1) / 365.25), D = Math.floor(365.25 * C), E = Math.floor((B - D) / 30.6001);
+  const diaF = B - D - Math.floor(30.6001 * E) + F;
+  const mes = E < 14 ? E - 1 : E - 13;
+  const anio = mes > 2 ? C - 4716 : C - 4715;
+  const dia = Math.floor(diaF), horaDec = (diaF - dia) * 24;
+  return { anio, mes, dia, hora: horaDec };
+}
+function diaNumAFecha(d) { return jdAFecha(2451543.5 + d); }
+function fmtFechaCiclo(f) {
+  const meses = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+  return f.dia + ' ' + meses[f.mes - 1] + ' ' + f.anio;
+}
+
+// Encuentra cuándo un planeta en tránsito cruza una longitud objetivo (bisección)
+async function cruceLongitud(clave, objetivo, dInicio, dFin, paso) {
+  let prev = null, prevD = dInicio;
+  for (let d = dInicio; d <= dFin; d += paso) {
+    const lon = (await calcularPosicionesPlanetarias(d))[clave];
+    let dif = lon - objetivo;
+    if (dif > 180) dif -= 360; if (dif < -180) dif += 360;
+    if (prev !== null && Math.sign(dif) !== Math.sign(prev) && Math.abs(dif - prev) < 180) {
+      let lo = prevD, hi = d;
+      for (let k = 0; k < 32; k++) {
+        const mid = (lo + hi) / 2;
+        let dm = (await calcularPosicionesPlanetarias(mid))[clave] - objetivo;
+        if (dm > 180) dm -= 360; if (dm < -180) dm += 360;
+        if (Math.sign(dm) === Math.sign(prev)) lo = mid; else hi = mid;
+      }
+      return (lo + hi) / 2;
+    }
+    prev = dif; prevD = d;
+  }
+  return null;
+}
+
+// Fecha del retorno solar de un año dado (Sol vuelve a su posición natal)
+async function retornoSolar(carta, anio) {
+  const natalSol = carta.planetas.find(p => p.clave === 'sol').lon;
+  const [, am, ad] = carta.fecha.split('-').map(Number);
+  let d = numeroDia(anio, am, ad, 12);
+  for (let i = 0; i < 10; i++) {
+    const s = (await calcularPosicionesPlanetarias(d)).sol;
+    let dif = s - natalSol;
+    if (dif > 180) dif -= 360; if (dif < -180) dif += 360;
+    d -= dif / 0.98565;
+    if (Math.abs(dif) < 0.0003) break;
+  }
+  return d;
+}
+
+// Los retornos de Saturno (aprox. cada 29,46 años)
+async function retornosSaturno(carta) {
+  const natalSat = carta.planetas.find(p => p.clave === 'saturno').lon;
+  const res = [];
+  for (const n of [1, 2, 3]) {
+    const centro = carta.d + n * 29.4571 * 365.25;
+    const d = await cruceLongitud('saturno', natalSat, centro - 550, centro + 550, 12);
+    if (d !== null) {
+      const f = diaNumAFecha(d);
+      const edad = Math.round((d - carta.d) / 365.25);
+      res.push({ orden: n, d, fecha: f, edad });
+    }
+  }
+  return res;
+}
+
+// Pronóstico anual: tránsitos de Júpiter y Saturno a puntos natales (próx. 12 meses)
+async function pronosticoAnual(carta, dHoy) {
+  const objetivos = [];
+  for (const [k, n] of [['sol', 'Sol'], ['luna', 'Luna'], ['venus', 'Venus'], ['marte', 'Marte']]) {
+    const p = carta.planetas.find(x => x.clave === k);
+    objetivos.push({ clave: k, nombre: n, lon: p.lon });
+  }
+  if (carta.angulos) objetivos.push({ clave: 'asc', nombre: 'Ascendente', lon: carta.angulos.asc });
+  const transitos = [['jupiter', 'Júpiter'], ['saturno', 'Saturno']];
+  const paso = 5, fin = dHoy + 366;
+  const muestras = [];
+  for (let d = dHoy; d <= fin; d += paso) muestras.push({ d, pos: await calcularPosicionesPlanetarias(d) });
+  const eventos = [];
+  for (const [tp, tpn] of transitos) {
+    for (const obj of objetivos) {
+      for (const asp of ASPECTOS_DEF) {
+        let best = null;
+        for (const s of muestras) {
+          let dif = Math.abs(rev(s.pos[tp]) - rev(obj.lon));
+          if (dif > 180) dif = 360 - dif;
+          const orb = Math.abs(dif - asp.angulo);
+          if (orb <= 1.5 && (!best || orb < best.orb)) best = { orb, d: s.d };
+        }
+        if (best) eventos.push({ tp, tpn, obj, asp, d: best.d, orb: best.orb, fecha: diaNumAFecha(best.d) });
+      }
+    }
+  }
+  eventos.sort((a, b) => a.d - b.d);
+  return eventos;
+}
+
+/* ================= CAPA 3 · RENDER / UI ================= */
+
+// Íconos de datos principales
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+let modo = 'individual';
+
+// ---- Poblar selects ----
+function poblarZonas() {
+  const zonas = [];
+  for (let z = -12; z <= 14; z++) {
+    const sig = z >= 0 ? '+' : '−';
+    const extra = z === -3 ? ' (Argentina)' : z === 0 ? ' (Londres/GMT)' : z === 1 ? ' (Europa central)' : z === -5 ? ' (Nueva York)' : '';
+    zonas.push({ v: z, t: 'UTC' + sig + String(Math.abs(z)).padStart(2, '0') + ':00' + extra });
+  }
+  for (const id of ['tz1', 'tz2', 'tz-ev']) {
+    const sel = $(id);
+    if (!sel) continue;
+    sel.innerHTML = zonas.map(z => '<option value="' + z.v + '"' + (z.v === -3 ? ' selected' : '') + '>' + z.t + '</option>').join('');
+  }
+}
+
+function poblarCiudades() {
+  const html = CIUDADES.map((c, i) => '<option value="' + i + '">' + c[0] + '</option>').join('');
+  const pares = [['ciudad1', 'latlon-1', 'lat1', 'lon1'], ['ciudad2', 'latlon-2', 'lat2', 'lon2'], ['ciudad-ev', 'latlon-ev', 'lat-ev', 'lon-ev']];
+  for (const [selId, filaId, latId, lonId] of pares) {
+    const sel = $(selId);
+    if (!sel) continue;
+    sel.innerHTML = html;
+    sel.addEventListener('change', () => {
+      const c = CIUDADES[Number(sel.value)];
+      const manual = c[1] === 'manual';
+      $(filaId).style.display = manual ? '' : 'none';
+      if (!manual) { $(latId).value = c[1] === null ? '' : c[1]; $(lonId).value = c[2] === null ? '' : c[2]; }
+    });
+  }
+}
+
+// ---- Tabs ----
+function setModo(m) {
+  modo = m;
+  $('tab-individual').classList.toggle('activa', m === 'individual');
+  $('tab-comparacion').classList.toggle('activa', m === 'comparacion');
+  $('tab-individual').setAttribute('aria-selected', m === 'individual');
+  $('tab-comparacion').setAttribute('aria-selected', m === 'comparacion');
+  $('ficha-2').style.display = m === 'comparacion' ? '' : 'none';
+  $('ficha-evento').style.display = m === 'comparacion' ? '' : 'none';
+  $('zona-forms').classList.toggle('doble', m === 'comparacion');
+  $('btn-calcular').textContent = m === 'comparacion' ? 'Trazar la sinastría' : 'Trazar la carta';
+  $('resultados').classList.remove('visible');
+}
+
+// ---- Lectura del formulario ----
+function leerLatLon(latId, lonId) {
+  const lat = $(latId).value === '' ? null : Number($(latId).value);
+  const lon = $(lonId).value === '' ? null : Number($(lonId).value);
+  return { lat, lon };
+}
+
+function leerEntidad(n) {
+  const fecha = $('fecha' + n).value;
+  if (!fecha) return null;
+  const ll = leerLatLon('lat' + n, 'lon' + n);
+  return {
+    nombre: $('nombre' + n).value.trim() || (n === 1 ? 'Entidad I' : 'Entidad II'),
+    tipo: $('tipo' + n).value,
+    fecha,
+    hora: $('hora' + n).value || null,
+    tz: Number($('tz' + n).value),
+    lat: ll.lat, lon: ll.lon
+  };
+}
+
+function leerEvento() {
+  const fecha = $('fecha-ev').value;
+  const hoy = new Date();
+  const hoyISO = hoy.getFullYear() + '-' + String(hoy.getMonth() + 1).padStart(2, '0') + '-' + String(hoy.getDate()).padStart(2, '0');
+  const ll = leerLatLon('lat-ev', 'lon-ev');
+  return {
+    esHoy: !fecha,
+    fecha: fecha || hoyISO,
+    hora: $('hora-ev') ? ($('hora-ev').value || null) : null,
+    tz: $('tz-ev') ? Number($('tz-ev').value) : -3,
+    lat: ll.lat, lon: ll.lon
+  };
+}
+
+function avisar(html, tipo) {
+  $('zona-avisos').insertAdjacentHTML('beforeend',
+    '<div class="aviso ' + tipo + '"><span class="ico">' + (tipo === 'error' ? '✕' : '☽') + '</span><span>' + html + '</span></div>');
+}
+
+/* ---- Rueda zodiacal SVG ---- */
+function ruedaSVG(cartas, aspectosEntre) {
+  const C = 260, Rext = 250, Rsig = 218, Rint = 186;
+  const pt = (lon, r) => {
+    const ang = (180 - lon) * RAD;
+    return [C + r * Math.cos(ang), C - r * Math.sin(ang)];
+  };
+  let s = '<svg viewBox="0 0 520 520" role="img" aria-label="Rueda zodiacal">';
+  s += '<circle cx="260" cy="260" r="' + Rext + '" fill="#111527" stroke="#a08a4e" stroke-width="1.5"/>';
+  s += '<circle cx="260" cy="260" r="' + Rsig + '" fill="none" stroke="#2a3152" stroke-width="1"/>';
+  s += '<circle cx="260" cy="260" r="' + Rint + '" fill="#0b0e1a" stroke="#2a3152" stroke-width="1"/>';
+  for (let i = 0; i < 12; i++) {
+    const [x1, y1] = pt(i * 30, Rint);
+    const [x2, y2] = pt(i * 30, Rext);
+    s += '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="#2a3152" stroke-width="1"/>';
+    const [gx, gy] = pt(i * 30 + 15, (Rext + Rsig) / 2);
+    s += '<text x="' + gx + '" y="' + (gy + 7) + '" text-anchor="middle" font-size="20" fill="#d8b65c">' + SIGNOS[i].glifo + '</text>';
+    for (let g = 10; g < 30; g += 10) {
+      const [mx1, my1] = pt(i * 30 + g, Rsig);
+      const [mx2, my2] = pt(i * 30 + g, Rsig + 8);
+      s += '<line x1="' + mx1 + '" y1="' + my1 + '" x2="' + mx2 + '" y2="' + my2 + '" stroke="#2a3152" stroke-width="1"/>';
+    }
+  }
+  if (aspectosEntre && cartas.length) {
+    const rA = cartas.length === 2 ? Rint - 26 : Rint - 18;
+    const rB = cartas.length === 2 ? Rint - 66 : Rint - 18;
+    for (const it of aspectosEntre.slice(0, 24)) {
+      const nat = naturalezaEfectiva(it);
+      const col = nat === 'armonico' ? '#6baf8d' : nat === 'tenso' ? '#c96b5a' : '#b9a26b';
+      const [x1, y1] = pt(it.a.lon, rA);
+      const [x2, y2] = pt(it.b.lon, rB);
+      s += '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + col + '" stroke-width="1" opacity="' + (0.35 + 0.5 * it.exactitud) + '"/>';
+    }
+  }
+  cartas.forEach((cc, idx) => {
+    const r = cartas.length === 2 ? (idx === 0 ? Rint - 26 : Rint - 66) : Rint - 18;
+    // Marca del Ascendente
+    if (cc.carta.angulos) {
+      const [ax1, ay1] = pt(cc.carta.angulos.asc, Rint);
+      const [ax2, ay2] = pt(cc.carta.angulos.asc, Rext);
+      s += '<line x1="' + ax1 + '" y1="' + ay1 + '" x2="' + ax2 + '" y2="' + ay2 + '" stroke="' + cc.color + '" stroke-width="2" opacity="0.8"/>';
+      const [tx, ty] = pt(cc.carta.angulos.asc, Rext - 14);
+      s += '<text x="' + tx + '" y="' + (ty + 4) + '" text-anchor="middle" font-size="10" font-family="IBM Plex Mono, monospace" fill="' + cc.color + '">ASC</text>';
+    }
+    for (const p of cc.carta.planetas) {
+      const [x, y] = pt(p.lon, r);
+      s += '<circle cx="' + x + '" cy="' + y + '" r="11" fill="#111527" stroke="' + cc.color + '" stroke-width="1.2"/>';
+      s += '<text x="' + x + '" y="' + (y + 5) + '" text-anchor="middle" font-size="13" fill="' + cc.color + '">' + p.glifo + '</text>';
+    }
+  });
+  s += '<text x="260" y="266" text-anchor="middle" font-size="15" fill="#565d78" font-family="Cormorant Garamond, serif" font-style="italic">' +
+       (cartas.length === 2 ? 'Sinastría' : 'Carta natal') + '</text>';
+  s += '</svg>';
+  return s;
+}
+
+/* ---- HERO del signo solar (destacado) ---- */
+function heroDe(carta, claseExtra) {
+  const sol = carta.planetas.find(p => p.clave === 'sol');
+  const d = DESCRIPCION_SIGNO[sol.signo];
+  let ascHTML = '';
+  if (carta.angulos) {
+    const sAsc = signoDe(carta.angulos.asc);
+    ascHTML = '<div class="hero-asc"><span class="g">' + sAsc.glifo + '</span> Ascendente en <strong>' + sAsc.nombre + '</strong> ' + Math.floor(sAsc.grado) + '° — su "fachada": ' + DESCRIPCION_SIGNO[sAsc.nombre].luz + '.</div>';
+  }
+  return '<div class="hero-signo ' + (claseExtra || '') + '">' +
+    '<div class="hero-quien">' + esc(carta.nombre) + '</div>' +
+    '<div class="hero-glifo">' + sol.glifoSigno + '</div>' +
+    '<div class="hero-nombre-signo">' + sol.signo + '</div>' +
+    '<div class="hero-meta">Sol en ' + sol.signo + ' · ' + sol.elemento + ' · ' + sol.modalidad + '</div>' +
+    '<p class="hero-perfil">' + d.perfil + '</p>' +
+    ascHTML + '</div>';
+}
+
+/* ---- Tarjetas de planetas ---- */
+function htmlPlanetas(carta) {
+  return '<div class="grilla-planetas">' + carta.planetas.map(p => {
+    const gr = Math.floor(p.grado);
+    const min = Math.round((p.grado - gr) * 60);
+    return '<div class="tarjeta-planeta">' +
+      '<div class="tp-cab"><span class="tp-glifo">' + p.glifo + '</span>' +
+      '<span class="tp-nombre">' + p.nombre + '</span>' +
+      (p.retro ? '<span class="tp-retro">Rx</span>' : '') + '</div>' +
+      '<div class="tp-pos"><span class="signo-glifo">' + p.glifoSigno + '</span> ' + p.signo + ' · ' + gr + '°' + String(min).padStart(2, '0') + '\\u2032' +
+      (p.clave === 'luna' && !carta.conHora ? ' ±6°' : '') + '</div>' +
+      (p.casa ? '<div class="tp-casa">Casa ' + p.casa + ' · ' + CASAS[p.casa - 1].tema.toLowerCase() + '</div>' : '') +
+      (p.enCuspide ? '<div class="tp-cuspide">Al borde del signo: verificar con efemérides exactas</div>' : '') +
+      '</div>';
+  }).join('') + '</div>';
+}
+
+/* ---- Balance elemental y modal ---- */
+function contarBalances(carta) {
+  const el = { Fuego: 0, Tierra: 0, Aire: 0, Agua: 0 };
+  const mo = { Cardinal: 0, Fijo: 0, Mutable: 0 };
+  for (const p of carta.planetas) { el[p.elemento]++; mo[p.modalidad]++; }
+  return { el, mo };
+}
+
+function htmlBalances(carta) {
+  const { el, mo } = contarBalances(carta);
+  const bloque = (titulo, obj) => '<div class="balance"><h4>' + titulo + '</h4>' +
+    Object.entries(obj).map(([k, v]) =>
+      '<div class="barra-linea"><span class="rotulo">' + k + '</span>' +
+      '<div class="barra-pista"><div class="barra-relleno" style="width:' + (v / 10 * 100) + '%"></div></div>' +
+      '<span class="valor">' + v + '</span></div>').join('') + '</div>';
+  return '<div class="balances">' + bloque('Elementos', el) + bloque('Modalidades', mo) + '</div>';
+}
+
+/* ---- Síntesis profunda de una carta ---- */
+const SENTIDO_ELEMENTO = {
+  Fuego: 'acción, entusiasmo e iniciativa',
+  Tierra: 'practicidad, paciencia y resultados concretos',
+  Aire: 'ideas, comunicación y vínculos sociales',
+  Agua: 'emoción, intuición y sensibilidad'
+};
+
+function htmlSintesis(carta) {
+  const { el } = contarBalances(carta);
+  const entradas = Object.entries(el).sort((a, b) => b[1] - a[1]);
+  const [domNombre, domN] = entradas[0];
+  const faltantes = entradas.filter(([, v]) => v === 0).map(([k]) => k);
+  const esOrg = carta.tipo !== 'persona';
+
+  // Stelliums: 3+ planetas en un mismo signo
+  const porSigno = {};
+  for (const p of carta.planetas) (porSigno[p.signo] = porSigno[p.signo] || []).push(p);
+  const stelliums = Object.entries(porSigno).filter(([, ps]) => ps.length >= 3);
+
+  // Planeta focal: el que participa en más aspectos internos
+  const internos = calcularAspectos(carta.planetas, carta.planetas, true);
+  const cuenta = {};
+  for (const it of internos) { cuenta[it.a.clave] = (cuenta[it.a.clave] || 0) + 1; cuenta[it.b.clave] = (cuenta[it.b.clave] || 0) + 1; }
+  const focalClave = Object.entries(cuenta).sort((a, b) => b[1] - a[1])[0];
+
+  let h = '<div class="sintesis"><h4>🔎 Lectura en profundidad</h4>';
+  h += '<p><strong>Elemento dominante: ' + domNombre + '</strong> (' + domN + ' de 10 planetas). El motor de ' + (esOrg ? 'esta entidad' : 'esta persona') + ' pasa por ' + SENTIDO_ELEMENTO[domNombre] + '.</p>';
+  if (faltantes.length) {
+    h += '<p><strong>Elemento ausente: ' + faltantes.join(' y ') + '.</strong> ' + faltantes.map(f => 'Le cuesta el terreno de ' + SENTIDO_ELEMENTO[f]).join('; ') + ': suele compensarlo apoyándose en otros o sobreactuándolo.</p>';
+  }
+  for (const [signo, ps] of stelliums) {
+    h += '<p><strong>Stellium en ' + signo + '</strong> (' + ps.map(p => p.nombre).join(', ') + '): una concentración fuerte de energía. Los rasgos de ' + signo + ' — ' + DESCRIPCION_SIGNO[signo].luz + ' — dominan la carta, con el riesgo de exceso: ' + DESCRIPCION_SIGNO[signo].sombra + '.</p>';
+  }
+  if (focalClave) {
+    const pf = carta.planetas.find(p => p.clave === focalClave[0]);
+    h += '<p><strong>Planeta focal: ' + pf.nombre + '</strong> (' + focalClave[1] + ' aspectos internos). Es el punto más conectado de la carta: ' + (esOrg ? pf.rolOrg : pf.rolPersona) + ' atraviesa todos los demás temas.</p>';
+  }
+  const retros = carta.planetas.filter(p => p.retro);
+  if (retros.length >= 3) {
+    h += '<p><strong>' + retros.length + ' planetas retrógrados</strong> (' + retros.map(p => p.nombre) .join(', ') + '): mucha energía procesándose hacia adentro; carta reflexiva, de maduración lenta pero profunda.</p>';
+  }
+  h += '</div>';
+  return h;
+}
+
+/* ---- Interpretaciones planeta-en-signo ---- */
+function htmlInterpretaciones(carta) {
+  const esOrg = carta.tipo !== 'persona';
+  const principales = carta.planetas.filter(p => ['sol', 'luna', 'mercurio', 'venus', 'marte', 'jupiter', 'saturno'].includes(p.clave));
+  return '<div class="interpretaciones">' + principales.map(p => {
+    const d = DESCRIPCION_SIGNO[p.signo];
+    const rol = esOrg ? p.rolOrg : p.rolPersona;
+    const casaTxt = p.casa ? ' Ubicado en la <strong>casa ' + p.casa + '</strong> (' + CASAS[p.casa - 1].tema.toLowerCase() + '), esta energía se despliega sobre todo en: ' + CASAS[p.casa - 1].desc + '.' : '';
+    return '<div class="interp"><h5>' + p.glifo + ' ' + p.nombre + ' en ' + p.signo + (p.retro ? ' retrógrado' : '') + '</h5>' +
+      '<p>' + p.nombre + ' rige ' + rol + '. En ' + p.signo + ' se expresa con ' + d.luz +
+      '. <em>Zona a cuidar: ' + d.sombra + '.</em>' + casaTxt +
+      (p.retro ? ' <em>Retrógrado: esta función opera de forma más interna, revisada o a contracorriente.</em>' : '') + '</p></div>';
+  }).join('') + '</div>';
+}
+
+/* ---- Casas ---- */
+function htmlCasas(carta) {
+  if (!carta.angulos) {
+    return '<div class="sintesis"><h4>🏛 Ascendente y Casas: no calculados</h4>' +
+      '<p>Para esta carta falta <strong>' + (carta.conHora ? 'el lugar' : (carta.conLugar ? 'el horario' : 'el horario y el lugar')) + '</strong>. El Ascendente es el signo que subía por el horizonte este en el momento exacto: cambia de signo cada ~2 horas y depende del punto de la Tierra desde donde se mira. Sin ese dato, calcularlo sería inventar. Las posiciones por signo de esta carta siguen siendo válidas.</p></div>';
+  }
+  const sAsc = signoDe(carta.angulos.asc);
+  const sMC = signoDe(carta.angulos.mc);
+  let h = '<div class="sintesis"><h4>🏛 Ascendente en ' + sAsc.nombre + ' ' + sAsc.glifo + ' · Medio Cielo en ' + sMC.nombre + ' ' + sMC.glifo + '</h4>' +
+    '<p>El <strong>Ascendente</strong> es la "puerta de entrada" de la carta: la primera impresión que da, el estilo con el que encara todo lo nuevo. En ' + sAsc.nombre + ' se presenta con ' + DESCRIPCION_SIGNO[sAsc.nombre].luz + '.</p>' +
+    '<p>El <strong>Medio Cielo</strong> marca la imagen pública y la dirección vocacional. En ' + sMC.nombre + ', apunta a destacarse por ' + DESCRIPCION_SIGNO[sMC.nombre].luz + '.</p></div>';
+  const ascIdx = sAsc.idx;
+  h += '<div class="casas-grilla">' + CASAS.map((c, i) => {
+    const signoCasa = SIGNOS[(ascIdx + i) % 12];
+    const ocupantes = carta.planetas.filter(p => p.casa === c.num);
+    return '<div class="casa-item">' +
+      '<div class="casa-num">Casa ' + c.num + '</div>' +
+      '<div class="casa-signo">' + signoCasa.glifo + ' ' + signoCasa.nombre + ' — ' + c.tema + '</div>' +
+      '<div class="casa-tema">' + c.desc + '</div>' +
+      (ocupantes.length ? '<div class="casa-planetas">' + ocupantes.map(p => p.glifo + ' ' + p.nombre).join(' · ') + '</div>' : '') +
+      '</div>';
+  }).join('') + '</div>';
+  return h;
+}
+
+/* ---- Lista de aspectos con explicación ---- */
+function htmlAspectos(aspectos, cartaA, cartaB) {
+  if (!aspectos.length) return '<p class="seccion-sub">Sin aspectos dentro de los orbes definidos.</p>';
+  const nomA = cartaB ? cartaA.nombre : null;
+  const nomB = cartaB ? cartaB.nombre : null;
+  const esOrgA = cartaA.tipo !== 'persona';
+  const esOrgB = (cartaB || cartaA).tipo !== 'persona';
+  return '<div class="lista-aspectos">' + aspectos.map(it => {
+    const nat = naturalezaEfectiva(it);
+    const quienA = nomA ? esc(nomA) + ': ' : '';
+    const quienB = nomB ? esc(nomB) + ': ' : '';
+    return '<div class="aspecto ' + nat + '"><div class="asp-linea">' +
+      '<span class="glifos">' + it.a.glifo + ' ' + it.aspecto.simbolo + ' ' + it.b.glifo + '</span>' +
+      '<span class="detalle">' + quienA + it.a.nombre + ' en ' + it.aspecto.nombre.toLowerCase() + ' con ' + quienB + it.b.nombre + '</span>' +
+      '<span class="orbe">orbe ' + it.orbe.toFixed(1) + '°</span>' +
+      '<span class="tipo-tag ' + nat + '">' + (nat === 'armonico' ? 'armónico' : nat === 'tenso' ? 'tenso' : 'neutro') + '</span></div>' +
+      '<p class="asp-explica">' + explicarAspecto(it, nomA ? esc(nomA) : null, nomB ? esc(nomB) : null, esOrgA, esOrgB) + '</p>' +
+      '</div>';
+  }).join('') + '</div>';
+}
+
+/* ---- Tránsitos sobre una carta ---- */
+function htmlTransitos(carta, transito, titulo) {
+  const aspTr = calcularAspectos(transito.planetas, carta.planetas, false, ORBES_TRANSITO)
+    .filter(it => ['sol', 'luna', 'mercurio', 'venus', 'marte', 'jupiter', 'saturno', 'urano', 'neptuno', 'pluton'].includes(it.a.clave));
+  const esOrg = carta.tipo !== 'persona';
+  let h = '<div class="transitos-cab">' + titulo + ' — los planetas <strong>en tránsito</strong> son el cielo de ese momento; al tocar puntos de la carta natal, activan temporalmente esos temas.</div>';
+  if (!aspTr.length) { h += '<p class="seccion-sub">Sin tránsitos exactos sobre esta carta en esa fecha (con orbes estrictos): un cielo tranquilo.</p>'; return h; }
+  h += '<div class="lista-aspectos">' + aspTr.slice(0, 12).map(it => {
+    const nat = naturalezaEfectiva(it);
+    return '<div class="aspecto ' + nat + '"><div class="asp-linea">' +
+      '<span class="glifos">' + it.a.glifo + ' ' + it.aspecto.simbolo + ' ' + it.b.glifo + '</span>' +
+      '<span class="detalle">' + it.a.nombre + ' en tránsito (' + it.a.signo + ') en ' + it.aspecto.nombre.toLowerCase() + ' con ' + it.b.nombre + ' natal</span>' +
+      '<span class="orbe">orbe ' + it.orbe.toFixed(1) + '°</span>' +
+      '<span class="tipo-tag ' + nat + '">' + (nat === 'armonico' ? 'armónico' : nat === 'tenso' ? 'tenso' : 'neutro') + '</span></div>' +
+      '<p class="asp-explica">La ' + it.aspecto.nombre.toLowerCase() + ' ' + it.aspecto.accion + '. Ese día, <strong>' + it.a.nombre + '</strong> (' + (esOrg ? it.a.rolOrg : it.a.rolPersona) + ') activa a su <strong>' + it.b.nombre + '</strong> natal: se enciende el tema de ' + (esOrg ? it.b.rolOrg : it.b.rolPersona) + '.</p>' +
+      '</div>';
+  }).join('') + '</div>';
+  return h;
+}
+
+/* ---- Datos principales (tira de chips) ---- */
+function htmlDatosPrincipales(carta) {
+  const sol = carta.planetas.find(p => p.clave === 'sol');
+  const luna = carta.planetas.find(p => p.clave === 'luna');
+  const dom = calcularDominancias(carta);
+  const chip = (ico, rotulo, valor, sub) =>
+    '<div class="dato-chip"><div class="dato-ico">' + ico + '</div>' +
+    '<div class="dato-txt"><span class="dato-rotulo">' + rotulo + '</span>' +
+    '<span class="dato-valor">' + valor + '</span>' + (sub ? '<span class="dato-sub">' + sub + '</span>' : '') + '</div></div>';
+  let chips = '';
+  chips += chip('☀️', 'Signo solar', sol.glifoSigno + ' ' + sol.signo, sol.elemento + ' · ' + sol.modalidad);
+  chips += chip('🌙', 'Signo lunar', luna.glifoSigno + ' ' + luna.signo + (carta.conHora ? '' : ' ±'), luna.elemento + (carta.conHora ? '' : ' · aprox.'));
+  if (carta.angulos) {
+    const sAsc = signoDe(carta.angulos.asc);
+    chips += chip('⬆️', 'Ascendente', sAsc.glifo + ' ' + sAsc.nombre, Math.floor(sAsc.grado) + '° · su fachada');
+  } else {
+    chips += chip('⬆️', 'Ascendente', '—', 'requiere hora + lugar');
+  }
+  chips += chip('🔥', 'Elemento dom.', dom.elementoDom, dom.pctElemento[dom.elementoDom] + '% de la carta');
+  chips += chip('♦️', 'Modalidad dom.', dom.modalidadDom, dom.pctModalidad[dom.modalidadDom] + '%');
+  const polDom = dom.polaridad.Yang >= dom.polaridad.Yin ? 'Yang' : 'Yin';
+  const polTxt = polDom === 'Yang' ? 'activo / extrovertido' : 'receptivo / reflexivo';
+  chips += chip(polDom === 'Yang' ? '☯' : '☯', 'Polaridad', polDom + ' ' + Math.max(dom.polaridad.Yang, dom.polaridad.Yin) + '%', polTxt);
+  return '<div class="datos-chips">' + chips + '</div>';
+}
+
+/* ---- Dominancias (bloque explicado) ---- */
+function htmlDominancias(carta) {
+  const dom = calcularDominancias(carta);
+  const esOrg = carta.tipo !== 'persona';
+  const pd = dom.planetaDom;
+  let h = '<div class="sintesis"><h4>👑 Dominancias de la carta</h4>';
+  h += '<p><strong>Planeta dominante: ' + pd.glifo + ' ' + pd.nombre + '</strong> (en ' + pd.signo + (pd.casa ? ', casa ' + pd.casa : '') + '). Es la energía que más tiñe todo: ' + (esOrg ? pd.rolOrg : pd.rolPersona) + '. Marca el "tono" general de la carta.</p>';
+  h += '<p><strong>Signo dominante: ' + dom.signoDom + '.</strong> Más allá del signo solar, este es el color que más se repite sumando todos los planetas y el ascendente: ' + DESCRIPCION_SIGNO[dom.signoDom].luz + '.</p>';
+  if (dom.casaDom) {
+    h += '<p><strong>Casa dominante: casa ' + dom.casaDom + ' (' + CASAS[dom.casaDom - 1].tema.toLowerCase() + ').</strong> El área de la vida donde se concentra más energía: ' + CASAS[dom.casaDom - 1].desc + '.</p>';
+  } else {
+    h += '<p><em>Casa dominante: no disponible (requiere hora + lugar para calcular las casas).</em></p>';
+  }
+  h += '<p><strong>Polaridad:</strong> ' + dom.polaridad.Yang + '% Yang (energía activa, que sale hacia afuera, inicia) y ' + dom.polaridad.Yin + '% Yin (energía receptiva, que procesa hacia adentro, sostiene). ' +
+    (dom.polaridad.Yang >= 65 ? 'Fuerte tendencia a la acción y la iniciativa.' : dom.polaridad.Yin >= 65 ? 'Fuerte tendencia a la reflexión y la receptividad.' : 'Buen equilibrio entre hacer y recibir.') + '</p>';
+  h += '</div>';
+  return h;
+}
+
+/* ---- Elementos en % (barras) ---- */
+function htmlElementosPct(carta) {
+  const dom = calcularDominancias(carta);
+  const colEl = { Fuego: '#c96b5a', Tierra: '#8a9a5b', Aire: '#7fa8d9', Agua: '#5b8aa8' };
+  let h = '<div class="balance"><h4>Elementos (%)</h4>';
+  for (const [k, v] of Object.entries(dom.pctElemento)) {
+    h += '<div class="barra-linea"><span class="rotulo">' + k + '</span>' +
+      '<div class="barra-pista"><div class="barra-relleno" style="width:' + v + '%;background:' + colEl[k] + '"></div></div>' +
+      '<span class="valor">' + v + '%</span></div>';
+  }
+  h += '</div><div class="balance"><h4>Modalidades (%)</h4>';
+  for (const [k, v] of Object.entries(dom.pctModalidad)) {
+    h += '<div class="barra-linea"><span class="rotulo">' + k + '</span>' +
+      '<div class="barra-pista"><div class="barra-relleno" style="width:' + v + '%"></div></div>' +
+      '<span class="valor">' + v + '%</span></div>';
+  }
+  h += '</div>';
+  return '<div class="balances">' + h + '</div>';
+}
+
+/* ---- Sección AMOR (solo persona) ---- */
+function htmlAmor(carta) {
+  const venus = carta.planetas.find(p => p.clave === 'venus');
+  const luna = carta.planetas.find(p => p.clave === 'luna');
+  const marte = carta.planetas.find(p => p.clave === 'marte');
+  const desc = signoDescendente(carta);
+  let h = '<div class="sintesis modo-amor"><h4>❤️ Amor y vínculos</h4>';
+  h += '<p><strong>Forma de amar (Venus en ' + venus.signo + '):</strong> ' + VENUS_AMOR[venus.signo] + '.</p>';
+  h += '<p><strong>Lenguaje afectivo:</strong> se siente más querido/a a través de ' + LENGUAJE_AFECTIVO[venus.elemento] + '.</p>';
+  h += '<p><strong>Necesidad emocional (Luna en ' + luna.signo + '):</strong> para sentirse en confianza necesita ' + DESCRIPCION_SIGNO[luna.signo].luz + '. Cuando esto falta, aparece su lado más ' + DESCRIPCION_SIGNO[luna.signo].sombra.split(' y ')[0] + '.</p>';
+  h += '<p><strong>Deseo y pasión (Marte en ' + marte.signo + '):</strong> en la atracción se mueve con ' + DESCRIPCION_SIGNO[marte.signo].luz + '.</p>';
+  if (desc) {
+    h += '<p><strong>Qué busca en el otro (Descendente en ' + desc.nombre + '):</strong> se siente atraído/a por personas con ' + DESCRIPCION_SIGNO[desc.nombre].luz + ' — a menudo lo que no tiene tan desarrollado en sí mismo/a.</p>';
+  } else {
+    h += '<p><em>Qué busca en el otro: se calcula desde el Descendente, que necesita hora + lugar. Cargá esos datos para verlo.</em></p>';
+  }
+  h += '<p style="font-size:.8rem;color:var(--marfil-dim)"><em>La compatibilidad con otra persona concreta se calcula en el modo Comparación (sinastría).</em></p>';
+  h += '</div>';
+  return h;
+}
+
+/* ---- Sección TRABAJO Y DINERO (solo persona) ---- */
+function htmlTrabajo(carta) {
+  const sol = carta.planetas.find(p => p.clave === 'sol');
+  const mercurio = carta.planetas.find(p => p.clave === 'mercurio');
+  const saturno = carta.planetas.find(p => p.clave === 'saturno');
+  const dom = calcularDominancias(carta);
+  // Vocación: prioriza el Medio Cielo si hay ascendente; si no, el Sol
+  let vocacionSigno, vocacionFuente;
+  if (carta.angulos) { const sMC = signoDe(carta.angulos.mc); vocacionSigno = sMC; vocacionFuente = 'Medio Cielo en ' + sMC.nombre; }
+  else { vocacionSigno = { nombre: sol.signo, elemento: sol.elemento }; vocacionFuente = 'Sol en ' + sol.signo; }
+  const voc = VOCACION_ELEMENTO[vocacionSigno.elemento];
+  let h = '<div class="sintesis modo-trabajo"><h4>💼 Trabajo y dinero</h4>';
+  h += '<p><strong>Vocación (' + vocacionFuente + '):</strong> se realiza al ' + voc.rasgo + '. El sello de ' + vocacionSigno.nombre + ' aporta ' + DESCRIPCION_SIGNO[vocacionSigno.nombre].luz + '.</p>';
+  h += '<p><strong>Talentos:</strong> su planeta dominante (' + dom.planetaDom.nombre + ') y su mente (Mercurio en ' + mercurio.signo + ') apuntan a destacar en tareas que pidan ' + DESCRIPCION_SIGNO[mercurio.signo].luz + '.</p>';
+  h += '<p><strong>Profesiones afines:</strong> ' + voc.profesiones + '.</p>';
+  // Relación con el dinero: casa 2 si hay ascendente, si no Saturno
+  let dineroSigno, dineroFuente;
+  if (carta.angulos) { const casa2 = SIGNOS[(signoDe(carta.angulos.asc).idx + 1) % 12]; dineroSigno = casa2.nombre; dineroFuente = 'casa 2 en ' + casa2.nombre; }
+  else { dineroSigno = saturno.signo; dineroFuente = 'Saturno en ' + saturno.signo; }
+  h += '<p><strong>Relación con el dinero (' + dineroFuente + '):</strong> ' + DINERO_SIGNO[dineroSigno] + '.</p>';
+  h += '<p><strong>Disciplina y estructura (Saturno en ' + saturno.signo + (saturno.casa ? ', casa ' + saturno.casa : '') + '):</strong> su madurez profesional se construye trabajando ' + DESCRIPCION_SIGNO[saturno.signo].luz + ', y su gran lección es soltar ' + DESCRIPCION_SIGNO[saturno.signo].sombra + '.</p>';
+  h += '</div>';
+  return h;
+}
+
+/* ---- Sección FORTALEZAS Y DESAFÍOS ---- */
+function htmlFortalezas(carta) {
+  const sol = carta.planetas.find(p => p.clave === 'sol');
+  const luna = carta.planetas.find(p => p.clave === 'luna');
+  const saturno = carta.planetas.find(p => p.clave === 'saturno');
+  const asc = carta.angulos ? signoDe(carta.angulos.asc) : null;
+  const fuentes = [sol, luna].concat(asc ? [{ signo: asc.nombre }] : []);
+  const virtudes = [...new Set(fuentes.map(f => DESCRIPCION_SIGNO[f.signo].luz))];
+  const debilidades = [...new Set(fuentes.map(f => DESCRIPCION_SIGNO[f.signo].sombra))];
+  let h = '<div class="dos-columnas">';
+  h += '<div class="columna-lista positiva"><h4>✨ Fortalezas</h4><ul>' +
+    virtudes.map(v => '<li>' + v.charAt(0).toUpperCase() + v.slice(1) + '</li>').join('') + '</ul></div>';
+  h += '<div class="columna-lista negativa"><h4>⚠️ Desafíos</h4><ul>' +
+    debilidades.map(v => '<li>' + v.charAt(0).toUpperCase() + v.slice(1) + '</li>').join('') + '</ul></div>';
+  h += '</div>';
+  h += '<div class="sintesis"><h4>🎓 Lecciones de vida y consejos</h4>';
+  h += '<p><strong>Gran lección (Saturno en ' + saturno.signo + '):</strong> la vida te va a pedir madurar en el terreno de ' + (carta.tipo !== 'persona' ? saturno.rolOrg : saturno.rolPersona) + ', aprendiendo a equilibrar ' + DESCRIPCION_SIGNO[saturno.signo].sombra + ' con ' + DESCRIPCION_SIGNO[saturno.signo].luz + '.</p>';
+  const dom = calcularDominancias(carta);
+  const faltantes = Object.entries(dom.pctElemento).filter(([, v]) => v === 0).map(([k]) => k);
+  if (faltantes.length) {
+    h += '<p><strong>Consejo — elemento ausente (' + faltantes.join(', ') + '):</strong> conviene cultivar conscientemente ' + faltantes.map(f => SENTIDO_ELEMENTO[f]).join(' y ') + ', que no salen de forma natural.</p>';
+  }
+  h += '<p><strong>Camino de crecimiento:</strong> apoyarse en las fortalezas del Sol en ' + sol.signo + ' para trabajar los desafíos, en lugar de pelear contra la propia naturaleza.</p>';
+  h += '</div>';
+  return h;
+}
+
+/* ---- Render: CICLOS Y PREDICCIONES ---- */
+async function htmlCiclos(carta) {
+  const hoyDate = new Date();
+  const dHoy = numeroDia(hoyDate.getUTCFullYear(), hoyDate.getUTCMonth() + 1, hoyDate.getUTCDate(), 12);
+  let h = '<h3 class="seccion-titulo" style="font-size:1.35rem">🔭 Ciclos y predicciones</h3>';
+  h += '<p class="seccion-sub">Las grandes olas del cielo sobre esta carta. Se calculan en vivo con el motor astronómico.</p>';
+
+  // --- Revolución solar ---
+  const anioAcademico = hoyDate.getUTCFullYear();
+  let dRS = await retornoSolar(carta, anioAcademico);
+  if (dRS < dHoy) dRS = await retornoSolar(carta, anioAcademico + 1);
+  const fRS = diaNumAFecha(dRS);
+  // Carta de la revolución solar (para el ascendente del año, si hay lugar)
+  let srAscTxt = '';
+  if (carta.conLugar) {
+    const ang = calcularAscendente(dRS, carta.lat, carta.lon);
+    const sAsc = signoDe(ang.asc);
+    srAscTxt = ' El <strong>Ascendente de la revolución</strong> cae en ' + sAsc.glifo + ' ' + sAsc.nombre + ', que marca el clima del año: se vive con ' + DESCRIPCION_SIGNO[sAsc.nombre].luz + '.';
+  }
+  const srPos = await calcularPosicionesPlanetarias(dRS);
+  const srSolSigno = signoDe(srPos.sol);
+  h += '<div class="ciclo-card"><div class="ciclo-cab"><span class="ciclo-ico">🎂</span><h4>Revolución Solar ' + fRS.anio + '</h4></div>' +
+    '<p>Tu próxima "vuelta al Sol" (el Sol regresa exactamente a su lugar natal) ocurre el <strong>' + fmtFechaCiclo(fRS) + '</strong>. Esa carta rige tu año personal hasta el siguiente cumpleaños.' + srAscTxt + '</p></div>';
+
+  // --- Retornos de Saturno ---
+  const rs = await retornosSaturno(carta);
+  const proximo = rs.find(r => r.d > dHoy);
+  h += '<div class="ciclo-card"><div class="ciclo-cab"><span class="ciclo-ico">🪐</span><h4>Retorno de Saturno</h4></div>' +
+    '<p>Saturno tarda ~29,5 años en dar la vuelta y volver a su sitio natal. Cada retorno es un rito de madurez: se cierra una etapa y empieza otra más sólida.</p><ul class="ciclo-lista">';
+  for (const r of rs) {
+    const estado = r.d < dHoy ? 'ya vivido' : (r === proximo ? 'el próximo' : 'futuro');
+    const etiqueta = r.orden === 1 ? 'Primer retorno (juventud → adultez)' : r.orden === 2 ? 'Segundo retorno (madurez → sabiduría)' : 'Tercer retorno (vejez → legado)';
+    h += '<li' + (r === proximo ? ' class="destacado"' : '') + '><strong>' + etiqueta + ':</strong> ~' + fmtFechaCiclo(r.fecha) + ' (a los ' + r.edad + ' años) — <em>' + estado + '</em></li>';
+  }
+  h += '</ul></div>';
+
+  // --- Pronóstico anual ---
+  const ev = await pronosticoAnual(carta, dHoy);
+  h += '<div class="ciclo-card"><div class="ciclo-cab"><span class="ciclo-ico">📅</span><h4>Pronóstico 12 meses · fechas clave</h4></div>';
+  if (!ev.length) {
+    h += '<p>Sin tránsitos exactos de Júpiter ni Saturno a tus puntos principales en el próximo año: un período sin grandes sacudones planetarios de fondo.</p>';
+  } else {
+    h += '<p>Momentos en que Júpiter (expansión, suerte) y Saturno (pruebas, estructura) activan tu carta:</p><div class="lista-aspectos" style="margin-top:10px">';
+    for (const e of ev) {
+      const nat = naturalezaEfectiva({ aspecto: e.asp, a: PLANETA_POR_CLAVE[e.tp], b: { clave: e.obj.clave } });
+      const rolObj = e.obj.clave === 'asc' ? 'tu imagen y tus nuevos comienzos' : (carta.tipo !== 'persona' ? PLANETA_POR_CLAVE[e.obj.clave].rolOrg : PLANETA_POR_CLAVE[e.obj.clave].rolPersona);
+      const signo = e.tp === 'jupiter' ? '🍀' : '🏛';
+      h += '<div class="aspecto ' + nat + '"><div class="asp-linea">' +
+        '<span class="orbe" style="color:var(--oro);min-width:88px">' + fmtFechaCiclo(e.fecha) + '</span>' +
+        '<span class="detalle">' + signo + ' <strong>' + e.tpn + '</strong> en ' + e.asp.nombre.toLowerCase() + ' a tu <strong>' + e.obj.nombre + '</strong></span>' +
+        '<span class="tipo-tag ' + nat + '">' + (nat === 'armonico' ? 'a favor' : nat === 'tenso' ? 'desafío' : 'mixto') + '</span></div>' +
+        '<p class="asp-explica">Se activa el tema de ' + rolObj + '. ' +
+        (e.tp === 'jupiter'
+          ? (nat === 'tenso' ? 'Júpiter acá puede traer exceso o exageración: aprovechar sin pasarse.' : 'Buen momento para expandir, arriesgar con cabeza y buscar oportunidades en esa área.')
+          : (nat === 'tenso' ? 'Saturno pone a prueba: exige esfuerzo, paciencia y hacerse cargo. Lo que se construya bien acá, dura.' : 'Saturno da estructura y reconocimiento al esfuerzo previo: buen momento para consolidar.')) +
+        '</p></div>';
+    }
+    h += '</div>';
+  }
+  h += '</div>';
+  return h;
+}
+
+/* ---- Resumen de la carta para alimentar a la IA ---- */
+function resumenCartaIA(carta) {
+  const l = [];
+  const tipos = { persona: 'persona', equipo: 'equipo deportivo', empresa: 'empresa/marca', proyecto: 'proyecto/evento' };
+  l.push('ENTIDAD: "' + carta.nombre + '" (' + tipos[carta.tipo] + '), fecha ' + carta.fecha + (carta.conHora ? ' hora ' + carta.hora + ' UTC' + (carta.tz >= 0 ? '+' : '') + carta.tz : ' (sin hora exacta, Luna ±6°, sin ascendente ni casas)') + '.');
+  l.push('POSICIONES:');
+  for (const p of carta.planetas) {
+    l.push('- ' + p.nombre + ': ' + p.signo + ' ' + Math.floor(p.grado) + '°' + (p.retro ? ' retrógrado' : '') + (p.casa ? ', casa ' + p.casa : ''));
+  }
+  if (carta.angulos) {
+    l.push('- Ascendente: ' + signoDe(carta.angulos.asc).nombre + ' ' + Math.floor(signoDe(carta.angulos.asc).grado) + '°');
+    l.push('- Medio Cielo: ' + signoDe(carta.angulos.mc).nombre);
+  }
+  const dom = calcularDominancias(carta);
+  l.push('DOMINANCIAS: planeta ' + dom.planetaDom.nombre + ', signo ' + dom.signoDom + ', elemento ' + dom.elementoDom + ' (' + dom.pctElemento[dom.elementoDom] + '%), modalidad ' + dom.modalidadDom + ', polaridad ' + (dom.polaridad.Yang >= dom.polaridad.Yin ? 'Yang ' + dom.polaridad.Yang : 'Yin ' + dom.polaridad.Yin) + '%.');
+  const internos = calcularAspectos(carta.planetas, carta.planetas, true).slice(0, 12);
+  l.push('ASPECTOS PRINCIPALES: ' + internos.map(it => it.a.nombre + ' ' + it.aspecto.nombre.toLowerCase() + ' ' + it.b.nombre + ' (orbe ' + it.orbe.toFixed(1) + '°)').join('; ') + '.');
+  return l.join('\\n');
+}
+
+/* ---- Chat IA ---- */
+let CTX_IA = { activo: false, cartas: [], modo: 'individual', historial: [] };
+
+function htmlChatIA() {
+  return '<h3 class="seccion-titulo" style="font-size:1.35rem">🔮 Preguntá sobre esta carta</h3>' +
+    '<p class="seccion-sub">La IA responde en base a los datos reales de la carta que trazaste. Preguntá lo que quieras: amor, trabajo, decisiones, compatibilidad, un año puntual…</p>' +
+    '<div class="ia-caja">' +
+    '<div class="ia-mensajes" id="ia-mensajes">' +
+      '<div class="ia-vacio">Ejemplos: <em>"¿Cómo me va a ir este año en el trabajo?"</em> · <em>"¿Qué tipo de pareja me conviene?"</em> · <em>"¿Cuáles son mis mayores desafíos?"</em></div>' +
+    '</div>' +
+    '<div class="ia-chips">' +
+      ['¿Cuáles son mis mayores fortalezas?', '¿Cómo me va este año?', '¿Qué debería trabajar de mí?', '¿Cómo soy en el amor?']
+        .map(q => '<button class="ia-chip" onclick="iaPregunta(this.textContent)">' + q + '</button>').join('') +
+    '</div>' +
+    '<div class="ia-entrada">' +
+      '<input type="text" id="ia-input" placeholder="Escribí tu pregunta…" onkeydown="if(event.key===\\'Enter\\')iaEnviar()">' +
+      '<button id="ia-enviar" onclick="iaEnviar()">Preguntar</button>' +
+    '</div>' +
+    '<p class="ia-nota" id="ia-nota"></p>' +
+    '</div>';
+}
+
+function iaPregunta(texto) { $('ia-input').value = texto; iaEnviar(); }
+
+function iaAgregarMensaje(rol, texto, cargando) {
+  const cont = $('ia-mensajes');
+  const vacio = cont.querySelector('.ia-vacio');
+  if (vacio) vacio.remove();
+  const div = document.createElement('div');
+  div.className = 'ia-msg ' + rol + (cargando ? ' cargando' : '');
+  div.innerHTML = rol === 'user'
+    ? '<span class="ia-rol">Vos</span>' + esc(texto)
+    : '<span class="ia-rol">✦ Astrolabio</span>' + (cargando ? '<span class="ia-puntos"><i></i><i></i><i></i></span>' : texto.replace(/\\n/g, '<br>'));
+  cont.appendChild(div);
+  cont.scrollTop = cont.scrollHeight;
+  return div;
+}
+
+async function iaEnviar() {
+  const input = $('ia-input');
+  const pregunta = input.value.trim();
+  if (!pregunta) return;
+  input.value = '';
+  $('ia-enviar').disabled = true;
+  iaAgregarMensaje('user', pregunta);
+  const cargando = iaAgregarMensaje('bot', '', true);
+
+  // Construir contexto astrológico
+  let contexto;
+  if (CTX_IA.modo === 'comparacion') {
+    contexto = 'Es una SINASTRÍA (comparación de dos cartas).\\n\\n=== CARTA A ===\\n' + resumenCartaIA(CTX_IA.cartas[0]) +
+      '\\n\\n=== CARTA B ===\\n' + resumenCartaIA(CTX_IA.cartas[1]);
+  } else {
+    contexto = resumenCartaIA(CTX_IA.cartas[0]);
+  }
+
+  const system = 'Sos un astrólogo profesional cálido y claro que habla en español rioplatense (usando "vos"). ' +
+    'Respondé preguntas basándote ÚNICA Y EXCLUSIVAMENTE en los datos de la carta astral que te paso a continuación. ' +
+    'No inventes posiciones planetarias: usá solo las que están en los datos. ' +
+    'Interpretá de forma concreta, aterrizada y útil para tomar decisiones, sin tecnicismos innecesarios; cuando uses un término astrológico, explicalo en una frase. ' +
+    'Sé honesto con lo positivo y lo desafiante. Si la carta no tiene hora (sin ascendente ni casas), aclaralo cuando sea relevante. ' +
+    'Respondé en 2-4 párrafos como máximo. Recordá que esto es orientativo y simbólico, no un determinante del futuro.\\n\\n' +
+    'DATOS DE LA CARTA:\\n' + contexto;
+
+  CTX_IA.historial.push({ role: 'user', content: pregunta });
+
+  try {
+    // ── IA vía Panel Maestro: worker /ai con fallback multi-proveedor ──
+    //   (Gemini Flash → cascade OpenRouter). Si una IA falla, el worker prueba
+    //   con la siguiente automáticamente, así siempre responde algo.
+    //   El puente window.parent.getAstroAuth() entrega { worker, token } del panel.
+    let _endpoint, _cuerpo;
+    const _headers = { 'Content-Type': 'application/json' };
+    const _auth = (window.parent && window.parent !== window && typeof window.parent.getAstroAuth === 'function')
+      ? window.parent.getAstroAuth() : null;
+    if (_auth && _auth.worker && _auth.token) {
+      _endpoint = _auth.worker.replace(/\\/+$/, '') + '/ai';
+      _headers['Authorization'] = 'Bearer ' + _auth.token;
+      _cuerpo = { system: system, messages: CTX_IA.historial, max_tokens: IA_CONFIG.maxTokens };
+    } else {
+      // Fallback standalone (vista previa Claude.ai o abierto fuera del panel)
+      _endpoint = IA_CONFIG.endpoint || 'https://api.anthropic.com/v1/messages';
+      _cuerpo = { model: IA_CONFIG.modelo, max_tokens: IA_CONFIG.maxTokens, system: system, messages: CTX_IA.historial };
+    }
+    const resp = await fetch(_endpoint, {
+      method: 'POST',
+      headers: _headers,
+      body: JSON.stringify(_cuerpo)
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    const texto = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('\\n').trim()
+      || 'No recibí una respuesta legible.';
+    cargando.remove();
+    iaAgregarMensaje('bot', texto);
+    CTX_IA.historial.push({ role: 'assistant', content: texto });
+  } catch (err) {
+    cargando.remove();
+    iaAgregarMensaje('bot', 'No pude conectar con la IA en este momento. Probá de nuevo en unos segundos.');
+    const _nota = $('ia-nota'); if (_nota) _nota.textContent = '';
+  } finally {
+    $('ia-enviar').disabled = false;
+  }
+}
+
+/* ---- Render: carta individual ---- */
+async function renderIndividual(carta, transitoHoy) {
+  const internos = calcularAspectos(carta.planetas, carta.planetas, true);
+  let h = '';
+  h += '<h2 class="seccion-titulo">' + esc(carta.nombre) + '</h2>';
+  h += '<p class="seccion-sub">' + fechaLegible(carta) + '</p>';
+  h += '<div class="heroes">' + heroDe(carta, '') + '</div>';
+  h += htmlDatosPrincipales(carta);
+  h += '<div class="rueda-caja">' + ruedaSVG([{ carta, color: '#d8b65c' }], internos) + '</div>';
+  h += htmlPlanetas(carta);
+  h += '<h3 class="seccion-titulo" style="font-size:1.35rem">Distribución</h3>';
+  h += htmlElementosPct(carta);
+  h += htmlSintesis(carta);
+  h += htmlDominancias(carta);
+  h += '<h3 class="seccion-titulo" style="font-size:1.35rem">Ascendente y Casas</h3>';
+  h += htmlCasas(carta);
+  if (carta.tipo === 'persona') {
+    h += '<h3 class="seccion-titulo" style="font-size:1.35rem">Amor · Trabajo · Crecimiento</h3>';
+    h += htmlAmor(carta);
+    h += htmlTrabajo(carta);
+    h += htmlFortalezas(carta);
+  } else {
+    h += '<h3 class="seccion-titulo" style="font-size:1.35rem">Fortalezas y desafíos</h3>';
+    h += htmlFortalezas(carta);
+  }
+  // Chat IA — reubicado: entre "Lecciones de vida" y "Aspectos internos"
+  CTX_IA = { activo: true, cartas: [carta], modo: 'individual', historial: [] };
+  h += htmlChatIA();
+  h += '<h3 class="seccion-titulo" style="font-size:1.35rem">Aspectos internos</h3>';
+  h += '<p class="seccion-sub">Los diálogos entre los planetas de la propia carta: su dinámica interna.</p>';
+  h += htmlAspectos(internos, carta, null);
+  h += '<h3 class="seccion-titulo" style="font-size:1.35rem">Lectura planeta por planeta</h3>';
+  h += htmlInterpretaciones(carta);
+  h += '<h3 class="seccion-titulo" style="font-size:1.35rem">🌠 Tránsitos de hoy</h3>';
+  h += htmlTransitos(carta, transitoHoy, 'Cielo del ' + fechaCorta(transitoHoy.fecha));
+  // Ciclos y predicciones (cálculo en vivo)
+  h += await htmlCiclos(carta);
+  return h;
+}
+
+/* ---- Render: sinastría ---- */
+async function renderSinastria(cartaA, cartaB, transito, eventoInformado) {
+  const entre = calcularAspectos(cartaA.planetas, cartaB.planetas, false);
+  const puntaje = puntajeSinastria(entre);
+  let h = '';
+  h += '<h2 class="seccion-titulo">' + esc(cartaA.nombre) + ' ✦ ' + esc(cartaB.nombre) + '</h2>';
+  h += '<p class="seccion-sub">' + fechaLegible(cartaA) + ' &nbsp;·&nbsp; ' + fechaLegible(cartaB) + '</p>';
+  h += '<div class="heroes">' + heroDe(cartaA, '') + '<div class="hero-vs">✦</div>' + heroDe(cartaB, 'b') + '</div>';
+  h += '<div class="rueda-caja">' + ruedaSVG([{ carta: cartaA, color: '#d8b65c' }, { carta: cartaB, color: '#7fa8d9' }], entre) + '</div>';
+  h += '<div class="leyenda"><span><span class="punto" style="background:#d8b65c"></span>' + esc(cartaA.nombre) + ' (anillo interior)</span>' +
+       '<span><span class="punto" style="background:#7fa8d9"></span>' + esc(cartaB.nombre) + ' (anillo exterior)</span></div>';
+
+  h += '<div class="marcador"><div class="cifra">' + puntaje + '</div>' +
+       '<div class="escala">Índice de afinidad / 100</div>' +
+       '<p class="lectura">' + lecturaPuntaje(puntaje, cartaA, cartaB) + '</p></div>';
+
+  // ---- Áreas temáticas según los tipos ----
+  const areas = areasParaTipos(cartaA.tipo, cartaB.tipo);
+  h += '<h3 class="seccion-titulo" style="font-size:1.35rem">Áreas de la relación</h3>';
+  h += '<p class="seccion-sub">Cada área se puntúa según los contactos entre los planetas que la rigen.</p>';
+  h += '<div class="areas">' + areas.map(a => {
+    const r = puntajeArea(a, entre);
+    const barra = r.valor === null ? 0 : r.valor;
+    const color = r.valor === null ? '#565d78' : r.valor >= 60 ? 'var(--armonico)' : r.valor >= 45 ? 'var(--neutro)' : 'var(--tenso)';
+    return '<div class="area"><div class="area-cab"><span class="area-ico">' + a.icono + '</span><h5>' + a.nombre + '</h5>' +
+      '<span class="area-num">' + (r.valor === null ? '—' : r.valor) + '</span></div>' +
+      '<div class="barra-pista"><div class="barra-relleno" style="width:' + barra + '%;background:' + color + '"></div></div>' +
+      '<p>' + textoArea(r.valor) + (r.n ? ' <em>(' + r.n + ' contacto' + (r.n > 1 ? 's' : '') + ')</em>' : '') + '</p>' +
+      '<p style="margin-top:5px;font-size:.78rem">' + a.desc + '</p></div>';
+  }).join('') + '</div>';
+
+  // ---- Apoyo / fricción ----
+  const armonicos = entre.filter(it => naturalezaEfectiva(it) === 'armonico').slice(0, 6);
+  const tensos = entre.filter(it => naturalezaEfectiva(it) === 'tenso').slice(0, 6);
+  const linea = it => it.a.nombre + ' de ' + esc(cartaA.nombre) + ' ' + it.aspecto.simbolo + ' ' + it.b.nombre + ' de ' + esc(cartaB.nombre) +
+    ' <span style="color:var(--marfil-dim)">(' + it.aspecto.nombre.toLowerCase() + ', orbe ' + it.orbe.toFixed(1) + '°)</span>';
+  h += '<div class="dos-columnas">' +
+    '<div class="columna-lista positiva"><h4>Puntos de apoyo</h4><ul>' +
+    (armonicos.length ? armonicos.map(it => '<li>' + linea(it) + '</li>').join('') : '<li class="vacio">Sin contactos armónicos fuertes.</li>') + '</ul></div>' +
+    '<div class="columna-lista negativa"><h4>Puntos de fricción</h4><ul>' +
+    (tensos.length ? tensos.map(it => '<li>' + linea(it) + '</li>').join('') : '<li class="vacio">Sin contactos tensos fuertes.</li>') + '</ul></div></div>';
+
+  // ---- Pronóstico competitivo (equipos) ----
+  if (cartaA.tipo === 'equipo' && cartaB.tipo === 'equipo') {
+    const iA = indiceCompetitivo(cartaA, transito);
+    const iB = indiceCompetitivo(cartaB, transito);
+    const pr = probabilidades(iA.puntos, iB.puntos);
+    const pct = x => Math.round(x * 100);
+    let ascEvento = '';
+    if (transito && transito.angulos) {
+      const sA = signoDe(transito.angulos.asc);
+      ascEvento = '<br><strong>Ascendente del evento:</strong> ' + sA.glifo + ' ' + sA.nombre + ' — el "clima escénico" del encuentro se tiñe de ' + DESCRIPCION_SIGNO[sA.nombre].luz + '.';
+    }
+    h += '<div class="pronostico"><h4>⚔ Pronóstico simbólico del enfrentamiento</h4>' +
+      (eventoInformado ? '<p class="seccion-sub" style="margin-bottom:12px">Incluye los tránsitos del ' + fechaCorta(transito.fecha) + ' sobre el Sol, Marte y Júpiter de cada equipo.</p>' : '') +
+      '<div class="prob-barras">' +
+      '<div class="prob-seg a" style="width:' + pct(pr.pA) + '%">' + pct(pr.pA) + '%</div>' +
+      '<div class="prob-seg empate" style="width:' + pct(pr.pEmpate) + '%">' + pct(pr.pEmpate) + '%</div>' +
+      '<div class="prob-seg b" style="width:' + pct(pr.pB) + '%">' + pct(pr.pB) + '%</div></div>' +
+      '<div class="prob-rotulos"><span>Gana ' + esc(cartaA.nombre) + '</span><span>Empate</span><span>Gana ' + esc(cartaB.nombre) + '</span></div>' +
+      '<div class="desglose"><strong>' + esc(cartaA.nombre) + '</strong> — índice competitivo ' + iA.puntos.toFixed(1) +
+      (iA.detalle.length ? ' · ' + iA.detalle.join(' · ') : '') + '<br>' +
+      '<strong>' + esc(cartaB.nombre) + '</strong> — índice competitivo ' + iB.puntos.toFixed(1) +
+      (iB.detalle.length ? ' · ' + iB.detalle.join(' · ') : '') + ascEvento +
+      '<br><em style="color:var(--marfil-dim)">Basado en dignidades de Sol, Marte y Júpiter, aspectos internos y tránsitos del evento. Es un juego simbólico: no lo uses para apostar.</em></div></div>';
+  }
+
+  // ---- Tránsitos del evento sobre ambas cartas ----
+  const tituloTr = eventoInformado
+    ? '🌠 Cielo del evento (' + fechaCorta(transito.fecha) + ')'
+    : '🌠 Tránsitos de hoy (' + fechaCorta(transito.fecha) + ')';
+  h += '<h3 class="seccion-titulo" style="font-size:1.35rem">' + tituloTr + '</h3>';
+  h += '<h4 class="seccion-sub" style="font-size:1rem;color:var(--oro)">Sobre ' + esc(cartaA.nombre) + '</h4>';
+  h += htmlTransitos(cartaA, transito, 'Tránsitos sobre ' + esc(cartaA.nombre));
+  h += '<h4 class="seccion-sub" style="font-size:1rem;color:var(--celeste)">Sobre ' + esc(cartaB.nombre) + '</h4>';
+  h += htmlTransitos(cartaB, transito, 'Tránsitos sobre ' + esc(cartaB.nombre));
+
+  // ---- Todos los contactos ----
+  h += '<h3 class="seccion-titulo" style="font-size:1.35rem">Todos los contactos (' + entre.length + ')</h3>';
+  h += htmlAspectos(entre, cartaA, cartaB);
+
+  // ---- Esencias ----
+  h += '<h3 class="seccion-titulo" style="font-size:1.35rem">Esencia de cada carta</h3>';
+  const mini = c => {
+    const sol = c.planetas.find(p => p.clave === 'sol');
+    const luna = c.planetas.find(p => p.clave === 'luna');
+    const marte = c.planetas.find(p => p.clave === 'marte');
+    return '<div class="interp"><h5>' + esc(c.nombre) + '</h5><p>Sol en ' + sol.signo + ' (' + DESCRIPCION_SIGNO[sol.signo].luz +
+      '), Luna en ' + luna.signo + (c.conHora ? '' : ' <em>(±6° por falta de horario)</em>') +
+      ' y Marte en ' + marte.signo + ': su forma de luchar es con ' + DESCRIPCION_SIGNO[marte.signo].luz + '.</p></div>';
+  };
+  h += '<div class="interpretaciones">' + mini(cartaA) + mini(cartaB) + '</div>';
+  // Chat IA con contexto de ambas cartas
+  CTX_IA = { activo: true, cartas: [cartaA, cartaB], modo: 'comparacion', historial: [] };
+  h += htmlChatIA();
+  return h;
+}
+
+function lecturaPuntaje(p, a, b) {
+  const esPar = a.tipo === 'persona' && b.tipo === 'persona';
+  if (p >= 75) return esPar ? 'Vínculo con mucha corriente a favor: los planetas se apoyan entre sí. Las diferencias existen, pero el terreno común es amplio.' : 'Relación con fuerte sinergia: los factores simbólicos de ambas entidades se potencian mutuamente.';
+  if (p >= 60) return esPar ? 'Buena base de entendimiento con algunos roces que, bien trabajados, dan profundidad al vínculo.' : 'Sinergia positiva con algunas áreas de tensión que conviene gestionar.';
+  if (p >= 45) return 'Relación mixta: apoyo y fricción en dosis parecidas. El resultado depende de cuánto se trabajen los puntos tensos.';
+  if (p >= 30) return 'Predominan los contactos desafiantes. Puede ser una relación intensa y transformadora, pero exige mucho de ambas partes.';
+  return 'Cartas con fuerte fricción simbólica: más campo de batalla que campo común. Interesante para crecer, difícil para descansar.';
+}
+
+function fechaLegible(c) {
+  const [a, m, d] = c.fecha.split('-');
+  const meses = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+  let s = Number(d) + ' ' + meses[Number(m) - 1] + ' ' + a;
+  s += c.conHora ? ' · ' + c.hora + ' (UTC' + (c.tz >= 0 ? '+' : '') + c.tz + ')' : ' · 12:00 UTC (horario no informado)';
+  const tipos = { persona: 'Persona', equipo: 'Equipo', empresa: 'Empresa', proyecto: 'Proyecto' };
+  return tipos[c.tipo] + ' · ' + s + (c.conLugar ? ' · lat ' + c.lat + ', lon ' + c.lon : '');
+}
+
+function fechaCorta(iso) {
+  const [a, m, d] = iso.split('-');
+  const meses = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+  return Number(d) + ' ' + meses[Number(m) - 1] + ' ' + a;
+}
+
+/* ---- Guía educativa ---- */
+function renderGuia() {
+  let h = '';
+  h += '<details class="guia"><summary>🪐 Qué representa cada planeta</summary><div class="guia-cuerpo">' +
+    PLANETAS.map(p => '<div class="guia-item"><span class="g">' + p.glifo + '</span><span class="t"><strong>' + p.nombre + ':</strong> en una persona, ' + p.rolPersona + '. En un equipo o empresa, ' + p.rolOrg + '.</span></div>').join('') +
+    '</div></details>';
+  h += '<details class="guia"><summary>📐 Qué significa cada aspecto</summary><div class="guia-cuerpo">' +
+    ASPECTOS_DEF.map(a => '<div class="guia-item"><span class="g">' + a.simbolo + '</span><span class="t"><strong>' + a.nombre + ' (' + a.angulo + '° ±' + a.orbe + '°):</strong> ' + a.accion + '.</span></div>').join('') +
+    '<div class="guia-item"><span class="g">°</span><span class="t"><strong>Orbe:</strong> el margen de desviación respecto del ángulo exacto. Cuanto más chico el orbe, más fuerte y "activo" es el aspecto.</span></div>' +
+    '</div></details>';
+  h += '<details class="guia"><summary>🏛 Qué son el Ascendente y las Casas</summary><div class="guia-cuerpo">' +
+    '<div class="guia-item"><span class="g">↑</span><span class="t"><strong>Ascendente:</strong> el signo que subía por el horizonte este en el momento y lugar exactos. Es la "fachada": la primera impresión, el estilo de arranque. Cambia de signo cada ~2 horas, por eso exige horario y lugar precisos.</span></div>' +
+    '<div class="guia-item"><span class="g">⌂</span><span class="t"><strong>Casas:</strong> doce sectores del cielo que reparten la vida en temas concretos. El signo del Ascendente define la casa 1 y de ahí se ordenan las demás (sistema de signos enteros).</span></div>' +
+    CASAS.map(c => '<div class="guia-item"><span class="g">' + c.num + '</span><span class="t"><strong>' + c.tema + ':</strong> ' + c.desc + '.</span></div>').join('') +
+    '</div></details>';
+  h += '<details class="guia"><summary>🌠 Qué son los tránsitos</summary><div class="guia-cuerpo">' +
+    '<div class="guia-item"><span class="g">☄</span><span class="t">La carta natal es una <strong>foto del cielo</strong> al nacer, pero los planetas siguen moviéndose. Cuando un planeta actual pasa por un punto sensible de la carta natal, se dice que lo <strong>transita</strong>: activa temporalmente ese tema. Un trígono de Júpiter en tránsito al Sol natal es viento a favor; una cuadratura de Saturno, una prueba de resistencia.</span></div>' +
+    '</div></details>';
+  h += '<details class="guia"><summary>✍ ¿El nombre influye en la carta?</summary><div class="guia-cuerpo">' +
+    '<div class="guia-item"><span class="g">✕</span><span class="t"><strong>No.</strong> La astrología calcula posiciones del cielo: solo usa fecha, hora y lugar. Da igual poner el nombre completo, un apodo o dejarlo vacío; es apenas la etiqueta de los resultados. La disciplina que analiza nombres y sus números es la <strong>numerología</strong>, que es otro sistema distinto.</span></div>' +
+    '</div></details>';
+  $('zona-guia').innerHTML = h;
+}
+
+/* ---- Orquestador ---- */
+async function trazar() {
+  $('zona-avisos').innerHTML = '';
+  const e1 = leerEntidad(1);
+  if (!e1) { avisar('Ingresá la fecha de la <strong>Entidad I</strong>.', 'error'); return; }
+  let e2 = null;
+  if (modo === 'comparacion') {
+    e2 = leerEntidad(2);
+    if (!e2) { avisar('Ingresá la fecha de la <strong>Entidad II</strong> para comparar.', 'error'); return; }
+  }
+
+  const btn = $('btn-calcular');
+  btn.disabled = true;
+  btn.textContent = 'Consultando el cielo…';
+  try {
+    const cartaA = await calcularCarta(e1);
+    const avisoDatos = c => {
+      if (!c.conHora) avisar('<strong>' + esc(c.nombre) + '</strong>: sin horario se usa 12:00 UTC. Sin Ascendente ni Casas; Luna con margen de ±6°.', 'advertencia');
+      else if (!c.conLugar) avisar('<strong>' + esc(c.nombre) + '</strong>: hay horario pero falta el lugar, así que no se calculan Ascendente ni Casas.', 'advertencia');
+    };
+    avisoDatos(cartaA);
+
+    let html;
+    if (modo === 'comparacion') {
+      const cartaB = await calcularCarta(e2);
+      avisoDatos(cartaB);
+      const ev = leerEvento();
+      const transito = await calcularTransito(ev);
+      html = await renderSinastria(cartaA, cartaB, transito, !ev.esHoy);
+    } else {
+      const hoy = new Date();
+      const hoyISO = hoy.getFullYear() + '-' + String(hoy.getMonth() + 1).padStart(2, '0') + '-' + String(hoy.getDate()).padStart(2, '0');
+      const transitoHoy = await calcularTransito({ fecha: hoyISO, hora: null, tz: 0, lat: null, lon: null });
+      html = await renderIndividual(cartaA, transitoHoy);
+    }
+    const cont = $('resultados');
+    cont.innerHTML = '<div class="acciones-resultado" data-noprint><button class="btn-pdf" onclick="descargarPDF()">📄 Descargar informe en PDF</button></div>' + html;
+    cont.classList.add('visible');
+    cont.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (err) {
+    avisar('No se pudo calcular la carta: ' + esc(err.message), 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = modo === 'comparacion' ? 'Trazar la sinastría' : 'Trazar la carta';
+  }
+}
+
+/* ---- Descarga en PDF (vía diálogo de impresión del navegador) ---- */
+function descargarPDF() {
+  // Abre todas las secciones desplegables de la guía para que salgan en el PDF
+  document.querySelectorAll('details.guia').forEach(d => d.open = true);
+  document.body.classList.add('modo-impresion');
+  const limpiar = () => { document.body.classList.remove('modo-impresion'); window.removeEventListener('afterprint', limpiar); };
+  window.addEventListener('afterprint', limpiar);
+  window.print();
+}
+
+/* ---- Init ---- */
+document.addEventListener('DOMContentLoaded', () => {
+  poblarZonas();
+  poblarCiudades();
+  renderGuia();
+  $('tab-individual').addEventListener('click', () => setModo('individual'));
+  $('tab-comparacion').addEventListener('click', () => setModo('comparacion'));
+  $('btn-calcular').addEventListener('click', trazar);
+});
+
+<\/script>
+</body>
+</html>
+`;
+
+let _astroLoaded = false;
+function astroInit(){
+  const f = document.getElementById('astro-frame');
+  if(!f || _astroLoaded) { if(f) _astroResizeSoon(f); return; }
+  _astroLoaded = true;
+  f.addEventListener('load', function(){
+    try{
+      const doc = f.contentWindow.document;
+      const resize = function(){
+        const h = Math.max(doc.body ? doc.body.scrollHeight : 0,
+                           doc.documentElement ? doc.documentElement.scrollHeight : 0);
+        if(h) f.style.height = (h + 28) + 'px';
+      };
+      resize();
+      if(window.ResizeObserver && doc.body){ new ResizeObserver(resize).observe(doc.body); }
+      if(doc.body){ new MutationObserver(resize).observe(doc.body, {childList:true, subtree:true, attributes:true}); }
+      // Red de seguridad para renders async (ciclos, rueda SVG)
+      [400, 1200, 2500, 5000].forEach(function(ms){ setTimeout(resize, ms); });
+    }catch(e){ console.warn('[astro] resize', e); }
+  });
+  f.srcdoc = ASTRO_SRCDOC;
+}
+function _astroResizeSoon(f){
+  try{
+    const doc = f.contentWindow.document;
+    const h = Math.max(doc.body ? doc.body.scrollHeight : 0, doc.documentElement ? doc.documentElement.scrollHeight : 0);
+    if(h) f.style.height = (h + 28) + 'px';
+  }catch(e){}
+}
+</script>
+
 </body>
 </html>
