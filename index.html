@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v222 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v223 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4163,7 +4163,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <input type="text" id="cta-search" placeholder="🔍 Buscar..." style="max-width:200px;font-size:12px;padding:5px 9px" oninput="_ctaState.page=1;ctaRenderTable()">
         <button class="btn btn-sm" style="background:var(--accent);color:#fff" onclick="ctaOpenOp(null)">➕ Nueva operación</button>
         <button class="btn btn-sm" style="background:#22c55e;color:#fff" onclick="persoOpenMsgCenter()">💬 Mensajes WhatsApp</button>
-        <button class="btn btn-ghost btn-sm" onclick="ctaSyncAll()" title="Trae ventas nuevas de ML y Personalizadas WA">⬇️ Sincronizar</button>
+        <button class="btn btn-ghost btn-sm" onclick="ctaRefreshCloud(true).then(function(){ctaSyncAll();})" title="Baja lo cargado desde la otra PC + trae ventas nuevas de ML, Web y Personalizadas WA">⬇️ Sincronizar</button>
         <button class="btn btn-ghost btn-sm" onclick="ctaEnrichML()" id="cta-enrich-btn" title="Trae el monto NETO acreditado y el nombre real del comprador de cada venta de ML (en lotes, cacheado)">💰 Montos netos ML</button>
         <button class="btn btn-ghost btn-sm" onclick="ctaExportExcel()" title="Exporta a .xlsx las operaciones filtradas">📥 Exportar Excel</button>
         <button class="btn btn-ghost btn-sm" onclick="document.getElementById('cta-xlsx-file').click()" title="Importar un .xlsx exportado previamente para aplicar cambios masivos">📤 Importar Excel</button>
@@ -6440,7 +6440,11 @@ async function _loadPubMetricsBatchInner(ids){
   const toFetch = [];
   for(const id of ids){
     const cached = metricsFromCache(id);
-    if(cached && typeof cached.visits30 === 'number'){
+    // v223: mv:3 = métricas con visitsPrev derivado del MISMO array diario que
+    // visits (antes venía de /visits?date_from=..., otro endpoint que devolvía
+    // totales muy por debajo → el embudo mostraba ▲150% falsos).
+    // Las cachés viejas (sin mv:3) se re-piden una vez y quedan sanas.
+    if(cached && typeof cached.visits30 === 'number' && cached.mv === 3){
       // Datos completos del caché — actualizar ventas (siempre frescos de allOrders)
       cached.sales      = salesMap7[id]    || 0;
       cached.salesPrev  = salesMap_prev[id] || 0;
@@ -6466,37 +6470,41 @@ async function _loadPubMetricsBatchInner(ids){
   for(const id of toFetch){
     let visits = 0, visitsPrev = 0, visits30 = 0;
 
-    // Visitas últimos 30 días
+    // v223: UNA sola llamada (30 días por día) y de ahí salen las TRES ventanas:
+    //   visits     = últimos 7 días        → días [-7 .. -1]
+    //   visitsPrev = los 7 días anteriores → días [-14 .. -8]
+    //   visits30   = total de los 30 días
+    // Antes visitsPrev se pedía a /items/{id}/visits?date_from=...&date_to=...,
+    // un endpoint distinto que cuenta otra cosa y devolvía ~40% de lo real:
+    // por eso el embudo marcaba saltos imposibles (6.754 vs 2.670 = ▲153%).
+    // Bonus: la mitad de requests a ML por ítem (menos 429, carga más rápida).
+    const sumDias = arr => arr.reduce((s,d)=>s+(+d.total||+d.quantity||0),0);
     try{
       const r = await mlGet('/items/'+id+'/visits/time_window?last=30&unit=day');
-      if(r && Array.isArray(r.results)){
-        // Array por día — sumar todo para 30d y los últimos 7 para 7d
-        visits30 = r.results.reduce((s,d)=>s+(d.total||d.quantity||0),0);
-        visits   = r.results.slice(-7).reduce((s,d)=>s+(d.total||d.quantity||0),0);
-      } else if(r && Array.isArray(r.visits)){
-        visits30 = r.visits.reduce((s,d)=>s+(d.total||d.quantity||0),0);
-        visits   = r.visits.slice(-7).reduce((s,d)=>s+(d.total||d.quantity||0),0);
+      const dias = (r && Array.isArray(r.results)) ? r.results
+                 : (r && Array.isArray(r.visits))  ? r.visits : null;
+      if(dias){
+        visits30   = sumDias(dias);
+        visits     = sumDias(dias.slice(-7));
+        visitsPrev = sumDias(dias.slice(-14, -7));
       } else if(r && typeof r.total_visits === 'number'){
-        // Fallback: API devolvió solo total — usamos eso para 30d y aproximamos 7d=total/4
-        visits30 = r.total_visits;
-        visits   = Math.round(r.total_visits / 4);
+        // Fallback: la API solo devolvió el total — repartimos proporcional
+        visits30   = r.total_visits;
+        visits     = Math.round(r.total_visits / 4);
+        visitsPrev = Math.round(r.total_visits / 4);
       }
     }catch(e){
       console.warn('[Metricas] time_window error', id, '—', e.message);
       try{
         const r2 = await mlGet('/items/'+id+'/visits?date_from='+from7.toISOString().slice(0,10)+'&date_to='+now.toISOString().slice(0,10));
         visits = (r2 && r2.total_visits) || 0;
+        const r3 = await mlGet('/items/'+id+'/visits?date_from='+from14.toISOString().slice(0,10)+'&date_to='+from7.toISOString().slice(0,10));
+        visitsPrev = (r3 && r3.total_visits) || 0;
       }catch(e2){
         console.warn('[Metricas] fallback error', id, '—', e2.message);
-        visits = 0;
+        visits = 0; visitsPrev = 0;
       }
     }
-
-    // Visitas período anterior (para tendencia 7d vs 7-14d)
-    try{
-      const rp = await mlGet('/items/'+id+'/visits?date_from='+from14.toISOString().slice(0,10)+'&date_to='+from7.toISOString().slice(0,10));
-      visitsPrev = (rp && rp.total_visits) || 0;
-    }catch(e){ visitsPrev = 0; }
 
     const sales      = salesMap7[id]    || 0;
     const salesPrev  = salesMap_prev[id] || 0;
@@ -6505,7 +6513,7 @@ async function _loadPubMetricsBatchInner(ids){
     const salesTrend = salesPrev>0 ? Math.round((sales-salesPrev)/salesPrev*100) : (sales>0?100:0);
     const visitsTrend= visitsPrev>0 ? Math.round((visits-visitsPrev)/visitsPrev*100) : (visits>0?100:0);
 
-    const data = { visits, visitsPrev, visits30, sales, salesPrev, sales60, conv, salesTrend, visitsTrend };
+    const data = { visits, visitsPrev, visits30, sales, salesPrev, sales60, conv, salesTrend, visitsTrend, mv: 3 };
     itemMetrics[id] = data;
     metricsToCache(id, data); // persistir en localStorage
 
@@ -7446,6 +7454,13 @@ function trendArrow(prevRanks, itemId, currentIdx){
     return '<span style="color:#00a650;font-weight:700;font-size:12px;line-height:1" title="Subió '+diff+' posición'+(diff>1?'es':'')+' desde ayer">⬆</span>';
   return '<span style="color:#e74c3c;font-weight:700;font-size:12px;line-height:1" title="Bajó '+Math.abs(diff)+' posición'+(Math.abs(diff)>1?'es':'')+' desde ayer">⬇</span>';
 }
+// v223: chip con el código MLA de la publicación (se muestra al lado de Calidad)
+function _mlaTag(id){
+  if(!id) return '';
+  var code = String(id);
+  if(!/^MLA/i.test(code)) code = 'MLA' + code;
+  return ' <span style="color:var(--text3);font-weight:700;letter-spacing:.2px" title="Código de la publicación en MercadoLibre">' + code + '</span>';
+}
 var DASH_C_METRIC = 'color:#1a1a1a;font-weight:700';   // negro legible (dark+light mode)
 var DASH_C_PRICE  = 'color:#00a650;font-weight:700';   // verde ML
 var DASH_C_QUAL   = 'color:#ff7733;font-weight:700';   // naranja calidad
@@ -7510,7 +7525,8 @@ function renderDashTopPubs(){
     const metric  =
       '<span style="'+DASH_C_METRIC+'">'+qty+' uds</span>'
       +' · <span style="'+DASH_C_PRICE+'">$'+price.toLocaleString('es-AR')+'</span>'
-      +(sc!=null?' · <span style="'+DASH_C_QUAL+'">Calidad: '+sc+'%</span>':'');
+      +(sc!=null?' · <span style="'+DASH_C_QUAL+'">Calidad: '+sc+'%</span>':'')
+      +_mlaTag(itemId);
     const onCl    = editUrl ? 'onclick="window.open(\''+editUrl+'\',\'_blank\')"' : '';
     const imgEl   = thumb ? '<img src="'+thumb+'" onerror="this.parentElement.textContent=\'☕\'">':'☕';
     return '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);'+(editUrl?'cursor:pointer;':'')+'" '+onCl+'>'
@@ -21469,7 +21485,8 @@ function renderLast50(){
     var metric   =
       '<span style="color:var(--text3)">'+fecha+'</span>'
       +' · <span style="'+DASH_C_PRICE+'">$'+price.toLocaleString('es-AR')+'</span>'
-      +(sc!=null?' · <span style="'+DASH_C_QUAL+'">Calidad: '+sc+'%</span>':'');
+      +(sc!=null?' · <span style="'+DASH_C_QUAL+'">Calidad: '+sc+'%</span>':'')
+      +_mlaTag(sale.itemId);
     return '<div style="display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid var(--border);'+cursor+'" '+onCl+'>'
       +'<div class="item-thumb" style="flex-shrink:0">'+imgEl+'</div>'
       +'<div style="flex:1;min-width:0">'
@@ -21693,7 +21710,8 @@ function renderMostVisited(data){
 
     var metric = visitLabel
       +' · <span style="'+DASH_C_PRICE+'">$'+(price>0?price.toLocaleString('es-AR'):'—')+'</span>'
-      +(sc!=null?' · <span style="'+DASH_C_QUAL+'">Cal: '+sc+'%</span>':'');
+      +(sc!=null?' · <span style="'+DASH_C_QUAL+'">Cal: '+sc+'%</span>':'')
+      +_mlaTag(v.itemId);
 
     var medal = idx===0?'🥇':idx===1?'🥈':idx===2?'🥉':(idx+1);
     return '<div style="'+rowStyle+'" '+onCl+'>'
@@ -23678,6 +23696,16 @@ let _ctaState = {
   periodo: 'mes',
   editId: null, saving: false, syncing: false,
   selected: new Set(),
+  // v223 · SINCRONIZACIÓN MULTI-PC
+  // base[ym] = Map(id → huella de la operación tal cual está en la nube).
+  // Sirve para dos cosas al guardar:
+  //   1) saber QUÉ operaciones cambié yo (huella distinta) → les pongo upd=ahora
+  //   2) saber cuáles BORRÉ (están en base y ya no en el chunk) → las mando como
+  //      borradas para que el Worker las tumbe (y no revivan desde otra PC)
+  // Con eso el guardado dejó de ser "piso el mes entero" y pasó a ser un MERGE
+  // por operación (gana la última edición real, venga de la PC que venga).
+  base: {},
+  lastRefresh: 0, refreshing: false,
 };
 let _ctaSaveTimer = null;
 let _ctaMLSynced = false;
@@ -23751,6 +23779,10 @@ async function ctaInit() {
     }
   }
   await ctaLoadRange();
+  // v223: cada vez que entrás a la sección, primero se trae lo último de la nube
+  // (lo que se cargó desde la otra PC). Antes los meses se bajaban una sola vez
+  // por sesión y una pestaña vieja se quedaba pegada mostrando datos viejos.
+  await ctaRefreshCloud(true);
   ctaRenderAll();
   if (typeof persoRenderMsgs === 'function') persoRenderMsgs(); // espejo de mensajes WA
   ctaSyncAll(true); // silencioso: WA apenas ingresa + ML asentado por siempre
@@ -23879,12 +23911,8 @@ async function ctaLoadRange() {
   // de a 4 en paralelo
   for (let i = 0; i < need.length; i += 4) {
     await Promise.all(need.slice(i, i + 4).map(async ym => {
-      try {
-        const r = await fetch(WORKER + '/api/cta/ops/' + ym);
-        const d = await r.json();
-        _ctaState.chunks[ym] = (d.ok && Array.isArray(d.ops)) ? d.ops : [];
-        _ctaState.loaded.add(ym);
-      } catch (e) { console.warn('[cta] chunk', ym, e.message); }
+      try { await _ctaFetchChunk(ym); }
+      catch (e) { console.warn('[cta] chunk', ym, e.message); }
     }));
   }
   _ctaStatus('✓');
@@ -23894,6 +23922,32 @@ async function ctaSetRango(v) {
   _ctaState.rango = v; _ctaState.page = 1;
   await ctaLoadRange();
   ctaRenderAll();
+}
+
+// v223 ── huella de una operación (todo menos el sello de tiempo de edición)
+function _ctaHuella(o) {
+  try {
+    const c = Object.assign({}, o);
+    delete c.upd;
+    return JSON.stringify(c);
+  } catch (e) { return String(Math.random()); }
+}
+// Guarda la foto de cómo quedó el mes en la nube (para el diff del próximo guardado)
+function _ctaSnap(ym) {
+  const m = new Map();
+  (_ctaState.chunks[ym] || []).forEach(o => { if (o && o.id) m.set(o.id, _ctaHuella(o)); });
+  _ctaState.base[ym] = m;
+}
+// v223: SIEMPRE contra la nube, sin caché HTTP (era una de las causas de que una
+// PC siguiera viendo el mes viejo después de que la otra lo hubiera modificado).
+async function _ctaFetchChunk(ym) {
+  const r = await fetch(WORKER + '/api/cta/ops/' + ym + '?_=' + Date.now(), { cache: 'no-store' });
+  const d = await r.json();
+  const ops = (d.ok && Array.isArray(d.ops)) ? d.ops : [];
+  _ctaState.chunks[ym] = ops;
+  _ctaState.loaded.add(ym);
+  _ctaSnap(ym);
+  return ops;
 }
 
 function _ctaEnsureChunk(ym) {
@@ -23911,29 +23965,108 @@ function ctaMarkDirty(ym) {
   _ctaSaveTimer = setTimeout(ctaFlushDirty, 3000);
 }
 
+// v223 ── GUARDADO CON MERGE (adiós al "gana la última PC que guarda")
+// Antes esto hacía PUT del mes ENTERO: si esta PC tenía el mes viejo en memoria
+// (pestaña abierta de ayer, otra PC editando mientras tanto), al guardar pisaba
+// TODO lo que la otra PC había hecho — ventas manuales, facturadas, estados.
+// Ahora mandamos solo lo que cambió + lo que borré, y el Worker lo fusiona
+// operación por operación contra lo que ya hay en la nube.
 async function ctaFlushDirty() {
   if (_ctaState.saving || !_ctaState.dirty.size) return;
   _ctaState.saving = true;
   const dirty = [..._ctaState.dirty]; _ctaState.dirty.clear();
   _ctaStatus('💾 Guardando…');
+  const now = Date.now();
   try {
     for (const ym of dirty) {
+      const ops  = _ctaState.chunks[ym] || [];
+      const base = _ctaState.base[ym] || new Map();
+      // 1) sellar con la hora SOLO las operaciones que realmente cambiaron acá
+      ops.forEach(o => {
+        if (!o || !o.id) return;
+        if (base.get(o.id) !== _ctaHuella(o)) o.upd = now;
+      });
+      // 2) las que estaban en la nube y ya no están en mi chunk = borradas por mí
+      const vivos = new Set(ops.map(o => o.id));
+      const deleted = [...base.keys()].filter(id => !vivos.has(id));
+
       const r = await fetch(WORKER + '/api/cta/ops/' + ym, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ops: _ctaState.chunks[ym] || [] })
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ops, deleted, merge: true })
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error || 'error guardando ' + ym);
+      // 3) el Worker devuelve el mes YA fusionado → me quedo con esa verdad
+      if (Array.isArray(d.ops)) { _ctaState.chunks[ym] = d.ops; }
+      _ctaSnap(ym);
       if (d.resumen) _ctaState.resumen[ym] = d.resumen;
     }
     _ctaStatus('✓ Guardado ' + new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }));
-    ctaRenderKPIs(); ctaRenderChart();
+    ctaRenderAll();
   } catch (e) {
     console.error('[cta] save', e);
     dirty.forEach(ym => _ctaState.dirty.add(ym));
     _ctaStatus('⚠ ' + e.message);
   } finally { _ctaState.saving = false; }
 }
+
+// v223 ── REFRESCO DESDE LA NUBE
+// Vuelve a bajar los meses cargados para ver lo que se hizo en la OTRA PC.
+// Antes esto no existía: el panel bajaba los meses una sola vez por sesión, así
+// que la PC de casa podía pasarse el día entero mostrando datos de ayer.
+// Primero sube lo pendiente (con merge, así no se pierde nada) y recién ahí baja.
+async function ctaRefreshCloud(force) {
+  if (!_ctaState.boot || _ctaState.refreshing) return;
+  if (!force && Date.now() - _ctaState.lastRefresh < 20000) return; // no más de 1 cada 20s
+  _ctaState.refreshing = true;
+  try {
+    if (_ctaState.dirty.size) { clearTimeout(_ctaSaveTimer); await ctaFlushDirty(); }
+    // índice de meses + catálogo + resumen
+    try {
+      const rb = await fetch(WORKER + '/api/cta/bootstrap?_=' + Date.now(), { cache: 'no-store' });
+      const db = await rb.json();
+      if (db.ok) {
+        _ctaState.months  = db.months || _ctaState.months;
+        _ctaState.resumen = db.resumen || _ctaState.resumen;
+        // el catálogo solo se pisa si no tengo cambios de stock sin guardar
+        if (!_ctaCatDirty && Array.isArray(db.catalogo)) _ctaState.catalogo = db.catalogo;
+      }
+    } catch (e) {}
+    // meses ya cargados en esta PC
+    const yms = [..._ctaState.loaded];
+    for (let i = 0; i < yms.length; i += 4) {
+      await Promise.all(yms.slice(i, i + 4).map(async ym => {
+        if (_ctaState.dirty.has(ym)) return;          // tiene cambios míos sin subir: no lo piso
+        try { await _ctaFetchChunk(ym); } catch (e) {}
+      }));
+    }
+    _ctaState.lastRefresh = Date.now();
+    if (document.getElementById('section-cta') && document.getElementById('section-cta').classList.contains('active')) {
+      ctaRenderAll();
+      if (typeof _ctaFillClientesList === 'function') _ctaFillClientesList();
+    }
+    _ctaStatus('🔄 Actualizado ' + new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }));
+  } catch (e) {
+    console.warn('[cta refresh]', e.message);
+  } finally { _ctaState.refreshing = false; }
+}
+
+// Refresco automático: cada 60s con la sección abierta, y al volver a la pestaña.
+setInterval(function () {
+  const s = document.getElementById('section-cta');
+  if (s && s.classList.contains('active') && document.visibilityState === 'visible') {
+    ctaRefreshCloud(false);
+  }
+}, 60000);
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState !== 'visible') return;
+  const s = document.getElementById('section-cta');
+  if (s && s.classList.contains('active')) ctaRefreshCloud(false);
+});
+window.addEventListener('focus', function () {
+  const s = document.getElementById('section-cta');
+  if (s && s.classList.contains('active')) ctaRefreshCloud(false);
+});
 
 // ── Render maestro ───────────────────────────────────────────────
 function ctaRenderAll() { ctaRenderStockAlerts(); ctaRenderKPIs(); ctaRenderChart(); ctaRenderDashCharts(); ctaRenderTable(); }
@@ -24972,12 +25105,7 @@ async function ctaSyncWoo() {
   }
   for (const [ym, lista] of porMes) {
     if (!_ctaState.loaded.has(ym)) {
-      try {
-        const r = await fetch(WORKER + '/api/cta/ops/' + ym);
-        const dd = await r.json();
-        _ctaState.chunks[ym] = (dd.ok && Array.isArray(dd.ops)) ? dd.ops : [];
-        _ctaState.loaded.add(ym);
-      } catch (e) { continue; }
+      try { await _ctaFetchChunk(ym); } catch (e) { continue; }
     }
     const chunk = _ctaEnsureChunk(ym);
     const ids = new Set(chunk.map(x => x.id));
@@ -25076,12 +25204,7 @@ async function ctaSyncWA() {
     if (p.ts < CTA_SYNC_DESDE_TS) continue; // v168: solo desde el corte
     const ym = new Date(p.ts).toISOString().slice(0, 7);
     if (!_ctaState.loaded.has(ym)) {
-      try {
-        const r = await fetch(WORKER + '/api/cta/ops/' + ym);
-        const d = await r.json();
-        _ctaState.chunks[ym] = (d.ok && Array.isArray(d.ops)) ? d.ops : [];
-        _ctaState.loaded.add(ym);
-      } catch (e) { continue; }
+      try { await _ctaFetchChunk(ym); } catch (e) { continue; }
     }
     const chunk = _ctaEnsureChunk(ym);
     const id = 'wa_' + p.code;
@@ -25142,12 +25265,7 @@ async function ctaSyncML() {
   }
   for (const [ym, lista] of porMes) {
     if (!_ctaState.loaded.has(ym)) {
-      try {
-        const r = await fetch(WORKER + '/api/cta/ops/' + ym);
-        const dd = await r.json();
-        _ctaState.chunks[ym] = (dd.ok && Array.isArray(dd.ops)) ? dd.ops : [];
-        _ctaState.loaded.add(ym);
-      } catch (e) { continue; }
+      try { await _ctaFetchChunk(ym); } catch (e) { continue; }
     }
     const chunk = _ctaEnsureChunk(ym);
     const ids = new Set(chunk.map(x => x.id));
@@ -28447,14 +28565,25 @@ function renderDashFunnel(){
       '</div>';
     }).join('');
     // Info adicional: conversión, ticket promedio, facturación, canceladas
-    const conv = (hayMetricas && v7>0) ? (c7/v7*100).toFixed(2)+'%' : '—';
-    const ticket = c7>0 ? money(fact7/c7) : '—';
+    // v223: conversión y ticket ahora también se comparan con los 7 días previos.
+    const convN     = (hayMetricas && v7>0)    ? (c7/v7*100)       : null;
+    const convPrevN = (hayMetricas && vPrev>0) ? (cPrev/vPrev*100) : null;
+    const conv      = convN!=null ? convN.toFixed(2)+'%' : '—';
+    const convPrevTxt = (convPrevN!=null && convN!=null)
+      ? 'anterior ' + convPrevN.toFixed(2) + '%' + deltaTxt(convN, convPrevN)
+      : 'ventas / visitas';
+    const ticketN     = c7>0    ? fact7/c7       : null;
+    const ticketPrevN = cPrev>0 ? factPrev/cPrev : null;
+    const ticket      = ticketN!=null ? money(ticketN) : '—';
+    const ticketPrevTxt = (ticketPrevN!=null && ticketN!=null)
+      ? 'anterior ' + money(ticketPrevN) + deltaTxt(ticketN, ticketPrevN)
+      : 'por venta concretada';
     const cancel7 = s7 - c7;
     const st = 'flex:1;min-width:105px;background:var(--bg2,#f8fafc);border:1px solid var(--border,#e2e8f0);border-radius:9px;padding:7px 9px;text-align:center';
     html += '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:11px">'+
       '<div style="'+st+'"><div style="font-size:9.5px;color:var(--text3);font-weight:600">💰 FACTURACIÓN 7D</div><div style="font-size:13.5px;font-weight:800;color:var(--text)">'+money(fact7)+'</div><div style="font-size:9.5px;color:var(--text3)">'+(factPrev? 'anterior '+money(factPrev)+deltaTxt(fact7,factPrev):'')+'</div></div>'+
-      '<div style="'+st+'"><div style="font-size:9.5px;color:var(--text3);font-weight:600">🎯 CONVERSIÓN</div><div style="font-size:13.5px;font-weight:800;color:var(--text)">'+conv+'</div><div style="font-size:9.5px;color:var(--text3)">ventas / visitas</div></div>'+
-      '<div style="'+st+'"><div style="font-size:9.5px;color:var(--text3);font-weight:600">🧾 TICKET PROMEDIO</div><div style="font-size:13.5px;font-weight:800;color:var(--text)">'+ticket+'</div><div style="font-size:9.5px;color:var(--text3)">por venta concretada</div></div>'+
+      '<div style="'+st+'" title="Ventas concretadas / visitas. Comparado con los 7 días anteriores."><div style="font-size:9.5px;color:var(--text3);font-weight:600">🎯 CONVERSIÓN</div><div style="font-size:13.5px;font-weight:800;color:var(--text)">'+conv+'</div><div style="font-size:9.5px;color:var(--text3)">'+convPrevTxt+'</div></div>'+
+      '<div style="'+st+'" title="Facturación / ventas concretadas. Comparado con los 7 días anteriores."><div style="font-size:9.5px;color:var(--text3);font-weight:600">🧾 TICKET PROMEDIO</div><div style="font-size:13.5px;font-weight:800;color:var(--text)">'+ticket+'</div><div style="font-size:9.5px;color:var(--text3)">'+ticketPrevTxt+'</div></div>'+
       '<div style="'+st+'"><div style="font-size:9.5px;color:var(--text3);font-weight:600">❌ CANCELADAS 7D</div><div style="font-size:13.5px;font-weight:800;color:'+(cancel7>0?'#dc2626':'var(--text)')+'">'+cancel7+'</div><div style="font-size:9.5px;color:var(--text3)">de '+s7+' ventas</div></div>'+
     '</div>';
     el.innerHTML = html;
@@ -31186,6 +31315,11 @@ const BKP_SECTIONS = {
     icon: '💬',
     get: () => typeof persoGetMsgs === 'function' ? (persoGetMsgs() || []) : [],
   },
+  astroCartas: {
+    label: 'Astrolabio — cartas y numerologías guardadas',
+    icon: '🔮',
+    get: () => { try { return JSON.parse(localStorage.getItem('astro_biblioteca_v1') || '[]'); } catch { return []; } },
+  },
   economia: {
     label: 'Economía — gastos e ingresos',
     icon: '💰',
@@ -31356,6 +31490,19 @@ async function bkpApplyImport(data, selection){
       try{ localStorage.setItem(ECO_LS_KEY, JSON.stringify({ gastos:_ecoState.gastos, ingresos:_ecoState.ingresos, metricas:_ecoState.metricas||{}, savedAt:Date.now() })); }catch(e){}
       if(typeof ecoRender === 'function' && document.getElementById('section-economia')?.classList.contains('active')) ecoRender();
       console.log('[Backup] Economía restaurada: '+data.economia.gastos.length+' gastos, '+((data.economia.ingresos||[]).length)+' ingresos');
+    }
+    // v223: Astrolabio — biblioteca de cartas natales / numerologías
+    if(selection.astroCartas && Array.isArray(data.astroCartas)){
+      localStorage.setItem('astro_biblioteca_v1', JSON.stringify(data.astroCartas));
+      // Si el iframe de Astrolabio ya está montado, lo remontamos para que
+      // levante la biblioteca nueva (lee del puente astroStore al arrancar).
+      try{
+        const _af = document.getElementById('astro-frame');
+        if(_af && typeof _astroLoaded !== 'undefined' && _astroLoaded && typeof ASTRO_SRCDOC === 'string'){
+          _af.srcdoc = ASTRO_SRCDOC;
+        }
+      }catch(e){}
+      console.log('[Backup] Astrolabio restaurado: ' + data.astroCartas.length + ' carta(s)');
     }
     // v157: Personalizadas WA — mensajes (localStorage) y pedidos (índice KV del Worker)
     if(selection.persoMsgs && Array.isArray(data.persoMsgs) && typeof persoSaveMsgs === 'function'){
