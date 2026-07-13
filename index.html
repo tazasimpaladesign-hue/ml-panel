@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v218 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v219 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -34488,6 +34488,13 @@ window.getAstroAuth = function(){
   catch(e){ return { worker: '', token: '' }; }
 };
 
+/* Puente de almacenamiento: la biblioteca de cartas de Astrolabio se guarda
+   en el localStorage del panel (persiste entre sesiones en esta PC). */
+window.astroStore = {
+  get: function(k){ try { return localStorage.getItem('astro_' + k); } catch(e){ return null; } },
+  set: function(k, v){ try { localStorage.setItem('astro_' + k, v); return true; } catch(e){ return false; } }
+};
+
 /* HTML completo de Astrolabio embebido como srcdoc (aislado del panel). */
 const ASTRO_SRCDOC = `<!DOCTYPE html>
 <html lang="es">
@@ -34810,6 +34817,26 @@ details.guia .guia-cuerpo{padding:0 18px 16px;font-size:.88rem}
   a{color:#1a1a1a !important;text-decoration:none}
 }
 .modo-impresion #zona-forms,.modo-impresion .tabs,.modo-impresion .acciones{display:none}
+
+/* --- Biblioteca de cartas (v3) --- */
+.biblio{background:rgba(20,24,40,.55);border:1px solid rgba(216,182,92,.25);border-radius:12px;padding:12px 16px;margin:0 0 18px}
+.biblio summary{cursor:pointer;font-family:var(--font-titulo);color:var(--oro);font-size:1rem;letter-spacing:.04em;list-style:none;display:flex;align-items:center;gap:8px}
+.biblio summary::-webkit-details-marker{display:none}
+.biblio summary::before{content:'\\25B8';transition:transform .2s}
+.biblio[open] summary::before{transform:rotate(90deg)}
+.biblio-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px;margin-top:12px}
+.biblio-item{background:rgba(10,12,24,.6);border:1px solid rgba(216,182,92,.18);border-radius:10px;padding:10px}
+.biblio-cab{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.biblio-ico{font-size:1.2rem}
+.biblio-nom{font-weight:600;color:var(--marfil);font-size:.9rem;line-height:1.2}
+.biblio-sub{font-size:.72rem;color:var(--marfil-dim)}
+.biblio-btns{display:flex;flex-wrap:wrap;gap:5px}
+.biblio-btns button{flex:1;min-width:70px;background:rgba(216,182,92,.12);border:1px solid rgba(216,182,92,.3);color:var(--oro);border-radius:6px;padding:5px 6px;font-size:.72rem;cursor:pointer;font-family:inherit}
+.biblio-btns button:hover{background:rgba(216,182,92,.25)}
+.biblio-btns .biblio-x{background:rgba(201,107,90,.12);border-color:rgba(201,107,90,.35);color:var(--tenso);flex:0 0 auto;min-width:58px}
+.biblio-acciones{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.biblio-acciones button{background:transparent;border:1px solid rgba(216,182,92,.3);color:var(--marfil-dim);border-radius:6px;padding:6px 12px;font-size:.76rem;cursor:pointer;font-family:inherit}
+.biblio-acciones button:hover{color:var(--oro);border-color:var(--oro)}
 </style>
 </head>
 <body>
@@ -34820,6 +34847,16 @@ details.guia .guia-cuerpo{padding:0 18px 16px;font-size:.88rem}
     <p class="subtitulo">Cartas natales y comparación astrológica para personas, equipos, empresas o proyectos. Cálculo planetario real, sin depender de APIs externas.</p>
     <div class="filete"></div>
   </header>
+
+  <details class="biblio" id="biblio">
+    <summary>📚 Cartas guardadas (<span id="biblio-n">0</span>)</summary>
+    <div id="biblio-lista"></div>
+    <div class="biblio-acciones">
+      <button onclick="biblioExportar()">⬇ Exportar todo</button>
+      <button onclick="document.getElementById('biblio-file').click()">⬆ Importar</button>
+      <input type="file" id="biblio-file" accept="application/json" style="display:none">
+    </div>
+  </details>
 
   <div class="tabs" role="tablist">
     <button class="tab activa" id="tab-individual" role="tab" aria-selected="true">✧ Carta individual</button>
@@ -36145,9 +36182,10 @@ function htmlInterpretaciones(carta) {
     const rol = esOrg ? p.rolOrg : p.rolPersona;
     const casaTxt = p.casa ? ' Ubicado en la <strong>casa ' + p.casa + '</strong> (' + CASAS[p.casa - 1].tema.toLowerCase() + '), esta energía se despliega sobre todo en: ' + CASAS[p.casa - 1].desc + '.' : '';
     return '<div class="interp"><h5>' + p.glifo + ' ' + p.nombre + ' en ' + p.signo + (p.retro ? ' retrógrado' : '') + '</h5>' +
-      '<p>' + p.nombre + ' rige ' + rol + '. En ' + p.signo + ' se expresa con ' + d.luz +
+      '<p><strong>' + p.nombre + ' es ' + llanoDe(p.clave, esOrg) + '.</strong> ' +
+      'En términos astrológicos rige ' + rol + '. En ' + p.signo + ' se expresa con ' + d.luz +
       '. <em>Zona a cuidar: ' + d.sombra + '.</em>' + casaTxt +
-      (p.retro ? ' <em>Retrógrado: esta función opera de forma más interna, revisada o a contracorriente.</em>' : '') + '</p></div>';
+      (p.retro ? ' <em>Retrógrado: esta parte tuya trabaja hacia adentro. Pensás y revisás antes de mostrarla, así que desde afuera parece que tardás; en realidad estás procesando.</em>' : '') + '</p></div>';
   }).join('') + '</div>';
 }
 
@@ -36191,8 +36229,9 @@ function htmlAspectos(aspectos, cartaA, cartaB) {
       '<span class="glifos">' + it.a.glifo + ' ' + it.aspecto.simbolo + ' ' + it.b.glifo + '</span>' +
       '<span class="detalle">' + quienA + it.a.nombre + ' en ' + it.aspecto.nombre.toLowerCase() + ' con ' + quienB + it.b.nombre + '</span>' +
       '<span class="orbe">orbe ' + it.orbe.toFixed(1) + '°</span>' +
-      '<span class="tipo-tag ' + nat + '">' + (nat === 'armonico' ? 'armónico' : nat === 'tenso' ? 'tenso' : 'neutro') + '</span></div>' +
-      '<p class="asp-explica">' + explicarAspecto(it, nomA ? esc(nomA) : null, nomB ? esc(nomB) : null, esOrgA, esOrgB) + '</p>' +
+      '<span class="tipo-tag ' + nat + '">' + (nat === 'armonico' ? 'fluye' : nat === 'tenso' ? 'cuesta' : 'mezclado') + '</span></div>' +
+      '<p class="asp-explica">' + explicarAspecto(it, nomA ? esc(nomA) : null, nomB ? esc(nomB) : null, esOrgA, esOrgB) +
+      '<br><strong>En criollo:</strong> ' + llanoDe(it.a.clave, esOrgA) + ' y ' + llanoDe(it.b.clave, esOrgB) + ' ' + LLANO_ASPECTO[it.aspecto.nombre] + '.</p>' +
       '</div>';
   }).join('') + '</div>';
 }
@@ -36202,16 +36241,17 @@ function htmlTransitos(carta, transito, titulo) {
   const aspTr = calcularAspectos(transito.planetas, carta.planetas, false, ORBES_TRANSITO)
     .filter(it => ['sol', 'luna', 'mercurio', 'venus', 'marte', 'jupiter', 'saturno', 'urano', 'neptuno', 'pluton'].includes(it.a.clave));
   const esOrg = carta.tipo !== 'persona';
-  let h = '<div class="transitos-cab">' + titulo + ' — los planetas <strong>en tránsito</strong> son el cielo de ese momento; al tocar puntos de la carta natal, activan temporalmente esos temas.</div>';
-  if (!aspTr.length) { h += '<p class="seccion-sub">Sin tránsitos exactos sobre esta carta en esa fecha (con orbes estrictos): un cielo tranquilo.</p>'; return h; }
+  let h = '<div class="transitos-cab">' + titulo + ' — un <strong>tránsito</strong> es un planeta de hoy tocando un planeta tuyo de nacimiento. Es como una visita: llega, mueve ese tema unos días y se va.</div>';
+  if (!aspTr.length) { h += '<p class="seccion-sub">Hoy no hay tránsitos fuertes sobre esta carta: cielo tranquilo, día sin sobresaltos.</p>'; return h; }
   h += '<div class="lista-aspectos">' + aspTr.slice(0, 12).map(it => {
     const nat = naturalezaEfectiva(it);
     return '<div class="aspecto ' + nat + '"><div class="asp-linea">' +
       '<span class="glifos">' + it.a.glifo + ' ' + it.aspecto.simbolo + ' ' + it.b.glifo + '</span>' +
       '<span class="detalle">' + it.a.nombre + ' en tránsito (' + it.a.signo + ') en ' + it.aspecto.nombre.toLowerCase() + ' con ' + it.b.nombre + ' natal</span>' +
       '<span class="orbe">orbe ' + it.orbe.toFixed(1) + '°</span>' +
-      '<span class="tipo-tag ' + nat + '">' + (nat === 'armonico' ? 'armónico' : nat === 'tenso' ? 'tenso' : 'neutro') + '</span></div>' +
-      '<p class="asp-explica">La ' + it.aspecto.nombre.toLowerCase() + ' ' + it.aspecto.accion + '. Ese día, <strong>' + it.a.nombre + '</strong> (' + (esOrg ? it.a.rolOrg : it.a.rolPersona) + ') activa a su <strong>' + it.b.nombre + '</strong> natal: se enciende el tema de ' + (esOrg ? it.b.rolOrg : it.b.rolPersona) + '.</p>' +
+      '<span class="tipo-tag ' + nat + '">' + (nat === 'armonico' ? 'a favor' : nat === 'tenso' ? 'en contra' : 'mezclado') + '</span></div>' +
+      '<p class="asp-explica">La ' + it.aspecto.nombre.toLowerCase() + ' ' + it.aspecto.accion + '. Ese día, <strong>' + it.a.nombre + '</strong> (' + (esOrg ? it.a.rolOrg : it.a.rolPersona) + ') activa a su <strong>' + it.b.nombre + '</strong> natal: se enciende el tema de ' + (esOrg ? it.b.rolOrg : it.b.rolPersona) + '.' +
+      '<br><strong>En criollo:</strong> por unos días, ' + llanoDe(it.a.clave, esOrg) + ' te remueve ' + llanoDe(it.b.clave, esOrg) + ', y ' + LLANO_ASPECTO[it.aspecto.nombre] + '.</p>' +
       '</div>';
   }).join('') + '</div>';
   return h;
@@ -36606,13 +36646,19 @@ async function renderIndividual(carta, transitoHoy) {
   // Chat IA — reubicado: entre "Lecciones de vida" y "Aspectos internos"
   CTX_IA = { activo: true, cartas: [carta], modo: 'individual', historial: [] };
   h += htmlChatIA();
-  h += '<h3 class="seccion-titulo" style="font-size:1.35rem">Aspectos internos</h3>';
-  h += '<p class="seccion-sub">Los diálogos entre los planetas de la propia carta: su dinámica interna.</p>';
+  h += '<h3 class="seccion-titulo" style="font-size:1.35rem">🤝 Cómo se llevan tus partes entre sí</h3>';
+  h += '<p class="seccion-sub">Cada planeta es una parte tuya. Acá se ve cuáles se ayudan y cuáles chocan. Lo que <strong>fluye</strong> te sale solo; lo que <strong>choca</strong> es tu zona de esfuerzo (y también donde más crecés). Nadie tiene una carta sin choques: sin fricción no hay carácter.</p>';
   h += htmlAspectos(internos, carta, null);
-  h += '<h3 class="seccion-titulo" style="font-size:1.35rem">Lectura planeta por planeta</h3>';
+  h += '<h3 class="seccion-titulo" style="font-size:1.35rem">🪐 Qué significa cada planeta en tu carta</h3>';
+  h += '<p class="seccion-sub">Uno por uno, en criollo: qué representa y cómo se te nota en la vida real.</p>';
   h += htmlInterpretaciones(carta);
-  h += '<h3 class="seccion-titulo" style="font-size:1.35rem">🌠 Tránsitos de hoy</h3>';
+  h += '<h3 class="seccion-titulo" style="font-size:1.35rem">🌠 Qué está pasando hoy en el cielo (y cómo te toca)</h3>';
+  h += '<p class="seccion-sub">Los planetas siguen moviéndose después de que naciste. Cuando el planeta de hoy toca un planeta de tu carta, enciende ese tema por unos días. Esto es pasajero: es el clima, no el clima de tu vida entera.</p>';
   h += htmlTransitos(carta, transitoHoy, 'Cielo del ' + fechaCorta(transitoHoy.fecha));
+  // AstroScore para una fecha elegida (rinde para deportes y para decisiones)
+  h += await htmlAstroScoreSeccion(carta);
+  // Momento vital: progresiones, arco solar, revolución lunar, Parte de la Fortuna
+  h += await htmlMomentoVital(carta);
   // Mercurio retrógrado (cálculo real de los períodos + impacto sobre esta carta)
   h += await htmlMercurioRx(carta);
   // Ciclos y predicciones (cálculo en vivo)
@@ -36779,9 +36825,11 @@ async function trazar() {
     btnN.disabled = true;
     btnN.textContent = 'Calculando los números…';
     try {
+      ULTIMO = { clase: 'num', datos: dn };
       const html = await renderNumerologiaFull(dn);
       const contN = $('resultados');
-      contN.innerHTML = '<div class="acciones-resultado" data-noprint><button class="btn-pdf" onclick="descargarPDF()">📄 Descargar informe en PDF</button></div>' + html;
+      contN.innerHTML = '<div class="acciones-resultado" data-noprint><button class="btn-pdf" onclick="descargarPDF()">📄 Descargar informe en PDF</button>' +
+        '<button class="btn-pdf" onclick="guardarActual()">💾 Guardar en la biblioteca</button></div>' + html;
       contN.classList.add('visible');
       contN.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (err) {
@@ -36812,6 +36860,7 @@ async function trazar() {
     };
     avisoDatos(cartaA);
 
+    ULTIMO = { clase: 'astro', e1: e1, e2: e2 };
     let html;
     if (modo === 'comparacion') {
       const cartaB = await calcularCarta(e2);
@@ -36826,7 +36875,8 @@ async function trazar() {
       html = await renderIndividual(cartaA, transitoHoy);
     }
     const cont = $('resultados');
-    cont.innerHTML = '<div class="acciones-resultado" data-noprint><button class="btn-pdf" onclick="descargarPDF()">📄 Descargar informe en PDF</button></div>' + html;
+    cont.innerHTML = '<div class="acciones-resultado" data-noprint><button class="btn-pdf" onclick="descargarPDF()">📄 Descargar informe en PDF</button>' +
+      '<button class="btn-pdf" onclick="guardarActual()">💾 Guardar en la biblioteca</button></div>' + html;
     cont.classList.add('visible');
     cont.scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (err) {
@@ -37585,6 +37635,484 @@ async function renderNumerologiaFull(datos) {
   return h;
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+   MÓDULO v3 · Astrolabio
+   1) Biblioteca de cartas guardadas (con exportar/importar)
+   2) Lenguaje simple ("en criollo") para no astrólogos
+   3) Técnicas predictivas: progresiones, arco solar, revolución lunar,
+      Parte de la Fortuna
+   4) AstroScore: puntajes por dimensión para una fecha elegida
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ---------- 1) BIBLIOTECA DE CARTAS ---------- */
+let BIBLIO_MEM = null;   // fallback si no hay almacenamiento
+
+function _almacen() {
+  // Preferimos el puente del Panel Maestro; si no, localStorage propio.
+  try {
+    if (window.parent && window.parent !== window && window.parent.astroStore) return window.parent.astroStore;
+  } catch (e) { /* cross-origin: seguimos */ }
+  try {
+    if (window.localStorage) {
+      return {
+        get: k => window.localStorage.getItem('astro_' + k),
+        set: (k, v) => { window.localStorage.setItem('astro_' + k, v); return true; }
+      };
+    }
+  } catch (e) { /* sin storage */ }
+  return null;
+}
+
+function biblioLeer() {
+  const a = _almacen();
+  if (!a) return BIBLIO_MEM || (BIBLIO_MEM = []);
+  try {
+    const raw = a.get('biblioteca_v1');
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) { return []; }
+}
+
+function biblioGuardar(lista) {
+  const a = _almacen();
+  if (!a) { BIBLIO_MEM = lista; return true; }
+  try { a.set('biblioteca_v1', JSON.stringify(lista)); return true; }
+  catch (e) { BIBLIO_MEM = lista; return false; }
+}
+
+let ULTIMO = null;   // lo último calculado, para poder guardarlo
+
+function guardarActual() {
+  if (!ULTIMO) { avisar('Primero calculá una carta o una numerología.', 'error'); return; }
+  const lista = biblioLeer();
+  const nuevos = [];
+  const agregar = it => {
+    const clave = it.clase + '|' + (it.nombre || '').toLowerCase() + '|' + it.fecha;
+    if (lista.some(x => (x.clase + '|' + (x.nombre || '').toLowerCase() + '|' + x.fecha) === clave)) return;
+    it.id = 'c' + Date.now() + Math.floor(Math.random() * 1000);
+    it.guardado = new Date().toISOString().slice(0, 10);
+    lista.push(it); nuevos.push(it.nombre);
+  };
+  if (ULTIMO.clase === 'num') {
+    agregar(Object.assign({ clase: 'num' }, ULTIMO.datos));
+  } else {
+    agregar(Object.assign({ clase: 'astro' }, ULTIMO.e1));
+    if (ULTIMO.e2) agregar(Object.assign({ clase: 'astro' }, ULTIMO.e2));
+  }
+  biblioGuardar(lista);
+  renderBiblioteca();
+  if (nuevos.length) avisar('Guardado en la biblioteca: <strong>' + nuevos.map(esc).join('</strong>, <strong>') + '</strong>.', 'advertencia');
+  else avisar('Ya estaba guardado en la biblioteca.', 'advertencia');
+}
+
+function biblioBorrar(id) {
+  const lista = biblioLeer().filter(x => x.id !== id);
+  biblioGuardar(lista);
+  renderBiblioteca();
+}
+
+function biblioCargar(id, slot) {
+  const it = biblioLeer().find(x => x.id === id);
+  if (!it) return;
+  if (it.clase === 'num') {
+    setModo('numerologia');
+    $('num-nombre').value = it.nombre || '';
+    $('num-fecha').value = it.fecha || '';
+    $('num-actual').value = it.actual || '';
+    $('num-casado').value = it.casado || '';
+    $('num-apodo').value = it.apodo || '';
+  } else {
+    if (slot === 2) setModo('comparacion');
+    else if (modo === 'numerologia') setModo('individual');
+    const n = slot === 2 ? 2 : 1;
+    $('nombre' + n).value = it.nombre || '';
+    $('tipo' + n).value = it.tipo || 'persona';
+    $('fecha' + n).value = it.fecha || '';
+    $('hora' + n).value = it.hora || '';
+    if (it.tz !== undefined && it.tz !== null) $('tz' + n).value = it.tz;
+    $('lat' + n).value = (it.lat === null || it.lat === undefined) ? '' : it.lat;
+    $('lon' + n).value = (it.lon === null || it.lon === undefined) ? '' : it.lon;
+  }
+  $('zona-forms').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  avisar('Cargado: <strong>' + esc(it.nombre || 'sin nombre') + '</strong>. Apretá el botón para calcular.', 'advertencia');
+}
+
+function renderBiblioteca() {
+  const cont = $('biblio-lista');
+  if (!cont) return;
+  const lista = biblioLeer();
+  const cn = $('biblio-n');
+  if (cn) cn.textContent = lista.length;
+  if (!lista.length) {
+    cont.innerHTML = '<p class="seccion-sub" style="margin:0">Todavía no guardaste ninguna carta. Calculá una y tocá <strong>Guardar</strong>: queda acá para volver a usarla o comparar sin cargar los datos de nuevo.</p>';
+    return;
+  }
+  const ICO = { persona: '👤', equipo: '⚽', empresa: '🏢', proyecto: '🚀' };
+  cont.innerHTML = '<div class="biblio-grid">' + lista.slice().reverse().map(it => {
+    const esNum = it.clase === 'num';
+    const sub = esNum ? 'Numerología' : ((it.tipo || 'persona') + (it.hora ? ' · ' + it.hora + 'h' : ' · sin hora'));
+    return '<div class="biblio-item">' +
+      '<div class="biblio-cab"><span class="biblio-ico">' + (esNum ? '№' : (ICO[it.tipo] || '👤')) + '</span>' +
+      '<div><div class="biblio-nom">' + esc(it.nombre || 'Sin nombre') + '</div>' +
+      '<div class="biblio-sub">' + esc(it.fecha || '') + ' · ' + esc(sub) + '</div></div></div>' +
+      '<div class="biblio-btns">' +
+      (esNum
+        ? '<button onclick="biblioCargar(\\'' + it.id + '\\',1)">Cargar</button>'
+        : '<button onclick="biblioCargar(\\'' + it.id + '\\',1)">Cargar en I</button>' +
+          '<button onclick="biblioCargar(\\'' + it.id + '\\',2)">Comparar (II)</button>') +
+      '<button class="biblio-x" onclick="biblioBorrar(\\'' + it.id + '\\')">Borrar</button>' +
+      '</div></div>';
+  }).join('') + '</div>';
+}
+
+function biblioExportar() {
+  const datos = JSON.stringify(biblioLeer(), null, 2);
+  const blob = new Blob([datos], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'astrolabio-cartas.json';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+function biblioImportar(archivo) {
+  const fr = new FileReader();
+  fr.onload = () => {
+    try {
+      const inc = JSON.parse(fr.result);
+      if (!Array.isArray(inc)) throw new Error('formato inválido');
+      const lista = biblioLeer();
+      let n = 0;
+      inc.forEach(it => {
+        if (!it || !it.fecha) return;
+        const clave = it.clase + '|' + (it.nombre || '').toLowerCase() + '|' + it.fecha;
+        if (lista.some(x => (x.clase + '|' + (x.nombre || '').toLowerCase() + '|' + x.fecha) === clave)) return;
+        if (!it.id) it.id = 'c' + Date.now() + Math.floor(Math.random() * 1000);
+        lista.push(it); n++;
+      });
+      biblioGuardar(lista);
+      renderBiblioteca();
+      avisar('Importadas <strong>' + n + '</strong> cartas nuevas.', 'advertencia');
+    } catch (e) {
+      avisar('No pude leer el archivo: ' + esc(e.message), 'error');
+    }
+  };
+  fr.readAsText(archivo);
+}
+
+/* ---------- 2) LENGUAJE SIMPLE ---------- */
+const LLANO_PLANETA = {
+  sol:      'quién sos y qué te da energía',
+  luna:     'lo que sentís y lo que necesitás para estar bien',
+  mercurio: 'cómo pensás, hablás y decidís',
+  venus:    'cómo querés y qué te gusta',
+  marte:    'cómo peleás, cómo arrancás y de dónde sacás fuerza',
+  jupiter:  'dónde tenés suerte y ganas de crecer',
+  saturno:  'dónde la vida te exige y te cuesta',
+  urano:    'dónde sos distinto y rompés moldes',
+  neptuno:  'dónde soñás y también dónde te confundís',
+  pluton:   'dónde te transformás de raíz'
+};
+const LLANO_PLANETA_ORG = {
+  sol:      'la identidad y el liderazgo',
+  luna:     'el clima interno y la gente',
+  mercurio: 'la comunicación y la táctica',
+  venus:    'la imagen y las alianzas',
+  marte:    'la garra y la fuerza de ataque',
+  jupiter:  'la expansión y la buena racha',
+  saturno:  'los límites, la presión y la estructura',
+  urano:    'los cambios bruscos e imprevistos',
+  neptuno:  'la confusión y lo que no se ve',
+  pluton:   'las crisis y las transformaciones de fondo'
+};
+const LLANO_ASPECTO = {
+  'Conjunción': 'van pegados: se mezclan y actúan como una sola cosa, para bien o para mal',
+  'Sextil':     'se llevan bien, pero solo si les das el empujón inicial',
+  'Cuadratura': 'chocan entre sí: es la parte que te cuesta y te obliga a esforzarte',
+  'Trígono':    'fluyen solos: te sale fácil, casi sin pensarlo',
+  'Oposición':  'tiran para lados opuestos: tenés que encontrar el punto medio'
+};
+function llanoDe(clave, esOrg) {
+  return (esOrg ? LLANO_PLANETA_ORG[clave] : LLANO_PLANETA[clave]) || '';
+}
+
+/* ---------- 3) TÉCNICAS PREDICTIVAS ---------- */
+
+// Progresiones secundarias: un día después del nacimiento = un año de vida.
+async function cartaProgresada(carta) {
+  const hoy = new Date();
+  const dHoy = numeroDia(hoy.getUTCFullYear(), hoy.getUTCMonth() + 1, hoy.getUTCDate(), 12);
+  const anios = (dHoy - carta.d) / 365.2422;          // edad en años
+  const dProg = carta.d + anios;                       // un día = un año
+  const pos = await calcularPosicionesPlanetarias(dProg);
+  const planetas = PLANETAS.map(p => {
+    const s = signoDe(pos[p.clave]);
+    return Object.assign({}, p, { lon: pos[p.clave], signo: s.nombre, glifoSigno: s.glifo, grado: s.grado });
+  });
+  const solN = carta.planetas.find(p => p.clave === 'sol').lon;
+  const solP = pos.sol;
+  let arco = solP - solN; if (arco < 0) arco += 360;   // Arco Solar
+  return { planetas, arco, anios, dProg };
+}
+
+// Revolución lunar: próxima vuelta de la Luna a su lugar natal (~cada 27,3 días)
+async function proximaRevolucionLunar(carta) {
+  const lunaN = carta.planetas.find(p => p.clave === 'luna').lon;
+  const hoy = new Date();
+  const dHoy = numeroDia(hoy.getUTCFullYear(), hoy.getUTCMonth() + 1, hoy.getUTCDate(), 12);
+  const d = await cruceLongitud('luna', lunaN, dHoy, dHoy + 30, 0.5);
+  return d;
+}
+
+// Parte de la Fortuna (necesita Ascendente): Asc + Luna - Sol (carta diurna)
+function parteFortuna(carta) {
+  if (!carta.angulos) return null;
+  const sol = carta.planetas.find(p => p.clave === 'sol').lon;
+  const luna = carta.planetas.find(p => p.clave === 'luna').lon;
+  const asc = carta.angulos.asc;
+  const diurna = true;
+  let pf = diurna ? (asc + luna - sol) : (asc + sol - luna);
+  pf = ((pf % 360) + 360) % 360;
+  return pf;
+}
+
+const LLANO_SIGNO_CORTO = {
+  'Aries': 'arranque y acción', 'Tauro': 'calma y seguridad', 'Géminis': 'curiosidad y charla',
+  'Cáncer': 'afecto y protección', 'Leo': 'brillo y protagonismo', 'Virgo': 'orden y detalle',
+  'Libra': 'equilibrio y vínculos', 'Escorpio': 'intensidad y profundidad', 'Sagitario': 'aventura y horizonte',
+  'Capricornio': 'esfuerzo y logro', 'Acuario': 'libertad y originalidad', 'Piscis': 'sensibilidad y sueño'
+};
+
+async function htmlMomentoVital(carta) {
+  const prog = await cartaProgresada(carta);
+  const solP = prog.planetas.find(p => p.clave === 'sol');
+  const lunaP = prog.planetas.find(p => p.clave === 'luna');
+  const mercP = prog.planetas.find(p => p.clave === 'mercurio');
+  const venusP = prog.planetas.find(p => p.clave === 'venus');
+  const edad = Math.floor(prog.anios);
+
+  let h = '<h3 class="seccion-titulo" style="font-size:1.35rem">🧭 Tu momento vital (progresiones)</h3>';
+  h += '<p class="seccion-sub">Esto no es el cielo de hoy: es tu <strong>reloj interno</strong>. Los astrólogos lo calculan con una regla simple: cada día después de tu nacimiento equivale a un año de vida. Muestra la etapa que estás atravesando, más allá de lo que pase esta semana.</p>';
+
+  h += '<div class="sintesis">';
+  h += '<h4>Etapa actual (tenés ' + edad + ' años)</h4>';
+  h += '<p><strong>Sol progresado en ' + solP.signo + ':</strong> es el tono de fondo de esta etapa larga de tu vida (el Sol progresado cambia de signo cada 30 años más o menos). Ahora estás en una fase de <strong>' + LLANO_SIGNO_CORTO[solP.signo] + '</strong>. En criollo: la vida te está pidiendo desarrollar eso, aunque no sea lo que más te sale de fábrica.</p>';
+  h += '<p><strong>Luna progresada en ' + lunaP.signo + ':</strong> es tu clima emocional de estos meses (cambia cada 2 años y medio aproximadamente). Estás en un período de <strong>' + LLANO_SIGNO_CORTO[lunaP.signo] + '</strong>. Es lo que hoy te alimenta el ánimo y también lo que te lo baja.</p>';
+  h += '<p><strong>Mercurio progresado en ' + mercP.signo + '</strong> (cómo estás pensando ahora) y <strong>Venus progresado en ' + venusP.signo + '</strong> (qué estás valorando y cómo estás queriendo en esta época).</p>';
+  h += '<p><strong>Arco Solar:</strong> ' + prog.arco.toFixed(1) + '°. Es cuánto avanzó simbólicamente tu carta entera desde que naciste. Los astrólogos lo usan para saber qué temas de la carta natal se están "activando" a esta edad.</p>';
+  h += '</div>';
+
+  // Aspectos de las progresiones sobre la carta natal
+  const aspProg = calcularAspectos(prog.planetas, carta.planetas, false, ORBES_TRANSITO)
+    .filter(it => ['sol', 'luna', 'mercurio', 'venus', 'marte'].includes(it.a.clave))
+    .slice(0, 6);
+  if (aspProg.length) {
+    const esOrg = carta.tipo !== 'persona';
+    h += '<h4 class="seccion-sub" style="font-size:1rem;color:var(--oro)">Lo que se está activando ahora</h4>';
+    h += '<div class="lista-aspectos">' + aspProg.map(it => {
+      const nat = naturalezaEfectiva(it);
+      return '<div class="aspecto ' + nat + '"><div class="asp-linea">' +
+        '<span class="detalle">' + it.a.nombre + ' progresado ' + it.aspecto.nombre.toLowerCase() + ' con tu ' + it.b.nombre + ' de nacimiento</span>' +
+        '<span class="orbe">orbe ' + it.orbe.toFixed(1) + '°</span>' +
+        '<span class="tipo-tag ' + nat + '">' + (nat === 'armonico' ? 'a favor' : nat === 'tenso' ? 'en contra' : 'mezclado') + '</span></div>' +
+        '<p class="asp-explica"><strong>En criollo:</strong> en esta etapa, ' + llanoDe(it.a.clave, esOrg) + ' se cruza con ' + llanoDe(it.b.clave, esOrg) + ', y ' + LLANO_ASPECTO[it.aspecto.nombre] + '.</p>' +
+        '</div>';
+    }).join('') + '</div>';
+  }
+
+  // Revolución lunar + Parte de la Fortuna
+  const dRL = await proximaRevolucionLunar(carta);
+  h += '<div class="dos-columnas">';
+  h += '<div class="columna-lista positiva"><h4>Próxima revolución lunar</h4><ul>';
+  if (dRL) {
+    h += '<li><strong>' + fmtFechaCiclo(diaNumAFecha(dRL)) + '</strong>: la Luna vuelve exactamente al lugar donde estaba cuando naciste. Arranca tu "mes emocional" nuevo. Muchos astrólogos lo usan para saber con qué ánimo vas a encarar las próximas cuatro semanas.</li>';
+  } else {
+    h += '<li class="vacio">No se pudo calcular en la ventana de 30 días.</li>';
+  }
+  h += '</ul></div>';
+  const pf = parteFortuna(carta);
+  h += '<div class="columna-lista negativa"><h4>Parte de la Fortuna</h4><ul>';
+  if (pf === null) {
+    h += '<li class="vacio">Necesita hora y lugar de nacimiento (usa el Ascendente).</li>';
+  } else {
+    const sPF = signoDe(pf);
+    const casaPF = ((sPF.idx - signoDe(carta.angulos.asc).idx + 12) % 12) + 1;
+    h += '<li>En <strong>' + sPF.nombre + '</strong>, casa ' + casaPF + ' (' + CASAS[casaPF - 1].tema.toLowerCase() + '). Es un punto viejísimo de la astrología: marca dónde te sentís pleno y dónde suele venir la buena fortuna cuando hacés las cosas a tu manera. En criollo: te va mejor cuando la jugás por el lado de ' + LLANO_SIGNO_CORTO[sPF.nombre] + ', en el terreno de ' + CASAS[casaPF - 1].desc + '.</li>';
+  }
+  h += '</ul></div></div>';
+  return h;
+}
+
+/* ---------- 4) ASTROSCORE ---------- */
+// Modelo transparente y auditable: partimos de 50 y sumamos/restamos según
+// los tránsitos que tocan los puntos natales de cada dimensión.
+const AS_DIM = [
+  { id: 'energia',       rot: 'ENERGÍA',        natal: ['marte', 'sol'],                  neg: false, txt: 'la fuerza física y las ganas de ir al frente' },
+  { id: 'confianza',     rot: 'CONFIANZA',      natal: ['sol', 'jupiter'],                neg: false, txt: 'la seguridad en uno mismo y la sensación de racha' },
+  { id: 'concentracion', rot: 'CONCENTRACIÓN',  natal: ['mercurio', 'luna'],              neg: false, txt: 'la claridad mental para decidir bien bajo presión' },
+  { id: 'presion',       rot: 'PRESIÓN',        natal: ['saturno', 'pluton', 'sol'],      neg: true,  txt: 'cuánta exigencia y peso hay encima' },
+  { id: 'riesgo',        rot: 'RIESGO DE ERROR', natal: ['neptuno', 'mercurio', 'luna'],  neg: true,  txt: 'la probabilidad de confusión, distracción o error no forzado' },
+  { id: 'protagonismo',  rot: 'PROTAGONISMO',   natal: ['sol', 'marte', 'jupiter'],       neg: false, txt: 'las chances de ser figura y quedar en el centro de la escena' }
+];
+const AS_PESO_TR = { sol: 2, luna: 1.2, mercurio: 1.4, venus: 1.4, marte: 2.4, jupiter: 2.4, saturno: 2.4, urano: 1.6, neptuno: 1.6, pluton: 1.8 };
+// Carácter del planeta que transita: positivo = ayuda, negativo = complica
+const AS_CARACTER = { jupiter: 1, venus: 0.9, sol: 0.7, mercurio: 0.5, luna: 0.3, marte: 0.2, urano: -0.2, neptuno: -0.6, saturno: -0.7, pluton: -0.5 };
+
+async function calcularAstroScore(carta, fechaISO) {
+  const [a, m, d] = fechaISO.split('-').map(Number);
+  const dNum = numeroDia(a, m, d, 12);
+  const pos = await calcularPosicionesPlanetarias(dNum);
+  const planetasTr = PLANETAS.map(p => {
+    const s = signoDe(pos[p.clave]);
+    return Object.assign({}, p, { lon: pos[p.clave], signo: s.nombre, grado: s.grado });
+  });
+  const asp = calcularAspectos(planetasTr, carta.planetas, false, ORBES_TRANSITO);
+
+  const puntajes = {}, aportes = {};
+  AS_DIM.forEach(dim => { puntajes[dim.id] = 50; aportes[dim.id] = []; });
+
+  asp.forEach(it => {
+    const tr = it.a.clave, na = it.b.clave;
+    const orbeMax = ORBES_TRANSITO[it.aspecto.angulo] || 4;
+    const cercania = Math.max(0, 1 - (it.orbe / orbeMax));      // 0..1
+    const peso = (AS_PESO_TR[tr] || 1) * cercania;
+    const car = AS_CARACTER[tr] !== undefined ? AS_CARACTER[tr] : 0;
+
+    // Signo del impacto según el aspecto
+    let signo;
+    if (it.aspecto.naturaleza === 'armonico') signo = 1;
+    else if (it.aspecto.naturaleza === 'tenso') signo = -1;
+    else signo = car >= 0 ? 1 : -1;                              // conjunción: manda el carácter
+
+    // Un armónico de un planeta duro ayuda menos; un tenso de un benéfico molesta menos
+    const magnitud = peso * (1 + Math.abs(car)) * 3.2;
+
+    AS_DIM.forEach(dim => {
+      if (dim.natal.indexOf(na) === -1) return;
+      let delta = signo * magnitud;
+      if (dim.neg) delta = -delta;                               // presión y riesgo se leen al revés
+      puntajes[dim.id] += delta;
+      if (Math.abs(delta) >= 1.5) {
+        aportes[dim.id].push({
+          txt: it.a.nombre + ' en tránsito ' + it.aspecto.nombre.toLowerCase() + ' con ' + it.b.nombre + ' natal',
+          delta: delta, orbe: it.orbe
+        });
+      }
+    });
+  });
+
+  // Dignidades natales: un Marte o un Sol fuertes de nacimiento suben la base
+  const dig = c => {
+    const p = carta.planetas.find(x => x.clave === c);
+    if (!p || !DIGNIDADES[c]) return 0;
+    const D = DIGNIDADES[c];
+    const dentro = (arr) => Array.isArray(arr) && arr.indexOf(p.signo) !== -1;
+    if (dentro(D.domicilio)) return 6;
+    if (dentro(D.exaltacion)) return 4;
+    if (dentro(D.caida)) return -4;
+    if (dentro(D.exilio)) return -6;
+    return 0;
+  };
+  puntajes.energia += dig('marte');
+  puntajes.confianza += dig('jupiter') + dig('sol');
+  puntajes.protagonismo += dig('sol');
+  puntajes.concentracion += dig('mercurio');   // (Mercurio no tiene tabla de dignidades: aporta 0)
+
+  AS_DIM.forEach(dim => {
+    puntajes[dim.id] = Math.max(1, Math.min(99, Math.round(puntajes[dim.id])));
+    aportes[dim.id].sort((x, y) => Math.abs(y.delta) - Math.abs(x.delta));
+  });
+
+  // Rendimiento esperado: combinación ponderada de las 6 dimensiones.
+  // Al promediar se achica la varianza, así que se aplica una ganancia sobre
+  // el punto medio (50) para que la escala use todo el rango y los días
+  // buenos y malos se distingan de verdad.
+  const crudo =
+    puntajes.energia * 0.25 +
+    puntajes.confianza * 0.20 +
+    puntajes.concentracion * 0.18 +
+    puntajes.protagonismo * 0.22 +
+    (100 - puntajes.riesgo) * 0.10 +
+    (100 - Math.abs(puntajes.presion - 55)) * 0.05;
+  const rend = Math.round(50 + (crudo - 50) * 1.9);
+
+  return { puntajes, aportes, rendimiento: Math.max(5, Math.min(95, rend)), fecha: fechaISO, asp };
+}
+
+function barraAS(v, neg) {
+  const bueno = neg ? (v < 45) : (v >= 60);
+  const malo = neg ? (v >= 70) : (v < 40);
+  const color = bueno ? 'var(--armonico)' : malo ? 'var(--tenso)' : 'var(--neutro)';
+  return '<div class="barra-pista"><div class="barra-relleno" style="width:' + v + '%;background:' + color + '"></div></div>';
+}
+
+function htmlAstroScore(carta, R) {
+  let h = '<div id="as-cont">';
+  h += '<div class="marcador"><div class="cifra">' + R.rendimiento + '</div>' +
+    '<div class="escala">AstroScore / 100 — ' + fechaCorta(R.fecha) + '</div>' +
+    '<p class="lectura">' + (R.rendimiento >= 72
+      ? 'Día claramente favorable: el cielo acompaña. De los mejores momentos para jugarse y arriesgar.'
+      : R.rendimiento >= 58
+        ? 'Día bueno. Se puede rendir alto, pero hay que ponerle trabajo: nada viene regalado.'
+        : R.rendimiento >= 43
+          ? 'Día normal, sin viento a favor ni en contra. Todo va a depender más de vos que del cielo.'
+          : R.rendimiento >= 30
+            ? 'Día trabado. Conviene ser prudente, simplificar y no forzar jugadas de riesgo.'
+            : 'Día cuesta arriba. Mucha fricción: bajá expectativas, cuidate y jugá a no perder.') + '</p></div>';
+
+  h += '<div class="areas">' + AS_DIM.map(dim => {
+    const v = R.puntajes[dim.id];
+    const top = R.aportes[dim.id].slice(0, 2);
+    return '<div class="area"><div class="area-cab"><h5>' + dim.rot + '</h5>' +
+      '<span class="area-num">' + v + '</span></div>' +
+      barraAS(v, dim.neg) +
+      '<p style="margin-top:5px;font-size:.78rem">' + dim.txt + (dim.neg ? ' <em>(acá, más bajo es mejor)</em>' : '') + '</p>' +
+      (top.length
+        ? '<p style="margin-top:5px;font-size:.74rem;color:var(--marfil-dim)">' + top.map(t =>
+            (t.delta > 0 ? '+' : '') + Math.round(t.delta) + ': ' + t.txt).join('<br>') + '</p>'
+        : '<p style="margin-top:5px;font-size:.74rem;color:var(--marfil-dim)">Sin tránsitos fuertes sobre este punto: valor neutro.</p>') +
+      '</div>';
+  }).join('') + '</div>';
+
+  h += '<p class="seccion-sub" style="margin-top:10px">Cómo se calcula: se parte de 50 y se suma o se resta según los tránsitos que tocan los planetas de esta carta ese día, pesando el planeta que transita, el tipo de aspecto y qué tan exacto es (el orbe). Se ajusta además por las dignidades del Sol, Marte, Júpiter y Mercurio de nacimiento. <strong>Es un juego simbólico: no sirve para apostar.</strong></p>';
+  h += '</div>';
+  return h;
+}
+
+let CARTA_AS = null;   // carta activa para recalcular el AstroScore
+
+async function astroScoreRecalc() {
+  if (!CARTA_AS) return;
+  const f = $('as-fecha').value;
+  if (!f) return;
+  const btn = $('as-btn');
+  btn.disabled = true; btn.textContent = 'Calculando…';
+  try {
+    const R = await calcularAstroScore(CARTA_AS, f);
+    $('as-wrap').innerHTML = htmlAstroScore(CARTA_AS, R);
+  } catch (e) {
+    avisar('No se pudo calcular el AstroScore: ' + esc(e.message), 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Calcular para esta fecha';
+  }
+}
+
+async function htmlAstroScoreSeccion(carta) {
+  CARTA_AS = carta;
+  const hoy = new Date();
+  const hoyISO = hoy.getFullYear() + '-' + String(hoy.getMonth() + 1).padStart(2, '0') + '-' + String(hoy.getDate()).padStart(2, '0');
+  const R = await calcularAstroScore(carta, hoyISO);
+  const esEquipo = carta.tipo === 'equipo';
+
+  let h = '<h3 class="seccion-titulo" style="font-size:1.35rem">📊 AstroScore' + (esEquipo ? ' (día de partido)' : ' del día') + '</h3>';
+  h += '<p class="seccion-sub">Puntajes por área para una fecha concreta. Elegí el día ' + (esEquipo ? 'del partido' : 'que quieras analizar') + ' y se recalcula todo. Cada barra muestra abajo los tránsitos que más pesaron, así se puede auditar de dónde sale el número.</p>';
+  h += '<div class="ficha" style="margin-bottom:14px"><div class="fila">' +
+    '<div class="campo"><label for="as-fecha">Fecha a analizar</label><input type="date" id="as-fecha" value="' + hoyISO + '"></div>' +
+    '<div class="campo"><label>&nbsp;</label><button id="as-btn" class="btn-pdf" style="width:100%" onclick="astroScoreRecalc()">Calcular para esta fecha</button></div>' +
+    '</div></div>';
+  h += '<div id="as-wrap">' + htmlAstroScore(carta, R) + '</div>';
+  return h;
+}
+
 /* ---- Init ---- */
 document.addEventListener('DOMContentLoaded', () => {
   poblarZonas();
@@ -37593,6 +38121,11 @@ document.addEventListener('DOMContentLoaded', () => {
   $('tab-individual').addEventListener('click', () => setModo('individual'));
   $('tab-comparacion').addEventListener('click', () => setModo('comparacion'));
   $('tab-numerologia').addEventListener('click', () => setModo('numerologia'));
+  renderBiblioteca();
+  $('biblio-file').addEventListener('change', e => {
+    if (e.target.files && e.target.files[0]) biblioImportar(e.target.files[0]);
+    e.target.value = '';
+  });
   $('btn-calcular').addEventListener('click', trazar);
 });
 
