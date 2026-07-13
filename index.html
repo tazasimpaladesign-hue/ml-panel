@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v221 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v222 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -36748,6 +36748,7 @@ async function iaEnviar() {
 /* ---- Render: carta individual ---- */
 async function renderIndividual(carta, transitoHoy) {
   const internos = calcularAspectos(carta.planetas, carta.planetas, true);
+  const dom = calcularDominancias(carta);   // FIX v222: faltaba declararlo
   let h = '';
   h += '<h2 class="seccion-titulo">' + esc(carta.nombre) + '</h2>';
   h += '<p class="seccion-sub">' + fechaLegible(carta) + '</p>';
@@ -36812,7 +36813,7 @@ async function renderIndividual(carta, transitoHoy) {
   if (carta.nombreNac) {
     try {
       const Pnum = calcularNumerologia({ nombre: carta.nombreNac, fecha: carta.fecha });
-      h += htmlPerfilIntegral(carta, Pnum, calcularDominancias(carta));
+      h += htmlPerfilIntegral(carta, Pnum, dom);
       CTX_IA.num = Pnum;   // la IA queda con los dos sistemas cargados
     } catch (e) { /* si el nombre no es válido, se omite la sección */ }
   }
@@ -36835,6 +36836,10 @@ async function renderSinastria(cartaA, cartaB, transito, eventoInformado) {
        '<div class="escala">Índice de afinidad / 100</div>' +
        '<p class="lectura">' + lecturaPuntaje(puntaje, cartaA, cartaB) + '</p></div>';
 
+  // ---- Resumen ejecutivo del vínculo (lo primero que se lee) ----
+  h += htmlResumenVinculo(cartaA, cartaB, entre, puntaje);
+  h += htmlClavesVinculo(cartaA, cartaB, entre);
+
   // ---- Áreas temáticas según los tipos ----
   const areas = areasParaTipos(cartaA.tipo, cartaB.tipo);
   h += '<h3 class="seccion-titulo" style="font-size:1.35rem">Áreas de la relación</h3>';
@@ -36850,16 +36855,8 @@ async function renderSinastria(cartaA, cartaB, transito, eventoInformado) {
       '<p style="margin-top:5px;font-size:.78rem">' + a.desc + '</p></div>';
   }).join('') + '</div>';
 
-  // ---- Apoyo / fricción ----
-  const armonicos = entre.filter(it => naturalezaEfectiva(it) === 'armonico').slice(0, 6);
-  const tensos = entre.filter(it => naturalezaEfectiva(it) === 'tenso').slice(0, 6);
-  const linea = it => it.a.nombre + ' de ' + esc(cartaA.nombre) + ' ' + it.aspecto.simbolo + ' ' + it.b.nombre + ' de ' + esc(cartaB.nombre) +
-    ' <span style="color:var(--marfil-dim)">(' + it.aspecto.nombre.toLowerCase() + ', orbe ' + it.orbe.toFixed(1) + '°)</span>';
-  h += '<div class="dos-columnas">' +
-    '<div class="columna-lista positiva"><h4>Puntos de apoyo</h4><ul>' +
-    (armonicos.length ? armonicos.map(it => '<li>' + linea(it) + '</li>').join('') : '<li class="vacio">Sin contactos armónicos fuertes.</li>') + '</ul></div>' +
-    '<div class="columna-lista negativa"><h4>Puntos de fricción</h4><ul>' +
-    (tensos.length ? tensos.map(it => '<li>' + linea(it) + '</li>').join('') : '<li class="vacio">Sin contactos tensos fuertes.</li>') + '</ul></div></div>';
+  // ---- Zonas de fluidez / fricción + propósito del vínculo ----
+  h += htmlZonasVinculo(cartaA, cartaB, entre);
 
   // ---- Pronóstico competitivo (equipos) ----
   if (cartaA.tipo === 'equipo' && cartaB.tipo === 'equipo') {
@@ -36894,15 +36891,17 @@ async function renderSinastria(cartaA, cartaB, transito, eventoInformado) {
   const tituloTr = eventoInformado
     ? '🌠 Cielo del evento (' + fechaCorta(transito.fecha) + ')'
     : '🌠 Tránsitos de hoy (' + fechaCorta(transito.fecha) + ')';
-  h += '<h3 class="seccion-titulo" style="font-size:1.35rem">' + tituloTr + '</h3>';
+  h += '<details class="plegable"><summary><span class="resumen-verde">🟢</span> <strong>' + tituloTr + '</strong> — cómo llega cada uno ese día, según el cielo del momento.</summary>';
   h += '<h4 class="seccion-sub" style="font-size:1rem;color:var(--oro)">Sobre ' + esc(cartaA.nombre) + '</h4>';
   h += htmlTransitos(cartaA, transito, 'Tránsitos sobre ' + esc(cartaA.nombre));
   h += '<h4 class="seccion-sub" style="font-size:1rem;color:var(--celeste)">Sobre ' + esc(cartaB.nombre) + '</h4>';
   h += htmlTransitos(cartaB, transito, 'Tránsitos sobre ' + esc(cartaB.nombre));
+  h += '</details>';
 
-  // ---- Todos los contactos ----
-  h += '<h3 class="seccion-titulo" style="font-size:1.35rem">Todos los contactos (' + entre.length + ')</h3>';
+  // ---- Todos los contactos (plegado: es la parte más técnica) ----
+  h += '<details class="plegable"><summary><span class="resumen-verde">🟢</span> <strong>Todos los contactos (' + entre.length + ')</strong> — el detalle técnico completo de la sinastría.</summary>';
   h += htmlAspectos(entre, cartaA, cartaB);
+  h += '</details>';
 
   // ---- Esencias ----
   h += '<h3 class="seccion-titulo" style="font-size:1.35rem">Esencia de cada carta</h3>';
@@ -39214,6 +39213,158 @@ async function htmlLineaTiempo(carta) {
       '<div class="lt-anio">' + anio + (k === 0 ? ' <span class="lt-hoy">actual</span>' : '') + '</div>' +
       '<div class="lt-temas">' + temas.map(t => '<p>' + t + '</p>').join('') + '</div></div>';
   }
+  h += '</div>';
+  return h;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   MÓDULO v6 · Capa visual para SINASTRÍA
+   Resumen ejecutivo del vínculo, claves, zonas de fluidez y fricción,
+   propósito de la relación y ranking de contactos.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Qué aporta cada planeta cuando toca la carta del otro */
+const VINCULO_ROL = {
+  sol:      'identidad y reconocimiento (te ve y te da lugar)',
+  luna:     'intimidad emocional y sensación de hogar',
+  mercurio: 'entendimiento mental y conversación',
+  venus:    'atracción, afecto y disfrute',
+  marte:    'deseo, empuje y también la pelea',
+  jupiter:  'crecimiento, optimismo y suerte compartida',
+  saturno:  'compromiso, estructura y exigencia',
+  urano:    'sacudón, libertad e imprevisibilidad',
+  neptuno:  'idealización, fantasía y también confusión',
+  pluton:   'intensidad, poder y transformación profunda'
+};
+
+/* Propósito según el planeta más fuerte que toca al otro */
+const VINCULO_PROPOSITO = {
+  sol: 'aprender a brillar sin opacar al otro, y a bancar que el otro brille',
+  luna: 'construir un refugio emocional mutuo y aprender a cuidarse sin ahogarse',
+  mercurio: 'aprender a hablarse de verdad: decir lo que molesta antes de que explote',
+  venus: 'disfrutar juntos y aprender que el amor también se cultiva en lo cotidiano',
+  marte: 'aprender a discutir sin destruirse: canalizar el fuego en algo que construya',
+  jupiter: 'crecer juntos y empujarse a lugares donde solos no se animarían',
+  saturno: 'aprender el compromiso real: sostener en el tiempo, incluso cuando cuesta',
+  urano: 'aprender a darse libertad sin sentir que eso es abandono',
+  neptuno: 'aprender a verse como son y no como cada uno fantasea que es el otro',
+  pluton: 'atravesar una transformación de fondo: este vínculo los cambia, no los deja iguales'
+};
+
+function _pareja(cartaA, cartaB) {
+  return cartaA.tipo === 'persona' && cartaB.tipo === 'persona';
+}
+
+/* ---------- Resumen ejecutivo del vínculo ---------- */
+function htmlResumenVinculo(cartaA, cartaB, entre, puntaje) {
+  const claves = [];
+  const orden = entre.slice().sort((a, b) => pesoAspecto(b) - pesoAspecto(a));
+  const nA = esc(cartaA.nombre), nB = esc(cartaB.nombre);
+  const domA = calcularDominancias(cartaA), domB = calcularDominancias(cartaB);
+
+  claves.push({ i: '🎯', t: 'Índice de afinidad: ' + puntaje + '/100',
+    d: puntaje >= 70 ? 'Hay mucha corriente a favor: el terreno común es amplio.'
+      : puntaje >= 50 ? 'Vínculo mixto: hay apoyo real, pero también roces que van a volver una y otra vez.'
+      : 'Vínculo de mucha fricción. No significa que no funcione: significa que hay que trabajarlo a conciencia.' });
+
+  // Elementos: química o choque de fondo
+  const eA = domA.elementoDom, eB = domB.elementoDom;
+  const quimica = { 'Fuego-Aire': 'se encienden mutuamente: el aire alimenta el fuego', 'Aire-Fuego': 'se encienden mutuamente: el aire alimenta el fuego',
+    'Tierra-Agua': 'se nutren: el agua da vida a la tierra', 'Agua-Tierra': 'se nutren: el agua da vida a la tierra',
+    'Fuego-Agua': 'chocan de raíz: uno hierve y el otro apaga', 'Agua-Fuego': 'chocan de raíz: uno hierve y el otro apaga',
+    'Tierra-Aire': 'van a distinta velocidad: uno quiere concretar, el otro quiere pensar', 'Aire-Tierra': 'van a distinta velocidad: uno quiere pensar, el otro quiere concretar' };
+  const kq = eA + '-' + eB;
+  claves.push({ i: '🔥', t: nA + ' es ' + eA + ' y ' + nB + ' es ' + eB,
+    d: eA === eB ? 'Mismo elemento: se entienden sin hablar, pero también se refuerzan los defectos mutuamente. Nadie compensa a nadie.'
+      : (quimica[kq] || 'Elementos distintos: se complementan si hay respeto, se irritan si no.') });
+
+  // Contacto más fuerte
+  if (orden.length) {
+    const top = orden[0];
+    const nat = naturalezaEfectiva(top);
+    claves.push({ i: nat === 'tenso' ? '⚡' : '✨', t: top.a.nombre + ' de ' + nA + ' ' + glo(top.aspecto.nombre.toLowerCase()) + ' ' + top.b.nombre + ' de ' + nB,
+      d: 'Es el contacto más fuerte entre ustedes (orbe ' + top.orbe.toFixed(1) + '°). ' + VINCULO_ROL[top.a.clave] + ' se cruza con ' + VINCULO_ROL[top.b.clave] + ', y ' + LLANO_ASPECTO[top.aspecto.nombre] + '.' });
+  }
+
+  // Balance de contactos
+  const arm = entre.filter(it => naturalezaEfectiva(it) === 'armonico').length;
+  const ten = entre.filter(it => naturalezaEfectiva(it) === 'tenso').length;
+  claves.push({ i: '⚖️', t: arm + ' contactos a favor · ' + ten + ' contactos en tensión',
+    d: arm > ten * 1.5 ? 'Predomina la fluidez: es un vínculo cómodo. Cuidado con que la comodidad se vuelva rutina.'
+      : ten > arm * 1.5 ? 'Predomina la tensión: es un vínculo intenso y demandante. Engancha fuerte, pero desgasta si no se habla.'
+      : 'Están equilibrados: hay apoyo y hay chispa. Es la combinación más sostenible en el tiempo.' });
+
+  let h = '<h3 class="seccion-titulo" style="font-size:1.35rem">⭐ Lo más importante de este vínculo</h3>';
+  h += '<p class="seccion-sub">Si solo vas a leer una cosa, leé esto.</p>';
+  h += '<div class="claves">' + claves.map(c =>
+    '<div class="clave"><span class="clave-ico">' + c.i + '</span>' +
+    '<div><div class="clave-t">' + c.t + '</div><div class="clave-d">' + c.d + '</div></div></div>').join('') + '</div>';
+  return h;
+}
+
+/* ---------- Zonas de fluidez / fricción / propósito ---------- */
+function htmlZonasVinculo(cartaA, cartaB, entre) {
+  const nA = esc(cartaA.nombre), nB = esc(cartaB.nombre);
+  const esPar = _pareja(cartaA, cartaB);
+  const arm = entre.filter(it => naturalezaEfectiva(it) === 'armonico').sort((a, b) => pesoAspecto(b) - pesoAspecto(a)).slice(0, 5);
+  const ten = entre.filter(it => naturalezaEfectiva(it) === 'tenso').sort((a, b) => pesoAspecto(b) - pesoAspecto(a)).slice(0, 5);
+
+  const linea = it => '<li><strong>' + it.a.nombre + ' de ' + nA + ' ' + glo(it.aspecto.nombre.toLowerCase()) + ' ' + it.b.nombre + ' de ' + nB + '</strong>' +
+    ' <span style="color:var(--marfil-dim);font-size:.78rem">(orbe ' + it.orbe.toFixed(1) + '°)</span><br>' +
+    '<span style="font-size:.84rem">' + VINCULO_ROL[it.a.clave] + ' ↔ ' + VINCULO_ROL[it.b.clave] + '</span></li>';
+
+  let h = '<h3 class="seccion-titulo" style="font-size:1.35rem">🧲 Zonas de fluidez y de fricción</h3>';
+  h += '<p class="seccion-sub">Ordenadas por fuerza real. Las de fluidez funcionan solas; las de fricción van a volver toda la vida, así que más vale conocerlas.</p>';
+  h += '<div class="dos-columnas">';
+  h += '<div class="columna-lista positiva"><h4>Donde se entienden sin hablar</h4><ul>' +
+    (arm.length ? arm.map(linea).join('') : '<li class="vacio">Sin contactos armónicos fuertes: nada les sale gratis, todo hay que construirlo.</li>') + '</ul></div>';
+  h += '<div class="columna-lista negativa"><h4>Donde van a chocar siempre</h4><ul>' +
+    (ten.length ? ten.map(linea).join('') : '<li class="vacio">Sin contactos tensos fuertes: poca fricción, pero ojo con la falta de chispa.</li>') + '</ul></div>';
+  h += '</div>';
+
+  // Propósito del vínculo
+  const todos = entre.slice().sort((a, b) => pesoAspecto(b) - pesoAspecto(a));
+  const clavePrincipal = todos.length ? todos[0].a.clave : 'sol';
+  const claveTensa = ten.length ? ten[0].a.clave : null;
+  h += '<div class="sintesis" style="margin-top:14px"><h4>🧭 El propósito de este vínculo</h4>';
+  h += '<p><strong>Qué vienen a aprender juntos:</strong> ' + VINCULO_PROPOSITO[clavePrincipal] + '.</p>';
+  if (claveTensa && claveTensa !== clavePrincipal) {
+    h += '<p><strong>La lección más difícil:</strong> el contacto tenso más fuerte lo trae ' + ten[0].a.nombre + ' de ' + nA + '. Ahí el desafío es ' + VINCULO_PROPOSITO[claveTensa] + '. Esa es la fricción que se va a repetir; no se "arregla" de una vez, se administra.</p>';
+  }
+  h += '<p style="color:var(--marfil-dim);font-size:.85rem">' +
+    (esPar ? 'Un vínculo no es "bueno" o "malo" según el puntaje. Los vínculos muy armónicos son cómodos pero pueden aburrir; los muy tensos enganchan pero desgastan. Lo que decide es si los dos están dispuestos a hacer el trabajo.'
+           : 'La sinastría entre entidades es una lectura simbólica de compatibilidad, no un pronóstico de resultados.') + '</p>';
+  h += '</div>';
+  return h;
+}
+
+/* ---------- 10 claves del vínculo ---------- */
+function htmlClavesVinculo(cartaA, cartaB, entre) {
+  const nA = esc(cartaA.nombre), nB = esc(cartaB.nombre);
+  const domA = calcularDominancias(cartaA), domB = calcularDominancias(cartaB);
+  const fort = [], ries = [];
+
+  entre.filter(it => naturalezaEfectiva(it) === 'armonico').sort((a, b) => pesoAspecto(b) - pesoAspecto(a)).slice(0, 3)
+    .forEach(it => fort.push('<strong>' + it.a.nombre + '–' + it.b.nombre + ':</strong> ' + VINCULO_ROL[it.a.clave] + ' fluye con ' + VINCULO_ROL[it.b.clave]));
+  entre.filter(it => naturalezaEfectiva(it) === 'tenso').sort((a, b) => pesoAspecto(b) - pesoAspecto(a)).slice(0, 3)
+    .forEach(it => ries.push('<strong>' + it.a.nombre + '–' + it.b.nombre + ':</strong> ' + VINCULO_ROL[it.a.clave] + ' choca con ' + VINCULO_ROL[it.b.clave]));
+
+  if (domA.elementoDom === domB.elementoDom) {
+    fort.push('Mismo elemento (' + domA.elementoDom + '): se entienden sin explicarse');
+    ries.push('Mismo elemento: se potencian los defectos, nadie compensa a nadie');
+  } else {
+    fort.push('Elementos distintos (' + domA.elementoDom + ' y ' + domB.elementoDom + '): cada uno aporta lo que al otro le falta');
+    ries.push('Elementos distintos: van a distinta velocidad y eso irrita');
+  }
+  if (domA.modalidadDom === 'Fijo' && domB.modalidadDom === 'Fijo') ries.push('Los dos son Fijos: cuando se plantan, no cede nadie');
+  fort.push('El ' + domA.planetaDom.nombre + ' dominante de ' + nA + ' se cruza con el ' + domB.planetaDom.nombre + ' de ' + nB);
+
+  let h = '<h3 class="seccion-titulo" style="font-size:1.35rem">🔑 Claves del vínculo</h3>';
+  h += '<div class="dos-columnas">';
+  h += '<div class="columna-lista positiva"><h4>Lo que los une</h4><ul>' +
+    fort.slice(0, 5).map(f => '<li>✅ ' + f + '</li>').join('') + '</ul></div>';
+  h += '<div class="columna-lista negativa"><h4>Lo que los desgasta</h4><ul>' +
+    ries.slice(0, 5).map(r => '<li>⚠️ ' + r + '</li>').join('') + '</ul></div>';
   h += '</div>';
   return h;
 }
