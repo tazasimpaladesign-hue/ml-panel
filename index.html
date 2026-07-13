@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v219 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v220 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -34815,6 +34815,17 @@ details.guia .guia-cuerpo{padding:0 18px 16px;font-size:.88rem}
   details.guia[open]{break-inside:avoid}
   .pie-nota,.tecnico{color:#777 !important}
   a{color:#1a1a1a !important;text-decoration:none}
+  /* v220: el PDF incluye TODO (IRA, momento vital, Mercurio Rx, numerología, perfil integral) */
+  .biblio,#biblio,.duelo-sel{display:none !important}
+  details.guia,details.guia[open]{display:block !important}
+  details.guia summary{color:#1a1a1a !important;font-weight:700}
+  details:not([open])>*:not(summary){display:block !important}
+  .barra-pista{background:#e8e8e8 !important;border:1px solid #ccc !important;
+    -webkit-print-color-adjust:exact !important;print-color-adjust:exact !important}
+  .barra-relleno,.prob-seg{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important}
+  .area,.marcador{break-inside:avoid}
+  .cifra{color:#1a1a1a !important}
+  .areas{break-inside:auto}
 }
 .modo-impresion #zona-forms,.modo-impresion .tabs,.modo-impresion .acciones{display:none}
 
@@ -34862,9 +34873,41 @@ details.guia .guia-cuerpo{padding:0 18px 16px;font-size:.88rem}
     <button class="tab activa" id="tab-individual" role="tab" aria-selected="true">✧ Carta individual</button>
     <button class="tab" id="tab-comparacion" role="tab" aria-selected="false">✧✧ Comparación (sinastría)</button>
     <button class="tab" id="tab-numerologia" role="tab" aria-selected="false">№ Numerología</button>
+    <button class="tab" id="tab-duelo" role="tab" aria-selected="false">⚔ Comparar varias</button>
   </div>
 
   <div class="forms" id="zona-forms">
+    <!-- ==================== COMPARADOR MÚLTIPLE ==================== -->
+    <div class="ficha duelo-sel" data-rotulo="Comparar varias cartas" id="ficha-duelo" style="display:none">
+      <p class="micro-nota" style="margin-top:0">Elegí <strong>2 a 8 cartas guardadas</strong> y una fecha. Se calcula el IRA de todas bajo el mismo cielo y se las ordena. Sirve para dos equipos, para un plantel entero, para vos y tus socios, o para elegir el mejor día de un grupo.</p>
+      <div id="duelo-lista" style="margin-bottom:12px"></div>
+      <div class="fila">
+        <div class="campo">
+          <label for="duelo-fecha">Fecha a analizar</label>
+          <input type="date" id="duelo-fecha">
+        </div>
+        <div class="campo">
+          <label for="duelo-hora">Hora del evento <span class="opc">(opcional)</span></label>
+          <input type="time" id="duelo-hora">
+        </div>
+        <div class="campo">
+          <label for="duelo-tz">Huso</label>
+          <input type="number" id="duelo-tz" value="-3" step="0.5">
+        </div>
+      </div>
+      <div class="fila">
+        <div class="campo">
+          <label for="duelo-lat">Latitud del lugar <span class="opc">(estadio, oficina…)</span></label>
+          <input type="number" id="duelo-lat" step="0.01" placeholder="-32.89">
+        </div>
+        <div class="campo">
+          <label for="duelo-lon">Longitud</label>
+          <input type="number" id="duelo-lon" step="0.01" placeholder="-68.85">
+        </div>
+      </div>
+      <button class="btn-calcular" id="duelo-btn" style="width:100%;margin-top:6px" onclick="correrDuelo()">Comparar en esta fecha</button>
+    </div>
+
     <!-- ==================== NUMEROLOGÍA ==================== -->
     <div class="ficha" data-rotulo="Numerología" id="ficha-num" style="display:none">
       <div class="campo">
@@ -34898,6 +34941,11 @@ details.guia .guia-cuerpo{padding:0 18px 16px;font-size:.88rem}
       <div class="campo">
         <label for="nombre1">Nombre</label>
         <input type="text" id="nombre1" placeholder="Ej.: Ana Gómez / Real Madrid / Estudio Aurora" maxlength="40">
+      </div>
+      <div class="campo">
+        <label for="nombre-nac1">Nombre completo de nacimiento <span class="opc">(opcional — activa el Perfil Integral)</span></label>
+        <input type="text" id="nombre-nac1" placeholder="Como figura en el acta: nombres + apellidos" maxlength="80">
+        <p class="micro-nota">Si lo cargás, se calcula también tu numerología y se agrega una sección que cruza <strong>carta astral + numerología</strong>: coincidencias, contradicciones y misión combinada.</p>
         <p class="micro-nota"><strong>El nombre no influye en el cálculo:</strong> es solo una etiqueta. La carta se construye únicamente con fecha, hora y lugar. (Analizar el nombre corresponde a la numerología, otra disciplina.)</p>
       </div>
       <div class="campo">
@@ -35964,17 +36012,27 @@ function poblarCiudades() {
 function setModo(m) {
   modo = m;
   const num = m === 'numerologia';
-  ['individual', 'comparacion', 'numerologia'].forEach(k => {
+  const duelo = m === 'duelo';
+  ['individual', 'comparacion', 'numerologia', 'duelo'].forEach(k => {
     $('tab-' + k).classList.toggle('activa', m === k);
     $('tab-' + k).setAttribute('aria-selected', m === k);
   });
-  $('ficha-1').style.display = num ? 'none' : '';
+  $('ficha-1').style.display = (num || duelo) ? 'none' : '';
   $('ficha-2').style.display = (m === 'comparacion') ? '' : 'none';
   $('ficha-evento').style.display = (m === 'comparacion') ? '' : 'none';
   $('ficha-num').style.display = num ? '' : 'none';
+  $('ficha-duelo').style.display = duelo ? '' : 'none';
   $('zona-forms').classList.toggle('doble', m === 'comparacion');
+  document.querySelector('.acciones').style.display = duelo ? 'none' : '';
   $('btn-calcular').textContent = num ? 'Calcular la numerología'
     : (m === 'comparacion' ? 'Trazar la sinastría' : 'Trazar la carta');
+  if (duelo) {
+    renderDueloSelector();
+    if (!$('duelo-fecha').value) {
+      const hoy = new Date();
+      $('duelo-fecha').value = hoy.getFullYear() + '-' + String(hoy.getMonth() + 1).padStart(2, '0') + '-' + String(hoy.getDate()).padStart(2, '0');
+    }
+  }
   $('resultados').classList.remove('visible');
 }
 
@@ -35995,7 +36053,8 @@ function leerEntidad(n) {
     fecha,
     hora: $('hora' + n).value || null,
     tz: Number($('tz' + n).value),
-    lat: ll.lat, lon: ll.lon
+    lat: ll.lat, lon: ll.lon,
+    nombreNac: (n === 1 && $('nombre-nac1')) ? ($('nombre-nac1').value.trim() || null) : null
   };
 }
 
@@ -36483,16 +36542,24 @@ let CTX_IA = { activo: false, cartas: [], modo: 'individual', historial: [] };
 
 function htmlChatIA(tipo) {
   const esNum = tipo === 'numerologia';
-  const titulo = esNum ? '🔮 Preguntá sobre tu numerología' : '🔮 Preguntá sobre esta carta';
+  const esDuelo = tipo === 'duelo';
+  const titulo = esNum ? '🔮 Preguntá sobre tu numerología'
+    : esDuelo ? '🔮 Preguntá sobre esta comparación' : '🔮 Preguntá sobre esta carta';
   const sub = esNum
     ? 'La IA responde como numeróloga profesional, usando únicamente los números ya calculados arriba. Podés pedirle el informe completo o preguntarle por una fecha puntual (por ejemplo: "¿cómo viene el 12 de marzo de 2027?").'
-    : 'La IA responde en base a los datos reales de la carta que trazaste. Preguntá lo que quieras: amor, trabajo, decisiones, compatibilidad, un año puntual…';
+    : esDuelo
+      ? 'La IA analiza los puntajes ya calculados de todas las cartas comparadas y te explica en criollo por qué cada una llega como llega, qué la favorece y qué la complica ese día.'
+      : 'La IA responde en base a los datos reales de la carta que trazaste. Preguntá lo que quieras: amor, trabajo, decisiones, compatibilidad, un año puntual…';
   const vacio = esNum
     ? 'Ejemplos: <em>"Generá mi informe completo"</em> · <em>"¿Cómo me va a ir en 2027?"</em> · <em>"¿Qué día de abril me conviene firmar?"</em>'
-    : 'Ejemplos: <em>"¿Cómo me va a ir este año en el trabajo?"</em> · <em>"¿Qué tipo de pareja me conviene?"</em> · <em>"¿Cuáles son mis mayores desafíos?"</em>';
+    : esDuelo
+      ? 'Ejemplos: <em>"Explicame por qué gana el primero"</em> · <em>"¿Quién llega mejor mentalmente?"</em> · <em>"¿Dónde puede fallar el favorito?"</em>'
+      : 'Ejemplos: <em>"¿Cómo me va a ir este año en el trabajo?"</em> · <em>"¿Qué tipo de pareja me conviene?"</em> · <em>"¿Cuáles son mis mayores desafíos?"</em>';
   const chips = esNum
     ? ['Generá mi informe completo', '¿Cuál es mi misión de vida?', '¿Cómo viene este año para mí?', '¿Qué profesión me conviene?', '¿Cómo soy en el amor?']
-    : ['¿Cuáles son mis mayores fortalezas?', '¿Cómo me va este año?', '¿Qué debería trabajar de mí?', '¿Cómo soy en el amor?'];
+    : esDuelo
+      ? ['Hacé la síntesis completa', '¿Por qué gana el primero?', '¿Dónde puede fallar el favorito?', '¿Quién llega mejor mentalmente?']
+      : ['¿Cuáles son mis mayores fortalezas?', '¿Cómo me va este año?', '¿Qué debería trabajar de mí?', '¿Cómo soy en el amor?'];
   return '<h3 class="seccion-titulo" style="font-size:1.35rem">' + titulo + '</h3>' +
     '<p class="seccion-sub">' + sub + '</p>' +
     '<div class="ia-caja">' +
@@ -36545,7 +36612,19 @@ async function iaEnviar() {
 
   // ── Contexto según el modo ──
   let contexto, system;
-  if (CTX_IA.modo === 'numerologia') {
+  if (CTX_IA.modo === 'duelo') {
+    contexto = resumenDueloIA(CTX_IA.duelo);
+    system = 'Actuás como un analista astrológico deportivo y de rendimiento, serio y honesto. Hablás en español rioplatense, usando "vos".\\n\\n' +
+      REGLAS +
+      'REGLAS DE ANÁLISIS (obligatorias):\\n' +
+      '1) NO recalcules nada: usá EXCLUSIVAMENTE los puntajes y los factores que te entrego.\\n' +
+      '2) Explicá en criollo por qué cada carta llega como llega, citando los factores concretos que más pesaron.\\n' +
+      '3) Recordá que en PRESIÓN y RIESGO DE ERROR un número más bajo es mejor.\\n' +
+      '4) Sé honesto: si los índices están parejos, decilo. No infles una conclusión que los números no sostienen.\\n' +
+      '5) Aclarás SIEMPRE, al final, que esto es un modelo simbólico: no predice resultados deportivos y no sirve para apostar. Un partido lo definen los jugadores, no los planetas.\\n' +
+      '6) Respondé en 3 a 5 párrafos, salvo que te pidan la síntesis completa.\\n\\n' +
+      'DATOS YA CALCULADOS:\\n' + contexto;
+  } else if (CTX_IA.modo === 'numerologia') {
     contexto = resumenNumerologiaIA(CTX_IA.num);
     system = 'Actuás como un numerólogo profesional serio, con formación en numerología pitagórica moderna ' +
       '(la escuela de autores como Hans Decoz, Matthew Oliver Goodwin y Juno Jordan). Hablás en español rioplatense, usando "vos".\\n\\n' +
@@ -36655,14 +36734,22 @@ async function renderIndividual(carta, transitoHoy) {
   h += '<h3 class="seccion-titulo" style="font-size:1.35rem">🌠 Qué está pasando hoy en el cielo (y cómo te toca)</h3>';
   h += '<p class="seccion-sub">Los planetas siguen moviéndose después de que naciste. Cuando el planeta de hoy toca un planeta de tu carta, enciende ese tema por unos días. Esto es pasajero: es el clima, no el clima de tu vida entera.</p>';
   h += htmlTransitos(carta, transitoHoy, 'Cielo del ' + fechaCorta(transitoHoy.fecha));
-  // AstroScore para una fecha elegida (rinde para deportes y para decisiones)
-  h += await htmlAstroScoreSeccion(carta);
+  // IRA multicapa para una fecha elegida (deportes, decisiones, planificación)
+  h += await htmlIRASeccion(carta);
   // Momento vital: progresiones, arco solar, revolución lunar, Parte de la Fortuna
   h += await htmlMomentoVital(carta);
   // Mercurio retrógrado (cálculo real de los períodos + impacto sobre esta carta)
   h += await htmlMercurioRx(carta);
   // Ciclos y predicciones (cálculo en vivo)
   h += await htmlCiclos(carta);
+  // Perfil Integral: solo si cargaron el nombre completo de nacimiento
+  if (carta.nombreNac) {
+    try {
+      const Pnum = calcularNumerologia({ nombre: carta.nombreNac, fecha: carta.fecha });
+      h += htmlPerfilIntegral(carta, Pnum, calcularDominancias(carta));
+      CTX_IA.num = Pnum;   // la IA queda con los dos sistemas cargados
+    } catch (e) { /* si el nombre no es válido, se omite la sección */ }
+  }
   return h;
 }
 
@@ -36889,8 +36976,8 @@ async function trazar() {
 
 /* ---- Descarga en PDF (vía diálogo de impresión del navegador) ---- */
 function descargarPDF() {
-  // Abre todas las secciones desplegables de la guía para que salgan en el PDF
-  document.querySelectorAll('details.guia').forEach(d => d.open = true);
+  // Abre TODOS los desplegables (guía + modo experto del IRA) para que salgan en el PDF
+  document.querySelectorAll('details').forEach(d => { if (d.id !== 'biblio') d.open = true; });
   document.body.classList.add('modo-impresion');
   const limpiar = () => { document.body.classList.remove('modo-impresion'); window.removeEventListener('afterprint', limpiar); };
   window.addEventListener('afterprint', limpiar);
@@ -38113,6 +38200,552 @@ async function htmlAstroScoreSeccion(carta) {
   return h;
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+   MÓDULO v4 · Astrolabio
+   1) IRA — Índice de Rendimiento Astrológico multicapa
+   2) NumeroScore del día + fase lunar
+   3) Comparador múltiple (N cartas a la vez)
+   4) Perfil Integral (carta astral + numerología)
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ---------- 1) MOTOR IRA MULTICAPA ---------- */
+const IRA_CAPAS = [
+  { id: 'transitos',    rot: 'Tránsitos del día',   peso: 30 },
+  { id: 'progresiones', rot: 'Progresiones',        peso: 20 },
+  { id: 'revsolar',     rot: 'Revolución Solar',    peso: 15 },
+  { id: 'evento',       rot: 'Carta del evento',    peso: 15 },
+  { id: 'revlunar',     rot: 'Revolución Lunar',    peso: 10 },
+  { id: 'numerologia',  rot: 'Numerología del día', peso: 5 },
+  { id: 'lunar',        rot: 'Fase lunar',          peso: 5 }
+];
+
+// Los ángulos del evento entran como "fuentes" con peso propio
+const AS_PESO_EXTRA = { asc: 2.2, mc: 2.2 };
+const AS_CARACTER_EXTRA = { asc: 0.4, mc: 0.4 };
+
+// Puntúa una capa de aspectos (fuente → natal). Devuelve dimensiones centradas en 50.
+function _puntuarCapa(asp, etiqueta, escala) {
+  const p = {}, ap = {};
+  AS_DIM.forEach(d => { p[d.id] = 50; ap[d.id] = []; });
+  asp.forEach(it => {
+    const tr = it.a.clave, na = it.b.clave;
+    const orbeMax = ORBES_TRANSITO[it.aspecto.angulo] || 4;
+    const cercania = Math.max(0, 1 - (it.orbe / orbeMax));
+    const peso = ((AS_PESO_TR[tr] !== undefined ? AS_PESO_TR[tr] : AS_PESO_EXTRA[tr]) || 1) * cercania;
+    const carRaw = AS_CARACTER[tr] !== undefined ? AS_CARACTER[tr] : AS_CARACTER_EXTRA[tr];
+    const car = carRaw !== undefined ? carRaw : 0;
+    let signo;
+    if (it.aspecto.naturaleza === 'armonico') signo = 1;
+    else if (it.aspecto.naturaleza === 'tenso') signo = -1;
+    else signo = car >= 0 ? 1 : -1;
+    const magnitud = peso * (1 + Math.abs(car)) * 3.2 * (escala || 1);
+    AS_DIM.forEach(dim => {
+      if (dim.natal.indexOf(na) === -1) return;
+      let delta = signo * magnitud;
+      if (dim.neg) delta = -delta;
+      p[dim.id] += delta;
+      if (Math.abs(delta) >= 1.5) {
+        ap[dim.id].push({
+          capa: etiqueta,
+          txt: it.a.nombre + ' ' + it.aspecto.nombre.toLowerCase() + ' ' + it.b.nombre + ' natal',
+          delta: delta, orbe: it.orbe
+        });
+      }
+    });
+  });
+  AS_DIM.forEach(d => { p[d.id] = Math.max(1, Math.min(99, p[d.id])); });
+  return { p, ap };
+}
+
+// Numerología del día: día personal a partir de la fecha de nacimiento
+const NUM_DIA_PERFIL = {
+  1: { energia: 78, confianza: 75, concentracion: 60, presion: 45, riesgo: 40, protagonismo: 80 },
+  2: { energia: 42, confianza: 48, concentracion: 65, presion: 45, riesgo: 45, protagonismo: 35 },
+  3: { energia: 65, confianza: 72, concentracion: 45, presion: 35, riesgo: 60, protagonismo: 72 },
+  4: { energia: 60, confianza: 55, concentracion: 78, presion: 65, riesgo: 32, protagonismo: 48 },
+  5: { energia: 72, confianza: 60, concentracion: 40, presion: 45, riesgo: 70, protagonismo: 68 },
+  6: { energia: 55, confianza: 60, concentracion: 62, presion: 55, riesgo: 42, protagonismo: 52 },
+  7: { energia: 40, confianza: 45, concentracion: 75, presion: 60, riesgo: 45, protagonismo: 32 },
+  8: { energia: 75, confianza: 72, concentracion: 68, presion: 72, riesgo: 38, protagonismo: 78 },
+  9: { energia: 52, confianza: 55, concentracion: 50, presion: 58, riesgo: 55, protagonismo: 55 }
+};
+function numeroDelDia(fechaNacISO, fechaISO) {
+  const [an, mn, dn] = fechaNacISO.split('-').map(Number);
+  const [a, m, d] = fechaISO.split('-').map(Number);
+  const anioPersonal = reducirSimple(reducirSimple(mn) + reducirSimple(dn) + reducirSimple(a));
+  const mesPersonal = reducirSimple(anioPersonal + m);
+  const diaPersonal = reducirSimple(mesPersonal + d);
+  return { anioPersonal, mesPersonal, diaPersonal };
+}
+
+// Fase lunar en una fecha: separación Sol–Luna
+const FASE_LUNAR = [
+  { max: 45,  nombre: 'Luna nueva',            e: 8,  c: 4,  co: 0,   pr: -4, ri: 4,  pt: 4,  txt: 'arranque, semilla: buena para empezar, floja para culminar' },
+  { max: 90,  nombre: 'Luna creciente',        e: 10, c: 8,  co: 4,   pr: 0,  ri: 0,  pt: 8,  txt: 'impulso en subida: la energía acompaña el crecimiento' },
+  { max: 135, nombre: 'Cuarto creciente',      e: 8,  c: 4,  co: 0,   pr: 6,  ri: 4,  pt: 6,  txt: 'momento de crisis de acción: hay que empujar contra la resistencia' },
+  { max: 180, nombre: 'Luna gibosa creciente', e: 6,  c: 6,  co: 6,   pr: 2,  ri: -4, pt: 6,  txt: 'ajuste fino antes del pico' },
+  { max: 225, nombre: 'Luna llena',            e: 12, c: 10, co: -8,  pr: 10, ri: 10, pt: 12, txt: 'máxima intensidad y visibilidad, pero también máximo desborde emocional' },
+  { max: 270, nombre: 'Luna gibosa menguante', e: 2,  c: 2,  co: 6,   pr: 2,  ri: -2, pt: 0,  txt: 'cosecha y difusión de lo hecho' },
+  { max: 315, nombre: 'Cuarto menguante',      e: -6, c: -4, co: 4,   pr: 6,  ri: 2,  pt: -6, txt: 'revisión y crisis de conciencia: baja la energía' },
+  { max: 361, nombre: 'Luna balsámica',        e: -10, c: -6, co: 0,  pr: 4,  ri: 6,  pt: -10, txt: 'cierre de ciclo: el cuerpo pide descanso, no es día de exigirse' }
+];
+async function faseLunar(dNum) {
+  const pos = await calcularPosicionesPlanetarias(dNum);
+  let sep = pos.luna - pos.sol;
+  sep = ((sep % 360) + 360) % 360;
+  const f = FASE_LUNAR.find(x => sep < x.max) || FASE_LUNAR[0];
+  return { sep, fase: f };
+}
+
+// Retorno lunar anterior a una fecha
+async function ultimaRevLunar(carta, dNum) {
+  const lunaN = carta.planetas.find(p => p.clave === 'luna').lon;
+  return await cruceLongitud('luna', lunaN, dNum - 28, dNum, 0.5);
+}
+
+// Convierte un conjunto de posiciones en pseudo-planetas aspectables
+function _planetasDe(pos) {
+  return PLANETAS.map(p => {
+    const s = signoDe(pos[p.clave]);
+    return Object.assign({}, p, { lon: pos[p.clave], signo: s.nombre, grado: s.grado });
+  });
+}
+
+/* Calcula el IRA completo, capa por capa. evento = {hora, tz, lat, lon} opcional */
+async function calcularIRA(carta, fechaISO, evento) {
+  const [a, m, d] = fechaISO.split('-').map(Number);
+  const dMedio = numeroDia(a, m, d, 12);
+  const capas = {};
+
+  // — Tránsitos —
+  const trPos = await calcularPosicionesPlanetarias(dMedio);
+  capas.transitos = _puntuarCapa(
+    calcularAspectos(_planetasDe(trPos), carta.planetas, false, ORBES_TRANSITO), 'Tránsitos', 1);
+
+  // — Progresiones —
+  const anios = (dMedio - carta.d) / 365.2422;
+  const progPos = await calcularPosicionesPlanetarias(carta.d + anios);
+  capas.progresiones = _puntuarCapa(
+    calcularAspectos(_planetasDe(progPos), carta.planetas, false, ORBES_TRANSITO), 'Progresiones', 1);
+
+  // — Revolución Solar (el retorno solar vigente para esa fecha) —
+  const solN = carta.planetas.find(p => p.clave === 'sol').lon;
+  let anioRS = a;
+  const dRSprueba = await retornoSolar(carta, a);
+  if (dRSprueba > dMedio) anioRS = a - 1;
+  const dRS = await retornoSolar(carta, anioRS);
+  const rsPos = await calcularPosicionesPlanetarias(dRS);
+  capas.revsolar = _puntuarCapa(
+    calcularAspectos(_planetasDe(rsPos), carta.planetas, false, ORBES_TRANSITO), 'Rev. Solar', 1);
+
+  // — Revolución Lunar —
+  const dRL = await ultimaRevLunar(carta, dMedio);
+  if (dRL) {
+    const rlPos = await calcularPosicionesPlanetarias(dRL);
+    capas.revlunar = _puntuarCapa(
+      calcularAspectos(_planetasDe(rlPos), carta.planetas, false, ORBES_TRANSITO), 'Rev. Lunar', 1);
+  }
+
+  // — Carta del evento (necesita hora y lugar) —
+  let evtInfo = null;
+  if (evento && evento.hora && evento.lat !== null && evento.lat !== undefined && evento.lon !== null) {
+    const [hh, mm] = evento.hora.split(':').map(Number);
+    const tz = (evento.tz === undefined || evento.tz === null) ? -3 : Number(evento.tz);
+    const horaUTC = hh + mm / 60 - tz;
+    const dEv = numeroDia(a, m, d, horaUTC);
+    const ang = calcularAscendente(dEv, evento.lat, evento.lon);
+    const sAsc = signoDe(ang.asc), sMC = signoDe(ang.mc);
+    const fuentes = [
+      { clave: 'asc', nombre: 'Ascendente del evento', glifo: 'Asc', lon: ang.asc, signo: sAsc.nombre,
+        rolPersona: 'el clima con el que arranca el evento', rolOrg: 'el clima con el que arranca el evento' },
+      { clave: 'mc', nombre: 'Medio Cielo del evento', glifo: 'MC', lon: ang.mc, signo: sMC.nombre,
+        rolPersona: 'el objetivo y la visibilidad del evento', rolOrg: 'el objetivo y la visibilidad del evento' }
+    ];
+    const evPos = await calcularPosicionesPlanetarias(dEv);
+    const fuentesTotal = fuentes.concat(_planetasDe(evPos).filter(p => ['marte', 'sol', 'jupiter', 'luna'].indexOf(p.clave) !== -1));
+    capas.evento = _puntuarCapa(
+      calcularAspectos(fuentesTotal, carta.planetas, false, ORBES_TRANSITO), 'Carta del evento', 1);
+    evtInfo = { asc: sAsc.nombre, mc: sMC.nombre, hora: evento.hora };
+  }
+
+  // — Numerología del día —
+  const nd = numeroDelDia(carta.fecha, fechaISO);
+  const perfilNum = NUM_DIA_PERFIL[nd.diaPersonal];
+  capas.numerologia = { p: {
+    energia: perfilNum.energia, confianza: perfilNum.confianza, concentracion: perfilNum.concentracion,
+    presion: perfilNum.presion, riesgo: perfilNum.riesgo, protagonismo: perfilNum.protagonismo
+  }, ap: {} };
+  AS_DIM.forEach(dim => { capas.numerologia.ap[dim.id] = []; });
+
+  // — Fase lunar —
+  const fl = await faseLunar(dMedio);
+  const F = fl.fase;
+  capas.lunar = { p: {
+    energia: 50 + F.e, confianza: 50 + F.c, concentracion: 50 + F.co,
+    presion: 50 + F.pr, riesgo: 50 + F.ri, protagonismo: 50 + F.pt
+  }, ap: {} };
+  AS_DIM.forEach(dim => { capas.lunar.ap[dim.id] = []; });
+
+  // — Mezcla ponderada (renormalizando si falta alguna capa) —
+  const puntajes = {}, aportes = {}, desglose = {};
+  const disponibles = IRA_CAPAS.filter(c => capas[c.id]);
+  const pesoTotal = disponibles.reduce((s, c) => s + c.peso, 0);
+  AS_DIM.forEach(dim => {
+    let acum = 0;
+    aportes[dim.id] = [];
+    disponibles.forEach(c => {
+      acum += capas[c.id].p[dim.id] * (c.peso / pesoTotal);
+      (capas[c.id].ap[dim.id] || []).forEach(x => aportes[dim.id].push(x));
+    });
+    // Al promediar 7 capas la varianza se achica y todo tiende a 50, con lo cual
+    // las barras quedarían todas iguales y el índice no distinguiría nada.
+    // Se aplica una ganancia sobre el punto medio para recuperar el rango útil.
+    puntajes[dim.id] = Math.max(3, Math.min(97, Math.round(50 + (acum - 50) * 2.2)));
+    aportes[dim.id].sort((x, y) => Math.abs(y.delta) - Math.abs(x.delta));
+  });
+  disponibles.forEach(c => {
+    const media = AS_DIM.reduce((s, d) => s + (d.neg ? (100 - capas[c.id].p[d.id]) : capas[c.id].p[d.id]), 0) / AS_DIM.length;
+    desglose[c.id] = { rot: c.rot, peso: Math.round(c.peso / pesoTotal * 100), valor: Math.round(media) };
+  });
+
+  // Dignidades natales (base estructural)
+  const dig = c => {
+    const p = carta.planetas.find(x => x.clave === c);
+    if (!p || !DIGNIDADES[c]) return 0;
+    const D = DIGNIDADES[c];
+    const dentro = arr => Array.isArray(arr) && arr.indexOf(p.signo) !== -1;
+    if (dentro(D.domicilio)) return 5;
+    if (dentro(D.exaltacion)) return 3;
+    if (dentro(D.caida)) return -3;
+    if (dentro(D.exilio)) return -5;
+    return 0;
+  };
+  puntajes.energia = Math.max(1, Math.min(99, puntajes.energia + dig('marte')));
+  puntajes.confianza = Math.max(1, Math.min(99, puntajes.confianza + dig('jupiter') + dig('sol')));
+  puntajes.protagonismo = Math.max(1, Math.min(99, puntajes.protagonismo + dig('sol')));
+
+  const crudo =
+    puntajes.energia * 0.25 + puntajes.confianza * 0.20 + puntajes.concentracion * 0.18 +
+    puntajes.protagonismo * 0.22 + (100 - puntajes.riesgo) * 0.10 +
+    (100 - Math.abs(puntajes.presion - 55)) * 0.05;
+  const ira = Math.max(5, Math.min(95, Math.round(50 + (crudo - 50) * 1.5)));
+
+  // NumeroScore del día (0-100)
+  const numeroScore = Math.round(
+    (perfilNum.energia + perfilNum.confianza + perfilNum.concentracion +
+     (100 - perfilNum.riesgo) + perfilNum.protagonismo) / 5);
+
+  return {
+    ira, puntajes, aportes, desglose, fecha: fechaISO,
+    numerologia: nd, numeroScore, fase: F, evento: evtInfo, carta
+  };
+}
+
+function lecturaIRA(v) {
+  return v >= 72 ? 'Día claramente favorable: el cielo acompaña. De los mejores momentos para jugarse y arriesgar.'
+    : v >= 58 ? 'Día bueno. Se puede rendir alto, pero hay que ponerle trabajo: nada viene regalado.'
+    : v >= 43 ? 'Día normal, sin viento a favor ni en contra. Todo va a depender más de la persona que del cielo.'
+    : v >= 30 ? 'Día trabado. Conviene ser prudente, simplificar y no forzar jugadas de riesgo.'
+    : 'Día cuesta arriba. Mucha fricción: bajá expectativas y jugá a no perder.';
+}
+
+/* ---------- Render del IRA (nivel 1 simple + nivel 3 experto) ---------- */
+function htmlIRA(R) {
+  let h = '<div id="as-cont">';
+  h += '<div class="marcador"><div class="cifra">' + R.ira + '</div>' +
+    '<div class="escala">IRA · Índice de Rendimiento Astrológico — ' + fechaCorta(R.fecha) + '</div>' +
+    '<p class="lectura">' + lecturaIRA(R.ira) + '</p></div>';
+
+  h += '<div class="areas">' + AS_DIM.map(dim => {
+    const v = R.puntajes[dim.id];
+    const top = R.aportes[dim.id].slice(0, 3);
+    return '<div class="area"><div class="area-cab"><h5>' + dim.rot + '</h5>' +
+      '<span class="area-num">' + v + '</span></div>' + barraAS(v, dim.neg) +
+      '<p style="margin-top:5px;font-size:.78rem">' + dim.txt + (dim.neg ? ' <em>(más bajo es mejor)</em>' : '') + '</p>' +
+      (top.length
+        ? '<p style="margin-top:5px;font-size:.74rem;color:var(--marfil-dim)">' + top.map(t =>
+            (t.delta > 0 ? '+' : '') + Math.round(t.delta) + ' · ' + t.txt + ' <em>(' + t.capa + ')</em>').join('<br>') + '</p>'
+        : '<p style="margin-top:5px;font-size:.74rem;color:var(--marfil-dim)">Sin activaciones fuertes sobre este punto.</p>') +
+      '</div>';
+  }).join('') + '</div>';
+
+  // Numerología del día + fase lunar
+  h += '<div class="dos-columnas" style="margin-top:14px">';
+  h += '<div class="columna-lista positiva"><h4>NumeroScore del día: ' + R.numeroScore + '/100</h4><ul>' +
+    '<li><strong>Día personal ' + R.numerologia.diaPersonal + ':</strong> ' + (NUM_MES[R.numerologia.diaPersonal] || '') + '. Es la energía numerológica de esa jornada para esta persona.</li>' +
+    '<li><strong>Mes personal ' + R.numerologia.mesPersonal + '</strong> y <strong>Año personal ' + R.numerologia.anioPersonal + '</strong>: el marco más grande en el que cae ese día.</li>' +
+    '</ul></div>';
+  h += '<div class="columna-lista negativa"><h4>Fase lunar: ' + R.fase.nombre + '</h4><ul>' +
+    '<li>' + R.fase.txt + '.</li>' +
+    (R.evento ? '<li><strong>Carta del evento:</strong> Ascendente en ' + R.evento.asc + ', Medio Cielo en ' + R.evento.mc + ' (hora ' + R.evento.hora + ').</li>'
+              : '<li><em>Sin hora ni lugar del evento: la capa "Carta del evento" no se pudo calcular y su peso se repartió entre las demás. Cargá hora y lugar para el análisis completo.</em></li>') +
+    '</ul></div></div>';
+
+  // Modo experto: desglose por capa
+  h += '<details class="guia" style="margin-top:14px"><summary>🔬 Modo experto: de dónde sale el número</summary><div class="areas" style="margin-top:12px">';
+  h += IRA_CAPAS.filter(c => R.desglose[c.id]).map(c => {
+    const dd = R.desglose[c.id];
+    return '<div class="area"><div class="area-cab"><h5>' + dd.rot + '</h5><span class="area-num">' + dd.valor + '</span></div>' +
+      barraAS(dd.valor, false) +
+      '<p style="margin-top:5px;font-size:.76rem">Pesa el <strong>' + dd.peso + '%</strong> del índice final.</p></div>';
+  }).join('') + '</div>';
+  h += '<p class="seccion-sub" style="margin-top:10px">El IRA combina siete capas: los tránsitos del día, las progresiones (tu etapa vital), la Revolución Solar (el año), la Revolución Lunar (el mes emocional), la carta del evento, la numerología del día y la fase lunar. Cada capa puntúa las seis dimensiones por separado y después se promedian según su peso. Se ajusta además por las dignidades natales del Sol, Marte y Júpiter.</p>';
+  h += '<p class="seccion-sub"><strong>Aviso serio:</strong> esto es un modelo simbólico. No predice resultados deportivos ni sirve para apostar. Un partido lo definen los jugadores, no los planetas.</p>';
+  h += '</details>';
+  h += '</div>';
+  return h;
+}
+
+let CARTA_AS2 = null;
+async function iraRecalc() {
+  if (!CARTA_AS2) return;
+  const f = $('as-fecha').value;
+  if (!f) return;
+  const btn = $('as-btn');
+  btn.disabled = true; btn.textContent = 'Calculando…';
+  try {
+    const ev = {
+      hora: $('as-hora').value || null,
+      tz: Number($('as-tz').value),
+      lat: $('as-lat').value === '' ? null : Number($('as-lat').value),
+      lon: $('as-lon').value === '' ? null : Number($('as-lon').value)
+    };
+    const R = await calcularIRA(CARTA_AS2, f, ev);
+    $('as-wrap').innerHTML = htmlIRA(R);
+  } catch (e) {
+    avisar('No se pudo calcular el IRA: ' + esc(e.message), 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Calcular para esta fecha';
+  }
+}
+
+async function htmlIRASeccion(carta) {
+  CARTA_AS2 = carta;
+  const hoy = new Date();
+  const hoyISO = hoy.getFullYear() + '-' + String(hoy.getMonth() + 1).padStart(2, '0') + '-' + String(hoy.getDate()).padStart(2, '0');
+  const R = await calcularIRA(carta, hoyISO, null);
+  const esEquipo = carta.tipo === 'equipo';
+
+  let h = '<h3 class="seccion-titulo" style="font-size:1.35rem">📊 IRA · Índice de Rendimiento' + (esEquipo ? ' (día de partido)' : ' del día') + '</h3>';
+  h += '<p class="seccion-sub">Puntajes por área para una fecha concreta, combinando siete capas astrológicas. Si cargás <strong>hora y lugar</strong> (por ejemplo, el horario y el estadio del partido), se suma la carta del evento y el análisis se vuelve mucho más preciso.</p>';
+  h += '<div class="ficha" data-noprint style="margin-bottom:14px"><div class="fila">' +
+    '<div class="campo"><label for="as-fecha">Fecha</label><input type="date" id="as-fecha" value="' + hoyISO + '"></div>' +
+    '<div class="campo"><label for="as-hora">Hora del evento <span class="opc">(opcional)</span></label><input type="time" id="as-hora"></div>' +
+    '<div class="campo"><label for="as-tz">Huso</label><input type="number" id="as-tz" value="-3" step="0.5"></div>' +
+    '</div><div class="fila">' +
+    '<div class="campo"><label for="as-lat">Latitud del lugar <span class="opc">(opcional)</span></label><input type="number" id="as-lat" step="0.01" placeholder="-32.89" value="' + (carta.lat !== null && carta.lat !== undefined ? carta.lat : '') + '"></div>' +
+    '<div class="campo"><label for="as-lon">Longitud</label><input type="number" id="as-lon" step="0.01" placeholder="-68.85" value="' + (carta.lon !== null && carta.lon !== undefined ? carta.lon : '') + '"></div>' +
+    '<div class="campo"><label>&nbsp;</label><button id="as-btn" class="btn-pdf" style="width:100%" onclick="iraRecalc()">Calcular para esta fecha</button></div>' +
+    '</div></div>';
+  h += '<div id="as-wrap">' + htmlIRA(R) + '</div>';
+  return h;
+}
+
+/* ---------- 3) COMPARADOR MÚLTIPLE (N cartas) ---------- */
+let DUELO_R = null;
+
+function renderDueloSelector() {
+  const cont = $('duelo-lista');
+  if (!cont) return;
+  const cartas = biblioLeer().filter(x => x.clase !== 'num');
+  if (!cartas.length) {
+    cont.innerHTML = '<p class="seccion-sub" style="margin:0">No tenés cartas guardadas todavía. Calculá una carta (individual) y tocá <strong>💾 Guardar en la biblioteca</strong>. Después volvé acá y vas a poder comparar todas las que quieras.</p>';
+    return;
+  }
+  cont.innerHTML = '<div class="biblio-grid">' + cartas.map(it =>
+    '<label class="biblio-item" style="cursor:pointer;display:block">' +
+    '<div class="biblio-cab"><input type="checkbox" class="duelo-chk" value="' + it.id + '" style="width:auto;margin-right:6px">' +
+    '<div><div class="biblio-nom">' + esc(it.nombre || 'Sin nombre') + '</div>' +
+    '<div class="biblio-sub">' + esc(it.fecha) + ' · ' + esc(it.tipo || 'persona') + (it.hora ? ' · ' + esc(it.hora) + 'h' : ' · sin hora') + '</div></div></div>' +
+    '</label>').join('') + '</div>';
+}
+
+async function correrDuelo() {
+  const ids = Array.prototype.slice.call(document.querySelectorAll('.duelo-chk:checked')).map(c => c.value);
+  if (ids.length < 2) { avisar('Elegí al menos <strong>2 cartas</strong> para comparar.', 'error'); return; }
+  if (ids.length > 8) { avisar('Máximo 8 cartas a la vez.', 'error'); return; }
+  const fecha = $('duelo-fecha').value;
+  if (!fecha) { avisar('Elegí la fecha a analizar.', 'error'); return; }
+  const ev = {
+    hora: $('duelo-hora').value || null,
+    tz: Number($('duelo-tz').value),
+    lat: $('duelo-lat').value === '' ? null : Number($('duelo-lat').value),
+    lon: $('duelo-lon').value === '' ? null : Number($('duelo-lon').value)
+  };
+  const btn = $('duelo-btn');
+  btn.disabled = true; btn.textContent = 'Calculando…';
+  $('zona-avisos').innerHTML = '';
+  try {
+    const lista = biblioLeer();
+    const res = [];
+    for (const id of ids) {
+      const it = lista.find(x => x.id === id);
+      if (!it) continue;
+      const carta = await calcularCarta({
+        nombre: it.nombre, tipo: it.tipo || 'persona', fecha: it.fecha,
+        hora: it.hora || null, tz: it.tz === undefined ? -3 : it.tz,
+        lat: it.lat === undefined ? null : it.lat, lon: it.lon === undefined ? null : it.lon
+      });
+      const R = await calcularIRA(carta, fecha, ev);
+      res.push({ carta, R });
+    }
+    res.sort((a, b) => b.R.ira - a.R.ira);
+    DUELO_R = { res, fecha, ev };
+    const cont = $('resultados');
+    cont.innerHTML = '<div class="acciones-resultado" data-noprint><button class="btn-pdf" onclick="descargarPDF()">📄 Descargar informe en PDF</button></div>' + htmlDuelo(DUELO_R);
+    cont.classList.add('visible');
+    cont.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) {
+    avisar('No se pudo comparar: ' + esc(e.message), 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Comparar en esta fecha';
+  }
+}
+
+function htmlDuelo(D) {
+  const { res, fecha } = D;
+  const gan = res[0], ult = res[res.length - 1];
+  let h = '<h2 class="seccion-titulo">Comparativa del ' + fechaCorta(fecha) + '</h2>';
+  h += '<p class="seccion-sub">' + res.length + ' cartas comparadas con el mismo índice (IRA), en la misma fecha y bajo el mismo cielo.</p>';
+
+  // Ranking
+  h += '<div class="marcador"><div class="cifra">' + gan.R.ira + '</div>' +
+    '<div class="escala">Mejor momento astrológico: <strong>' + esc(gan.carta.nombre) + '</strong></div>' +
+    '<p class="lectura">' + esc(gan.carta.nombre) + ' llega con el cielo más a favor (IRA ' + gan.R.ira + '), y ' +
+    esc(ult.carta.nombre) + ' con el más en contra (IRA ' + ult.R.ira + '). ' +
+    (gan.R.ira - ult.R.ira < 8
+      ? 'Igualmente la diferencia es chica: astrológicamente están parejos, así que esto no define nada.'
+      : 'La diferencia es marcada.') + '</p></div>';
+
+  // Tabla comparativa
+  h += '<h3 class="seccion-titulo" style="font-size:1.35rem">Tabla comparativa</h3>';
+  h += '<div class="lista-aspectos">';
+  res.forEach((r, i) => {
+    h += '<div class="aspecto ' + (i === 0 ? 'armonico' : i === res.length - 1 ? 'tenso' : 'neutro') + '">' +
+      '<div class="asp-linea"><span class="detalle"><strong>' + (i + 1) + '. ' + esc(r.carta.nombre) + '</strong> — IRA ' + r.R.ira +
+      ' · NumeroScore ' + r.R.numeroScore + '</span>' +
+      '<span class="tipo-tag ' + (i === 0 ? 'armonico' : i === res.length - 1 ? 'tenso' : 'neutro') + '">' + (i === 0 ? 'mejor' : i === res.length - 1 ? 'peor' : '—') + '</span></div>' +
+      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:6px;margin-top:8px">' +
+      AS_DIM.map(dim => '<div><div style="font-size:.68rem;color:var(--marfil-dim)">' + dim.rot + '</div>' +
+        '<div style="display:flex;align-items:center;gap:5px"><span style="font-size:.85rem;font-weight:600">' + r.R.puntajes[dim.id] + '</span>' +
+        '<div style="flex:1">' + barraAS(r.R.puntajes[dim.id], dim.neg) + '</div></div></div>').join('') +
+      '</div></div>';
+  });
+  h += '</div>';
+
+  // Dimensión por dimensión: quién gana cada una
+  h += '<h3 class="seccion-titulo" style="font-size:1.35rem">Quién gana cada área</h3>';
+  h += '<div class="interpretaciones">' + AS_DIM.map(dim => {
+    const orden = res.slice().sort((a, b) => dim.neg
+      ? a.R.puntajes[dim.id] - b.R.puntajes[dim.id]
+      : b.R.puntajes[dim.id] - a.R.puntajes[dim.id]);
+    const top = orden[0];
+    return '<div class="interp"><h5>' + dim.rot + ': ' + esc(top.carta.nombre) + ' (' + top.R.puntajes[dim.id] + ')</h5>' +
+      '<p>' + dim.txt.charAt(0).toUpperCase() + dim.txt.slice(1) + '. ' +
+      (dim.neg ? 'Acá gana el que tiene el número más bajo. ' : '') +
+      'Orden: ' + orden.map(o => esc(o.carta.nombre) + ' (' + o.R.puntajes[dim.id] + ')').join(' · ') + '.</p></div>';
+  }).join('') + '</div>';
+
+  // Chat IA con todo el contexto
+  CTX_IA = { activo: true, cartas: res.map(r => r.carta), modo: 'duelo', duelo: D, historial: [] };
+  h += htmlChatIA('duelo');
+  return h;
+}
+
+function resumenDueloIA(D) {
+  const l = [];
+  l.push('COMPARATIVA ASTROLOGICA de ' + D.res.length + ' cartas para el ' + D.fecha + '.');
+  if (D.ev && D.ev.hora) l.push('Carta del evento: hora ' + D.ev.hora + ', lat ' + D.ev.lat + ', lon ' + D.ev.lon + '.');
+  l.push('');
+  D.res.forEach((r, i) => {
+    l.push((i + 1) + ') ' + r.carta.nombre + ' (' + r.carta.tipo + ', nacido/fundado ' + r.carta.fecha + ')');
+    l.push('   IRA total: ' + r.R.ira + ' | NumeroScore: ' + r.R.numeroScore);
+    l.push('   ' + AS_DIM.map(d => d.rot + ': ' + r.R.puntajes[d.id]).join(' | '));
+    const top = [];
+    AS_DIM.forEach(d => r.R.aportes[d.id].slice(0, 2).forEach(t => top.push(t.txt + ' (' + (t.delta > 0 ? '+' : '') + Math.round(t.delta) + ', ' + t.capa + ')')));
+    if (top.length) l.push('   Factores mas influyentes: ' + top.slice(0, 5).join('; '));
+    l.push('   Fase lunar: ' + r.R.fase.nombre + '. Dia personal: ' + r.R.numerologia.diaPersonal + '.');
+    l.push('');
+  });
+  l.push('RECORDATORIO: presion y riesgo de error se leen al reves (mas bajo es mejor).');
+  return l.join('\\n');
+}
+
+/* ---------- 4) PERFIL INTEGRAL (carta astral + numerología) ---------- */
+const ELEM_NUM = { Fuego: [1, 3, 5, 9], Tierra: [4, 6, 8], Aire: [3, 5, 7], Agua: [2, 6, 7, 9] };
+
+function htmlPerfilIntegral(carta, P, dom) {
+  const cv = nEs(P.caminoVida), de = nEs(P.destino), al = nEs(P.alma);
+  const elem = dom.elementoDom;
+  const solSigno = carta.planetas.find(p => p.clave === 'sol').signo;
+  const lunaSigno = carta.planetas.find(p => p.clave === 'luna').signo;
+
+  let h = '<h3 class="seccion-titulo" style="font-size:1.35rem">🔮 Perfil Integral (carta astral + numerología)</h3>';
+  h += '<p class="seccion-sub">Dos sistemas distintos, mirando a la misma persona. Donde <strong>coinciden</strong>, el rasgo es muy fuerte y difícil de disimular. Donde se <strong>contradicen</strong>, aparece la tensión interna más interesante de tu vida: ahí es donde te sentís dos personas a la vez.</p>';
+
+  // Coincidencias
+  const numsClave = [base(P.caminoVida), base(P.destino), base(P.alma)];
+  const afines = ELEM_NUM[elem] || [];
+  const coinc = numsClave.filter(n => afines.indexOf(n) !== -1);
+
+  h += '<div class="sintesis"><h4>Lo que ambos sistemas confirman</h4>';
+  if (coinc.length) {
+    h += '<p><strong>Coinciden y fuerte.</strong> Tu elemento dominante es <strong>' + elem + '</strong> (' + dom.pctElemento[elem] + '% de la carta) y tus números clave (' + coinc.join(', ') + ') vibran en la misma frecuencia. Traducido: ' + SENTIDO_ELEMENTO[elem] + ', y la numerología te empuja exactamente para el mismo lado. Este rasgo es tu columna vertebral: no lo podés esconder ni aunque quieras, y cuando lo negás te enfermás de aburrimiento.</p>';
+  } else {
+    h += '<p>Tu elemento dominante (<strong>' + elem + '</strong>) y tus números principales (' + numsClave.join(', ') + ') no vibran en la misma frecuencia. No es un error: significa que <strong>tenés dos motores distintos</strong>, y que la vida te va a pedir usar los dos. Es más incómodo, pero también te vuelve más completo que alguien de una sola nota.</p>';
+  }
+  h += '<p><strong>Tu Sol está en ' + solSigno + '</strong> (' + DESCRIPCION_SIGNO[solSigno].luz + ') y tu <strong>Camino de Vida es ' + P.caminoVida + '</strong> (' + cv.luz + '). ' +
+    'La astrología describe con qué materia estás hecho; la numerología, qué viniste a hacer con esa materia. Acá se ve claro: ' +
+    'sos ' + DESCRIPCION_SIGNO[solSigno].luz + ', y con eso tenés que ' + cv.vb + '.</p>';
+  h += '</div>';
+
+  // Talentos que ambos destacan
+  h += '<div class="dos-columnas">';
+  h += '<div class="columna-lista positiva"><h4>Talentos que los dos destacan</h4><ul>' +
+    '<li><strong>Astrología:</strong> tu planeta dominante es ' + dom.planetaDom.nombre + ' en ' + dom.planetaDom.signo + ' — ' + DESCRIPCION_SIGNO[dom.planetaDom.signo].luz + '.</li>' +
+    '<li><strong>Numerología:</strong> tu Destino ' + P.destino + ' te dio ' + de.luz + '.</li>' +
+    '<li><strong>Vocación cruzada:</strong> ' + VOCACION_ELEMENTO[elem].rasgo + ', aplicado a ' + nGet(NUM_TRABAJO, P.destino) + '</li>' +
+    '</ul></div>';
+  h += '<div class="columna-lista negativa"><h4>Contradicciones a resolver</h4><ul>';
+  const yin = dom.polaridad.Yin, yang = dom.polaridad.Yang;
+  const numExtro = [1, 3, 5, 8].indexOf(base(P.caminoVida)) !== -1;
+  if (yin > 60 && numExtro) {
+    h += '<li><strong>Carta introvertida, número extrovertido.</strong> Tu carta es ' + yin + '% Yin (te recargás para adentro), pero tu Camino de Vida ' + P.caminoVida + ' te empuja a salir, liderar y exponerte. Vas a sentir siempre que el mundo te pide más de lo que tenés ganas de dar. La salida no es forzarte: es exponerte en dosis y volver a tu cueva a recargar, sin culpa.</li>';
+  } else if (yang > 60 && !numExtro) {
+    h += '<li><strong>Carta extrovertida, número introvertido.</strong> Tu carta es ' + yang + '% Yang (salís al mundo, actuás rápido), pero tu Camino ' + P.caminoVida + ' te pide profundidad, paciencia o servicio. Arrancás mil cosas y después la vida te frena para que las termines bien.</li>';
+  } else {
+    h += '<li><strong>Sin contradicción estructural:</strong> tu polaridad astral (' + yang + '% Yang / ' + yin + '% Yin) y tu Camino ' + P.caminoVida + ' apuntan al mismo tipo de temperamento. Ventaja: sos coherente. Riesgo: no tenés un contrapeso interno que te frene cuando te excedés.</li>';
+  }
+  const lunaAgua = ['Cáncer', 'Escorpio', 'Piscis'].indexOf(lunaSigno) !== -1;
+  const numRacional = [4, 7, 8].indexOf(base(P.alma)) !== -1;
+  if (lunaAgua && numRacional) {
+    h += '<li><strong>Luna emocional, Alma racional.</strong> Tu Luna en ' + lunaSigno + ' siente todo con una intensidad enorme, pero tu número del Alma (' + P.alma + ') quiere entender, ordenar y controlar. Resultado: sentís muchísimo y después te peleás con vos mismo por sentirlo. Dejá de exigirte que la emoción tenga lógica.</li>';
+  }
+  h += '<li><strong>Sombra compartida:</strong> la carta avisa de ' + DESCRIPCION_SIGNO[solSigno].sombra + '; los números avisan de ' + cv.som + '. Cuando las dos se activan juntas, ahí es cuando te saboteás.</li>';
+  h += '</ul></div></div>';
+
+  // Misión combinada
+  h += '<div class="sintesis"><h4>Misión de vida según las dos disciplinas</h4>';
+  h += '<p>La numerología dice que viniste a <strong>' + nGet(NUM_MISION, P.caminoVida) + '</strong>. La astrología agrega el <em>cómo</em>: con un motor de ' + elem + ' (' + SENTIDO_ELEMENTO[elem] + ') y un ' + dom.planetaDom.nombre + ' dominante que te marca el estilo.</p>';
+  h += '<p><strong>En criollo, la síntesis:</strong> tu tarea es ' + cv.vb + ', usando tu ' + elem.toLowerCase() + ' natural, en el terreno de ' + VOCACION_ELEMENTO[elem].rasgo + '. Cuando hacés eso, todo encaja. Cuando lo traicionás (por miedo o por plata), aparecen ' + cv.som + '.</p>';
+  h += '</div>';
+
+  // Recomendaciones
+  h += '<div class="dos-columnas">';
+  h += '<div class="columna-lista positiva"><h4>Recomendaciones prácticas</h4><ul>' +
+    '<li><strong>Trabajo:</strong> ' + nGet(NUM_TRABAJO, P.destino) + '</li>' +
+    '<li><strong>Relaciones:</strong> necesitás ' + LENGUAJE_AFECTIVO[carta.planetas.find(p => p.clave === 'venus').elemento] + '. Y en lo numerológico, ' + nGet(NUM_AMOR, P.alma) + '</li>' +
+    '<li><strong>Crecimiento:</strong> potenciá ' + cv.luz + '.</li>' +
+    '</ul></div>';
+  h += '<div class="columna-lista negativa"><h4>Lo que tenés que evitar</h4><ul>' +
+    '<li>' + cv.som.charAt(0).toUpperCase() + cv.som.slice(1) + ' (numerología).</li>' +
+    '<li>' + DESCRIPCION_SIGNO[solSigno].sombra.charAt(0).toUpperCase() + DESCRIPCION_SIGNO[solSigno].sombra.slice(1) + ' (astrología).</li>' +
+    (P.deudas.length ? '<li>Tu deuda kármica ' + P.deudas[0].n + ' te va a poner a prueba justo en esos momentos.</li>' : '') +
+    '</ul></div></div>';
+
+  return h;
+}
+
 /* ---- Init ---- */
 document.addEventListener('DOMContentLoaded', () => {
   poblarZonas();
@@ -38121,6 +38754,7 @@ document.addEventListener('DOMContentLoaded', () => {
   $('tab-individual').addEventListener('click', () => setModo('individual'));
   $('tab-comparacion').addEventListener('click', () => setModo('comparacion'));
   $('tab-numerologia').addEventListener('click', () => setModo('numerologia'));
+  $('tab-duelo').addEventListener('click', () => setModo('duelo'));
   renderBiblioteca();
   $('biblio-file').addEventListener('change', e => {
     if (e.target.files && e.target.files[0]) biblioImportar(e.target.files[0]);
