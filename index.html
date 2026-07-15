@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v223 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v224 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -6206,18 +6206,39 @@ function restoreMetricsFromCache(){
       console.log('[Métricas] Limpieza de caché v1 obsoleto:', oldKeys.length, 'entradas');
     }
 
-    let restored = 0;
+    // v224: PURGA de métricas contaminadas. Las cachés anteriores a mv:3 tienen
+    // visitsPrev calculado con OTRO endpoint (devolvía ~40% de lo real) — eran
+    // la causa de los ▲150% falsos del embudo. v223 arregló los fetch nuevos,
+    // pero esta función seguía restaurando el caché viejo al arrancar, así que
+    // el embudo nunca veía los datos sanos. Ahora las viejas se borran acá y
+    // NO entran a memoria; se recargan solas (Los más visitados dispara la
+    // recarga al iniciar) o con "📊 Cargar métricas" del Analizador SEO.
+    let restored = 0, purged = 0;
+    const claves = [];
     for(let i = 0; i < localStorage.length; i++){
-      const key = localStorage.key(i);
-      if(!key || !key.startsWith(METRICS_CACHE_KEY)) continue;
+      const k = localStorage.key(i);
+      if(k && k.startsWith(METRICS_CACHE_KEY)) claves.push(k);
+    }
+    for(const key of claves){
       const id = key.slice(METRICS_CACHE_KEY.length);
       if(!id) continue;
-      const entry = JSON.parse(localStorage.getItem(key)||'null');
+      let entry = null;
+      try{ entry = JSON.parse(localStorage.getItem(key)||'null'); }catch(e){}
       if(!entry || !entry.data) continue;
-      // v203: restaurar SIEMPRE (aunque haya pasado el TTL) para que las métricas
-      // queden visibles. La antigüedad se muestra aparte; el usuario refresca cuando quiere.
+      if(entry.data.mv !== 3){
+        try{ localStorage.removeItem(key); }catch(e){}
+        purged++;
+        continue;
+      }
+      // v203: restaurar aunque haya pasado el TTL (la antigüedad se muestra aparte)
       itemMetrics[id] = entry.data;
       restored++;
+    }
+    if(purged > 0){
+      // tirar también el caché de "Los más visitados": su recarga automática
+      // al iniciar vuelve a pedir TODAS las métricas ya con el cálculo nuevo.
+      try{ localStorage.removeItem('impala_mv_cache'); }catch(e){}
+      console.log('[Métricas] v224: purgadas ' + purged + ' métricas viejas (visitsPrev inflado). Se recargan solas al iniciar.');
     }
     if(restored > 0) console.log('[Métricas] Restauradas desde localStorage:', restored, 'ítems');
   }catch(e){ console.warn('[Métricas] restoreFromCache error:', e.message); }
@@ -23972,7 +23993,13 @@ function ctaMarkDirty(ym) {
 // Ahora mandamos solo lo que cambió + lo que borré, y el Worker lo fusiona
 // operación por operación contra lo que ya hay en la nube.
 async function ctaFlushDirty() {
-  if (_ctaState.saving || !_ctaState.dirty.size) return;
+  if (_ctaState.saving) {
+    // v224: hay un guardado en curso → reintentar en 1.5s en vez de perder el turno
+    clearTimeout(_ctaSaveTimer);
+    _ctaSaveTimer = setTimeout(ctaFlushDirty, 1500);
+    return;
+  }
+  if (!_ctaState.dirty.size) return;
   _ctaState.saving = true;
   const dirty = [..._ctaState.dirty]; _ctaState.dirty.clear();
   _ctaStatus('💾 Guardando…');
@@ -23989,6 +24016,8 @@ async function ctaFlushDirty() {
       // 2) las que estaban en la nube y ya no están en mi chunk = borradas por mí
       const vivos = new Set(ops.map(o => o.id));
       const deleted = [...base.keys()].filter(id => !vivos.has(id));
+      // Foto de lo que mando ANTES del await (el array puede mutar mientras viaja)
+      const sentIds = new Set(ops.map(o => o && o.id).filter(Boolean));
 
       const r = await fetch(WORKER + '/api/cta/ops/' + ym, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -23996,9 +24025,36 @@ async function ctaFlushDirty() {
       });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error || 'error guardando ' + ym);
-      // 3) el Worker devuelve el mes YA fusionado → me quedo con esa verdad
-      if (Array.isArray(d.ops)) { _ctaState.chunks[ym] = d.ops; }
-      _ctaSnap(ym);
+      // 3) v224: fusionar la respuesta EN EL MISMO array y los MISMOS objetos.
+      //    Antes: chunks[ym] = d.ops (objetos nuevos) → el enriquecedor de neto
+      //    (que guarda referencias a los objetos) escribía en huérfanos y las
+      //    ventas de ML quedaban en bruto para siempre.
+      if (Array.isArray(d.ops)) {
+        const arr   = _ctaState.chunks[ym] || [];
+        const srvBy = new Map(d.ops.map(o => [o.id, o]));
+        // a) sacar las que YO mandé y el server tumbó (borradas desde otra PC)
+        for (let i = arr.length - 1; i >= 0; i--) {
+          const o = arr[i];
+          if (o && o.id && sentIds.has(o.id) && !srvBy.has(o.id)) arr.splice(i, 1);
+        }
+        // b) actualizar sobre el MISMO objeto / agregar lo que vino de la otra PC
+        const localBy = new Map(arr.map(o => [o.id, o]));
+        d.ops.forEach(srv => {
+          const mine = localBy.get(srv.id);
+          if (!mine) { arr.push(srv); return; }
+          if ((Number(srv.upd) || 0) > (Number(mine.upd) || 0)) {
+            for (const k of Object.keys(mine)) delete mine[k];
+            Object.assign(mine, srv);
+          }
+        });
+        _ctaState.chunks[ym] = arr;
+        // c) baseline = la verdad de la NUBE. Si una mutación llegó en pleno
+        //    vuelo (ej. el neto de MP), su huella difiere del baseline y el
+        //    próximo guardado la sube sola. Nada se pierde.
+        _ctaState.base[ym] = new Map(d.ops.map(o => [o.id, _ctaHuella(o)]));
+      } else {
+        _ctaSnap(ym);
+      }
       if (d.resumen) _ctaState.resumen[ym] = d.resumen;
     }
     _ctaStatus('✓ Guardado ' + new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }));
@@ -24017,6 +24073,10 @@ async function ctaFlushDirty() {
 // Primero sube lo pendiente (con merge, así no se pierde nada) y recién ahí baja.
 async function ctaRefreshCloud(force) {
   if (!_ctaState.boot || _ctaState.refreshing) return;
+  // v224: si hay un sync o un enriquecimiento de netos en vuelo, no refrescar
+  // (el refresco reemplaza los arrays y dejaría a esos procesos escribiendo
+  // en objetos huérfanos). Se reintenta solo en el próximo tick de 60s.
+  if (_ctaState.syncing || (typeof _ctaAutoEnriching !== 'undefined' && _ctaAutoEnriching)) return;
   if (!force && Date.now() - _ctaState.lastRefresh < 20000) return; // no más de 1 cada 20s
   _ctaState.refreshing = true;
   try {
@@ -25131,8 +25191,10 @@ async function ctaSyncWoo() {
       ids.add(id); ctaMarkDirty(ym); nuevos++;
     }
   }
-  // Enriquecer neto MP de las ventas Woo nuevas (si el worker lo soporta)
-  if (nuevos > 0) { try { await ctaEnrichWooNet(); } catch (e) {} }
+  // Enriquecer neto MP de las ventas Woo (si el worker lo soporta).
+  // v224: se intenta siempre — si quedó alguna sin neto de un intento anterior,
+  // acá se completa. Sin pendientes, la función sale sin pegarle al worker.
+  try { await ctaEnrichWooNet(); } catch (e) {}
   return nuevos;
 }
 
@@ -25161,7 +25223,9 @@ async function ctaEnrichWooNet() {
           _ctaState.dirty.add(o.fecha.slice(0, 7)); cambios = true;
         }
       });
-      if (cambios) await ctaFlushDirty();
+      // v224: mismo criterio que el enrich de ML — guardar por debounce para
+      // no chocar con un flush en curso.
+      if (cambios) { clearTimeout(_ctaSaveTimer); _ctaSaveTimer = setTimeout(ctaFlushDirty, 500); }
     }
   } catch (e) { /* el endpoint puede no existir aún */ }
 }
@@ -25307,6 +25371,11 @@ async function ctaSyncML() {
         telefono: '', provincia, thumb,
         items, envio: 0,
         monto: Number(o.paid_amount) || Number(o.total_amount) || 0,
+        // v224: entra en rojo "A realizar" (como las de la web). Es un estado
+        // guardado → se ve rojo también en la otra PC aunque allá no estén
+        // cargados los envíos de ML. Cuando el envío avanza, el estado ML
+        // (Imprimir/En camino/Entregado) tiene prioridad visual sobre este.
+        estado: 'a_realizar',
         src: 'ml'
       });
       ids.add(id); ctaMarkDirty(ym); nuevos++;
@@ -25315,10 +25384,11 @@ async function ctaSyncML() {
   }
   if (_ctaCatDirty) { _ctaPersistCatalogo(); _ctaCatDirty = false; }
   _ctaMLSynced = true;
-  // v175: enriquecer las ventas ML NUEVAS apenas entran (las del día), con el
-  // endpoint batch (1 escritura de KV por lote). Tope de seguridad de 15 para
-  // no procesar el histórico por accidente — eso ya está hecho y cacheado.
-  if (nuevos > 0 && typeof userId !== 'undefined' && userId) {
+  // v175: enriquecer las ventas ML con neto real (MP) apenas entran.
+  // v224: se llama SIEMPRE, no solo cuando hay nuevas — si un intento anterior
+  // falló (red, MP lento), acá se reintenta. Si no hay pendientes sale al toque,
+  // y el tope de 15 sigue protegiendo el histórico.
+  if (typeof userId !== 'undefined' && userId) {
     ctaAutoEnrichNuevas();
   }
   return nuevos;
@@ -25368,7 +25438,13 @@ async function ctaAutoEnrichNuevas() {
         }
       }
     } catch (e) { console.warn('[autoenrich batch]', e.message); }
-    if (cambios) { await ctaFlushDirty(); ctaRenderAll(); }
+    if (cambios) {
+      // v224: guardar por el debounce normal. El flush directo podía chocar con
+      // un guardado en curso y el neto quedaba en el limbo hasta el próximo evento.
+      clearTimeout(_ctaSaveTimer);
+      _ctaSaveTimer = setTimeout(ctaFlushDirty, 500);
+      ctaRenderAll();
+    }
   } finally { _ctaAutoEnriching = false; }
 }
 
