@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v224 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v225 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -893,7 +893,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         · Cron Worker cada 5min → red de seguridad que recupera lo que el webhook perdió.
        Se carga al abrir el dashboard. Click para detalles.
        v111: Ahora hay 2 widgets lado a lado: Telegram 24/7 y Consumo KV. -->
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px" id="dash-system-widgets">
+  <div style="display:none;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px" id="dash-system-widgets">
     <div id="dash-tg247-status" class="card" style="cursor:pointer;display:flex;align-items:center;gap:10px;padding:11px 13px;background:linear-gradient(135deg,#f0f9ff 0%,#e0f2fe 100%);border:1px solid #bae6fd;margin:0" onclick="tg247OpenDetails()">
       <div style="font-size:22px;flex-shrink:0">📡</div>
       <div style="flex:1;min-width:0">
@@ -1001,6 +1001,18 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       </div>
       <div id="dash-map" style="position:relative;min-height:300px"><div style="color:var(--text3);font-size:12px;padding:10px 0">Cargando...</div></div>
     </div>
+  </div>
+
+  <!-- ── v225: Ticket promedio ML vs Inflación (IPC) — 12 meses ── -->
+  <div class="card mb" style="min-width:0">
+    <div class="card-hd">
+      <div>
+        <div class="card-title">🎟️ Ticket promedio ML vs Inflación</div>
+        <div class="card-sub">Ticket promedio mensual de ventas de Mercado Libre (barras, $) comparado con el IPC mensual del INDEC (línea, %) · últimos 12 meses</div>
+      </div>
+    </div>
+    <div style="position:relative;height:300px"><canvas id="chart-ticket-ipc"></canvas></div>
+    <div id="dash-ticket-ipc-note" style="font-size:10.5px;color:var(--text3);margin-top:8px"></div>
   </div>
 
   <!-- ── Ventas por tipo (izq) + Distribución por categoría (der), mitad y mitad ── -->
@@ -4090,6 +4102,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <div class="mc c-purple ctakpi"><div class="mc-label">🏦 Saldo histórico</div><div class="ctakpi-val" id="cta-kpi-saldo">—</div><div class="ctakpi-sub" id="cta-kpi-saldo-sub"></div></div>
     <div class="mc c-amber ctakpi"><div class="mc-label">📦 Unid. históricas</div><div class="ctakpi-val" id="cta-kpi-unihist">—</div><div class="ctakpi-sub">histórico total</div></div>
     <div class="mc c-green ctakpi"><div class="mc-label">💰 Stock valorizado</div><div class="ctakpi-val" id="cta-kpi-stockval">—</div><div class="ctakpi-sub">stock × costo</div></div>
+    <div class="mc c-green ctakpi" title="Stock disponible × precio de la columna Woo de la Lista de Precios"><div class="mc-label">💰 Stock valorizado Venta</div><div class="ctakpi-val" id="cta-kpi-stockvalventa">—</div><div class="ctakpi-sub">stock × precio Woo</div></div>
   </div>
 
   <!-- Dashboard analítico (v176) -->
@@ -4169,6 +4182,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <button class="btn btn-ghost btn-sm" onclick="document.getElementById('cta-xlsx-file').click()" title="Importar un .xlsx exportado previamente para aplicar cambios masivos">📤 Importar Excel</button>
         <input type="file" id="cta-xlsx-file" accept=".xlsx,.xls,.csv" style="display:none" onchange="ctaImportExcel(this.files[0])">
         <button class="btn btn-ghost btn-sm" onclick="ctaOpenStock()" title="Ver y administrar stock + catálogo de productos">📦 Stock y catálogo</button>
+        <button class="btn btn-ghost btn-sm" onclick="ctaOpenPrecios()" title="Lista de precios editable por canal (Clásica / Premium / Woo / Mayorista y columnas propias)">💲 Lista de Precios</button>
         <button class="btn btn-ghost btn-sm" onclick="ctaOpenOrigenes()" title="Editar nombres y emojis de los orígenes (renombrar actualiza todas las filas)">⚙️ Orígenes</button>
         <button class="btn btn-ghost btn-sm" onclick="ctaOpenCategorias()" title="Editar las categorías de egreso (insumos, impuestos, proveedores...)">🧾 Egresos</button>
         <button class="btn btn-ghost btn-sm" onclick="document.getElementById('cta-import-file').click()" title="Importar histórico" style="display:none">📥 Importar histórico</button>
@@ -4293,6 +4307,24 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <span id="cta-stock-status" style="font-size:11px;color:var(--text3);margin-right:auto"></span>
         <button class="btn btn-ghost btn-sm" onclick="ctaCloseStock()">Cerrar</button>
         <button class="btn btn-sm" style="background:var(--accent);color:#fff" onclick="ctaSaveStock()">💾 Guardar catálogo</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Lista de Precios (v225) -->
+  <div id="cta-precios-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;align-items:center;justify-content:center">
+    <div class="card" style="max-width:1180px;width:97%;margin:0;max-height:92vh;overflow:hidden;display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+        <div class="card-title" style="margin:0">💲 Lista de Precios</div>
+        <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="ctaPreciosAddCol()">➕ Columna</button>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:10px">
+        Precios por canal de cada producto del catálogo. Editá cada celda como en una planilla; se guardan solos y se sincronizan en todas las PCs. Clic en el nombre de una columna para renombrarla. El KPI <b>💰 Stock valorizado Venta</b> usa la columna <b>Woo</b>.
+      </div>
+      <div id="cta-precios-body" class="tw" style="flex:1;overflow:auto;border:1px solid var(--border);border-radius:8px"></div>
+      <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end;align-items:center">
+        <span style="font-size:11px;color:var(--text3);margin-right:auto">Los cambios se guardan automáticamente.</span>
+        <button class="btn btn-sm" style="background:var(--accent);color:#fff" onclick="ctaClosePrecios()">Cerrar</button>
       </div>
     </div>
   </div>
@@ -4953,6 +4985,10 @@ async function initApp(){
   stamp();
   // ── RESTAURAR métricas desde localStorage ANTES de cargar ─────────────
   restoreMetricsFromCache();
+
+  // v225: cargar la serie de inflación al inicio (el gráfico Ticket vs IPC del
+  // Dashboard la necesita sin tener que entrar antes a Economía). En background.
+  try{ _ecoInflLoad(); _ecoInflFetch(); }catch(e){}
 
   // ── CARGA RÁPIDA: usar caché si hay datos frescos (nueva pestaña / recarga) ─
   // Si hay datos en localStorage (< 10 min), mostrar inmediatamente y hacer
@@ -7874,12 +7910,84 @@ async function loadDashVisits(){
 // ── Global DOM helper (used by renderFacturacion + others) ──
 function setEl(id,txt){ var e=document.getElementById(id); if(e) e.textContent=txt; }
 
+// v225 ── Gráfico Ticket promedio ML (barras $) vs IPC mensual (línea %) · 12 meses
+function renderDashTicketIPC(){
+  if(typeof Chart==='undefined' || typeof makeChart!=='function') return;
+  const cv = document.getElementById('chart-ticket-ipc');
+  if(!cv) return;
+  // 1) armar los últimos 12 meses (YYYY-MM) terminando en el mes actual
+  const now = new Date();
+  const meses = [];
+  for(let i=11;i>=0;i--){
+    const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
+    meses.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'));
+  }
+  // 2) ticket promedio ML por mes = facturación / cantidad de ventas (no canceladas)
+  const sum = {}, cnt = {};
+  (allOrders||[]).forEach(o=>{
+    if(!o || String(o.status||'').toLowerCase()==='cancelled') return;
+    const t = o.date_created ? new Date(o.date_created) : null;
+    if(!t || isNaN(t)) return;
+    const ym = t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0');
+    if(!(ym in sum)){ sum[ym]=0; cnt[ym]=0; }
+    sum[ym] += (+o.total_amount||0);
+    cnt[ym] += 1;
+  });
+  const ticket = meses.map(ym => cnt[ym] ? Math.round(sum[ym]/cnt[ym]) : null);
+  // 3) IPC mensual del INDEC (de la serie de Economía)
+  const serie = (typeof _ecoInfl!=='undefined' && Array.isArray(_ecoInfl.serie)) ? _ecoInfl.serie : [];
+  const ipcMap = {};
+  serie.forEach(x=>{ if(x && x.fecha) ipcMap[x.fecha.slice(0,7)] = +x.valor; });
+  const ipc = meses.map(ym => ym in ipcMap ? ipcMap[ym] : null);
+  // etiquetas cortas: "ene 25"
+  const MM = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  const labels = meses.map(ym => { const [y,m]=ym.split('-'); return MM[+m-1]+' '+y.slice(2); });
+
+  const hayIpc = ipc.some(v => v!=null);
+  makeChart('chart-ticket-ipc', {
+    data: { labels, datasets: [
+      { type:'bar', label:'Ticket promedio ($)', data:ticket, yAxisID:'y',
+        backgroundColor:'rgba(37,99,235,.55)', borderColor:'#2563eb', borderWidth:1,
+        borderRadius:5, order:2 },
+      { type:'line', label:'Inflación IPC (%)', data:ipc, yAxisID:'y1',
+        borderColor:'#f0994a', backgroundColor:'#f0994a', borderWidth:2.4,
+        pointRadius:3, pointHoverRadius:5, tension:.3, spanGaps:true, order:1 },
+    ]},
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      interaction:{ mode:'index', intersect:false },
+      plugins:{
+        legend:{ display:true, position:'bottom', labels:{ font:{size:11}, usePointStyle:true, padding:14 } },
+        tooltip:{ callbacks:{ label:(c)=>{
+          if(c.dataset.yAxisID==='y1') return c.parsed.y==null?'IPC: s/d':('IPC: '+c.parsed.y.toFixed(1)+'%');
+          return c.parsed.y==null?'Ticket: s/d':('Ticket: $'+c.parsed.y.toLocaleString('es-AR'));
+        }}}
+      },
+      scales:{
+        x: tXOpts(),
+        y: { position:'left', ...tOpts(), title:{display:true,text:'Ticket $',color:'#2563eb',font:{size:10,weight:'600'}},
+             ticks:{ ...tOpts().ticks, callback:v=>'$'+(v>=1000?(v/1000).toFixed(0)+'k':v) } },
+        y1:{ position:'right', grid:{drawOnChartArea:false}, ...tOpts(),
+             title:{display:true,text:'IPC %',color:'#f0994a',font:{size:10,weight:'600'}},
+             ticks:{ ...tOpts().ticks, callback:v=>v+'%' } },
+      }
+    }
+  });
+  const note = document.getElementById('dash-ticket-ipc-note');
+  if(note){
+    note.innerHTML = hayIpc
+      ? 'Ticket: promedio por venta de ML (facturación / ventas del mes). IPC: variación mensual INDEC.'
+      : '⚠ Todavía no hay datos de inflación cargados. Entrá una vez a <b>Economía</b> o esperá unos segundos: se cargan solos.';
+  }
+}
+
 function renderDashboard(){
   renderBizScore();
   renderSmartAlerts();
   renderDashKPIs();
   loadDashVisits().then(()=>renderMainChart()).catch(()=>renderMainChart());
   renderCatChart(); renderPubTypeChart(); renderDashTopPubs(); renderDashInsights(); renderDashStock(); renderDashConv(); renderDashRepMini();
+  try{ renderDashTicketIPC(); }catch(e){ console.warn('[ticket-ipc]', e.message); }
   renderCalWidget();
   // v109: refrescar estado Telegram 24/7
   if(typeof tg247Refresh === 'function') tg247Refresh();
@@ -23791,6 +23899,11 @@ async function ctaInit() {
           if (Array.isArray(dc.categorias) && dc.categorias.length) {
             localStorage.setItem('cta_categorias', JSON.stringify(dc.categorias));
           }
+          // v225: columnas de la Lista de Precios (sincronizadas)
+          if (Array.isArray(dc.preciosCols) && dc.preciosCols.length) {
+            _ctaPreciosCols = dc.preciosCols;
+            try{ localStorage.setItem('cta_precios_cols', JSON.stringify(dc.preciosCols)); }catch(e){}
+          }
         }
       } catch (e) { console.warn('[cta config]', e.message); }
     } catch (e) {
@@ -24102,8 +24215,10 @@ async function ctaRefreshCloud(force) {
     }
     _ctaState.lastRefresh = Date.now();
     if (document.getElementById('section-cta') && document.getElementById('section-cta').classList.contains('active')) {
-      ctaRenderAll();
-      if (typeof _ctaFillClientesList === 'function') _ctaFillClientesList();
+      // v225: si estás editando una celda (estado/precio/cantidad), no toco la
+      // tabla ahora — ctaRenderTable ya se reprograma sola al salir del control.
+      if(_ctaEditandoTabla()){ ctaRenderKPIs(); ctaRenderChart(); }
+      else { ctaRenderAll(); if (typeof _ctaFillClientesList === 'function') _ctaFillClientesList(); }
     }
     _ctaStatus('🔄 Actualizado ' + new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }));
   } catch (e) {
@@ -24467,9 +24582,16 @@ function ctaRenderKPIs() {
 
   // ── Stock valorizado (stock actual × costo unitario del catálogo) ──
   ctaRecalcStock();
-  let stockVal = 0;
-  _ctaState.catalogo.forEach(c => { stockVal += (Number(c.stock) || 0) * (Number(c.costo) || 0); });
+  let stockVal = 0, stockValVenta = 0;
+  _ctaState.catalogo.forEach(c => {
+    const st = Number(c.stock) || 0;
+    stockVal += st * (Number(c.costo) || 0);
+    // v225: valorizado a precio de VENTA con la columna Woo de la Lista de Precios
+    const pv = (c.precios && Number(c.precios.woo)) || 0;
+    stockValVenta += st * pv;
+  });
   set('cta-kpi-stockval', PERSO_FMT_MONEY(stockVal));
+  set('cta-kpi-stockvalventa', PERSO_FMT_MONEY(stockValVenta));
 }
 
 function _ctaContarMeses() {
@@ -24642,9 +24764,37 @@ function _ctaOpsFiltradas() {
   return ops;
 }
 
+// v225: ¿el foco está dentro de la tabla de operaciones? (select/input abierto)
+function _ctaEditandoTabla(){
+  const tb = document.getElementById('cta-tbody');
+  const a = document.activeElement;
+  if(!tb || !a) return false;
+  if(!tb.contains(a)) return false;
+  const tag = (a.tagName || '').toUpperCase();
+  return tag === 'SELECT' || tag === 'INPUT' || tag === 'TEXTAREA' || a.isContentEditable;
+}
+let _ctaRenderPend = false;
 function ctaRenderTable() {
   const tb = document.getElementById('cta-tbody');
   if (!tb) return;
+  // v225: NO redibujar mientras se está usando un desplegable/celda (lo cerraría
+  // de golpe). Se reintenta apenas el control pierde el foco.
+  if(_ctaEditandoTabla()){
+    if(!_ctaRenderPend){
+      _ctaRenderPend = true;
+      const reintento = () => {
+        // esperar un toque: si el foco saltó a OTRA celda de la tabla, seguir esperando
+        setTimeout(() => {
+          if(_ctaEditandoTabla()) return; // sigue editando otra celda → el próximo focusout reintenta
+          document.removeEventListener('focusout', reintento, true);
+          _ctaRenderPend = false;
+          ctaRenderTable();
+        }, 80);
+      };
+      document.addEventListener('focusout', reintento, true);
+    }
+    return;
+  }
   const ops = _ctaOpsFiltradas();
   const cnt = document.getElementById('cta-count');
   if (cnt) cnt.textContent = ops.length.toLocaleString('es-AR') + ' operación(es) en el rango';
@@ -26222,7 +26372,9 @@ function ctaSetEstado(id, estado) {
   found.op.estado = estado;
   found.op.manualEdit = true;
   ctaMarkDirty(found.ym);
-  ctaRenderTable();
+  // v225: el <select> ya cambió su valor; re-render diferido para que no se
+  // sienta el "salto". Si el foco ya salió, ctaRenderTable corre normal.
+  setTimeout(() => ctaRenderTable(), 0);
 }
 
 // ── Edición inline de una celda (detalle/cliente/monto/origen/provincia/telefono) ──
@@ -26640,6 +26792,162 @@ async function ctaSaveStock() {
 }
 
 function ctaCloseStock() { document.getElementById('cta-stock-modal').style.display = 'none'; }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v225 · LISTA DE PRECIOS (grilla tipo Excel por canal)
+// ───────────────────────────────────────────────────────────────────────────
+// Filas = productos del catálogo (Stock y catálogo). Columnas = canales de
+// precio. Las 4 fijas por defecto: Clásica 🟡 / Premium 🔵 / Woo 🟣 / Mayorista ⚪.
+// Se pueden agregar columnas propias. Los precios se guardan por producto en
+// catalogo[i].precios[colId]; la definición de columnas se sincroniza en KV
+// (cta_config.preciosCols) para verlas igual en todas las PCs.
+// El KPI "Stock valorizado Venta" usa la columna Woo.
+const CTA_PRECIOS_COLS_DEFAULT = [
+  { id: 'clasica',   nombre: 'Clásica',   emoji: '🟡' },
+  { id: 'premium',   nombre: 'Premium',   emoji: '🔵' },
+  { id: 'woo',       nombre: 'Woo',       emoji: '🟣' },
+  { id: 'mayorista', nombre: 'Mayorista', emoji: '⚪' },
+];
+let _ctaPreciosCols = null; // se llena desde KV/localStorage
+
+function _ctaPreciosColsGet(){
+  if(_ctaPreciosCols) return _ctaPreciosCols;
+  try{
+    const s = JSON.parse(localStorage.getItem('cta_precios_cols') || 'null');
+    if(Array.isArray(s) && s.length){ _ctaPreciosCols = s; return s; }
+  }catch(e){}
+  _ctaPreciosCols = CTA_PRECIOS_COLS_DEFAULT.map(c => Object.assign({}, c));
+  return _ctaPreciosCols;
+}
+function _ctaPreciosColsSaveLS(){
+  try{ localStorage.setItem('cta_precios_cols', JSON.stringify(_ctaPreciosCols || [])); }catch(e){}
+}
+// sincroniza la definición de columnas al Worker (todas las PCs iguales)
+function _ctaPreciosColsPersist(){
+  _ctaPreciosColsSaveLS();
+  fetch(WORKER + '/api/cta/config', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ preciosCols: _ctaPreciosCols || [] })
+  }).catch(e => console.warn('[cta precios cols persist]', e.message));
+}
+function _ctaPrecioDe(prod, colId){
+  return (prod && prod.precios && prod.precios[colId] != null) ? prod.precios[colId] : '';
+}
+
+function ctaOpenPrecios(){
+  ctaRecalcStock();
+  _ctaRenderPreciosModal();
+  document.getElementById('cta-precios-modal').style.display = 'flex';
+}
+function ctaClosePrecios(){ const m=document.getElementById('cta-precios-modal'); if(m) m.style.display='none'; }
+
+function _ctaRenderPreciosModal(){
+  const cols = _ctaPreciosColsGet();
+  const cat = (_ctaState.catalogo || []).filter(c => c && c.nombre);
+  const fmtInput = v => (v===''||v==null) ? '' : Number(v).toLocaleString('es-AR');
+  // encabezados
+  let thead = '<th style="text-align:left;position:sticky;left:0;background:var(--bg2);z-index:2;min-width:200px">Productos</th>';
+  cols.forEach(col => {
+    thead += '<th style="min-width:130px;white-space:nowrap">' +
+      '<div style="display:flex;align-items:center;gap:5px;justify-content:center">' +
+        '<span>' + (col.emoji||'') + '</span>' +
+        '<span contenteditable="true" onblur="ctaPreciosRenameCol(\'' + col.id + '\', this.textContent)" ' +
+          'title="Clic para renombrar" style="outline:none;border-bottom:1px dashed transparent;cursor:text" ' +
+          'onfocus="this.style.borderBottomColor=\'var(--accent)\'" ' +
+          'onmouseover="this.style.borderBottomColor=\'var(--border)\'" ' +
+          'onmouseout="if(document.activeElement!==this)this.style.borderBottomColor=\'transparent\'">' +
+          _persoEsc(col.nombre) + '</span>' +
+        '<span style="font-size:9px;color:var(--text3);cursor:pointer;opacity:.6" title="Quitar columna" ' +
+          'onclick="ctaPreciosDelCol(\'' + col.id + '\')">✕</span>' +
+      '</div>' +
+      '<div style="font-size:9px;color:var(--text3);font-weight:400;margin-top:1px">Precio</div>' +
+    '</th>';
+  });
+  // filas
+  let rows = '';
+  if(!cat.length){
+    rows = '<tr><td colspan="' + (cols.length+1) + '" style="text-align:center;color:var(--text3);padding:26px">No hay productos en el catálogo. Cargalos en 📦 Stock y catálogo.</td></tr>';
+  } else {
+    cat.forEach(prod => {
+      let tds = '<td style="text-align:left;position:sticky;left:0;background:var(--card);z-index:1;font-weight:600;white-space:nowrap">' +
+        (prod.emoji ? prod.emoji + ' ' : '') + _persoEsc(prod.nombre) +
+        ' <span style="font-size:9.5px;color:var(--text3);font-weight:400">(stock ' + (Number(prod.stock)||0) + ')</span></td>';
+      cols.forEach(col => {
+        const v = _ctaPrecioDe(prod, col.id);
+        tds += '<td style="padding:2px"><input type="text" inputmode="numeric" value="' + fmtInput(v) + '" ' +
+          'data-prod="' + _persoEsc(prod.id) + '" data-col="' + col.id + '" ' +
+          'oninput="ctaPreciosEdit(this)" onblur="this.style.background=\'transparent\';ctaPreciosFmtBlur(this)" placeholder="—" ' +
+          'style="width:100%;box-sizing:border-box;border:none;background:transparent;text-align:right;padding:6px 8px;font-size:12.5px;color:var(--text1);border-radius:5px" ' +
+          'onfocus="this.style.background=\'var(--bg2)\'"></td>';
+      });
+      rows += '<tr style="border-bottom:1px solid var(--border)" onmouseover="this.style.background=\'var(--bg2)\'" onmouseout="this.style.background=\'\'">' + tds + '</tr>';
+    });
+  }
+  const cont = document.getElementById('cta-precios-body');
+  if(cont) cont.innerHTML =
+    '<table style="border-collapse:separate;border-spacing:0;width:100%;font-size:12.5px">' +
+      '<thead><tr style="position:sticky;top:0;background:var(--bg2);z-index:3">' + thead + '</tr></thead>' +
+      '<tbody>' + rows + '</tbody>' +
+    '</table>';
+}
+
+// escribir un precio (mientras se tipea) — no re-renderiza, no roba el foco
+function ctaPreciosEdit(inp){
+  const prodId = inp.getAttribute('data-prod');
+  const colId  = inp.getAttribute('data-col');
+  const prod = (_ctaState.catalogo || []).find(c => c.id === prodId);
+  if(!prod) return;
+  if(!prod.precios) prod.precios = {};
+  const num = parseFloat(String(inp.value).replace(/\./g,'').replace(/[^0-9,.-]/g,'').replace(',', '.')) || 0;
+  if(num > 0) prod.precios[colId] = num; else delete prod.precios[colId];
+  _ctaPreciosDirty = true;
+}
+// al salir de la celda: formatear con miles + guardar (debounce) + refrescar KPI
+let _ctaPreciosDirty = false, _ctaPreciosSaveTimer = null;
+function ctaPreciosFmtBlur(inp){
+  const prodId = inp.getAttribute('data-prod');
+  const colId  = inp.getAttribute('data-col');
+  const prod = (_ctaState.catalogo || []).find(c => c.id === prodId);
+  const v = prod && prod.precios ? prod.precios[colId] : null;
+  inp.value = (v==null || v==='') ? '' : Number(v).toLocaleString('es-AR');
+  if(_ctaPreciosDirty){
+    clearTimeout(_ctaPreciosSaveTimer);
+    _ctaPreciosSaveTimer = setTimeout(()=>{ _ctaPersistCatalogo(); _ctaPreciosDirty=false; }, 800);
+    if(typeof ctaRenderKPIs==='function') ctaRenderKPIs(); // refresca "Stock valorizado Venta"
+  }
+}
+function ctaPreciosAddCol(){
+  const nombre = prompt('Nombre de la nueva columna de precio:', 'Nuevo canal');
+  if(nombre===null) return;
+  const nom = nombre.trim(); if(!nom) return;
+  const base = nom.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'') || ('col'+Date.now());
+  const cols = _ctaPreciosColsGet();
+  let id = base, n=2; while(cols.some(c=>c.id===id)){ id = base+'_'+n; n++; }
+  cols.push({ id, nombre: nom, emoji: '➕' });
+  _ctaPreciosColsPersist();
+  _ctaRenderPreciosModal();
+}
+function ctaPreciosDelCol(colId){
+  const cols = _ctaPreciosColsGet();
+  const col = cols.find(c=>c.id===colId);
+  if(!col) return;
+  if(!confirm('¿Quitar la columna "' + col.nombre + '"?\n\nLos precios cargados en ella se borran de todos los productos.')) return;
+  _ctaPreciosCols = cols.filter(c=>c.id!==colId);
+  (_ctaState.catalogo||[]).forEach(pr=>{ if(pr.precios) delete pr.precios[colId]; });
+  _ctaPreciosColsPersist();
+  _ctaPersistCatalogo();
+  _ctaRenderPreciosModal();
+  if(typeof ctaRenderKPIs==='function') ctaRenderKPIs();
+}
+function ctaPreciosRenameCol(colId, nuevo){
+  const cols = _ctaPreciosColsGet();
+  const col = cols.find(c=>c.id===colId);
+  if(!col) return;
+  const nom = (nuevo||'').trim();
+  if(!nom || nom===col.nombre) return;
+  col.nombre = nom;
+  _ctaPreciosColsPersist();
+}
 
 // ── Importar Excel (edición masiva del exportado) ────────────────
 // Mismo sistema que el Analizador SEO: matchea por columna clave y
@@ -29210,17 +29518,38 @@ function _ecoInflLoad(){
 function _ecoInflSave(){
   try{ localStorage.setItem(ECO_INFL_KEY, JSON.stringify(_ecoInfl)); }catch(e){}
 }
-// trae la serie de inflación mensual (una vez por mes)
+// trae la serie de inflación mensual
+// v225: antes la caché de 25 días bloqueaba el refetch. El IPC del mes anterior
+// lo publica el INDEC a mitad de mes, así que si la caché se había refrescado
+// hace <25 días (p.ej. a fin de mes), el índice nuevo NO aparecía hasta bien
+// entrado el mes siguiente. Ahora: si el ÚLTIMO dato de la serie no es del mes
+// pasado (habiendo día ≥10, cuando ya debería estar publicado), se reintenta
+// aunque la caché sea reciente. Y el refresco base baja a 6h.
+function _ecoInflFaltaMesPasado(){
+  const u = _ecoInflUltimo();
+  if(!u || !u.fecha) return true;
+  const hoy = new Date();
+  // mes anterior en formato YYYY-MM
+  const prev = new Date(hoy.getFullYear(), hoy.getMonth()-1, 1);
+  const prevYm = prev.getFullYear()+'-'+String(prev.getMonth()+1).padStart(2,'0');
+  // solo lo consideramos "faltante" a partir del día 10 (antes puede no estar publicado)
+  if(hoy.getDate() < 10) return false;
+  return u.fecha.slice(0,7) < prevYm;
+}
 async function _ecoInflFetch(force){
-  const dias = (Date.now()-(_ecoInfl.ts||0))/86400000;
-  if(!force && _ecoInfl.serie.length && dias<25) return;   // fresco (menos de 25 días)
+  const horas = (Date.now()-(_ecoInfl.ts||0))/3600000;
+  const fresco = _ecoInfl.serie.length && horas < 6;
+  // Si está fresco Y ya tengo el índice del mes pasado → no pego a la API
+  if(!force && fresco && !_ecoInflFaltaMesPasado()) return;
   try{
-    const r = await fetch('https://api.argentinadatos.com/v1/finanzas/indices/inflacion');
+    const r = await fetch('https://api.argentinadatos.com/v1/finanzas/indices/inflacion', { cache:'no-store' });
     const arr = await r.json();
     if(Array.isArray(arr) && arr.length){
       _ecoInfl = { serie: arr, ts: Date.now() };
       _ecoInflSave();
       if(document.getElementById('section-economia')?.classList.contains('active')) ecoRenderKPIsSafe();
+      // el gráfico del dashboard (ticket vs IPC) también se actualiza si está a la vista
+      if(typeof renderDashTicketIPC==='function' && document.getElementById('section-dashboard')?.classList.contains('active')) renderDashTicketIPC();
     }
   }catch(e){ console.warn('[eco] inflación fetch:', e.message); }
 }
