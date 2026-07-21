@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v225 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v226 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1008,8 +1008,12 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <div class="card-hd">
       <div>
         <div class="card-title">🎟️ Ticket promedio ML vs Inflación</div>
-        <div class="card-sub">Ticket promedio mensual de ventas de Mercado Libre (barras, $) comparado con el IPC mensual del INDEC (línea, %) · últimos 12 meses</div>
+        <div class="card-sub">Últimos 12 meses · comparación del ticket promedio de ML con el IPC del INDEC</div>
       </div>
+      <select id="ticket-ipc-modo" onchange="renderDashTicketIPC()" style="margin-left:auto;font-size:11.5px;padding:5px 9px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text1);cursor:pointer">
+        <option value="valores">Valores ($ y %)</option>
+        <option value="base100">Índice base 100 (comparable)</option>
+      </select>
     </div>
     <div style="position:relative;height:300px"><canvas id="chart-ticket-ipc"></canvas></div>
     <div id="dash-ticket-ipc-note" style="font-size:10.5px;color:var(--text3);margin-top:8px"></div>
@@ -4314,16 +4318,20 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   <!-- Modal Lista de Precios (v225) -->
   <div id="cta-precios-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;align-items:center;justify-content:center">
     <div class="card" style="max-width:1180px;width:97%;margin:0;max-height:92vh;overflow:hidden;display:flex;flex-direction:column">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
         <div class="card-title" style="margin:0">💲 Lista de Precios</div>
         <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="ctaPreciosAddCol()">➕ Columna</button>
+        <button class="btn btn-ghost btn-sm" onclick="ctaPreciosExportExcel()" title="Descargar la lista a un .xlsx">📥 Exportar Excel</button>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('cta-precios-file').click()" title="Actualizar precios desde un .xlsx (matchea por nombre de producto)">📤 Importar Excel</button>
+        <input type="file" id="cta-precios-file" accept=".xlsx,.xls,.csv" style="display:none" onchange="ctaPreciosImportExcel(this.files[0])">
       </div>
       <div style="font-size:11px;color:var(--text3);margin-bottom:10px">
         Precios por canal de cada producto del catálogo. Editá cada celda como en una planilla; se guardan solos y se sincronizan en todas las PCs. Clic en el nombre de una columna para renombrarla. El KPI <b>💰 Stock valorizado Venta</b> usa la columna <b>Woo</b>.
       </div>
       <div id="cta-precios-body" class="tw" style="flex:1;overflow:auto;border:1px solid var(--border);border-radius:8px"></div>
-      <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end;align-items:center">
-        <span style="font-size:11px;color:var(--text3);margin-right:auto">Los cambios se guardan automáticamente.</span>
+      <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end;align-items:center;flex-wrap:wrap">
+        <span id="cta-precios-status" style="font-size:11px;color:var(--text3);margin-right:auto">Los cambios se guardan automáticamente. Usá "Guardar en la nube" para forzar la sincronización ya.</span>
+        <button class="btn btn-ghost btn-sm" onclick="ctaPreciosGuardarNube()">☁️ Guardar en la nube</button>
         <button class="btn btn-sm" style="background:var(--accent);color:#fff" onclick="ctaClosePrecios()">Cerrar</button>
       </div>
     </div>
@@ -7944,11 +7952,75 @@ function renderDashTicketIPC(){
   const labels = meses.map(ym => { const [y,m]=ym.split('-'); return MM[+m-1]+' '+y.slice(2); });
 
   const hayIpc = ipc.some(v => v!=null);
+  const modo = (document.getElementById('ticket-ipc-modo')||{}).value || 'valores';
+  const note = document.getElementById('dash-ticket-ipc-note');
+
+  if(modo === 'base100'){
+    // ── ÍNDICE BASE 100 ──────────────────────────────────────────────────
+    // Ambas series arrancan en 100 en el primer mes con dato y se comparan como
+    // trayectorias (adimensionales). Clave: la inflación NO va como variación
+    // mensual %, sino como NIVEL de precios acumulado (índice), que es lo único
+    // comparable contra la evolución del ticket. Si el ticket queda por debajo
+    // de la línea de inflación, perdió contra la suba general de precios.
+    const iBase = ticket.findIndex(v => v!=null && v>0);
+    let ticketIdx = labels.map(()=>null), inflIdx = labels.map(()=>null);
+    if(iBase >= 0){
+      const base = ticket[iBase];
+      ticketIdx = ticket.map(v => (v!=null && v>0) ? +(v/base*100).toFixed(1) : null);
+      // inflación acumulada: desde iBase, cada mes multiplica por (1+ipc/100)
+      let factor = 1;
+      for(let i=iBase; i<labels.length; i++){
+        if(i>iBase){ const r = ipc[i]; if(r!=null) factor *= (1 + r/100); }
+        inflIdx[i] = +(factor*100).toFixed(1);
+      }
+    }
+    makeChart('chart-ticket-ipc', {
+      type:'line',
+      data:{ labels, datasets:[
+        { label:'Ticket promedio (índice)', data:ticketIdx, borderColor:'#2563eb',
+          backgroundColor:'rgba(37,99,235,.10)', borderWidth:2.6, pointRadius:3, pointHoverRadius:5,
+          tension:.3, spanGaps:true, fill:true },
+        { label:'Precios / inflación (índice)', data:inflIdx, borderColor:'#f0994a',
+          backgroundColor:'transparent', borderWidth:2.4, borderDash:[6,4], pointRadius:3,
+          pointHoverRadius:5, tension:.3, spanGaps:true },
+      ]},
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        interaction:{ mode:'index', intersect:false },
+        plugins:{
+          legend:{ display:true, position:'bottom', labels:{ font:{size:11}, usePointStyle:true, padding:14 } },
+          tooltip:{ callbacks:{ label:(c)=> c.dataset.label + ': ' + (c.parsed.y==null?'s/d':c.parsed.y.toFixed(1)) } }
+        },
+        scales:{ x: tXOpts(),
+          y:{ ...tOpts(), title:{display:true,text:'Índice (base 100)',color:'var(--text3)',font:{size:10,weight:'600'}},
+              ticks:{ ...tOpts().ticks } } }
+      }
+    });
+    if(note){
+      if(iBase<0 || !hayIpc){
+        note.innerHTML = '⚠ Faltan datos (ventas de ML o inflación). Entrá una vez a <b>Economía</b> para cargar el IPC.';
+      } else {
+        const tf = ticketIdx.slice().reverse().find(v=>v!=null);
+        const inf = inflIdx.slice().reverse().find(v=>v!=null);
+        const brecha = (tf!=null && inf!=null) ? (tf - inf) : null;
+        note.innerHTML = 'Ambas series parten de <b>100</b> en el primer mes con datos. La naranja es el nivel de precios (inflación acumulada); la azul, tu ticket. ' +
+          (brecha!=null ? (brecha>=0
+            ? 'Tu ticket va <b style="color:#16a34a">' + brecha.toFixed(0) + ' puntos por encima</b> de la inflación (le ganás a los precios).'
+            : 'Tu ticket va <b style="color:#dc2626">' + Math.abs(brecha).toFixed(0) + ' puntos por debajo</b> de la inflación (perdés contra los precios).') : '');
+      }
+    }
+    return;
+  }
+
+  // ── MODO VALORES (default): barras ticket $ + línea IPC % ──────────────
   makeChart('chart-ticket-ipc', {
     data: { labels, datasets: [
       { type:'bar', label:'Ticket promedio ($)', data:ticket, yAxisID:'y',
         backgroundColor:'rgba(37,99,235,.55)', borderColor:'#2563eb', borderWidth:1,
-        borderRadius:5, order:2 },
+        borderRadius:5, order:3 },
+      { type:'line', label:'Ticket (tendencia)', data:ticket, yAxisID:'y',
+        borderColor:'#1e40af', backgroundColor:'#1e40af', borderWidth:2, pointRadius:0,
+        tension:.3, spanGaps:true, order:2 },
       { type:'line', label:'Inflación IPC (%)', data:ipc, yAxisID:'y1',
         borderColor:'#f0994a', backgroundColor:'#f0994a', borderWidth:2.4,
         pointRadius:3, pointHoverRadius:5, tension:.3, spanGaps:true, order:1 },
@@ -7957,8 +8029,10 @@ function renderDashTicketIPC(){
       responsive:true, maintainAspectRatio:false,
       interaction:{ mode:'index', intersect:false },
       plugins:{
-        legend:{ display:true, position:'bottom', labels:{ font:{size:11}, usePointStyle:true, padding:14 } },
+        legend:{ display:true, position:'bottom', labels:{ font:{size:11}, usePointStyle:true, padding:14,
+          filter:(it)=> it.text!=='Ticket (tendencia)' } },
         tooltip:{ callbacks:{ label:(c)=>{
+          if(c.dataset.label==='Ticket (tendencia)') return null;
           if(c.dataset.yAxisID==='y1') return c.parsed.y==null?'IPC: s/d':('IPC: '+c.parsed.y.toFixed(1)+'%');
           return c.parsed.y==null?'Ticket: s/d':('Ticket: $'+c.parsed.y.toLocaleString('es-AR'));
         }}}
@@ -7973,10 +8047,9 @@ function renderDashTicketIPC(){
       }
     }
   });
-  const note = document.getElementById('dash-ticket-ipc-note');
   if(note){
     note.innerHTML = hayIpc
-      ? 'Ticket: promedio por venta de ML (facturación / ventas del mes). IPC: variación mensual INDEC.'
+      ? 'Ticket: promedio por venta de ML (facturación / ventas del mes, línea + barras). IPC: variación mensual INDEC. Para comparar la evolución de las dos, usá el modo <b>Índice base 100</b> arriba a la derecha.'
       : '⚠ Todavía no hay datos de inflación cargados. Entrá una vez a <b>Economía</b> o esperá unos segundos: se cargan solos.';
   }
 }
@@ -26758,7 +26831,10 @@ async function ctaSaveStock() {
     if (!nombre) return;
     const prev = _ctaState.catalogo.find(c => c.nombre === nombre) || {};
     const matchRaw = (tr.querySelector('.cs-match').value || '').split(',').map(s => s.trim()).filter(Boolean);
-    cat.push({
+    // v226 FIX: partir de una COPIA del producto previo para NO perder campos que
+    // no están en este modal — sobre todo `precios` (la Lista de Precios). Antes
+    // se construía el objeto de cero y al guardar stock se borraban los precios.
+    const nuevo = Object.assign({}, prev, {
       id: prev.id || nombre.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''),
       nombre,
       emoji: tr.querySelector('.cs-emoji').value.trim() || '📦',
@@ -26770,6 +26846,8 @@ async function ctaSaveStock() {
       costo: parseFloat(tr.querySelector('.cs-costo').value) || 0,
       activo: true
     });
+    if (prev.precios) nuevo.precios = prev.precios;   // conservar la lista de precios
+    cat.push(nuevo);
   });
   _ctaState.catalogo = cat;
   const st = document.getElementById('cta-stock-status');
@@ -26839,16 +26917,28 @@ function ctaOpenPrecios(){
   _ctaRenderPreciosModal();
   document.getElementById('cta-precios-modal').style.display = 'flex';
 }
-function ctaClosePrecios(){ const m=document.getElementById('cta-precios-modal'); if(m) m.style.display='none'; }
+function ctaClosePrecios(){
+  // v226: si quedaron cambios sin subir, guardarlos al cerrar (no perder nada)
+  if(_ctaPreciosDirty){ try{ ctaPreciosGuardarNube(); }catch(e){} }
+  const m=document.getElementById('cta-precios-modal'); if(m) m.style.display='none';
+}
 
 function _ctaRenderPreciosModal(){
   const cols = _ctaPreciosColsGet();
   const cat = (_ctaState.catalogo || []).filter(c => c && c.nombre);
   const fmtInput = v => (v===''||v==null) ? '' : Number(v).toLocaleString('es-AR');
+  // v226: bordes de celda (cuadrícula), TODO centrado y anchos repartidos parejo.
+  // colgroup: la 1ª columna (Productos) un poco más ancha; el resto en partes iguales.
+  const wProd = 26;                                    // % para Productos
+  const wCol  = cols.length ? ((100 - wProd) / cols.length).toFixed(3) : (100 - wProd);
+  let colgroup = '<col style="width:' + wProd + '%">';
+  cols.forEach(() => { colgroup += '<col style="width:' + wCol + '%">'; });
+  const BRD = '1px solid var(--border)';
+  const thBase = 'text-align:center;border:' + BRD + ';padding:7px 6px;background:var(--bg2)';
   // encabezados
-  let thead = '<th style="text-align:left;position:sticky;left:0;background:var(--bg2);z-index:2;min-width:200px">Productos</th>';
+  let thead = '<th style="' + thBase + ';position:sticky;left:0;z-index:2">Productos</th>';
   cols.forEach(col => {
-    thead += '<th style="min-width:130px;white-space:nowrap">' +
+    thead += '<th style="' + thBase + '">' +
       '<div style="display:flex;align-items:center;gap:5px;justify-content:center">' +
         '<span>' + (col.emoji||'') + '</span>' +
         '<span contenteditable="true" onblur="ctaPreciosRenameCol(\'' + col.id + '\', this.textContent)" ' +
@@ -26866,27 +26956,28 @@ function _ctaRenderPreciosModal(){
   // filas
   let rows = '';
   if(!cat.length){
-    rows = '<tr><td colspan="' + (cols.length+1) + '" style="text-align:center;color:var(--text3);padding:26px">No hay productos en el catálogo. Cargalos en 📦 Stock y catálogo.</td></tr>';
+    rows = '<tr><td colspan="' + (cols.length+1) + '" style="text-align:center;color:var(--text3);padding:26px;border:' + BRD + '">No hay productos en el catálogo. Cargalos en 📦 Stock y catálogo.</td></tr>';
   } else {
     cat.forEach(prod => {
-      let tds = '<td style="text-align:left;position:sticky;left:0;background:var(--card);z-index:1;font-weight:600;white-space:nowrap">' +
+      let tds = '<td style="text-align:center;border:' + BRD + ';padding:6px 8px;position:sticky;left:0;background:var(--card);z-index:1;font-weight:600;white-space:nowrap">' +
         (prod.emoji ? prod.emoji + ' ' : '') + _persoEsc(prod.nombre) +
         ' <span style="font-size:9.5px;color:var(--text3);font-weight:400">(stock ' + (Number(prod.stock)||0) + ')</span></td>';
       cols.forEach(col => {
         const v = _ctaPrecioDe(prod, col.id);
-        tds += '<td style="padding:2px"><input type="text" inputmode="numeric" value="' + fmtInput(v) + '" ' +
+        tds += '<td style="padding:0;border:' + BRD + '"><input type="text" inputmode="numeric" value="' + fmtInput(v) + '" ' +
           'data-prod="' + _persoEsc(prod.id) + '" data-col="' + col.id + '" ' +
           'oninput="ctaPreciosEdit(this)" onblur="this.style.background=\'transparent\';ctaPreciosFmtBlur(this)" placeholder="—" ' +
-          'style="width:100%;box-sizing:border-box;border:none;background:transparent;text-align:right;padding:6px 8px;font-size:12.5px;color:var(--text1);border-radius:5px" ' +
+          'style="width:100%;box-sizing:border-box;border:none;background:transparent;text-align:center;padding:7px 8px;font-size:12.5px;color:var(--text1)" ' +
           'onfocus="this.style.background=\'var(--bg2)\'"></td>';
       });
-      rows += '<tr style="border-bottom:1px solid var(--border)" onmouseover="this.style.background=\'var(--bg2)\'" onmouseout="this.style.background=\'\'">' + tds + '</tr>';
+      rows += '<tr>' + tds + '</tr>';
     });
   }
   const cont = document.getElementById('cta-precios-body');
   if(cont) cont.innerHTML =
-    '<table style="border-collapse:separate;border-spacing:0;width:100%;font-size:12.5px">' +
-      '<thead><tr style="position:sticky;top:0;background:var(--bg2);z-index:3">' + thead + '</tr></thead>' +
+    '<table style="border-collapse:collapse;width:100%;table-layout:fixed;font-size:12.5px">' +
+      '<colgroup>' + colgroup + '</colgroup>' +
+      '<thead><tr style="position:sticky;top:0;z-index:3">' + thead + '</tr></thead>' +
       '<tbody>' + rows + '</tbody>' +
     '</table>';
 }
@@ -26913,8 +27004,10 @@ function ctaPreciosFmtBlur(inp){
   if(_ctaPreciosDirty){
     clearTimeout(_ctaPreciosSaveTimer);
     _ctaPreciosSaveTimer = setTimeout(()=>{ _ctaPersistCatalogo(); _ctaPreciosDirty=false; }, 800);
-    if(typeof ctaRenderKPIs==='function') ctaRenderKPIs(); // refresca "Stock valorizado Venta"
   }
+  // v226: recalcular el KPI SIEMPRE al salir de una celda (aunque no haya
+  // cambio en esta, el stock pudo variar en otra parte).
+  if(typeof ctaRenderKPIs==='function') ctaRenderKPIs();
 }
 function ctaPreciosAddCol(){
   const nombre = prompt('Nombre de la nueva columna de precio:', 'Nuevo canal');
@@ -26939,6 +27032,127 @@ function ctaPreciosDelCol(colId){
   _ctaRenderPreciosModal();
   if(typeof ctaRenderKPIs==='function') ctaRenderKPIs();
 }
+// v226: guardado explícito a la nube (fuerza el flush inmediato, sin esperar el
+// debounce) — para el botón "Guardar en la nube" del modal.
+async function ctaPreciosGuardarNube(){
+  const st = document.getElementById('cta-precios-status');
+  if(st) st.textContent = '💾 Guardando…';
+  clearTimeout(_ctaPreciosSaveTimer); clearTimeout(_ctaCatTimer);
+  try{
+    // columnas (definición) + catálogo (precios por producto), en firme
+    _ctaPreciosColsSaveLS();
+    await fetch(WORKER + '/api/cta/config', { method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ preciosCols: _ctaPreciosCols || [] }) });
+    const r = await fetch(WORKER + '/api/cta/catalogo', { method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ catalogo: _ctaState.catalogo }) });
+    const d = await r.json();
+    if(!d.ok) throw new Error(d.error || 'error');
+    _ctaPreciosDirty = false;
+    if(st) st.textContent = '✓ Guardado en la nube ' + new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+    if(typeof showToast==='function') showToast('💲 Lista de precios guardada en la nube','success');
+  }catch(e){
+    console.error('[precios guardar]', e);
+    if(st) st.textContent = '⚠ ' + e.message;
+  }
+}
+
+// v226: exportar la Lista de Precios a Excel (una fila por producto, una columna
+// por canal). Formato pensado para re-importar (matchea por nombre de producto).
+async function ctaPreciosExportExcel(){
+  const st = document.getElementById('cta-precios-status');
+  const cols = _ctaPreciosColsGet();
+  const cat = (_ctaState.catalogo||[]).filter(c=>c&&c.nombre);
+  if(!cat.length){ alert('No hay productos en el catálogo.'); return; }
+  if(st) st.textContent = '⏳ Generando Excel…';
+  try{
+    const XLSX = await _seoLoadSheetJS();
+    const header = ['Producto', 'Stock'].concat(cols.map(c=>c.nombre));
+    const aoa = [header];
+    cat.forEach(prod=>{
+      const row = [prod.nombre, Number(prod.stock)||0];
+      cols.forEach(col=>{ row.push((prod.precios && Number(prod.precios[col.id])) || ''); });
+      aoa.push(row);
+    });
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = [{wch:26},{wch:8}].concat(cols.map(()=>({wch:13})));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Lista de Precios');
+    // hoja guía: los ids de columna, por si se quiere entender el mapeo
+    const guia = XLSX.utils.aoa_to_sheet([
+      ['Cómo re-importar'],[''],
+      ['· No cambies la fila de encabezados ni el nombre de los productos.'],
+      ['· Editá los precios (podés dejar celdas vacías = sin precio).'],
+      ['· Volvé a importarlo con el botón 📤 Importar Excel.'],[''],
+      ['Columnas de precio actuales:'],
+      ...cols.map(c=>[c.emoji + ' ' + c.nombre]),
+    ]);
+    XLSX.utils.book_append_sheet(wb, guia, 'Instrucciones');
+    XLSX.writeFile(wb, 'lista-precios-impala-' + new Date().toISOString().slice(0,10) + '.xlsx');
+    if(st) st.textContent = '✓ Exportado (' + cat.length + ' productos)';
+  }catch(e){
+    console.error('[precios export]', e);
+    if(st) st.textContent = '⚠ ' + e.message;
+  }
+}
+
+// v226: importar la Lista de Precios desde Excel. Matchea por NOMBRE de producto
+// (columna 1). Cada columna cuyo encabezado coincida con una columna de precios
+// existente (por nombre, sin distinguir mayúsculas) actualiza esos precios.
+// No borra precios de columnas que no estén en el archivo. NO toca el stock.
+async function ctaPreciosImportExcel(file){
+  if(!file) return;
+  const st = document.getElementById('cta-precios-status');
+  if(st) st.textContent = '⏳ Leyendo Excel…';
+  try{
+    const XLSX = await _seoLoadSheetJS();
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type:'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const aoa = XLSX.utils.sheet_to_json(ws, { header:1, blankrows:false });
+    if(!aoa.length) throw new Error('archivo vacío');
+    const header = aoa[0].map(h=>String(h||'').trim());
+    // localizar la columna Producto y mapear encabezados → columnas de precio
+    const idxProd = header.findIndex(h=>/producto/i.test(h));
+    if(idxProd < 0) throw new Error('no encuentro la columna "Producto"');
+    const cols = _ctaPreciosColsGet();
+    const norm = s => String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+    const colMap = {}; // índiceExcel → colId
+    header.forEach((h,i)=>{
+      if(i===idxProd) return;
+      const col = cols.find(c=>norm(c.nombre)===norm(h));
+      if(col) colMap[i] = col.id;
+    });
+    if(!Object.keys(colMap).length) throw new Error('ninguna columna del archivo coincide con las columnas de precio actuales');
+    let tocados = 0;
+    for(let r=1;r<aoa.length;r++){
+      const fila = aoa[r]; if(!fila) continue;
+      const nombre = String(fila[idxProd]||'').trim();
+      if(!nombre) continue;
+      const prod = (_ctaState.catalogo||[]).find(c=>norm(c.nombre)===norm(nombre));
+      if(!prod) continue;
+      if(!prod.precios) prod.precios = {};
+      Object.keys(colMap).forEach(iStr=>{
+        const i = +iStr, colId = colMap[i];
+        const raw = fila[i];
+        if(raw==='' || raw==null){ return; } // celda vacía = no toca ese precio
+        const num = parseFloat(String(raw).replace(/\./g,'').replace(/[^0-9,.-]/g,'').replace(',', '.')) || 0;
+        if(num>0) prod.precios[colId] = num; else delete prod.precios[colId];
+      });
+      tocados++;
+    }
+    _ctaRenderPreciosModal();
+    if(typeof ctaRenderKPIs==='function') ctaRenderKPIs();
+    await ctaPreciosGuardarNube();
+    if(st) st.textContent = '✓ Importado: ' + tocados + ' producto(s) actualizados';
+    if(typeof showToast==='function') showToast('💲 Precios importados y guardados','success');
+  }catch(e){
+    console.error('[precios import]', e);
+    if(st) st.textContent = '⚠ ' + e.message;
+    alert('No se pudo importar: ' + e.message);
+  }
+  const inp = document.getElementById('cta-precios-file'); if(inp) inp.value='';
+}
+
 function ctaPreciosRenameCol(colId, nuevo){
   const cols = _ctaPreciosColsGet();
   const col = cols.find(c=>c.id===colId);
@@ -30577,6 +30791,7 @@ function ecoOpenGraf(){
       '<select id="eco-graf-mes-fin" onchange="_ecoGrafDraw()" style="padding:6px;border:1px solid '+_ECO_BRD+';border-radius:8px;font-size:12.5px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+'">'+mesesOpt+'</select>'+
       '<select id="eco-graf-anio-fin" onchange="_ecoGrafDraw()" style="padding:6px;border:1px solid '+_ECO_BRD+';border-radius:8px;font-size:12.5px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+'">'+aniosOpt(yMax)+'</select>'+
       '<label style="display:flex;align-items:center;gap:5px;cursor:pointer;margin-left:auto;background:#f0f9ff;padding:5px 10px;border-radius:8px;border:1px solid #bae6fd"><input type="checkbox" id="eco-graf-infl" onchange="_ecoGrafDraw()"><span style="font-weight:600;color:#0369a1">📈 Comparar con inflación</span></label>'+
+      '<label style="display:flex;align-items:center;gap:5px;cursor:pointer;background:#faf5ff;padding:5px 10px;border-radius:8px;border:1px solid #e9d5ff" title="Ambas curvas parten de 100 en el primer mes: ves si tus gastos suben más o menos que la inflación"><input type="checkbox" id="eco-graf-base100" onchange="_ecoGrafDraw()"><span style="font-weight:600;color:#7c3aed">💯 Índice base 100</span></label>'+
     '</div>'+
     '<div style="position:relative;height:360px;background:#fff"><canvas id="eco-graf-canvas"></canvas></div>'+
     '<div id="eco-graf-nota" style="font-size:11px;color:'+_ECO_TXT3+';margin-top:8px"></div>';
@@ -30587,18 +30802,78 @@ function ecoOpenGraf(){
 function _ecoGrafModoChg(){
   const modo=document.getElementById('eco-graf-modo').value;
   document.getElementById('eco-graf-gasto').style.display = modo==='gasto'?'block':'none';
-  document.getElementById('eco-graf-periodo').style.display = modo==='gasto'?'flex':'none';
+  // v226: el bloque de período/comparación ahora también aplica en modo total y
+  // categoría (para poder cruzar el gasto anual con la inflación en base 100).
+  document.getElementById('eco-graf-periodo').style.display = 'flex';
+  // en total/cat, el rango mensual no aplica: ocultar los selectores de mes/año
+  const perMens = document.querySelectorAll('#eco-graf-periodo select');
+  perMens.forEach(s=> s.style.display = (modo==='gasto') ? '' : 'none');
+  const spans = document.querySelectorAll('#eco-graf-periodo > span');
+  spans.forEach(s=> s.style.display = (modo==='gasto') ? '' : 'none');
   _ecoGrafDraw();
 }
 function _ecoGrafClose(){ if(_ecoChart){_ecoChart.destroy();_ecoChart=null;} document.querySelector('.eco-modal-ov')?.remove(); }
+// v226: helper — índice base 100 de una serie (primer valor no nulo = 100)
+function _ecoBase100(arr){
+  const i = arr.findIndex(v=>v!=null && v!==0);
+  if(i<0) return arr.map(()=>null);
+  const base = arr[i];
+  return arr.map(v=> (v!=null) ? +(v/base*100).toFixed(1) : null);
+}
+// v226: inflación ACUMULADA (nivel de precios, índice base 100) sobre una lista
+// de meses [{y, m(0-11)}]. El primer mes = 100.
+function _ecoInflIndice(meses){
+  let factor=1; const out=[];
+  meses.forEach((mm,idx)=>{
+    if(idx>0){ const v=_ecoInflDe(mm.y, mm.m+1); if(v!=null) factor*=(1+v/100); }
+    out.push(+(factor*100).toFixed(1));
+  });
+  return out;
+}
 function _ecoGrafDraw(){
   const modo=document.getElementById('eco-graf-modo').value;
   const cv=document.getElementById('eco-graf-canvas');
   if(!cv||typeof Chart==='undefined') return;
   if(_ecoChart){ _ecoChart.destroy(); _ecoChart=null; }
+  const base100 = document.getElementById('eco-graf-base100')?.checked;
+  const nota0=document.getElementById('eco-graf-nota');
   const years=_ecoYears().slice().reverse();
   let datasets=[], labels=[];
   const PAL=['#2563eb','#dc2626','#16a34a','#f59e0b','#7c3aed','#0891b2','#db2777','#65a30d','#ea580c','#0d9488'];
+
+  // ── MODO TOTAL / CATEGORÍA con base 100 anual vs inflación ────────────
+  if((modo==='total' || modo==='cat') && base100){
+    labels=years.map(String);
+    // meses de referencia para la inflación: diciembre de cada año (cierre)
+    const mesesRef = years.map(y=>({y:+y, m:11}));
+    const inflIdx = _ecoInflIndice(mesesRef);
+    if(modo==='total'){
+      const raw=years.map(y=>{ let s=0; _ecoState.gastos.forEach(g=>{const a=g.d&&g.d[y];if(a)a.forEach(v=>{if(typeof v==='number')s+=v;});}); return s; });
+      datasets=[{label:'Gasto total (índice)',data:_ecoBase100(raw),borderColor:'#2563eb',backgroundColor:'rgba(37,99,235,.10)',fill:true,tension:.3,spanGaps:true}];
+    } else {
+      datasets=Object.keys(ECO_CATS).map((c,i)=>{
+        const raw=years.map(y=>{ let s=0; _ecoState.gastos.filter(g=>g.cat===c).forEach(g=>{const a=g.d&&g.d[y];if(a)a.forEach(v=>{if(typeof v==='number')s+=v;});}); return s; });
+        return { label:(ECO_CATS[c]||'')+' '+c, data:_ecoBase100(raw), borderColor:PAL[i%PAL.length], backgroundColor:'transparent', tension:.3, spanGaps:true };
+      }).filter(ds=>ds.data.some(v=>v!=null && v!==100));
+    }
+    datasets.push({label:'Inflación acumulada (índice)',data:inflIdx,borderColor:'#f0994a',backgroundColor:'transparent',borderDash:[6,4],borderWidth:2.4,tension:.3,spanGaps:true});
+    _ecoChart=new Chart(cv.getContext('2d'),{ type:'line', data:{labels,datasets},
+      options:{responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{display:true,labels:{color:'#334155',font:{size:10},boxWidth:12}}},
+        scales:{ y:{ticks:{color:'#334155',callback:v=>v.toFixed(0),font:{size:10}},grid:{color:'rgba(0,0,0,.06)'},title:{display:true,text:'Índice (base 100)',color:'#64748b',font:{size:10}}},
+                 x:{ticks:{color:'#334155',font:{size:10}},grid:{color:'rgba(0,0,0,.04)'}} } }
+    });
+    if(nota0){
+      const gasto = datasets[0] ? datasets[0].data.slice().reverse().find(v=>v!=null) : null;
+      const inf   = inflIdx.slice().reverse().find(v=>v!=null);
+      nota0.innerHTML = 'Todo parte de <b>100</b> en el primer año con datos. La curva naranja es la inflación acumulada. ' +
+        (gasto!=null && inf!=null ? (gasto>=inf
+          ? 'Tu gasto quedó <b style="color:#dc2626">' + (gasto-inf).toFixed(0) + ' puntos por encima</b> de la inflación (subió más que los precios).'
+          : 'Tu gasto quedó <b style="color:#16a34a">' + (inf-gasto).toFixed(0) + ' puntos por debajo</b> de la inflación (le ganaste a los precios).') : '');
+    }
+    return;
+  }
+
   if(modo==='total'){
     labels=years.map(String);
     const data=years.map(y=>{ let s=0; _ecoState.gastos.forEach(g=>{const a=g.d&&g.d[y];if(a)a.forEach(v=>{if(typeof v==='number')s+=v;});}); return Math.round(s); });
@@ -30628,6 +30903,27 @@ function _ecoGrafDraw(){
         labels.push(ECO_MESES[m]+' '+String(y).slice(2));
         data.push(typeof v==='number'?v:null);
         meses.push({y,m});
+      }
+      // v226: modo base 100 para un gasto puntual — gasto e inflación arrancan en 100
+      if(base100){
+        const gastoIdx=_ecoBase100(data);
+        const inflIdx=_ecoInflIndice(meses);
+        datasets=[
+          {label:g.e+' '+g.n+' (índice)',data:gastoIdx,borderColor:'#2563eb',backgroundColor:'rgba(37,99,235,.10)',fill:true,tension:.3,spanGaps:true},
+          {label:'Inflación acumulada (índice)',data:inflIdx,borderColor:'#f0994a',backgroundColor:'transparent',borderDash:[6,4],borderWidth:2.4,tension:.3,spanGaps:true},
+        ];
+        _ecoChart=new Chart(cv.getContext('2d'),{ type:'line', data:{labels,datasets},
+          options:{responsive:true,maintainAspectRatio:false,
+            plugins:{legend:{display:true,labels:{color:'#334155',font:{size:10},boxWidth:12}}},
+            scales:{ y:{ticks:{color:'#334155',callback:v=>v.toFixed(0),font:{size:10}},grid:{color:'rgba(0,0,0,.06)'},title:{display:true,text:'Índice (base 100)',color:'#64748b',font:{size:10}}},
+                     x:{ticks:{color:'#334155',font:{size:9},maxRotation:60},grid:{color:'rgba(0,0,0,.04)'}} } }
+        });
+        const gf=gastoIdx.slice().reverse().find(v=>v!=null), inf=inflIdx.slice().reverse().find(v=>v!=null);
+        if(nota) nota.innerHTML='Ambas líneas parten de <b>100</b>. '+
+          (gf!=null && inf!=null ? (gf>=inf
+            ? 'Este gasto subió <b style="color:#dc2626">'+(gf-inf).toFixed(0)+' puntos más</b> que la inflación en el período.'
+            : 'Este gasto subió <b style="color:#16a34a">'+(inf-gf).toFixed(0)+' puntos menos</b> que la inflación (te conviene).') : '');
+        return;
       }
       datasets=[{label:g.e+' '+g.n,data,borderColor:'#2563eb',backgroundColor:'rgba(37,99,235,.13)',fill:true,tension:.3,spanGaps:true,yAxisID:'y'}];
       // comparación con inflación (acumulada desde el primer mes del período)
