@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v227 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v228 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -30006,57 +30006,100 @@ function ecoOpenMetricas(){
   _ecoMetSeedMerge();
   _ecoMetAutoFill();
   _ecoMetEnsureCta();
+  // opciones de período (todos los meses disponibles)
+  const yms=_ecoMetYms();
+  const MC=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  const lblYm=ym=>MC[+ym.slice(5,7)-1]+' '+ym.slice(0,4);
+  const rango=_ecoMetRango(yms);
+  const opts=(selYm)=>yms.map(ym=>'<option value="'+ym+'"'+(ym===selYm?' selected':'')+'>'+lblYm(ym)+'</option>').join('');
   const inner=
-    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'+
-      '<div style="font-size:16px;font-weight:800;color:'+_ECO_TXT+'">📊 Métricas — finanzas mensuales</div>'+
-      '<div style="display:flex;gap:8px;align-items:center">'+
-        '<button onclick="_ecoMetAddMes()" style="padding:7px 12px;border:1px dashed #93c5fd;background:#eff6ff;color:#1d4ed8;border-radius:9px;font-weight:600;cursor:pointer;font-size:12px">➕ Mes</button>'+
-        '<button onclick="_ecoCellClose()" style="border:none;background:#eef2f7;width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:16px;color:'+_ECO_TXT2+'">✕</button>'+
+    // ── HEADER FIJO ──
+    '<div style="flex:0 0 auto;padding:18px 20px 12px;border-bottom:1px solid '+_ECO_BRD+'">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center">'+
+        '<div style="font-size:16px;font-weight:800;color:'+_ECO_TXT+'">📊 Métricas — finanzas mensuales</div>'+
+        '<div style="display:flex;gap:8px;align-items:center">'+
+          '<button onclick="_ecoMetAddMes()" style="padding:7px 12px;border:1px dashed #93c5fd;background:#eff6ff;color:#1d4ed8;border-radius:9px;font-weight:600;cursor:pointer;font-size:12px">➕ Mes</button>'+
+          '<button onclick="_ecoCellClose()" style="border:none;background:#eef2f7;width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:16px;color:'+_ECO_TXT2+'">✕</button>'+
+        '</div>'+
       '</div>'+
     '</div>'+
-    '<div id="eco-met-resumen" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>'+
-    // v227: comparador base 100 (entre los KPIs y la cuadrícula)
-    '<div style="border:1px solid '+_ECO_BRD+';border-radius:11px;padding:12px 14px;margin-bottom:12px;background:#fbfcfe">'+
-      '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">'+
-        '<div style="font-size:13px;font-weight:800;color:'+_ECO_TXT+'">📈 Comparador — índice base 100 vs inflación</div>'+
-        '<span style="font-size:10.5px;color:'+_ECO_TXT3+'">Elegí una o varias series. Todas parten de 100 en su primer mes con dato, así se comparan aunque tengan unidades distintas.</span>'+
-        '<label style="display:flex;align-items:center;gap:5px;cursor:pointer;margin-left:auto;background:#fff7ed;padding:4px 9px;border-radius:8px;border:1px solid #fed7aa"><input type="checkbox" id="eco-met-cmp-infl" checked onchange="_ecoMetChartDraw()"><span style="font-weight:600;color:#c2410c;font-size:11px">Mostrar inflación</span></label>'+
+    // ── CUERPO SCROLLEABLE ──
+    '<div style="flex:1 1 auto;overflow:auto;padding:14px 20px 20px">'+
+      '<div id="eco-met-resumen" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>'+
+      // comparador base 100 (entre los KPIs y la cuadrícula)
+      '<div style="border:1px solid '+_ECO_BRD+';border-radius:11px;padding:12px 14px;margin-bottom:12px;background:#fbfcfe">'+
+        '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">'+
+          '<div style="font-size:13px;font-weight:800;color:'+_ECO_TXT+'">📈 Comparador — índice base 100 vs inflación</div>'+
+          '<label style="display:flex;align-items:center;gap:5px;cursor:pointer;margin-left:auto;background:#fff7ed;padding:4px 9px;border-radius:8px;border:1px solid #fed7aa"><input type="checkbox" id="eco-met-cmp-infl" checked onchange="_ecoMetChartDraw()"><span style="font-weight:600;color:#c2410c;font-size:11px">Mostrar inflación</span></label>'+
+        '</div>'+
+        // selector de período (desde / hasta)
+        '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-size:11.5px;color:'+_ECO_TXT2+'">'+
+          '<span style="font-weight:600">Período:</span>'+
+          '<span>desde</span>'+
+          '<select id="eco-met-desde" onchange="_ecoMetChartDraw()" style="padding:5px 8px;border:1px solid '+_ECO_BRD+';border-radius:8px;font-size:12px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+'">'+opts(rango.desde)+'</select>'+
+          '<span>hasta</span>'+
+          '<select id="eco-met-hasta" onchange="_ecoMetChartDraw()" style="padding:5px 8px;border:1px solid '+_ECO_BRD+';border-radius:8px;font-size:12px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+'">'+opts(rango.hasta)+'</select>'+
+          '<button onclick="_ecoMetRangoReset()" style="padding:4px 10px;border:1px solid '+_ECO_BRD+';background:#fff;color:'+_ECO_TXT2+';border-radius:8px;cursor:pointer;font-size:11px;font-weight:600">↺ Todo</button>'+
+          '<span style="color:'+_ECO_TXT3+';font-size:10.5px">Cada serie parte de 100 en el primer mes del período elegido.</span>'+
+        '</div>'+
+        '<div id="eco-met-cmp-series" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"></div>'+
+        '<div style="position:relative;height:320px;background:#fff;border-radius:8px;padding:4px"><canvas id="eco-met-chart"></canvas></div>'+
+        '<div id="eco-met-cmp-nota" style="font-size:11.5px;color:'+_ECO_TXT2+';margin-top:10px;line-height:1.7"></div>'+
       '</div>'+
-      '<div id="eco-met-cmp-series" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"></div>'+
-      '<div style="position:relative;height:300px;background:#fff;border-radius:8px;padding:4px"><canvas id="eco-met-chart"></canvas></div>'+
-      '<div id="eco-met-cmp-nota" style="font-size:11px;color:'+_ECO_TXT3+';margin-top:8px;line-height:1.5"></div>'+
-    '</div>'+
-    '<div style="overflow:auto;max-height:62vh;border:1px solid '+_ECO_BRD+';border-radius:10px">'+
-      '<table style="border-collapse:collapse;font-size:10.5px;min-width:1550px" id="eco-met-table">'+
-        '<thead><tr>'+_ecoMetHeaders()+'</tr></thead>'+
-        '<tbody id="eco-met-tbody"></tbody>'+
-      '</table>'+
-    '</div>'+
-    '<div style="font-size:10px;color:'+_ECO_TXT3+';margin-top:8px;line-height:1.5">'+
-      '⚙ = dato automático (IPC de la API de inflación · Ventas/Egresos del resumen de Cuenta Impala · Gastos de la planilla sin Convenio/Contador/Monotributo). '+
-      'Tocá una celda editable (borde punteado) para cargar o corregir. El dólar del mes en curso se completa solo a partir del día 10 con el oficial compra. '+
-      '<b>Ahorro %</b> = saldo del mes ÷ ingresos totales (tu capacidad de ahorro).'+
+      '<div style="overflow:auto;max-height:52vh;border:1px solid '+_ECO_BRD+';border-radius:10px">'+
+        '<table style="border-collapse:collapse;font-size:10.5px;min-width:1550px" id="eco-met-table">'+
+          '<thead><tr>'+_ecoMetHeaders()+'</tr></thead>'+
+          '<tbody id="eco-met-tbody"></tbody>'+
+        '</table>'+
+      '</div>'+
+      '<div style="font-size:10px;color:'+_ECO_TXT3+';margin-top:8px;line-height:1.5">'+
+        '⚙ = dato automático (IPC de la API de inflación · Ventas/Egresos del resumen de Cuenta Impala · Gastos de la planilla sin Convenio/Contador/Monotributo). '+
+        'Tocá una celda editable (borde punteado) para cargar o corregir. El dólar del mes en curso se completa solo a partir del día 10 con el oficial compra. '+
+        '<b>Ahorro %</b> = saldo del mes ÷ ingresos totales (tu capacidad de ahorro).'+
+      '</div>'+
     '</div>';
-  _ecoModalShell(inner, 2600);   // v227: usa (casi) toda la pantalla
+  _ecoModalShell(inner, 2400, true);   // v228: pantalla completa con scroll interno
   _ecoMetChipsRender();
   _ecoMetRedraw();
+}
+// v228: rango de período elegido para el comparador (persistente en la sesión)
+let _ecoMetRangoSel = null;
+function _ecoMetRango(yms){
+  if(_ecoMetRangoSel && yms.includes(_ecoMetRangoSel.desde) && yms.includes(_ecoMetRangoSel.hasta)) return _ecoMetRangoSel;
+  // por defecto: últimos 18 meses (o todo si hay menos)
+  const desde = yms.length>18 ? yms[yms.length-18] : yms[0];
+  const hasta = yms[yms.length-1];
+  _ecoMetRangoSel = { desde, hasta };
+  return _ecoMetRangoSel;
+}
+function _ecoMetRangoReset(){
+  const yms=_ecoMetYms();
+  _ecoMetRangoSel = { desde:yms[0], hasta:yms[yms.length-1] };
+  const d=document.getElementById('eco-met-desde'), h=document.getElementById('eco-met-hasta');
+  if(d) d.value=_ecoMetRangoSel.desde; if(h) h.value=_ecoMetRangoSel.hasta;
+  _ecoMetChartDraw();
 }
 
 // ── v227: comparador base 100 multi-serie ──────────────────────────────────
 // Series disponibles (campo del row calculado en _ecoMetCompute). Se pueden
 // elegir varias; cada una se normaliza a 100 en su primer mes con dato.
 const _ECO_MET_SERIES = [
-  { id:'v',     lbl:'Ventas $',      color:'#ea580c' },
-  { id:'sc',    lbl:'Sueldo C $',    color:'#16a34a' },
-  { id:'sb',    lbl:'Sueldo B $',    color:'#db2777' },
-  { id:'d',     lbl:'Dólar $',       color:'#ca8a04' },
-  { id:'g',     lbl:'Gastos $',      color:'#dc2626' },
-  { id:'tzUsd', lbl:'Taza US$',      color:'#7c3aed' },
-  { id:'vUsd',  lbl:'Ventas US$',    color:'#f59e0b' },
-  { id:'scUsd', lbl:'Sueldo C US$',  color:'#0891b2' },
-  { id:'sbUsd', lbl:'Sueldo B US$',  color:'#be185d' },
-  { id:'qIng',  lbl:'Ingresos US$',  color:'#0d9488' },
+  { id:'v',     lbl:'Ventas $',      color:'#ea580c', u:'$'   },
+  { id:'sc',    lbl:'Sueldo C $',    color:'#16a34a', u:'$'   },
+  { id:'sb',    lbl:'Sueldo B $',    color:'#db2777', u:'$'   },
+  { id:'d',     lbl:'Dólar $',       color:'#ca8a04', u:'$'   },
+  { id:'g',     lbl:'Gastos $',      color:'#dc2626', u:'$'   },
+  { id:'tzUsd', lbl:'Taza US$',      color:'#7c3aed', u:'US$' },
+  { id:'vUsd',  lbl:'Ventas US$',    color:'#f59e0b', u:'US$' },
+  { id:'scUsd', lbl:'Sueldo C US$',  color:'#0891b2', u:'US$' },
+  { id:'sbUsd', lbl:'Sueldo B US$',  color:'#be185d', u:'US$' },
+  { id:'qIng',  lbl:'Ingresos US$',  color:'#0d9488', u:'US$' },
 ];
+// formateo del objetivo según unidad (US$ con 2 decimales para taza)
+function _ecoMetFmtObj(u, n){
+  if(u==='US$') return 'US$'+ (n<100 ? (+n).toFixed(2) : Math.round(n).toLocaleString('es-AR'));
+  return '$'+Math.round(n).toLocaleString('es-AR');
+}
 let _ecoMetSel = null; // Set de ids seleccionados
 function _ecoMetSelGet(){
   if(_ecoMetSel) return _ecoMetSel;
@@ -30084,20 +30127,32 @@ function _ecoMetChartDraw(){
   const cv=document.getElementById('eco-met-chart');
   if(!cv||typeof Chart==='undefined') return;
   if(_ecoMetChart){ _ecoMetChart.destroy(); _ecoMetChart=null; }
-  // calcular todas las filas (ascendente)
-  const yms=_ecoMetYms(); const rows=[]; let prev=null;
-  yms.forEach(ym=>{ const r=_ecoMetCompute(ym,prev); rows.push(r); prev=r; });
+  // filas de TODO el histórico (ascendente) — las variaciones necesitan continuidad
+  const ymsAll=_ecoMetYms(); const rowsAll=[]; let prev=null;
+  ymsAll.forEach(ym=>{ const r=_ecoMetCompute(ym,prev); rowsAll.push(r); prev=r; });
+  // recortar al período elegido
+  const rango=_ecoMetRango(ymsAll);
+  const dSel=document.getElementById('eco-met-desde')?.value || rango.desde;
+  const hSel=document.getElementById('eco-met-hasta')?.value || rango.hasta;
+  let d0=dSel, h0=hSel; if(d0>h0){ const t=d0; d0=h0; h0=t; }
+  _ecoMetRangoSel={ desde:d0, hasta:h0 };
+  const rows=rowsAll.filter(r=> r.ym>=d0 && r.ym<=h0);
+  if(!rows.length){ const n=document.getElementById('eco-met-cmp-nota'); if(n) n.innerHTML='Sin datos en el período elegido.'; return; }
   const MESES_C=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
   const labels=rows.map(r=>MESES_C[+r.ym.slice(5,7)-1]+' '+r.ym.slice(2,4));
   const sel=_ecoMetSelGet();
-  const base100=(arr)=>{ const i=arr.findIndex(v=>v!=null&&v!==0); if(i<0) return arr.map(()=>null); const b=arr[i]; return arr.map(v=> v!=null?+(v/b*100).toFixed(1):null); };
+  // base 100 sobre el PERÍODO (primer valor no nulo del período = 100)
+  const base100=(arr)=>{ const i=arr.findIndex(v=>v!=null&&v!==0); if(i<0) return {idx:arr.map(()=>null),base:null,iBase:-1}; const b=arr[i]; return {idx:arr.map(v=> v!=null?+(v/b*100).toFixed(1):null), base:b, iBase:i}; };
   const datasets=[];
+  const perSerie={};
   _ECO_MET_SERIES.forEach(s=>{
     if(!sel.has(s.id)) return;
     const raw=rows.map(r=> (r[s.id]!=null&&isFinite(r[s.id]))? +r[s.id] : null);
-    datasets.push({ label:s.lbl, data:base100(raw), borderColor:s.color, backgroundColor:'transparent', borderWidth:2.4, pointRadius:2, pointHoverRadius:5, tension:.3, spanGaps:true });
+    const b=base100(raw);
+    perSerie[s.id]={ raw, idx:b.idx, base:b.base };
+    datasets.push({ label:s.lbl, data:b.idx, borderColor:s.color, backgroundColor:'transparent', borderWidth:2.4, pointRadius:2, pointHoverRadius:5, tension:.3, spanGaps:true });
   });
-  // inflación acumulada base 100 (mismos meses)
+  // inflación acumulada base 100 SOBRE EL PERÍODO (primer mes del período = 100)
   const verInfl=document.getElementById('eco-met-cmp-infl')?.checked;
   let inflIdx=null;
   if(verInfl){
@@ -30111,27 +30166,40 @@ function _ecoMetChartDraw(){
       scales:{ y:{ticks:{color:'#334155',callback:v=>v.toFixed(0),font:{size:10}},grid:{color:'rgba(0,0,0,.06)'},title:{display:true,text:'Índice (base 100)',color:'#64748b',font:{size:10,weight:'600'}}},
                x:{ticks:{color:'#334155',font:{size:9},maxRotation:60,autoSkip:true,maxTicksLimit:16},grid:{color:'rgba(0,0,0,.04)'}} } }
   });
-  // nota: comparar cada serie seleccionada contra la inflación en el período
+  // ── nota + RECOMENDACIÓN por serie ──────────────────────────────────────
   const nota=document.getElementById('eco-met-cmp-nota');
-  if(nota){
-    if(!datasets.length || (verInfl && datasets.length===1)){ nota.innerHTML='Elegí al menos una serie para comparar.'; return; }
-    if(verInfl && inflIdx){
-      const infFin=inflIdx.slice().reverse().find(v=>v!=null);
-      const partes=[];
-      _ECO_MET_SERIES.forEach(s=>{
-        if(!sel.has(s.id)) return;
-        const raw=rows.map(r=> (r[s.id]!=null&&isFinite(r[s.id]))? +r[s.id] : null);
-        const idx=base100(raw); const fin=idx.slice().reverse().find(v=>v!=null);
-        if(fin!=null && infFin!=null){
-          const dif=fin-infFin;
-          partes.push('<b style="color:'+s.color+'">'+s.lbl+'</b>: '+(dif>=0?'<span style="color:#16a34a">+'+dif.toFixed(0)+' pts sobre inflación</span>':'<span style="color:#dc2626">'+dif.toFixed(0)+' pts bajo inflación</span>'));
-        }
-      });
-      nota.innerHTML = partes.length ? ('En el período (todo base 100): '+partes.join(' · ')) : '';
-    } else {
-      nota.innerHTML='Cada serie parte de 100 en su primer mes con dato. Activá "Mostrar inflación" para comparar contra los precios.';
-    }
+  if(!nota) return;
+  if(!Object.keys(perSerie).length){ nota.innerHTML='Elegí al menos una serie para comparar.'; return; }
+  if(!(verInfl && inflIdx)){
+    nota.innerHTML='Cada serie parte de 100 en el primer mes del período. Activá "Mostrar inflación" para ver la recomendación contra los precios.';
+    return;
   }
+  const infFin=inflIdx.slice().reverse().find(v=>v!=null);      // índice inflación al final del período
+  const lblIni=labels[0], lblFin=labels[labels.length-1];
+  const partes=[];
+  _ECO_MET_SERIES.forEach(s=>{
+    if(!perSerie[s.id]) return;
+    const ps=perSerie[s.id];
+    const fin=ps.idx.slice().reverse().find(v=>v!=null);
+    const valorAct=ps.raw.slice().reverse().find(v=>v!=null);   // último valor real del período
+    if(fin==null || infFin==null || ps.base==null){ return; }
+    const dif=fin-infFin;   // puntos sobre/bajo inflación
+    // objetivo = valor_base × (índice_inflación_final / 100)  → lo que debería valer hoy para igualar la inflación
+    const objetivo = ps.base * (infFin/100);
+    let linea = '<b style="color:'+s.color+'">'+s.lbl+'</b>: ';
+    if(dif>=0){
+      linea += '<span style="color:#16a34a">+'+dif.toFixed(0)+' pts sobre inflación ✅</span>';
+      linea += ' <span style="color:'+_ECO_TXT3+'">(le gana a los precios; para igualar bastaba '+_ecoMetFmtObj(s.u,objetivo)+', hoy '+_ecoMetFmtObj(s.u,valorAct)+')</span>';
+    } else {
+      const faltan = objetivo - valorAct;
+      const pctSubir = valorAct>0 ? (faltan/valorAct*100) : null;
+      linea += '<span style="color:#dc2626">'+dif.toFixed(0)+' pts bajo inflación ⚠️</span>';
+      linea += ' <span style="color:'+_ECO_TXT2+'">— para equiparar debería ser <b>'+_ecoMetFmtObj(s.u,objetivo)+'</b> (hoy '+_ecoMetFmtObj(s.u,valorAct)+
+        (faltan>0?' → subir '+_ecoMetFmtObj(s.u,faltan)+(pctSubir!=null?', +'+pctSubir.toFixed(1)+'%':''):'')+')</span>';
+    }
+    partes.push('<div style="margin-top:3px">'+linea+'</div>');
+  });
+  nota.innerHTML = '<div style="font-weight:700;color:'+_ECO_TXT2+';margin-bottom:2px">Período '+lblIni+' → '+lblFin+' (todo base 100):</div>' + partes.join('');
 }
 // colores por grupo de columnas (como el Excel: las relacionadas comparten color)
 const _ECO_MET_COL={ mes:'#e9ebf0', ipc:'#dbeafe', dolar:'#fef9c3', cris:'#dcfce7',
@@ -30668,11 +30736,19 @@ function ecoRenderSummary(y, totMes, totAnual){
 
 // ═══ MODALES (colores explícitos, legibles en fondo claro) ═══
 const _ECO_MODAL_BG='#ffffff', _ECO_TXT='#0f172a', _ECO_TXT2='#334155', _ECO_TXT3='#64748b', _ECO_BRD='#cbd5e1', _ECO_INP_BG='#f8fafc';
-function _ecoModalShell(inner, maxw){
+function _ecoModalShell(inner, maxw, fullHeight){
   const ov=document.createElement('div');
   ov.className='eco-modal-ov';
-  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
-  ov.innerHTML='<div style="background:'+_ECO_MODAL_BG+';border-radius:14px;max-width:'+(maxw||400)+'px;width:100%;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.35);color:'+_ECO_TXT+'">'+inner+'</div>';
+  // v228: fullHeight → el modal ocupa casi toda la pantalla y su CONTENIDO
+  // scrollea internamente (antes, con mucho contenido, la caja crecía más que
+  // el viewport y como está centrada verticalmente, los KPIs de arriba quedaban
+  // cortados fuera de pantalla).
+  const align = fullHeight ? 'flex-start' : 'center';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99999;display:flex;align-items:'+align+';justify-content:center;padding:'+(fullHeight?'2vh 12px':'16px')+'';
+  const boxStyle = fullHeight
+    ? 'background:'+_ECO_MODAL_BG+';border-radius:14px;max-width:'+(maxw||400)+'px;width:100%;height:96vh;padding:0;box-shadow:0 20px 60px rgba(0,0,0,.35);color:'+_ECO_TXT+';display:flex;flex-direction:column;overflow:hidden'
+    : 'background:'+_ECO_MODAL_BG+';border-radius:14px;max-width:'+(maxw||400)+'px;width:100%;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.35);color:'+_ECO_TXT+'';
+  ov.innerHTML='<div style="'+boxStyle+'">'+inner+'</div>';
   document.body.appendChild(ov);
   return ov;
 }
