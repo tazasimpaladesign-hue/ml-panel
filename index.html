@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v226 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v227 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1010,10 +1010,6 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <div class="card-title">🎟️ Ticket promedio ML vs Inflación</div>
         <div class="card-sub">Últimos 12 meses · comparación del ticket promedio de ML con el IPC del INDEC</div>
       </div>
-      <select id="ticket-ipc-modo" onchange="renderDashTicketIPC()" style="margin-left:auto;font-size:11.5px;padding:5px 9px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text1);cursor:pointer">
-        <option value="valores">Valores ($ y %)</option>
-        <option value="base100">Índice base 100 (comparable)</option>
-      </select>
     </div>
     <div style="position:relative;height:300px"><canvas id="chart-ticket-ipc"></canvas></div>
     <div id="dash-ticket-ipc-note" style="font-size:10.5px;color:var(--text3);margin-top:8px"></div>
@@ -4317,7 +4313,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
   <!-- Modal Lista de Precios (v225) -->
   <div id="cta-precios-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;align-items:center;justify-content:center">
-    <div class="card" style="max-width:1180px;width:97%;margin:0;max-height:92vh;overflow:hidden;display:flex;flex-direction:column">
+    <div class="card" style="max-width:1500px;width:98%;margin:0;max-height:92vh;overflow:hidden;display:flex;flex-direction:column">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
         <div class="card-title" style="margin:0">💲 Lista de Precios</div>
         <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="ctaPreciosAddCol()">➕ Columna</button>
@@ -7952,106 +7948,99 @@ function renderDashTicketIPC(){
   const labels = meses.map(ym => { const [y,m]=ym.split('-'); return MM[+m-1]+' '+y.slice(2); });
 
   const hayIpc = ipc.some(v => v!=null);
-  const modo = (document.getElementById('ticket-ipc-modo')||{}).value || 'valores';
   const note = document.getElementById('dash-ticket-ipc-note');
 
-  if(modo === 'base100'){
-    // ── ÍNDICE BASE 100 ──────────────────────────────────────────────────
-    // Ambas series arrancan en 100 en el primer mes con dato y se comparan como
-    // trayectorias (adimensionales). Clave: la inflación NO va como variación
-    // mensual %, sino como NIVEL de precios acumulado (índice), que es lo único
-    // comparable contra la evolución del ticket. Si el ticket queda por debajo
-    // de la línea de inflación, perdió contra la suba general de precios.
+  // ── GRÁFICO UNIFICADO (v227) ─────────────────────────────────────────────
+  // Todo en una sola vista, sin selector:
+  //   · Barras  = Ticket $ (valor real, eje $ izquierda, siempre visible)
+  //   · Línea azul llena     = Ticket índice base 100 (eje derecho, comparable)
+  //   · Línea naranja rayada = Inflación acumulada índice base 100 (eje derecho)
+  //   · Línea gris punteada  = IPC mensual % (eje oculto, para diferenciarla)
+  // Base 100 = primer mes con ticket. La inflación va como NIVEL de precios
+  // acumulado (100·∏(1+ipc)), que es lo único comparable contra el ticket.
+  {
     const iBase = ticket.findIndex(v => v!=null && v>0);
     let ticketIdx = labels.map(()=>null), inflIdx = labels.map(()=>null);
+    let ticketBase = null, inflNow = null, ticketNow = null;
     if(iBase >= 0){
-      const base = ticket[iBase];
-      ticketIdx = ticket.map(v => (v!=null && v>0) ? +(v/base*100).toFixed(1) : null);
-      // inflación acumulada: desde iBase, cada mes multiplica por (1+ipc/100)
+      ticketBase = ticket[iBase];
+      ticketIdx = ticket.map(v => (v!=null && v>0) ? +(v/ticketBase*100).toFixed(1) : null);
       let factor = 1;
       for(let i=iBase; i<labels.length; i++){
         if(i>iBase){ const r = ipc[i]; if(r!=null) factor *= (1 + r/100); }
         inflIdx[i] = +(factor*100).toFixed(1);
       }
+      // últimos valores con dato (para la recomendación)
+      for(let i=labels.length-1;i>=0;i--){ if(ticketNow==null && ticket[i]!=null && ticket[i]>0){ ticketNow=ticket[i]; } if(inflNow==null && inflIdx[i]!=null){ inflNow=inflIdx[i]; } if(ticketNow!=null&&inflNow!=null) break; }
     }
     makeChart('chart-ticket-ipc', {
-      type:'line',
-      data:{ labels, datasets:[
-        { label:'Ticket promedio (índice)', data:ticketIdx, borderColor:'#2563eb',
-          backgroundColor:'rgba(37,99,235,.10)', borderWidth:2.6, pointRadius:3, pointHoverRadius:5,
-          tension:.3, spanGaps:true, fill:true },
-        { label:'Precios / inflación (índice)', data:inflIdx, borderColor:'#f0994a',
-          backgroundColor:'transparent', borderWidth:2.4, borderDash:[6,4], pointRadius:3,
-          pointHoverRadius:5, tension:.3, spanGaps:true },
+      data: { labels, datasets: [
+        { type:'bar', label:'Ticket promedio ($)', data:ticket, yAxisID:'y',
+          backgroundColor:'rgba(37,99,235,.28)', borderColor:'rgba(37,99,235,.55)', borderWidth:1,
+          borderRadius:5, order:5 },
+        { type:'line', label:'Ticket (índice base 100)', data:ticketIdx, yAxisID:'y1',
+          borderColor:'#2563eb', backgroundColor:'rgba(37,99,235,.08)', borderWidth:2.8,
+          pointRadius:3, pointHoverRadius:5, tension:.3, spanGaps:true, fill:false, order:2 },
+        { type:'line', label:'Inflación acumulada (índice)', data:inflIdx, yAxisID:'y1',
+          borderColor:'#f0994a', backgroundColor:'transparent', borderWidth:2.4, borderDash:[6,4],
+          pointRadius:3, pointHoverRadius:5, tension:.3, spanGaps:true, order:3 },
+        { type:'line', label:'IPC mensual (%)', data:ipc, yAxisID:'y2',
+          borderColor:'#94a3b8', backgroundColor:'transparent', borderWidth:1.6, borderDash:[2,3],
+          pointRadius:2, pointHoverRadius:4, tension:.3, spanGaps:true, order:4 },
       ]},
-      options:{
+      options: {
         responsive:true, maintainAspectRatio:false,
         interaction:{ mode:'index', intersect:false },
         plugins:{
-          legend:{ display:true, position:'bottom', labels:{ font:{size:11}, usePointStyle:true, padding:14 } },
-          tooltip:{ callbacks:{ label:(c)=> c.dataset.label + ': ' + (c.parsed.y==null?'s/d':c.parsed.y.toFixed(1)) } }
+          legend:{ display:true, position:'bottom', labels:{ font:{size:10.5}, usePointStyle:true, padding:12 } },
+          tooltip:{ callbacks:{ label:(c)=>{
+            if(c.parsed.y==null) return c.dataset.label+': s/d';
+            if(c.dataset.yAxisID==='y')  return 'Ticket: $'+c.parsed.y.toLocaleString('es-AR');
+            if(c.dataset.yAxisID==='y2') return 'IPC mensual: '+c.parsed.y.toFixed(1)+'%';
+            return c.dataset.label+': '+c.parsed.y.toFixed(1);
+          }}}
         },
-        scales:{ x: tXOpts(),
-          y:{ ...tOpts(), title:{display:true,text:'Índice (base 100)',color:'var(--text3)',font:{size:10,weight:'600'}},
-              ticks:{ ...tOpts().ticks } } }
+        scales:{
+          x: tXOpts(),
+          y:  { position:'left', ...tOpts(), title:{display:true,text:'Ticket $',color:'#2563eb',font:{size:10,weight:'600'}},
+               ticks:{ ...tOpts().ticks, callback:v=>'$'+(v>=1000?(v/1000).toFixed(0)+'k':v) } },
+          y1: { position:'right', grid:{drawOnChartArea:false}, ...tOpts(),
+               title:{display:true,text:'Índice base 100',color:'#64748b',font:{size:10,weight:'600'}},
+               ticks:{ ...tOpts().ticks } },
+          y2: { display:false },
+        }
       }
     });
     if(note){
       if(iBase<0 || !hayIpc){
-        note.innerHTML = '⚠ Faltan datos (ventas de ML o inflación). Entrá una vez a <b>Economía</b> para cargar el IPC.';
+        note.innerHTML = '⚠ Faltan datos (ventas de ML o inflación). Entrá una vez a <b>Economía</b> para cargar el IPC y esperá unos segundos.';
       } else {
         const tf = ticketIdx.slice().reverse().find(v=>v!=null);
-        const inf = inflIdx.slice().reverse().find(v=>v!=null);
-        const brecha = (tf!=null && inf!=null) ? (tf - inf) : null;
-        note.innerHTML = 'Ambas series parten de <b>100</b> en el primer mes con datos. La naranja es el nivel de precios (inflación acumulada); la azul, tu ticket. ' +
-          (brecha!=null ? (brecha>=0
-            ? 'Tu ticket va <b style="color:#16a34a">' + brecha.toFixed(0) + ' puntos por encima</b> de la inflación (le ganás a los precios).'
-            : 'Tu ticket va <b style="color:#dc2626">' + Math.abs(brecha).toFixed(0) + ' puntos por debajo</b> de la inflación (perdés contra los precios).') : '');
+        const brecha = (tf!=null && inflNow!=null) ? (tf - inflNow) : null;
+        // recomendación con cálculo: ticket necesario para igualar la inflación
+        // ticketObjetivo = ticketBase × (índiceInflación/100)
+        let reco = '';
+        if(ticketBase!=null && inflNow!=null && ticketNow!=null){
+          const objetivo = ticketBase * (inflNow/100);
+          const faltan = objetivo - ticketNow;
+          const fmt = n => '$'+Math.round(n).toLocaleString('es-AR');
+          if(faltan > 0){
+            const pctSubir = ticketNow>0 ? (faltan/ticketNow*100) : 0;
+            reco = ' <b>Para equiparar la inflación tu ticket promedio debería estar en '+fmt(objetivo)+'</b> (hoy '+fmt(ticketNow)+
+              ' → subir '+fmt(faltan)+', +'+pctSubir.toFixed(1)+'%).';
+          } else {
+            reco = ' Tu ticket ya supera lo que pide la inflación (objetivo '+fmt(objetivo)+', hoy '+fmt(ticketNow)+'). Buen trabajo.';
+          }
+        }
+        const estado = (brecha!=null) ? (brecha>=0
+            ? 'Tu ticket va <b style="color:#16a34a">'+brecha.toFixed(0)+' puntos por encima</b> de la inflación (le ganás a los precios).'
+            : 'Tu ticket va <b style="color:#dc2626">'+Math.abs(brecha).toFixed(0)+' puntos por debajo</b> de la inflación (perdés contra los precios).') : '';
+        note.innerHTML = 'Barras = ticket en $ (valor real). Líneas = índice base 100 (parten de 100 en el primer mes): azul tu ticket, naranja el nivel de precios (inflación acumulada), gris punteada el IPC mensual. ' + estado + reco;
       }
     }
     return;
   }
 
-  // ── MODO VALORES (default): barras ticket $ + línea IPC % ──────────────
-  makeChart('chart-ticket-ipc', {
-    data: { labels, datasets: [
-      { type:'bar', label:'Ticket promedio ($)', data:ticket, yAxisID:'y',
-        backgroundColor:'rgba(37,99,235,.55)', borderColor:'#2563eb', borderWidth:1,
-        borderRadius:5, order:3 },
-      { type:'line', label:'Ticket (tendencia)', data:ticket, yAxisID:'y',
-        borderColor:'#1e40af', backgroundColor:'#1e40af', borderWidth:2, pointRadius:0,
-        tension:.3, spanGaps:true, order:2 },
-      { type:'line', label:'Inflación IPC (%)', data:ipc, yAxisID:'y1',
-        borderColor:'#f0994a', backgroundColor:'#f0994a', borderWidth:2.4,
-        pointRadius:3, pointHoverRadius:5, tension:.3, spanGaps:true, order:1 },
-    ]},
-    options: {
-      responsive:true, maintainAspectRatio:false,
-      interaction:{ mode:'index', intersect:false },
-      plugins:{
-        legend:{ display:true, position:'bottom', labels:{ font:{size:11}, usePointStyle:true, padding:14,
-          filter:(it)=> it.text!=='Ticket (tendencia)' } },
-        tooltip:{ callbacks:{ label:(c)=>{
-          if(c.dataset.label==='Ticket (tendencia)') return null;
-          if(c.dataset.yAxisID==='y1') return c.parsed.y==null?'IPC: s/d':('IPC: '+c.parsed.y.toFixed(1)+'%');
-          return c.parsed.y==null?'Ticket: s/d':('Ticket: $'+c.parsed.y.toLocaleString('es-AR'));
-        }}}
-      },
-      scales:{
-        x: tXOpts(),
-        y: { position:'left', ...tOpts(), title:{display:true,text:'Ticket $',color:'#2563eb',font:{size:10,weight:'600'}},
-             ticks:{ ...tOpts().ticks, callback:v=>'$'+(v>=1000?(v/1000).toFixed(0)+'k':v) } },
-        y1:{ position:'right', grid:{drawOnChartArea:false}, ...tOpts(),
-             title:{display:true,text:'IPC %',color:'#f0994a',font:{size:10,weight:'600'}},
-             ticks:{ ...tOpts().ticks, callback:v=>v+'%' } },
-      }
-    }
-  });
-  if(note){
-    note.innerHTML = hayIpc
-      ? 'Ticket: promedio por venta de ML (facturación / ventas del mes, línea + barras). IPC: variación mensual INDEC. Para comparar la evolución de las dos, usá el modo <b>Índice base 100</b> arriba a la derecha.'
-      : '⚠ Todavía no hay datos de inflación cargados. Entrá una vez a <b>Economía</b> o esperá unos segundos: se cargan solos.';
-  }
 }
 
 function renderDashboard(){
@@ -30026,6 +30015,17 @@ function ecoOpenMetricas(){
       '</div>'+
     '</div>'+
     '<div id="eco-met-resumen" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>'+
+    // v227: comparador base 100 (entre los KPIs y la cuadrícula)
+    '<div style="border:1px solid '+_ECO_BRD+';border-radius:11px;padding:12px 14px;margin-bottom:12px;background:#fbfcfe">'+
+      '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">'+
+        '<div style="font-size:13px;font-weight:800;color:'+_ECO_TXT+'">📈 Comparador — índice base 100 vs inflación</div>'+
+        '<span style="font-size:10.5px;color:'+_ECO_TXT3+'">Elegí una o varias series. Todas parten de 100 en su primer mes con dato, así se comparan aunque tengan unidades distintas.</span>'+
+        '<label style="display:flex;align-items:center;gap:5px;cursor:pointer;margin-left:auto;background:#fff7ed;padding:4px 9px;border-radius:8px;border:1px solid #fed7aa"><input type="checkbox" id="eco-met-cmp-infl" checked onchange="_ecoMetChartDraw()"><span style="font-weight:600;color:#c2410c;font-size:11px">Mostrar inflación</span></label>'+
+      '</div>'+
+      '<div id="eco-met-cmp-series" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"></div>'+
+      '<div style="position:relative;height:300px;background:#fff;border-radius:8px;padding:4px"><canvas id="eco-met-chart"></canvas></div>'+
+      '<div id="eco-met-cmp-nota" style="font-size:11px;color:'+_ECO_TXT3+';margin-top:8px;line-height:1.5"></div>'+
+    '</div>'+
     '<div style="overflow:auto;max-height:62vh;border:1px solid '+_ECO_BRD+';border-radius:10px">'+
       '<table style="border-collapse:collapse;font-size:10.5px;min-width:1550px" id="eco-met-table">'+
         '<thead><tr>'+_ecoMetHeaders()+'</tr></thead>'+
@@ -30037,8 +30037,101 @@ function ecoOpenMetricas(){
       'Tocá una celda editable (borde punteado) para cargar o corregir. El dólar del mes en curso se completa solo a partir del día 10 con el oficial compra. '+
       '<b>Ahorro %</b> = saldo del mes ÷ ingresos totales (tu capacidad de ahorro).'+
     '</div>';
-  _ecoModalShell(inner, 1900);
+  _ecoModalShell(inner, 2600);   // v227: usa (casi) toda la pantalla
+  _ecoMetChipsRender();
   _ecoMetRedraw();
+}
+
+// ── v227: comparador base 100 multi-serie ──────────────────────────────────
+// Series disponibles (campo del row calculado en _ecoMetCompute). Se pueden
+// elegir varias; cada una se normaliza a 100 en su primer mes con dato.
+const _ECO_MET_SERIES = [
+  { id:'v',     lbl:'Ventas $',      color:'#ea580c' },
+  { id:'sc',    lbl:'Sueldo C $',    color:'#16a34a' },
+  { id:'sb',    lbl:'Sueldo B $',    color:'#db2777' },
+  { id:'d',     lbl:'Dólar $',       color:'#ca8a04' },
+  { id:'g',     lbl:'Gastos $',      color:'#dc2626' },
+  { id:'tzUsd', lbl:'Taza US$',      color:'#7c3aed' },
+  { id:'vUsd',  lbl:'Ventas US$',    color:'#f59e0b' },
+  { id:'scUsd', lbl:'Sueldo C US$',  color:'#0891b2' },
+  { id:'sbUsd', lbl:'Sueldo B US$',  color:'#be185d' },
+  { id:'qIng',  lbl:'Ingresos US$',  color:'#0d9488' },
+];
+let _ecoMetSel = null; // Set de ids seleccionados
+function _ecoMetSelGet(){
+  if(_ecoMetSel) return _ecoMetSel;
+  try{ const s=JSON.parse(localStorage.getItem('eco_met_cmp_sel')||'null'); if(Array.isArray(s)&&s.length){ _ecoMetSel=new Set(s); return _ecoMetSel; } }catch(e){}
+  _ecoMetSel = new Set(['v','sc','tzUsd']);  // default útil
+  return _ecoMetSel;
+}
+function _ecoMetSelSave(){ try{ localStorage.setItem('eco_met_cmp_sel', JSON.stringify([..._ecoMetSelGet()])); }catch(e){} }
+function _ecoMetChipsRender(){
+  const cont=document.getElementById('eco-met-cmp-series'); if(!cont) return;
+  const sel=_ecoMetSelGet();
+  cont.innerHTML=_ECO_MET_SERIES.map(s=>{
+    const on=sel.has(s.id);
+    return '<span onclick="_ecoMetToggleSerie(\''+s.id+'\')" style="cursor:pointer;user-select:none;font-size:11px;font-weight:700;padding:5px 11px;border-radius:20px;border:1.5px solid '+s.color+';'+
+      (on?('background:'+s.color+';color:#fff'):('background:#fff;color:'+s.color))+'">'+(on?'✓ ':'')+s.lbl+'</span>';
+  }).join('');
+}
+function _ecoMetToggleSerie(id){
+  const sel=_ecoMetSelGet();
+  if(sel.has(id)) sel.delete(id); else sel.add(id);
+  _ecoMetSelSave(); _ecoMetChipsRender(); _ecoMetChartDraw();
+}
+let _ecoMetChart=null;
+function _ecoMetChartDraw(){
+  const cv=document.getElementById('eco-met-chart');
+  if(!cv||typeof Chart==='undefined') return;
+  if(_ecoMetChart){ _ecoMetChart.destroy(); _ecoMetChart=null; }
+  // calcular todas las filas (ascendente)
+  const yms=_ecoMetYms(); const rows=[]; let prev=null;
+  yms.forEach(ym=>{ const r=_ecoMetCompute(ym,prev); rows.push(r); prev=r; });
+  const MESES_C=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  const labels=rows.map(r=>MESES_C[+r.ym.slice(5,7)-1]+' '+r.ym.slice(2,4));
+  const sel=_ecoMetSelGet();
+  const base100=(arr)=>{ const i=arr.findIndex(v=>v!=null&&v!==0); if(i<0) return arr.map(()=>null); const b=arr[i]; return arr.map(v=> v!=null?+(v/b*100).toFixed(1):null); };
+  const datasets=[];
+  _ECO_MET_SERIES.forEach(s=>{
+    if(!sel.has(s.id)) return;
+    const raw=rows.map(r=> (r[s.id]!=null&&isFinite(r[s.id]))? +r[s.id] : null);
+    datasets.push({ label:s.lbl, data:base100(raw), borderColor:s.color, backgroundColor:'transparent', borderWidth:2.4, pointRadius:2, pointHoverRadius:5, tension:.3, spanGaps:true });
+  });
+  // inflación acumulada base 100 (mismos meses)
+  const verInfl=document.getElementById('eco-met-cmp-infl')?.checked;
+  let inflIdx=null;
+  if(verInfl){
+    let f=1; inflIdx=rows.map((r,idx)=>{ if(idx>0 && r.ipc!=null) f*=(1+r.ipc/100); return +(f*100).toFixed(1); });
+    datasets.push({ label:'Inflación acumulada', data:inflIdx, borderColor:'#0f172a', backgroundColor:'transparent', borderWidth:2.8, borderDash:[7,4], pointRadius:0, tension:.3, spanGaps:true });
+  }
+  _ecoMetChart=new Chart(cv.getContext('2d'),{ type:'line', data:{labels,datasets},
+    options:{ responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
+      plugins:{ legend:{display:true,position:'bottom',labels:{color:'#334155',font:{size:10.5},boxWidth:12,usePointStyle:true,padding:12}},
+        tooltip:{callbacks:{label:c=> c.dataset.label+': '+(c.parsed.y==null?'s/d':c.parsed.y.toFixed(1))}} },
+      scales:{ y:{ticks:{color:'#334155',callback:v=>v.toFixed(0),font:{size:10}},grid:{color:'rgba(0,0,0,.06)'},title:{display:true,text:'Índice (base 100)',color:'#64748b',font:{size:10,weight:'600'}}},
+               x:{ticks:{color:'#334155',font:{size:9},maxRotation:60,autoSkip:true,maxTicksLimit:16},grid:{color:'rgba(0,0,0,.04)'}} } }
+  });
+  // nota: comparar cada serie seleccionada contra la inflación en el período
+  const nota=document.getElementById('eco-met-cmp-nota');
+  if(nota){
+    if(!datasets.length || (verInfl && datasets.length===1)){ nota.innerHTML='Elegí al menos una serie para comparar.'; return; }
+    if(verInfl && inflIdx){
+      const infFin=inflIdx.slice().reverse().find(v=>v!=null);
+      const partes=[];
+      _ECO_MET_SERIES.forEach(s=>{
+        if(!sel.has(s.id)) return;
+        const raw=rows.map(r=> (r[s.id]!=null&&isFinite(r[s.id]))? +r[s.id] : null);
+        const idx=base100(raw); const fin=idx.slice().reverse().find(v=>v!=null);
+        if(fin!=null && infFin!=null){
+          const dif=fin-infFin;
+          partes.push('<b style="color:'+s.color+'">'+s.lbl+'</b>: '+(dif>=0?'<span style="color:#16a34a">+'+dif.toFixed(0)+' pts sobre inflación</span>':'<span style="color:#dc2626">'+dif.toFixed(0)+' pts bajo inflación</span>'));
+        }
+      });
+      nota.innerHTML = partes.length ? ('En el período (todo base 100): '+partes.join(' · ')) : '';
+    } else {
+      nota.innerHTML='Cada serie parte de 100 en su primer mes con dato. Activá "Mostrar inflación" para comparar contra los precios.';
+    }
+  }
 }
 // colores por grupo de columnas (como el Excel: las relacionadas comparten color)
 const _ECO_MET_COL={ mes:'#e9ebf0', ipc:'#dbeafe', dolar:'#fef9c3', cris:'#dcfce7',
@@ -30109,6 +30202,7 @@ function _ecoMetRedraw(){
     '</tr>';
   }).join('');
   _ecoMetResumen(rows);
+  try{ _ecoMetChartDraw(); }catch(e){ console.warn('[eco-met chart]', e.message); }
 }
 function _ecoMetResumen(rows){
   const cont=document.getElementById('eco-met-resumen');
