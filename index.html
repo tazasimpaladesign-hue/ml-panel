@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v228 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v229 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -8049,6 +8049,8 @@ function renderDashboard(){
   renderDashKPIs();
   loadDashVisits().then(()=>renderMainChart()).catch(()=>renderMainChart());
   renderCatChart(); renderPubTypeChart(); renderDashTopPubs(); renderDashInsights(); renderDashStock(); renderDashConv(); renderDashRepMini();
+  // v229: el embudo usa la serie diaria de visitas de la cuenta → asegurarla
+  loadDashVisits().then(()=>{ try{ renderDashFunnel(); }catch(e){} }).catch(()=>{});
   try{ renderDashTicketIPC(); }catch(e){ console.warn('[ticket-ipc]', e.message); }
   renderCalWidget();
   // v109: refrescar estado Telegram 24/7
@@ -12869,6 +12871,10 @@ function _predUpdateReportBadge(){
   if(typeof renderRadarAciertos === 'function') renderRadarAciertos();
   const el = document.getElementById('seo-pred-badge');
   if(!el) return;
+  // v229: badge del reporte predictivo oculto a pedido (el reporte se sigue
+  // generando y se puede bajar con predDownloadReport() desde la consola).
+  el.style.display = 'none'; el.innerHTML = '';
+  if(true) return;
   if(predIsReportDue()){
     const store = _predLoad();
     const snapCount = Object.values(store.snapshots).reduce((s,a) => s+a.length, 0);
@@ -14096,6 +14102,11 @@ function _predRadarMessage(stats){
 function renderRadarAciertos(){
   const el = document.getElementById('seo-pred-radar');
   if(!el) return;
+  // v229: widget oculto a pedido. El motor predictivo sigue corriendo igual
+  // (snapshots, matches, hotness/fueguitos y KPIs no se tocan); solo no se
+  // dibuja el panel. Para volver a mostrarlo, borrar estas 2 líneas.
+  el.style.display = 'none'; el.innerHTML = '';
+  if(true) return;
   const stats = _predGetRadarStats();
   if(stats.totalHotItems === 0 && stats.totalMatches === 0){
     el.style.display = 'none';
@@ -29097,17 +29108,47 @@ function selectOptItem(id,title){
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ── Embudo de ventas (últimos 7 días vs 7 anteriores) ──
+var _funnelVisitsAsked = false;   // v229: evita pedir la serie de visitas en bucle
 function renderDashFunnel(){
   const el = document.getElementById('dash-funnel');
   if(!el) return;
   try{
-    // Visitas: suma de visitas 7d de las métricas (si están cargadas)
-    let v7=0, vPrev=0, hayMetricas=false;
-    Object.values(itemMetrics||{}).forEach(m=>{
-      if(!m) return;
-      if((+m.visits||0) > 0 || (+m.visitsPrev||0) > 0) hayMetricas = true;
-      v7 += (+m.visits||0); vPrev += (+m.visitsPrev||0);
-    });
+    // ── VISITAS (v229: reescrito) ─────────────────────────────────────────
+    // ANTES: se sumaba itemMetrics[].visits / .visitsPrev de cada publicación.
+    // Eso era incoherente por diseño y por eso los números no cerraban nunca:
+    //   · La ventana de 30 días de cada ítem es relativa a CUÁNDO se cacheó ese
+    //     ítem. Si una publicación se cargó hace 10 días y otra hoy, sus "7 días"
+    //     son semanas distintas y se estaban sumando entre sí.
+    //   · Los ítems sin métricas cargadas (o con fetch fallido) aportaban 0,
+    //     así que el total dependía de cuántos ítems alcanzó a bajar el panel.
+    //   · visitsPrev quedaba en 0 en cachés viejas → saltos falsos tipo ▲153%.
+    // AHORA: se usa globalVisitsByDay, la MISMA serie diaria a nivel cuenta que
+    // alimenta el gráfico principal (1 sola llamada:
+    // /users/{id}/items_visits/time_window?last=60&unit=day). Las dos ventanas
+    // salen del mismo array, del mismo momento → comparables por construcción.
+    let v7=0, vPrev=0, hayMetricas=false, vDesde='', vHasta='';
+    const _gv = (typeof globalVisitsByDay==='object' && globalVisitsByDay) ? globalVisitsByDay : {};
+    const _dias = Object.keys(_gv).sort();          // 'YYYY-MM-DD' ascendente
+    if(_dias.length >= 8){
+      const ult = _dias.slice(-7);                  // últimos 7 días con dato
+      const ant = _dias.slice(-14, -7);             // los 7 anteriores
+      v7    = ult.reduce((s,k)=>s+(+_gv[k]||0),0);
+      vPrev = ant.reduce((s,k)=>s+(+_gv[k]||0),0);
+      hayMetricas = true;
+      vDesde = ult[0]; vHasta = ult[ult.length-1];
+    } else {
+      // Fallback (cuenta sin datos de visitas todavía): suma por ítem, como antes.
+      Object.values(itemMetrics||{}).forEach(m=>{
+        if(!m) return;
+        if((+m.visits||0) > 0 || (+m.visitsPrev||0) > 0) hayMetricas = true;
+        v7 += (+m.visits||0); vPrev += (+m.visitsPrev||0);
+      });
+      // pedir la serie de cuenta y redibujar cuando llegue (una sola vez)
+      if(typeof loadDashVisits==='function' && !_funnelVisitsAsked){
+        _funnelVisitsAsked = true;
+        loadDashVisits().then(()=>{ try{ renderDashFunnel(); }catch(e){} }).catch(()=>{});
+      }
+    }
     // Preguntas por fecha
     const now=Date.now(), d7=now-7*86400000, d14=now-14*86400000;
     let q7=0, qPrev=0;
@@ -29134,7 +29175,8 @@ function renderDashFunnel(){
       return ' <b>' + (p>=0?'▲':'▼') + Math.abs(p) + '%</b>';
     };
     const niveles = [
-      { label:'Visitas',             val: hayMetricas? v7 : null, prev: hayMetricas? vPrev : null, c:'#4aaef7', ins:[0,9]  },
+      { label:'Visitas',             val: hayMetricas? v7 : null, prev: hayMetricas? vPrev : null, c:'#4aaef7', ins:[0,9],
+        tip: vDesde? ('Visitas reales de la cuenta (todas las publicaciones), del '+vDesde+' al '+vHasta+', comparadas con los 7 días previos. Fuente única: items_visits diario de Mercado Libre.') : '' },
       { label:'Preguntas',           val: q7, prev: qPrev, c:'#7ac943', ins:[9,18]  },
       { label:'Ventas',              val: s7, prev: sPrev, c:'#f0994a', ins:[18,26] },
       { label:'Ventas concretadas',  val: c7, prev: cPrev, c:'#ef5350', ins:[26,32] },
@@ -29145,7 +29187,7 @@ function renderDashFunnel(){
       const valTxt = (n.val==null) ? '—' : fmt(n.val);
       const prevTxt = (n.val==null) ? 'cargá métricas en el Analizador SEO'
         : (n.prev!=null ? '7 días anteriores: '+fmt(n.prev)+deltaTxt(n.val,n.prev) : '');
-      return '<div style="clip-path:'+clip+';-webkit-clip-path:'+clip+';background:'+n.c+';text-align:center;padding:8px 4px 9px;color:#fff">'+
+      return '<div title="'+((n.tip||'').replace(/"/g,'&quot;'))+'" style="clip-path:'+clip+';-webkit-clip-path:'+clip+';background:'+n.c+';text-align:center;padding:8px 4px 9px;color:#fff">'+
         '<div style="font-size:11.5px;font-weight:700;opacity:.95">'+n.label+'</div>'+
         '<div style="font-size:21px;font-weight:800;line-height:1.1">'+valTxt+'</div>'+
         '<div style="font-size:10px;opacity:.92">'+prevTxt+'</div>'+
@@ -29395,12 +29437,12 @@ let _ecoSel = [];  // selección múltiple de celdas: [{gid, mes}]
 function _ecoLoad(){
   try{
     const raw = localStorage.getItem(ECO_LS_KEY);
-    if(raw){ const d=JSON.parse(raw); if(d && Array.isArray(d.gastos)){ if(Array.isArray(d.ingresos)) _ecoState.ingresos=d.ingresos; if(d.metricas&&typeof d.metricas==='object') _ecoState.metricas=d.metricas; if(Array.isArray(d.acreditar)) _ecoState.acreditar=d.acreditar; if(Array.isArray(d.ahorros)) _ecoState.ahorros=d.ahorros; return d.gastos; } }
+    if(raw){ const d=JSON.parse(raw); if(d && Array.isArray(d.gastos)){ if(Array.isArray(d.ingresos)) _ecoState.ingresos=d.ingresos; if(d.metricas&&typeof d.metricas==='object') _ecoState.metricas=d.metricas; if(Array.isArray(d.metricasCols)) _ecoState.metricasCols=d.metricasCols; if(Array.isArray(d.acreditar)) _ecoState.acreditar=d.acreditar; if(Array.isArray(d.ahorros)) _ecoState.ahorros=d.ahorros; return d.gastos; } }
   }catch(e){}
   try{ return JSON.parse(ECO_SEED_JSON); }catch(e){ return []; }
 }
 function _ecoSaveLS(){
-  try{ localStorage.setItem(ECO_LS_KEY, JSON.stringify({ gastos:_ecoState.gastos, ingresos:_ecoState.ingresos||[], metricas:_ecoState.metricas||{}, acreditar:_ecoState.acreditar||[], ahorros:_ecoState.ahorros||[], savedAt:Date.now() })); }catch(e){}
+  try{ localStorage.setItem(ECO_LS_KEY, JSON.stringify({ gastos:_ecoState.gastos, ingresos:_ecoState.ingresos||[], metricas:_ecoState.metricas||{}, metricasCols:_ecoState.metricasCols||[], acreditar:_ecoState.acreditar||[], ahorros:_ecoState.ahorros||[], savedAt:Date.now() })); }catch(e){}
 }
 function _ecoMarkDirty(){
   _ecoState.dirty = true; _ecoSaveLS();
@@ -29413,7 +29455,7 @@ async function _ecoFlush(){
   try{
     await fetch(WORKER + '/api/backup', {
       method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
-      body: JSON.stringify({ economia: { gastos:_ecoState.gastos, ingresos:_ecoState.ingresos||[], metricas:_ecoState.metricas||{}, acreditar:_ecoState.acreditar||[], ahorros:_ecoState.ahorros||[], savedAt:Date.now() } })
+      body: JSON.stringify({ economia: { gastos:_ecoState.gastos, ingresos:_ecoState.ingresos||[], metricas:_ecoState.metricas||{}, metricasCols:_ecoState.metricasCols||[], acreditar:_ecoState.acreditar||[], ahorros:_ecoState.ahorros||[], savedAt:Date.now() } })
     });
   }catch(e){ console.warn('[eco] guardar nube:', e.message); }
 }
@@ -29429,6 +29471,7 @@ async function _ecoSyncDown(){
         _ecoState.gastos = d.economia.gastos;
         if(Array.isArray(d.economia.ingresos)) _ecoState.ingresos = d.economia.ingresos;
         if(d.economia.metricas && typeof d.economia.metricas==='object') _ecoState.metricas = d.economia.metricas;
+        if(Array.isArray(d.economia.metricasCols)) _ecoState.metricasCols = d.economia.metricasCols;
         if(Array.isArray(d.economia.acreditar)) _ecoState.acreditar = d.economia.acreditar;
         if(Array.isArray(d.economia.ahorros)) _ecoState.ahorros = d.economia.ahorros;
         _ecoSaveLS();
@@ -29920,6 +29963,8 @@ function _ecoMetCompute(ym, prevRow){
     tzUsd: (tz!=null&&d>0)? tz/d : null,
     gUsd:  (g!=null&&d>0)? g/d : null,
   };
+  // v229: columnas propias — su valor se guarda igual que el resto en met[ym][id]
+  _ecoMetCols().forEach(c=>{ row[c.id] = (m[c.id]!=null && isFinite(m[c.id])) ? +m[c.id] : null; });
   row.nDif = (row.scDif!=null&&ipc!=null)? row.scDif-ipc : null;   // Cristian % - IPC
   row.oDif = (row.sbDif!=null&&ipc!=null)? row.sbDif-ipc : null;   // Belén % - IPC
   row.qIng = (row.vUsd!=null||row.scUsd!=null||row.sbUsd!=null)? ((row.vUsd||0)+(row.scUsd||0)+(row.sbUsd||0)) : null;
@@ -30019,6 +30064,7 @@ function ecoOpenMetricas(){
         '<div style="font-size:16px;font-weight:800;color:'+_ECO_TXT+'">📊 Métricas — finanzas mensuales</div>'+
         '<div style="display:flex;gap:8px;align-items:center">'+
           '<button onclick="_ecoMetAddMes()" style="padding:7px 12px;border:1px dashed #93c5fd;background:#eff6ff;color:#1d4ed8;border-radius:9px;font-weight:600;cursor:pointer;font-size:12px">➕ Mes</button>'+
+          '<button onclick="_ecoMetColsManager()" style="padding:7px 12px;border:1px dashed #c4b5fd;background:#f5f3ff;color:#6d28d9;border-radius:9px;font-weight:600;cursor:pointer;font-size:12px" title="Agregar columnas propias a la planilla y elegir dónde van">🧩 Columnas</button>'+
           '<button onclick="_ecoCellClose()" style="border:none;background:#eef2f7;width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:16px;color:'+_ECO_TXT2+'">✕</button>'+
         '</div>'+
       '</div>'+
@@ -30048,7 +30094,7 @@ function ecoOpenMetricas(){
       '</div>'+
       '<div style="overflow:auto;max-height:52vh;border:1px solid '+_ECO_BRD+';border-radius:10px">'+
         '<table style="border-collapse:collapse;font-size:10.5px;min-width:1550px" id="eco-met-table">'+
-          '<thead><tr>'+_ecoMetHeaders()+'</tr></thead>'+
+          '<thead><tr id="eco-met-thead-row">'+_ecoMetHeaders()+'</tr></thead>'+
           '<tbody id="eco-met-tbody"></tbody>'+
         '</table>'+
       '</div>'+
@@ -30062,6 +30108,78 @@ function ecoOpenMetricas(){
   _ecoMetChipsRender();
   _ecoMetRedraw();
 }
+// ── v229: gestor de columnas propias de la planilla ────────────────────────
+function _ecoMetColsManager(){
+  const cols=_ecoMetCols();
+  const base=_ecoMetBaseCols();
+  const anclas='<option value="__ini__">(al principio)</option>'+
+    base.map(b=>'<option value="'+b.id+'">después de "'+b.th+'"</option>').join('')+
+    '<option value="__fin__">(al final)</option>';
+  const unis=Object.keys(_ECO_MET_UNIDADES).map(u=>'<option value="'+u+'">'+_ECO_MET_UNIDADES[u].lbl+'</option>').join('');
+  const filas = cols.length ? cols.map((c,i)=>
+    '<tr>'+
+      '<td style="padding:5px;border:1px solid '+_ECO_BRD+'"><input value="'+String(c.nombre||'').replace(/"/g,'&quot;')+'" onchange="_ecoMetColSet('+i+',\'nombre\',this.value)" style="width:110px;padding:5px;border:1px solid '+_ECO_BRD+';border-radius:6px;font-size:12px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+'"></td>'+
+      '<td style="padding:5px;border:1px solid '+_ECO_BRD+'"><select onchange="_ecoMetColSet('+i+',\'unidad\',this.value)" style="padding:5px;border:1px solid '+_ECO_BRD+';border-radius:6px;font-size:12px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+'">'+
+        Object.keys(_ECO_MET_UNIDADES).map(u=>'<option value="'+u+'"'+(c.unidad===u?' selected':'')+'>'+_ECO_MET_UNIDADES[u].lbl+'</option>').join('')+'</select></td>'+
+      '<td style="padding:5px;border:1px solid '+_ECO_BRD+'"><select onchange="_ecoMetColSet('+i+',\'after\',this.value)" style="padding:5px;border:1px solid '+_ECO_BRD+';border-radius:6px;font-size:12px;max-width:170px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+'">'+
+        '<option value="__ini__"'+(c.after==='__ini__'?' selected':'')+'>(al principio)</option>'+
+        base.map(b=>'<option value="'+b.id+'"'+(c.after===b.id?' selected':'')+'>después de "'+b.th+'"</option>').join('')+
+        '<option value="__fin__"'+((!c.after||c.after==='__fin__')?' selected':'')+'>(al final)</option>'+
+      '</select></td>'+
+      '<td style="padding:5px;border:1px solid '+_ECO_BRD+';text-align:center"><button onclick="_ecoMetColDel('+i+')" style="border:none;background:#fee2e2;color:#b91c1c;border-radius:6px;padding:5px 9px;cursor:pointer;font-size:11px;font-weight:700">Borrar</button></td>'+
+    '</tr>').join('') : '<tr><td colspan="4" style="padding:14px;text-align:center;color:'+_ECO_TXT3+';border:1px solid '+_ECO_BRD+'">Todavía no agregaste columnas propias.</td></tr>';
+  const inner=
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'+
+      '<div style="font-size:15px;font-weight:800;color:'+_ECO_TXT+'">🧩 Columnas propias de la planilla</div>'+
+      '<button onclick="this.closest(\'.eco-modal-ov2\').remove()" style="border:none;background:#eef2f7;width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:16px;color:'+_ECO_TXT2+'">✕</button>'+
+    '</div>'+
+    '<div style="font-size:11.5px;color:'+_ECO_TXT3+';margin-bottom:10px;line-height:1.5">Agregá las columnas que necesites (otro ingreso, otro gasto, un dato a seguir) y elegí en qué lugar de la planilla van. Se cargan como cualquier otra celda y se pueden comparar en el gráfico.</div>'+
+    '<table style="border-collapse:collapse;width:100%;font-size:12px;margin-bottom:12px">'+
+      '<thead><tr>'+['Nombre','Unidad','Posición',''].map(t=>'<th style="padding:6px;border:1px solid '+_ECO_BRD+';background:#eef2f7;font-size:11px">'+t+'</th>').join('')+'</tr></thead>'+
+      '<tbody>'+filas+'</tbody>'+
+    '</table>'+
+    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-top:1px solid '+_ECO_BRD+';padding-top:12px">'+
+      '<input id="eco-met-newcol-nom" placeholder="Nombre de la columna" style="flex:1;min-width:150px;padding:8px;border:1px solid '+_ECO_BRD+';border-radius:8px;font-size:13px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+'">'+
+      '<select id="eco-met-newcol-uni" style="padding:8px;border:1px solid '+_ECO_BRD+';border-radius:8px;font-size:12.5px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+'">'+unis+'</select>'+
+      '<select id="eco-met-newcol-pos" style="padding:8px;border:1px solid '+_ECO_BRD+';border-radius:8px;font-size:12.5px;max-width:190px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+'">'+anclas+'</select>'+
+      '<button onclick="_ecoMetColAdd()" style="padding:8px 14px;border:none;background:#2563eb;color:#fff;border-radius:8px;font-weight:700;cursor:pointer;font-size:12.5px">➕ Agregar</button>'+
+    '</div>';
+  const ov=document.createElement('div');
+  ov.className='eco-modal-ov2';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:100001;display:flex;align-items:center;justify-content:center;padding:16px';
+  ov.innerHTML='<div style="background:'+_ECO_MODAL_BG+';border-radius:14px;max-width:720px;width:100%;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.35);color:'+_ECO_TXT+';max-height:88vh;overflow:auto">'+inner+'</div>';
+  document.body.appendChild(ov);
+}
+function _ecoMetColAdd(){
+  const nom=(document.getElementById('eco-met-newcol-nom').value||'').trim();
+  if(!nom){ alert('Poné un nombre para la columna.'); return; }
+  const uni=document.getElementById('eco-met-newcol-uni').value||'#';
+  const pos=document.getElementById('eco-met-newcol-pos').value||'__fin__';
+  const cols=_ecoMetCols();
+  const id='cc_'+Date.now().toString(36)+Math.floor(Math.random()*1000).toString(36);
+  cols.push({ id, nombre:nom, unidad:uni, after:pos, color:'#ede9fe' });
+  _ecoMetColsSave();
+  document.querySelector('.eco-modal-ov2')?.remove();
+  _ecoMetColsManager();
+  _ecoMetRedraw(); _ecoMetChipsRender();
+}
+function _ecoMetColSet(i,campo,val){
+  const cols=_ecoMetCols(); if(!cols[i]) return;
+  cols[i][campo]=val; _ecoMetColsSave();
+  _ecoMetRedraw(); _ecoMetChipsRender();
+}
+function _ecoMetColDel(i){
+  const cols=_ecoMetCols(); const c=cols[i]; if(!c) return;
+  if(!confirm('¿Borrar la columna "'+c.nombre+'"?\n\nSe eliminan también los valores cargados en ella en todos los meses.')) return;
+  const met=_ecoMet();
+  Object.keys(met).forEach(ym=>{ if(met[ym] && met[ym][c.id]!=null) delete met[ym][c.id]; });
+  const sel=_ecoMetSelGet(); sel.delete(c.id); _ecoMetSelSave();
+  cols.splice(i,1); _ecoMetColsSave();
+  document.querySelector('.eco-modal-ov2')?.remove();
+  _ecoMetColsManager();
+  _ecoMetRedraw(); _ecoMetChipsRender();
+}
+
 // v228: rango de período elegido para el comparador (persistente en la sesión)
 let _ecoMetRangoSel = null;
 function _ecoMetRango(yms){
@@ -30094,7 +30212,16 @@ const _ECO_MET_SERIES = [
   { id:'scUsd', lbl:'Sueldo C US$',  color:'#0891b2', u:'US$' },
   { id:'sbUsd', lbl:'Sueldo B US$',  color:'#be185d', u:'US$' },
   { id:'qIng',  lbl:'Ingresos US$',  color:'#0d9488', u:'US$' },
+  { id:'gUsd',  lbl:'Gastos US$',    color:'#b91c1c', u:'US$' },
+  { id:'saldo', lbl:'Saldo US$',     color:'#334155', u:'US$' },
 ];
+// v229: series disponibles = base + columnas propias de la planilla
+function _ecoMetSeriesAll(){
+  const custom=(typeof _ecoMetCols==='function'? _ecoMetCols():[]).map(c=>({
+    id:c.id, lbl:c.nombre, color:c.colorSerie||'#8b5cf6', u:(c.unidad==='#'?'':c.unidad)||'', custom:true
+  }));
+  return _ECO_MET_SERIES.concat(custom);
+}
 // formateo del objetivo según unidad (US$ con 2 decimales para taza)
 function _ecoMetFmtObj(u, n){
   if(u==='US$') return 'US$'+ (n<100 ? (+n).toFixed(2) : Math.round(n).toLocaleString('es-AR'));
@@ -30111,7 +30238,7 @@ function _ecoMetSelSave(){ try{ localStorage.setItem('eco_met_cmp_sel', JSON.str
 function _ecoMetChipsRender(){
   const cont=document.getElementById('eco-met-cmp-series'); if(!cont) return;
   const sel=_ecoMetSelGet();
-  cont.innerHTML=_ECO_MET_SERIES.map(s=>{
+  cont.innerHTML=_ecoMetSeriesAll().map(s=>{
     const on=sel.has(s.id);
     return '<span onclick="_ecoMetToggleSerie(\''+s.id+'\')" style="cursor:pointer;user-select:none;font-size:11px;font-weight:700;padding:5px 11px;border-radius:20px;border:1.5px solid '+s.color+';'+
       (on?('background:'+s.color+';color:#fff'):('background:#fff;color:'+s.color))+'">'+(on?'✓ ':'')+s.lbl+'</span>';
@@ -30123,6 +30250,28 @@ function _ecoMetToggleSerie(id){
   _ecoMetSelSave(); _ecoMetChipsRender(); _ecoMetChartDraw();
 }
 let _ecoMetChart=null;
+// v229: ejes del comparador. 'y' = índice base 100 (siempre, a la derecha si hay
+// barras). 'yv'/'yv2' = valores reales de cada unidad, a la izquierda.
+function _ecoMetScales(ejesValor, conBarras){
+  const sc={
+    x:{ticks:{color:'#334155',font:{size:9},maxRotation:60,autoSkip:true,maxTicksLimit:16},grid:{color:'rgba(0,0,0,.04)'}},
+    y:{ position: conBarras?'right':'left', ticks:{color:'#334155',callback:v=>v.toFixed(0),font:{size:10}},
+        grid:{color:'rgba(0,0,0,.06)', drawOnChartArea:!conBarras},
+        title:{display:true,text:'Índice (base 100)',color:'#64748b',font:{size:10,weight:'600'}} },
+  };
+  if(conBarras){
+    const uds=Object.keys(ejesValor);
+    uds.forEach(u=>{
+      const id=ejesValor[u];
+      const simbolo = u==='US$' ? 'US$' : (u==='$' ? '$' : (u==='%' ? '' : ''));
+      sc[id]={ position:'left', ticks:{color:'#334155',font:{size:9.5},
+          callback:v=>{ const a=Math.abs(v); const s=(a>=1000000)?(v/1000000).toFixed(1)+'M':(a>=1000?(v/1000).toFixed(0)+'k':v); return simbolo+s; }},
+        grid:{color:'rgba(0,0,0,.05)'},
+        title:{display:true,text:'Valor'+(u?' ('+u+')':''),color:'#64748b',font:{size:10,weight:'600'}} };
+    });
+  }
+  return sc;
+}
 function _ecoMetChartDraw(){
   const cv=document.getElementById('eco-met-chart');
   if(!cv||typeof Chart==='undefined') return;
@@ -30143,28 +30292,46 @@ function _ecoMetChartDraw(){
   const sel=_ecoMetSelGet();
   // base 100 sobre el PERÍODO (primer valor no nulo del período = 100)
   const base100=(arr)=>{ const i=arr.findIndex(v=>v!=null&&v!==0); if(i<0) return {idx:arr.map(()=>null),base:null,iBase:-1}; const b=arr[i]; return {idx:arr.map(v=> v!=null?+(v/b*100).toFixed(1):null), base:b, iBase:i}; };
+  const SER=_ecoMetSeriesAll();
+  const elegidas=SER.filter(s=>sel.has(s.id));
+  // v229: con 1 o 2 series mostramos además las BARRAS con el valor real de la
+  // celda (como el gráfico de ticket). Con 3 o más se omiten para no saturar.
+  const conBarras = elegidas.length>0 && elegidas.length<=2;
   const datasets=[];
   const perSerie={};
-  _ECO_MET_SERIES.forEach(s=>{
-    if(!sel.has(s.id)) return;
+  const ejesValor={};   // unidad → id de eje
+  if(conBarras){
+    elegidas.forEach((s,i)=>{
+      const raw=rows.map(r=> (r[s.id]!=null&&isFinite(r[s.id]))? +r[s.id] : null);
+      // un eje de valores por unidad distinta (máx 2)
+      let ejeId=ejesValor[s.u||'#'];
+      if(!ejeId){ ejeId = Object.keys(ejesValor).length===0 ? 'yv' : 'yv2'; ejesValor[s.u||'#']=ejeId; }
+      datasets.push({ type:'bar', label:s.lbl+' (valor)', data:raw, yAxisID:ejeId,
+        backgroundColor:s.color+'40', borderColor:s.color+'80', borderWidth:1, borderRadius:4, order:9+i });
+    });
+  }
+  elegidas.forEach(s=>{
     const raw=rows.map(r=> (r[s.id]!=null&&isFinite(r[s.id]))? +r[s.id] : null);
     const b=base100(raw);
     perSerie[s.id]={ raw, idx:b.idx, base:b.base };
-    datasets.push({ label:s.lbl, data:b.idx, borderColor:s.color, backgroundColor:'transparent', borderWidth:2.4, pointRadius:2, pointHoverRadius:5, tension:.3, spanGaps:true });
+    datasets.push({ type:'line', label:s.lbl+(conBarras?' (índice)':''), data:b.idx, yAxisID:'y', borderColor:s.color, backgroundColor:'transparent', borderWidth:2.6, pointRadius:2, pointHoverRadius:5, tension:.3, spanGaps:true, order:2 });
   });
   // inflación acumulada base 100 SOBRE EL PERÍODO (primer mes del período = 100)
   const verInfl=document.getElementById('eco-met-cmp-infl')?.checked;
   let inflIdx=null;
   if(verInfl){
     let f=1; inflIdx=rows.map((r,idx)=>{ if(idx>0 && r.ipc!=null) f*=(1+r.ipc/100); return +(f*100).toFixed(1); });
-    datasets.push({ label:'Inflación acumulada', data:inflIdx, borderColor:'#0f172a', backgroundColor:'transparent', borderWidth:2.8, borderDash:[7,4], pointRadius:0, tension:.3, spanGaps:true });
+    datasets.push({ type:'line', label:'Inflación acumulada', data:inflIdx, yAxisID:'y', borderColor:'#0f172a', backgroundColor:'transparent', borderWidth:2.8, borderDash:[7,4], pointRadius:0, tension:.3, spanGaps:true, order:1 });
   }
   _ecoMetChart=new Chart(cv.getContext('2d'),{ type:'line', data:{labels,datasets},
     options:{ responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
       plugins:{ legend:{display:true,position:'bottom',labels:{color:'#334155',font:{size:10.5},boxWidth:12,usePointStyle:true,padding:12}},
-        tooltip:{callbacks:{label:c=> c.dataset.label+': '+(c.parsed.y==null?'s/d':c.parsed.y.toFixed(1))}} },
-      scales:{ y:{ticks:{color:'#334155',callback:v=>v.toFixed(0),font:{size:10}},grid:{color:'rgba(0,0,0,.06)'},title:{display:true,text:'Índice (base 100)',color:'#64748b',font:{size:10,weight:'600'}}},
-               x:{ticks:{color:'#334155',font:{size:9},maxRotation:60,autoSkip:true,maxTicksLimit:16},grid:{color:'rgba(0,0,0,.04)'}} } }
+        tooltip:{callbacks:{label:c=>{
+          if(c.parsed.y==null) return c.dataset.label+': s/d';
+          if(c.dataset.type==='bar') return c.dataset.label+': '+Math.round(c.parsed.y).toLocaleString('es-AR');
+          return c.dataset.label+': '+c.parsed.y.toFixed(1);
+        }}} },
+      scales:_ecoMetScales(ejesValor, conBarras) }
   });
   // ── nota + RECOMENDACIÓN por serie ──────────────────────────────────────
   const nota=document.getElementById('eco-met-cmp-nota');
@@ -30177,7 +30344,7 @@ function _ecoMetChartDraw(){
   const infFin=inflIdx.slice().reverse().find(v=>v!=null);      // índice inflación al final del período
   const lblIni=labels[0], lblFin=labels[labels.length-1];
   const partes=[];
-  _ECO_MET_SERIES.forEach(s=>{
+  _ecoMetSeriesAll().forEach(s=>{
     if(!perSerie[s.id]) return;
     const ps=perSerie[s.id];
     const fin=ps.idx.slice().reverse().find(v=>v!=null);
@@ -30199,34 +30366,92 @@ function _ecoMetChartDraw(){
     }
     partes.push('<div style="margin-top:3px">'+linea+'</div>');
   });
-  nota.innerHTML = '<div style="font-weight:700;color:'+_ECO_TXT2+';margin-bottom:2px">Período '+lblIni+' → '+lblFin+' (todo base 100):</div>' + partes.join('');
+  const aviso = conBarras
+    ? '<div style="font-size:10.5px;color:'+_ECO_TXT3+';margin-top:6px">Las barras muestran el valor real de cada mes (eje izquierdo) y las líneas el índice base 100 (eje derecho). Con 3 o más series se ocultan las barras para no saturar.</div>'
+    : '<div style="font-size:10.5px;color:'+_ECO_TXT3+';margin-top:6px">Seleccioná 1 o 2 series para ver también las barras con los valores reales de cada mes.</div>';
+  nota.innerHTML = '<div style="font-weight:700;color:'+_ECO_TXT2+';margin-bottom:2px">Período '+lblIni+' → '+lblFin+' (todo base 100):</div>' + partes.join('') + aviso;
 }
+// ═══════════════════════════════════════════════════════════════════════════
+// v229 · COLUMNAS DE LA PLANILLA (base + personalizadas)
+// ───────────────────────────────────────────────────────────────────────────
+// La planilla ahora se dibuja recorriendo una lista ORDENADA de descriptores.
+// Las columnas base son fijas; las personalizadas se insertan "después de" la
+// que elijas, así podés meter un ingreso o gasto nuevo entre medio de las que
+// ya están. Los valores se guardan en metricas[ym][idColumna] (misma
+// persistencia que el resto: localStorage + KV + backup).
+function _ecoMetCols(){
+  if(!Array.isArray(_ecoState.metricasCols)) _ecoState.metricasCols=[];
+  return _ecoState.metricasCols;
+}
+function _ecoMetColsSave(){ _ecoMarkDirty(); }
+// unidades disponibles para una columna propia
+const _ECO_MET_UNIDADES = {
+  '$':   { lbl:'Pesos ($)',    fmt:n=>'$'+Math.round(n).toLocaleString('es-AR') },
+  'US$': { lbl:'Dólares (US$)',fmt:n=>'US$'+((+n<100)?(+n).toFixed(2):Math.round(n).toLocaleString('es-AR')) },
+  '%':   { lbl:'Porcentaje (%)',fmt:n=>(+n).toFixed(1)+'%' },
+  '#':   { lbl:'Número',       fmt:n=>(+n).toLocaleString('es-AR') },
+};
+function _ecoMetUniFmt(u){ return (_ECO_MET_UNIDADES[u]||_ECO_MET_UNIDADES['#']).fmt; }
+
 // colores por grupo de columnas (como el Excel: las relacionadas comparten color)
 const _ECO_MET_COL={ mes:'#e9ebf0', ipc:'#dbeafe', dolar:'#fef9c3', cris:'#dcfce7',
   belen:'#fce7f3', ventas:'#ffedd5', taza:'#f3e8ff', difs:'#cffafe', gastos:'#fee2e2', tot:'#e0e7ff' };
-function _ecoMetHeaders(){
-  const th=(t,w,tip,bg)=>'<th title="'+(tip||t)+'" style="position:sticky;top:0;background:'+(bg||'#e9ebf0')+';color:#0f172a;padding:6px 5px;border:1px solid '+_ECO_BRD+';font-size:9.5px;font-weight:800;white-space:nowrap;z-index:2;'+(w?'min-width:'+w+'px;':'')+'">'+t+'</th>';
+// Descriptores de las columnas BASE (mismo orden y formato de siempre).
+// type: 'edit' = celda editable · 'calc' = calculada
+function _ecoMetBaseCols(){
   const C=_ECO_MET_COL;
-  return th('MES',72,'Mes y año',C.mes)+
-    th('IPC %',44,'Ipc Mensual (inflación INDEC, automático)',C.ipc)+
-    th('Dólar $',56,'Cotización Dólar del día 10 de cada mes o el próximo día hábil (oficial compra)',C.dolar)+
-    th('Δ $ %',44,'Diferencia % Dólar: variación en porcentaje del dólar en comparación al mes anterior',C.dolar)+
-    th('Sueldo C $',72,'Sueldo en $ Cristian (cobra en pesos)',C.cris)+
-    th('Δ C %',44,'Diferencia en % $ Sueldo Cristian en comparación al mes anterior',C.cris)+
-    th('C US$',52,'Sueldo en U$S Cristian: convertido a dólares con la cotización del mes',C.cris)+
-    th('Sueldo B $',72,'Sueldo en $ Belén (cobra en pesos)',C.belen)+
-    th('Δ B %',44,'Diferencia en % $ Sueldo Belén en comparación al mes anterior',C.belen)+
-    th('B US$',52,'Sueldo en U$S Belén: convertido a dólares con la cotización del mes',C.belen)+
-    th('Ventas $',74,'Ventas Impala: total de ventas de Cuenta Impala, solo ingresos del mes (automático)',C.ventas)+
-    th('Ventas US$',58,'Ventas en U$S Impala: convertidas a dólares con la cotización del mes',C.ventas)+
-    th('Taza US$',50,'Precio Taza Mágica en U$S: precio de venta convertido a dólares con la cotización del mes',C.taza)+
-    th('C−IPC',46,'Diferencia Cristian: % Sueldo menos el % Ipc (le ganó o perdió a la inflación)',C.difs)+
-    th('B−IPC',46,'Diferencia Belén: % Sueldo menos el % Ipc (le ganó o perdió a la inflación)',C.difs)+
-    th('Gastos $',76,'Gastos Totales: gastos del mes de la planilla de Economía (sin Convenio Multilateral, Contador Ezequiel ni Afip Monotributo) + egresos del mes de Cuenta Impala (automático)',C.gastos)+
-    th('Ing US$',56,'Ingresos Totales en U$S: Ventas en U$S Impala + Sueldo en U$S Belén + Sueldo en U$S Cristian',C.tot)+
-    th('Gas US$',56,'Gastos Totales en U$S: Gastos Totales dividido la cotización del dólar',C.tot)+
-    th('SALDO US$',62,'Saldo en U$S: Ingresos Totales en U$S menos Gastos Totales en U$S (saldo del mes, puede ser positivo o negativo)',C.tot)+
-    th('Ahorro %',50,'PORCENTAJE (tasa de ahorro): Saldo ÷ Ingresos Totales — qué porcentaje de tus ingresos lográs ahorrar',C.tot);
+  const P=_ECO_MET_FMTP, PC=_ecoMetPctColor;
+  return [
+    {id:'ipc',   th:'IPC %',     w:44, bg:C.ipc,    tip:'Ipc Mensual (inflación INDEC, automático)', type:'edit', campo:'ipc', val:r=>r.ipc, fmt:n=>(+n).toFixed(1)+'%', auto:r=>r.ipcAuto},
+    {id:'d',     th:'Dólar $',   w:56, bg:C.dolar,  tip:'Cotización Dólar del día 10 de cada mes o el próximo día hábil (oficial compra)', type:'edit', campo:'d', val:r=>r.d, fmt:n=>'$'+(+n).toLocaleString('es-AR')},
+    {id:'dDif',  th:'Δ $ %',     w:44, bg:C.dolar,  tip:'Diferencia % Dólar: variación en porcentaje del dólar en comparación al mes anterior', type:'calc', html:r=>P(r.dDif), extra:r=>'color:'+PC(r.dDif)},
+    {id:'sc',    th:'Sueldo C $',w:72, bg:C.cris,   tip:'Sueldo en $ Cristian (cobra en pesos)', type:'edit', campo:'sc', val:r=>r.sc, fmt:n=>'$'+Math.round(n).toLocaleString('es-AR')},
+    {id:'scDif', th:'Δ C %',     w:44, bg:C.cris,   tip:'Diferencia en % $ Sueldo Cristian en comparación al mes anterior', type:'calc', html:r=>P(r.scDif), extra:r=>'color:'+PC(r.scDif)},
+    {id:'scUsd', th:'C US$',     w:52, bg:C.cris,   tip:'Sueldo en U$S Cristian: convertido a dólares con la cotización del mes', type:'calc', html:r=>r.scUsd==null?'—':Math.round(r.scUsd).toLocaleString('es-AR')},
+    {id:'sb',    th:'Sueldo B $',w:72, bg:C.belen,  tip:'Sueldo en $ Belén (cobra en pesos)', type:'edit', campo:'sb', val:r=>r.sb, fmt:n=>'$'+Math.round(n).toLocaleString('es-AR')},
+    {id:'sbDif', th:'Δ B %',     w:44, bg:C.belen,  tip:'Diferencia en % $ Sueldo Belén en comparación al mes anterior', type:'calc', html:r=>P(r.sbDif), extra:r=>'color:'+PC(r.sbDif)},
+    {id:'sbUsd', th:'B US$',     w:52, bg:C.belen,  tip:'Sueldo en U$S Belén: convertido a dólares con la cotización del mes', type:'calc', html:r=>r.sbUsd==null?'—':Math.round(r.sbUsd).toLocaleString('es-AR')},
+    {id:'v',     th:'Ventas $',  w:74, bg:C.ventas, tip:'Ventas Impala: total de ventas de Cuenta Impala, solo ingresos del mes (automático)', type:'edit', campo:'v', val:r=>r.v, fmt:n=>'$'+Math.round(n).toLocaleString('es-AR'), auto:r=>r.vAuto},
+    {id:'vUsd',  th:'Ventas US$',w:58, bg:C.ventas, tip:'Ventas en U$S Impala: convertidas a dólares con la cotización del mes', type:'calc', html:r=>r.vUsd==null?'—':Math.round(r.vUsd).toLocaleString('es-AR')},
+    {id:'tz',    th:'Taza US$',  w:50, bg:C.taza,   tip:'Precio Taza Mágica en U$S: precio de venta convertido a dólares con la cotización del mes', type:'edit', campo:'tz', val:r=>r.tzUsd, fmt:n=>(+n).toFixed(2)},
+    {id:'nDif',  th:'C−IPC',     w:46, bg:C.difs,   tip:'Diferencia Cristian: % Sueldo menos el % Ipc (le ganó o perdió a la inflación)', type:'calc', html:r=>P(r.nDif), extra:r=>'color:'+PC(r.nDif)+';font-weight:600'},
+    {id:'oDif',  th:'B−IPC',     w:46, bg:C.difs,   tip:'Diferencia Belén: % Sueldo menos el % Ipc (le ganó o perdió a la inflación)', type:'calc', html:r=>P(r.oDif), extra:r=>'color:'+PC(r.oDif)+';font-weight:600'},
+    {id:'g',     th:'Gastos $',  w:76, bg:C.gastos, tip:'Gastos Totales: gastos del mes de la planilla de Economía (sin Convenio Multilateral, Contador Ezequiel ni Afip Monotributo) + egresos del mes de Cuenta Impala (automático)', type:'edit', campo:'g', val:r=>r.g, fmt:n=>'$'+Math.round(n).toLocaleString('es-AR'), auto:r=>r.gAuto},
+    {id:'qIng',  th:'Ing US$',   w:56, bg:C.tot,    tip:'Ingresos Totales en U$S: Ventas en U$S Impala + Sueldo en U$S Belén + Sueldo en U$S Cristian', type:'calc', html:r=>r.qIng==null?'—':Math.round(r.qIng).toLocaleString('es-AR'), extra:()=>'font-weight:600'},
+    {id:'gUsd',  th:'Gas US$',   w:56, bg:C.tot,    tip:'Gastos Totales en U$S: Gastos Totales dividido la cotización del dólar', type:'calc', html:r=>r.gUsd==null?'—':Math.round(r.gUsd).toLocaleString('es-AR')},
+    {id:'saldo', th:'SALDO US$', w:62, bg:C.tot,    tip:'Saldo en U$S: Ingresos Totales en U$S menos Gastos Totales en U$S (saldo del mes, puede ser positivo o negativo)', type:'calc', html:r=>r.saldo==null?'—':(r.saldo>=0?'+':'')+Math.round(r.saldo).toLocaleString('es-AR'), extra:r=>'color:'+(r.saldo==null?'#94a3b8':(r.saldo>=0?'#16a34a':'#dc2626'))+';font-weight:800'},
+    {id:'ahorro',th:'Ahorro %',  w:50, bg:C.tot,    tip:'PORCENTAJE (tasa de ahorro): Saldo ÷ Ingresos Totales — qué porcentaje de tus ingresos lográs ahorrar', type:'calc', html:r=>P(r.ahorro,1), extra:r=>'color:'+(r.saldo==null?'#94a3b8':(r.saldo>=0?'#16a34a':'#dc2626'))+';font-weight:700'},
+  ];
+}
+// Lista final: base + personalizadas insertadas donde corresponde ("after")
+function _ecoMetOrder(){
+  const base=_ecoMetBaseCols();
+  const custom=_ecoMetCols();
+  const out=[];
+  const porAncla={};
+  custom.forEach(c=>{ const k=c.after||'__fin__'; (porAncla[k]=porAncla[k]||[]).push(c); });
+  const mkCustom=c=>({
+    id:c.id, th:c.nombre, w:Math.max(56, Math.min(120, (c.nombre||'').length*8+28)),
+    bg:c.color||'#ede9fe', tip:(c.nota||c.nombre)+' (columna propia · '+((_ECO_MET_UNIDADES[c.unidad]||{}).lbl||'número')+')',
+    type:'edit', campo:c.id, val:r=>r[c.id], fmt:_ecoMetUniFmt(c.unidad), custom:true,
+  });
+  if(porAncla['__ini__']) porAncla['__ini__'].forEach(c=>out.push(mkCustom(c)));
+  base.forEach(b=>{
+    out.push(b);
+    if(porAncla[b.id]) porAncla[b.id].forEach(c=>out.push(mkCustom(c)));
+  });
+  if(porAncla['__fin__']) porAncla['__fin__'].forEach(c=>out.push(mkCustom(c)));
+  return out;
+}
+function _ecoMetHeaders(){
+  const th=(t,w,tip,bg,extra)=>'<th title="'+String(tip||t).replace(/"/g,'&quot;')+'" style="position:sticky;top:0;background:'+(bg||'#e9ebf0')+';color:#0f172a;padding:6px 5px;border:1px solid '+_ECO_BRD+';font-size:9.5px;font-weight:800;white-space:nowrap;z-index:2;'+(w?'min-width:'+w+'px;':'')+(extra||'')+'">'+t+'</th>';
+  const C=_ECO_MET_COL;
+  let h=th('MES',72,'Mes y año',C.mes);
+  _ecoMetOrder().forEach(col=>{
+    const marca = col.custom ? '<span style="opacity:.5;font-size:8px"> ✎</span>' : '';
+    h+=th(col.th+marca, col.w, col.tip, col.bg);
+  });
+  return h;
 }
 function _ecoMetRedraw(){
   const tb=document.getElementById('eco-met-tbody');
@@ -30244,30 +30469,21 @@ function _ecoMetRedraw(){
     const badge = auto? ' <span style="opacity:.55;font-size:8px" title="automático">⚙</span>' : '';
     return '<td onclick="_ecoMetEdit(\''+ym+'\',\''+campo+'\')" style="padding:4px 5px;border:1px dashed #64748b;text-align:right;white-space:nowrap;cursor:pointer;font-weight:600;background:'+(bg||'#fff')+'" title="Clic para editar">'+disp+badge+'</td>';
   };
+  // v229: refrescar también el encabezado (puede haber columnas propias nuevas)
+  const thr=document.getElementById('eco-met-thead-row');
+  if(thr) thr.innerHTML=_ecoMetHeaders();
+  const orden=_ecoMetOrder();
   tb.innerHTML = rows.slice().reverse().map(r=>{
-    const saldoCol = r.saldo==null?'#94a3b8':(r.saldo>=0?'#16a34a':'#dc2626');
-    return '<tr>'+
-      '<td style="padding:4px 6px;border:1px solid '+_ECO_BRD+';font-weight:700;white-space:nowrap;position:sticky;left:0;background:'+C.mes+';z-index:1">'+lbl(r.ym)+'</td>'+
-      edit(r.ym,'ipc', r.ipc, n=>(+n).toFixed(1)+'%', r.ipcAuto, C.ipc)+
-      edit(r.ym,'d', r.d, n=>'$'+(+n).toLocaleString('es-AR'), false, C.dolar)+
-      tdC(_ECO_MET_FMTP(r.dDif),C.dolar,'color:'+_ecoMetPctColor(r.dDif))+
-      edit(r.ym,'sc', r.sc, n=>'$'+Math.round(n).toLocaleString('es-AR'), false, C.cris)+
-      tdC(_ECO_MET_FMTP(r.scDif),C.cris,'color:'+_ecoMetPctColor(r.scDif))+
-      tdC(r.scUsd==null?'—':Math.round(r.scUsd).toLocaleString('es-AR'),C.cris)+
-      edit(r.ym,'sb', r.sb, n=>'$'+Math.round(n).toLocaleString('es-AR'), false, C.belen)+
-      tdC(_ECO_MET_FMTP(r.sbDif),C.belen,'color:'+_ecoMetPctColor(r.sbDif))+
-      tdC(r.sbUsd==null?'—':Math.round(r.sbUsd).toLocaleString('es-AR'),C.belen)+
-      edit(r.ym,'v', r.v, n=>'$'+Math.round(n).toLocaleString('es-AR'), r.vAuto, C.ventas)+
-      tdC(r.vUsd==null?'—':Math.round(r.vUsd).toLocaleString('es-AR'),C.ventas)+
-      edit(r.ym,'tz', r.tzUsd, n=>(+n).toFixed(2), false, C.taza)+
-      tdC(_ECO_MET_FMTP(r.nDif),C.difs,'color:'+_ecoMetPctColor(r.nDif)+';font-weight:600')+
-      tdC(_ECO_MET_FMTP(r.oDif),C.difs,'color:'+_ecoMetPctColor(r.oDif)+';font-weight:600')+
-      edit(r.ym,'g', r.g, n=>'$'+Math.round(n).toLocaleString('es-AR'), r.gAuto, C.gastos)+
-      tdC(r.qIng==null?'—':Math.round(r.qIng).toLocaleString('es-AR'),C.tot,'font-weight:600')+
-      tdC(r.gUsd==null?'—':Math.round(r.gUsd).toLocaleString('es-AR'),C.tot)+
-      tdC(r.saldo==null?'—':(r.saldo>=0?'+':'')+Math.round(r.saldo).toLocaleString('es-AR'),C.tot,'color:'+saldoCol+';font-weight:800')+
-      tdC(_ECO_MET_FMTP(r.ahorro,1),C.tot,'color:'+saldoCol+';font-weight:700')+
-    '</tr>';
+    let tds='<td style="padding:4px 6px;border:1px solid '+_ECO_BRD+';font-weight:700;white-space:nowrap;position:sticky;left:0;background:'+C.mes+';z-index:1">'+lbl(r.ym)+'</td>';
+    orden.forEach(col=>{
+      if(col.type==='edit'){
+        const v=col.val(r);
+        tds+=edit(r.ym, col.campo, v, col.fmt, (col.auto?col.auto(r):false), col.bg);
+      } else {
+        tds+=tdC(col.html(r), col.bg, (col.extra?col.extra(r):''));
+      }
+    });
+    return '<tr>'+tds+'</tr>';
   }).join('');
   _ecoMetResumen(rows);
   try{ _ecoMetChartDraw(); }catch(e){ console.warn('[eco-met chart]', e.message); }
@@ -30355,7 +30571,11 @@ function _ecoMetEdit(ym,campo){
   _ecoMetEditCtx={ym,campo};
   const met=_ecoMet();
   const cur=(met[ym]&&met[ym][campo]!=null)?met[ym][campo]:'';
-  const cfg=_ECO_MET_CAMPOS[campo]||{lbl:campo};
+  let cfg=_ECO_MET_CAMPOS[campo];
+  if(!cfg){
+    const cc=_ecoMetCols().find(c=>c.id===campo);
+    cfg = cc ? {lbl:cc.nombre+' ('+((_ECO_MET_UNIDADES[cc.unidad]||{}).lbl||'número')+')', tip:cc.nota||'Columna propia. Dejá vacío para borrar el dato del mes.'} : {lbl:campo};
+  }
   const MESES_F=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
   const ov=document.createElement('div');
   ov.className='eco-met-edit-ov';
@@ -32196,7 +32416,7 @@ const BKP_SECTIONS = {
     icon: '💰',
     get: () => {
       if(typeof _ecoState === 'undefined') return null;
-      return { gastos: _ecoState.gastos||[], ingresos: _ecoState.ingresos||[], metricas: _ecoState.metricas||{}, acreditar: _ecoState.acreditar||[], ahorros: _ecoState.ahorros||[], savedAt: Date.now() };
+      return { gastos: _ecoState.gastos||[], ingresos: _ecoState.ingresos||[], metricas: _ecoState.metricas||{}, metricasCols: _ecoState.metricasCols||[], acreditar: _ecoState.acreditar||[], ahorros: _ecoState.ahorros||[], savedAt: Date.now() };
     },
   },
   // v118: 'seoKeywords' eliminado del backup — el SEO Tracker viejo fue descontinuado
@@ -32356,6 +32576,7 @@ async function bkpApplyImport(data, selection){
       _ecoState.gastos = data.economia.gastos;
       if(Array.isArray(data.economia.ingresos)) _ecoState.ingresos = data.economia.ingresos;
       if(data.economia.metricas && typeof data.economia.metricas==='object') _ecoState.metricas = data.economia.metricas;
+      if(Array.isArray(data.economia.metricasCols)) _ecoState.metricasCols = data.economia.metricasCols;
       if(Array.isArray(data.economia.acreditar)) _ecoState.acreditar = data.economia.acreditar;
       if(Array.isArray(data.economia.ahorros)) _ecoState.ahorros = data.economia.ahorros;
       try{ localStorage.setItem(ECO_LS_KEY, JSON.stringify({ gastos:_ecoState.gastos, ingresos:_ecoState.ingresos, metricas:_ecoState.metricas||{}, savedAt:Date.now() })); }catch(e){}
