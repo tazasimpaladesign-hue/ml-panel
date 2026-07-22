@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v230 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v231 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -31284,15 +31284,20 @@ function ecoEditGasto(gid){
       '<input type="checkbox" id="eco-ed-hidden" '+(g.hidden?'checked':'')+' style="width:16px;height:16px">'+
       '<span>Ocultar en la planilla de años futuros<br><span style="font-size:10.5px;color:'+_ECO_TXT3+'">(los datos históricos se conservan; deja de mostrarse en años nuevos)</span></span>'+
     '</label>'+
+    // v231: resumen de tarjeta (solo para la categoría Tarjetas)
+    (g.cat==='Tarjetas' ?
+      '<div style="border-top:1px solid #e2e8f0;margin:4px 0 12px;padding-top:12px">'+
+        '<button onclick="ecoOpenResumen(\''+gid+'\')" style="width:100%;padding:11px;border:1px solid #c4b5fd;background:#f5f3ff;color:#6d28d9;border-radius:9px;font-weight:700;cursor:pointer;font-size:13px">💳 Resumen de la tarjeta</button>'+
+        '<div style="font-size:10.5px;color:'+_ECO_TXT3+';margin-top:6px">Cargá cada compra con sus cuotas y los costos fijos. El total se calcula solo y se vuelca a la planilla, incluidas las cuotas de los meses que vienen.</div>'+
+      '</div>' : '')+
     '<div style="border-top:1px solid #e2e8f0;margin:4px 0 12px;padding-top:12px">'+
-      '<label style="font-size:12px;font-weight:600;color:'+_ECO_TXT2+';display:block;margin-bottom:5px">🔗 Vincular / unificar con otro gasto</label>'+
-      '<div style="font-size:10.5px;color:'+_ECO_TXT3+';margin-bottom:6px">Si este gasto es el mismo que otro con distinto nombre en otros años, fusionalos en uno solo (se combinan los datos por año).</div>'+
-      '<div style="display:flex;gap:6px">'+
-        '<select id="eco-ed-merge" style="flex:1;padding:8px;border:1px solid '+_ECO_BRD+';border-radius:9px;font-size:12.5px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+'">'+
-          '<option value="">— elegí un gasto para fusionar —</option>'+
-          _ecoState.gastos.filter(x=>x.id!==gid).sort((a,b)=>a.n.localeCompare(b.n)).map(x=>'<option value="'+x.id+'">'+x.e+' '+_persoEsc(x.n)+'</option>').join('')+
-        '</select>'+
-        '<button onclick="_ecoMergeGasto(\''+gid+'\')" style="padding:8px 12px;border:1px solid #93c5fd;background:#eff6ff;color:#1d4ed8;border-radius:9px;font-weight:600;cursor:pointer;font-size:12.5px;white-space:nowrap">Fusionar</button>'+
+      '<label style="font-size:12px;font-weight:600;color:'+_ECO_TXT2+';display:block;margin-bottom:5px">🔗 Vincular / unificar con otros gastos</label>'+
+      '<div style="font-size:10.5px;color:'+_ECO_TXT3+';margin-bottom:6px">Si este gasto es el mismo que otros con distinto nombre, buscalos, marcá los que correspondan y fusionalos todos de una (se combinan los datos por año).</div>'+
+      '<input type="text" id="eco-ed-merge-q" oninput="_ecoMergeFiltrar(\''+gid+'\')" placeholder="🔍 Buscar gasto por nombre…" style="width:100%;padding:8px 10px;border:1px solid '+_ECO_BRD+';border-radius:9px;font-size:12.5px;margin-bottom:6px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+';box-sizing:border-box">'+
+      '<div id="eco-ed-merge-list" style="max-height:170px;overflow:auto;border:1px solid '+_ECO_BRD+';border-radius:9px;background:'+_ECO_INP_BG+';padding:4px"></div>'+
+      '<div style="display:flex;gap:6px;align-items:center;margin-top:7px">'+
+        '<span id="eco-ed-merge-cnt" style="font-size:11px;color:'+_ECO_TXT3+';flex:1">Ninguno seleccionado</span>'+
+        '<button onclick="_ecoMergeGasto(\''+gid+'\')" style="padding:8px 12px;border:1px solid #93c5fd;background:#eff6ff;color:#1d4ed8;border-radius:9px;font-weight:600;cursor:pointer;font-size:12.5px;white-space:nowrap">Fusionar seleccionados</button>'+
       '</div>'+
     '</div>'+
     '<div style="display:flex;gap:8px">'+
@@ -31300,33 +31305,439 @@ function ecoEditGasto(gid){
       '<button onclick="_ecoDelGasto(\''+gid+'\')" style="padding:10px;border:1px solid #fca5a5;background:#fef2f2;color:#b91c1c;border-radius:9px;font-weight:600;cursor:pointer">Eliminar</button>'+
       '<button onclick="_ecoSaveGasto(\''+gid+'\')" style="flex:1;padding:10px;border:none;background:#4f8ef7;color:#fff;border-radius:9px;font-weight:700;cursor:pointer">Guardar</button>'+
     '</div>';
-  _ecoModalShell(inner, 420);
+  _ecoModalShell(inner, 460);
+  _ecoMergeSelSet=null;          // v231: arrancar sin selección previa
+  _ecoMergeFiltrar(gid);
   setTimeout(()=>document.getElementById('eco-ed-name')?.focus(),50);
+}
+
+// v231 ── lista filtrable de gastos para fusionar (selección múltiple)
+function _ecoMergeFiltrar(gid){
+  const cont=document.getElementById('eco-ed-merge-list'); if(!cont) return;
+  const q=((document.getElementById('eco-ed-merge-q')||{}).value||'').toLowerCase().trim();
+  const norm=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  const marcados=_ecoMergeSel();
+  const lista=_ecoState.gastos.filter(x=>x.id!==gid)
+    .filter(x=> !q || norm(x.n).includes(norm(q)) || norm(x.cat).includes(norm(q)))
+    .sort((a,b)=>a.n.localeCompare(b.n));
+  cont.innerHTML = lista.length ? lista.map(x=>{
+    const on=marcados.has(x.id);
+    const anios=Object.keys(x.d||{}).sort();
+    const rango=anios.length? (anios[0]+(anios.length>1?'–'+anios[anios.length-1]:'')) : 'sin datos';
+    return '<label style="display:flex;align-items:center;gap:8px;padding:5px 7px;border-radius:7px;cursor:pointer;'+(on?'background:#eff6ff':'')+'">'+
+      '<input type="checkbox" data-mid="'+x.id+'" '+(on?'checked':'')+' onchange="_ecoMergeToggle(\''+x.id+'\',\''+gid+'\')" style="width:15px;height:15px">'+
+      '<span style="flex:1;font-size:12px;color:'+_ECO_TXT+'">'+x.e+' '+_persoEsc(x.n)+
+        '<span style="font-size:10px;color:'+_ECO_TXT3+'"> · '+x.cat+' · '+rango+'</span></span>'+
+    '</label>';
+  }).join('') : '<div style="padding:10px;text-align:center;font-size:11.5px;color:'+_ECO_TXT3+'">Sin resultados</div>';
+  _ecoMergeCnt();
+}
+let _ecoMergeSelSet=null;
+function _ecoMergeSel(){ if(!_ecoMergeSelSet) _ecoMergeSelSet=new Set(); return _ecoMergeSelSet; }
+function _ecoMergeToggle(id,gid){
+  const s=_ecoMergeSel();
+  if(s.has(id)) s.delete(id); else s.add(id);
+  _ecoMergeCnt();
+}
+function _ecoMergeCnt(){
+  const el=document.getElementById('eco-ed-merge-cnt'); if(!el) return;
+  const n=_ecoMergeSel().size;
+  el.textContent = n===0 ? 'Ninguno seleccionado' : (n===1? '1 gasto seleccionado' : n+' gastos seleccionados');
 }
 
 // v208: fusiona el gasto "otroId" DENTRO de "gid" (gid queda como el nombre final).
 // Combina los datos por año: si ambos tienen el mismo año, suma; si solo uno, lo copia.
 function _ecoMergeGasto(gid){
-  const otroId=document.getElementById('eco-ed-merge').value;
-  if(!otroId){ showToast('Elegí un gasto para fusionar','info'); return; }
-  const g=_ecoState.gastos.find(x=>x.id===gid);
-  const otro=_ecoState.gastos.find(x=>x.id===otroId);
-  if(!g||!otro) return;
-  if(!confirm('¿Fusionar "'+otro.n+'" dentro de "'+g.n+'"?\nLos datos de ambos se combinan por año y "'+otro.n+'" se elimina. No se puede deshacer.')) return;
+  const ids=[..._ecoMergeSel()];
+  if(!ids.length){ showToast('Marcá al menos un gasto para fusionar','info'); return; }
+  const g=_ecoState.gastos.find(x=>x.id===gid); if(!g) return;
+  const otros=ids.map(id=>_ecoState.gastos.find(x=>x.id===id)).filter(Boolean);
+  if(!otros.length) return;
+  if(!confirm('¿Fusionar '+otros.length+' gasto(s) dentro de "'+g.n+'"?\n\n'+
+     otros.map(o=>'· '+o.n).join('\n')+'\n\nLos datos se combinan por año y esos gastos se eliminan. No se puede deshacer.')) return;
   if(!g.d) g.d={}; if(!g.st) g.st={};
-  Object.keys(otro.d||{}).forEach(y=>{
-    if(!g.d[y]){ g.d[y]=otro.d[y].slice(); if(otro.st&&otro.st[y]) g.st[y]=otro.st[y].slice(); }
-    else{
-      // ambos tienen el año: para cada mes, si g no tiene dato usa el de otro
-      for(let m=0;m<12;m++){
-        const vg=g.d[y][m], vo=otro.d[y][m];
-        if((vg==null||vg==='') && vo!=null){ g.d[y][m]=vo; if(otro.st&&otro.st[y]){ if(!g.st[y])g.st[y]=[]; g.st[y][m]=otro.st[y][m]; } }
+  otros.forEach(otro=>{
+    Object.keys(otro.d||{}).forEach(y=>{
+      if(!g.d[y]){ g.d[y]=otro.d[y].slice(); if(otro.st&&otro.st[y]) g.st[y]=otro.st[y].slice(); }
+      else{
+        // ambos tienen el año: para cada mes, si g no tiene dato usa el de otro
+        for(let m=0;m<12;m++){
+          const vg=g.d[y][m], vo=otro.d[y][m];
+          if((vg==null||vg==='') && vo!=null){ g.d[y][m]=vo; if(otro.st&&otro.st[y]){ if(!g.st[y])g.st[y]=[]; g.st[y][m]=otro.st[y][m]; } }
+        }
+      }
+    });
+  });
+  const quitar=new Set(ids);
+  _ecoState.gastos=_ecoState.gastos.filter(x=>!quitar.has(x.id));
+  _ecoMergeSelSet=null;
+  _ecoMarkDirty(); _ecoCellClose(); ecoRender();
+  showToast('✓ '+otros.length+' gasto(s) fusionados en "'+g.n+'"','success');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v231 · RESUMEN DE TARJETA
+// ───────────────────────────────────────────────────────────────────────────
+// Cargás cada compra (fecha, local, importe, cuotas) y los conceptos fijos que
+// trae el resumen todos los meses (costo fijo, IVA, seguro…). El módulo:
+//   · reparte cada compra en sus cuotas y las proyecta a los meses que vienen
+//     (una compra en 3 pagos aparece en 3 meses y en el 4º ya no)
+//   · suma los fijos (importe fijo o un % de los consumos del mes, como el IVA)
+//   · vuelca el total calculado a la celda del mes en la planilla
+//   · si vos editaste la celda a mano (llegó el resumen real), NO la pisa: muestra
+//     una fila "Diferencia" con lo que falta cargar, hasta que la cargues y cierre
+// Los datos viven en g.res = { items:[], fijos:[] } y se guardan/sincronizan con
+// el resto de Economía. g.resAuto guarda qué valor escribió el módulo en cada mes
+// para poder distinguir una edición manual posterior.
+// ───────────────────────────────────────────────────────────────────────────
+function _ecoYmDiff(a,b){ // meses de a hasta b (ambos 'YYYY-MM')
+  const [ay,am]=a.split('-').map(Number), [by,bm]=b.split('-').map(Number);
+  return (by-ay)*12 + (bm-am);
+}
+function _ecoYmAdd(ym,n){
+  const [y,m]=ym.split('-').map(Number);
+  const d=new Date(y, m-1+n, 1);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+}
+function _ecoYmHoy(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+function _ecoResDe(g){ if(!g.res || typeof g.res!=='object') g.res={items:[],fijos:[]};
+  if(!Array.isArray(g.res.items)) g.res.items=[];
+  if(!Array.isArray(g.res.fijos)) g.res.fijos=[];
+  return g.res; }
+
+// Calcula el resumen de un mes: cuotas activas + fijos + diferencia contra la celda
+function _ecoResMes(g, ym){
+  const res=_ecoResDe(g);
+  const consumos=[]; let subConsumo=0;
+  res.items.forEach(it=>{
+    const desde = it.desde || (it.f? it.f.slice(0,7) : null);
+    if(!desde) return;
+    const cuo = Math.max(1, Math.round(+it.cuo||1));
+    const idx = _ecoYmDiff(desde, ym);
+    if(idx<0 || idx>=cuo) return;              // fuera del plan de cuotas
+    const sub = (+it.imp||0)/cuo;
+    consumos.push({ it, nro:idx+1, cuo, sub });
+    subConsumo += sub;
+  });
+  const fijos=[]; let subFijo=0;
+  res.fijos.forEach(f=>{
+    if(f.desde && ym < f.desde) return;
+    if(f.hasta && ym > f.hasta) return;
+    const val = (f.tipo==='pct') ? subConsumo*(+f.val||0)/100 : (+f.val||0);
+    fijos.push({ f, val });
+    subFijo += val;
+  });
+  const calc = subConsumo + subFijo;
+  // ¿la celda de la planilla fue editada a mano?
+  const y=+ym.slice(0,4), m=+ym.slice(5,7)-1;
+  const cur=_ecoVal(g,y,m);
+  const last=(g.resAuto||{})[ym];
+  const esNum = typeof cur==='number';
+  const manual = esNum && (last==null || Math.abs(cur-last)>0.5);
+  const dif = manual ? (cur-calc) : 0;
+  return { consumos, fijos, subConsumo, subFijo, calc, manual, real:esNum?cur:null, dif,
+           total: manual? cur : calc };
+}
+
+// Rango de meses que cubre el resumen (para volcar a la planilla)
+function _ecoResRango(g){
+  const res=_ecoResDe(g);
+  let min=null, max=null;
+  res.items.forEach(it=>{
+    const desde=it.desde||(it.f? it.f.slice(0,7):null); if(!desde) return;
+    const cuo=Math.max(1,Math.round(+it.cuo||1));
+    const fin=_ecoYmAdd(desde, cuo-1);
+    if(!min||desde<min) min=desde;
+    if(!max||fin>max) max=fin;
+  });
+  res.fijos.forEach(f=>{ if(f.desde){ if(!min||f.desde<min) min=f.desde; } });
+  const hoy=_ecoYmHoy();
+  // v231: si todavía no hay compras pero sí conceptos fijos, arrancar en el mes actual
+  if(!min && res.fijos.length) min=hoy;
+  if(!min) return null;
+  if(!max||max<hoy) max=hoy;          // los fijos acompañan hasta el mes actual
+  return { min, max };
+}
+
+// Vuelca los totales calculados a la planilla (sin pisar ediciones manuales)
+function _ecoResAplicar(gid, silencioso){
+  const g=_ecoState.gastos.find(x=>x.id===gid); if(!g) return 0;
+  const r=_ecoResRango(g); if(!r) return 0;
+  if(!g.resAuto) g.resAuto={};
+  let n=0, ym=r.min;
+  while(ym<=r.max){
+    const d=_ecoResMes(g, ym);
+    if(!d.manual){
+      const y=+ym.slice(0,4), m=+ym.slice(5,7)-1;
+      const val = d.calc>0 ? Math.round(d.calc*100)/100 : null;
+      const actual=_ecoVal(g,y,m);
+      if(val!=null || actual!=null){
+        _ecoSet(g, y, m, val, _ecoEst(g,y,m));
+        g.resAuto[ym]=val;
+        n++;
       }
     }
-  });
-  _ecoState.gastos=_ecoState.gastos.filter(x=>x.id!==otroId);
-  _ecoMarkDirty(); _ecoCellClose(); ecoRender();
-  showToast('✓ Gastos fusionados en "'+g.n+'"','success');
+    ym=_ecoYmAdd(ym,1);
+  }
+  _ecoMarkDirty();
+  if(!silencioso){ ecoRender(); showToast('✓ Resumen aplicado a '+n+' mes(es)','success'); }
+  return n;
+}
+
+let _ecoResState={ gid:null, ym:null };
+function ecoOpenResumen(gid){
+  const g=_ecoState.gastos.find(x=>x.id===gid); if(!g) return;
+  _ecoResDe(g);
+  const r=_ecoResRango(g);
+  _ecoResState={ gid, ym: (r? (r.max<_ecoYmHoy()? r.max : _ecoYmHoy()) : _ecoYmHoy()) };
+  const ov=document.createElement('div');
+  ov.className='eco-res-ov';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:100002;display:flex;align-items:flex-start;justify-content:center;padding:2vh 12px';
+  ov.innerHTML='<div style="background:'+_ECO_MODAL_BG+';border-radius:14px;max-width:1080px;width:100%;height:96vh;box-shadow:0 20px 60px rgba(0,0,0,.35);color:'+_ECO_TXT+';display:flex;flex-direction:column;overflow:hidden"><div id="eco-res-body" style="flex:1;overflow:auto;padding:18px 20px"></div></div>';
+  document.body.appendChild(ov);
+  _ecoResRender();
+}
+function ecoCloseResumen(){ document.querySelector('.eco-res-ov')?.remove(); }
+
+function _ecoResRender(){
+  const cont=document.getElementById('eco-res-body'); if(!cont) return;
+  const g=_ecoState.gastos.find(x=>x.id===_ecoResState.gid); if(!g) return;
+  const res=_ecoResDe(g);
+  const ym=_ecoResState.ym;
+  const d=_ecoResMes(g, ym);
+  const MC=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  const lblYm=x=>MC[+x.slice(5,7)-1]+' '+x.slice(0,4);
+  const BR='1px solid '+_ECO_BRD;
+  const F=n=>'$'+Math.round(+n||0).toLocaleString('es-AR');
+  // meses disponibles para el selector (rango del resumen ± margen)
+  const r=_ecoResRango(g);
+  const meses=[];
+  if(r){ let x=_ecoYmAdd(r.min,-1); const fin=_ecoYmAdd(r.max,2); while(x<=fin){ meses.push(x); x=_ecoYmAdd(x,1);} }
+  else { let x=_ecoYmAdd(_ecoYmHoy(),-6); for(let i=0;i<18;i++){ meses.push(x); x=_ecoYmAdd(x,1);} }
+  if(!meses.includes(ym)) meses.push(ym), meses.sort();
+
+  // ── filas de consumos del mes ──
+  const filasCons = d.consumos.length ? d.consumos.map(c=>{
+    const i=res.items.indexOf(c.it);
+    return '<tr>'+
+      '<td style="padding:5px 7px;border:'+BR+';white-space:nowrap">'+(c.it.f||'—')+'</td>'+
+      '<td style="padding:5px 7px;border:'+BR+'">'+_persoEsc(c.it.n||'')+'</td>'+
+      '<td style="padding:5px 7px;border:'+BR+';text-align:right;white-space:nowrap">'+F(c.it.imp)+'</td>'+
+      '<td style="padding:5px 7px;border:'+BR+';text-align:center;white-space:nowrap">'+c.nro+'/'+c.cuo+'</td>'+
+      '<td style="padding:5px 7px;border:'+BR+';text-align:right;font-weight:700;white-space:nowrap">'+F(c.sub)+'</td>'+
+      '<td style="padding:5px 7px;border:'+BR+';text-align:center;white-space:nowrap">'+
+        '<button onclick="_ecoResItemForm('+i+')" style="border:none;background:#eef2f7;color:#334155;border-radius:6px;padding:4px 7px;cursor:pointer;font-size:11px">✎</button> '+
+        '<button onclick="_ecoResItemDel('+i+')" style="border:none;background:#fee2e2;color:#b91c1c;border-radius:6px;padding:4px 7px;cursor:pointer;font-size:11px">✕</button>'+
+      '</td>'+
+    '</tr>';
+  }).join('') : '<tr><td colspan="6" style="padding:14px;text-align:center;color:'+_ECO_TXT3+';border:'+BR+'">Sin compras en cuotas activas este mes.</td></tr>';
+
+  // ── filas de fijos ──
+  const filasFij = d.fijos.length ? d.fijos.map(x=>{
+    const i=res.fijos.indexOf(x.f);
+    const desc = x.f.tipo==='pct' ? (x.f.val+'% de los consumos') : 'importe fijo';
+    return '<tr>'+
+      '<td style="padding:5px 7px;border:'+BR+'">'+_persoEsc(x.f.n||'')+'</td>'+
+      '<td style="padding:5px 7px;border:'+BR+';color:'+_ECO_TXT3+';font-size:11px">'+desc+'</td>'+
+      '<td style="padding:5px 7px;border:'+BR+';text-align:right;font-weight:700;white-space:nowrap">'+F(x.val)+'</td>'+
+      '<td style="padding:5px 7px;border:'+BR+';text-align:center;white-space:nowrap">'+
+        '<button onclick="_ecoResFijoForm('+i+')" style="border:none;background:#eef2f7;color:#334155;border-radius:6px;padding:4px 7px;cursor:pointer;font-size:11px">✎</button> '+
+        '<button onclick="_ecoResFijoDel('+i+')" style="border:none;background:#fee2e2;color:#b91c1c;border-radius:6px;padding:4px 7px;cursor:pointer;font-size:11px">✕</button>'+
+      '</td>'+
+    '</tr>';
+  }).join('') : '<tr><td colspan="4" style="padding:12px;text-align:center;color:'+_ECO_TXT3+';border:'+BR+'">Sin conceptos fijos.</td></tr>';
+
+  // ── proyección próximos meses ──
+  let proy='';
+  if(r){
+    const cols=[]; let x=ym;
+    for(let i=0;i<12;i++){ cols.push(x); x=_ecoYmAdd(x,1); }
+    proy='<table style="border-collapse:collapse;font-size:11px;width:max-content;min-width:100%">'+
+      '<thead><tr>'+cols.map(c=>'<th style="padding:5px 7px;border:'+BR+';background:#eef2f7;white-space:nowrap;font-size:10px">'+lblYm(c)+'</th>').join('')+'</tr></thead>'+
+      '<tbody><tr>'+cols.map(c=>{
+        const dd=_ecoResMes(g,c);
+        const col = dd.total>0 ? (dd.manual?'#1d4ed8':_ECO_TXT) : _ECO_TXT3;
+        return '<td style="padding:5px 7px;border:'+BR+';text-align:right;white-space:nowrap;color:'+col+';font-weight:'+(dd.total>0?'700':'400')+'">'+(dd.total>0?F(dd.total):'—')+'</td>';
+      }).join('')+'</tr></tbody></table>';
+  }
+
+  cont.innerHTML =
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;flex-wrap:wrap;gap:8px">'+
+      '<div style="font-size:16px;font-weight:800;color:'+_ECO_TXT+'">💳 Resumen — '+_persoEsc(g.n)+'</div>'+
+      '<div style="display:flex;gap:8px;align-items:center">'+
+        '<select onchange="_ecoResSetMes(this.value)" style="padding:7px 10px;border:'+BR+';border-radius:9px;font-size:13px;font-weight:600;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+'">'+
+          meses.map(x=>'<option value="'+x+'"'+(x===ym?' selected':'')+'>'+lblYm(x)+'</option>').join('')+
+        '</select>'+
+        '<button onclick="ecoCloseResumen()" style="border:none;background:#eef2f7;width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:16px;color:'+_ECO_TXT2+'">✕</button>'+
+      '</div>'+
+    '</div>'+
+    '<div style="font-size:11px;color:'+_ECO_TXT3+';margin-bottom:14px">Cargá cada compra con sus cuotas: se reparten solas en los meses que corresponden y dejan de aparecer cuando terminan. Los conceptos fijos se repiten todos los meses.</div>'+
+
+    // CONSUMOS
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'+
+      '<div style="font-size:13px;font-weight:800;color:'+_ECO_TXT+'">🛒 Compras / consumos activos en '+lblYm(ym)+'</div>'+
+      '<button onclick="_ecoResItemForm(-1)" style="margin-left:auto;padding:6px 11px;border:1px dashed #93c5fd;background:#eff6ff;color:#1d4ed8;border-radius:8px;font-weight:700;cursor:pointer;font-size:11.5px">➕ Compra</button>'+
+    '</div>'+
+    '<table style="border-collapse:collapse;width:100%;font-size:12px;margin-bottom:14px">'+
+      '<thead><tr>'+['Fecha','Detalle','Importe total','Cuota','Subtotal del mes',''].map(t=>'<th style="padding:6px 7px;border:'+BR+';background:#eef2f7;font-size:11px;white-space:nowrap">'+t+'</th>').join('')+'</tr></thead>'+
+      '<tbody>'+filasCons+'</tbody>'+
+      '<tfoot><tr><td colspan="4" style="padding:6px 7px;border:'+BR+';text-align:right;font-weight:700;background:#f8fafc">Subtotal consumos</td>'+
+        '<td style="padding:6px 7px;border:'+BR+';text-align:right;font-weight:800;background:#f8fafc;white-space:nowrap">'+F(d.subConsumo)+'</td><td style="border:'+BR+';background:#f8fafc"></td></tr></tfoot>'+
+    '</table>'+
+
+    // FIJOS
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'+
+      '<div style="font-size:13px;font-weight:800;color:'+_ECO_TXT+'">📌 Conceptos fijos del resumen</div>'+
+      '<button onclick="_ecoResFijoForm(-1)" style="margin-left:auto;padding:6px 11px;border:1px dashed #c4b5fd;background:#f5f3ff;color:#6d28d9;border-radius:8px;font-weight:700;cursor:pointer;font-size:11.5px">➕ Concepto fijo</button>'+
+    '</div>'+
+    '<table style="border-collapse:collapse;width:100%;font-size:12px;margin-bottom:14px">'+
+      '<thead><tr>'+['Concepto','Tipo','Importe del mes',''].map(t=>'<th style="padding:6px 7px;border:'+BR+';background:#eef2f7;font-size:11px;white-space:nowrap">'+t+'</th>').join('')+'</tr></thead>'+
+      '<tbody>'+filasFij+'</tbody>'+
+      '<tfoot><tr><td colspan="2" style="padding:6px 7px;border:'+BR+';text-align:right;font-weight:700;background:#f8fafc">Subtotal fijos</td>'+
+        '<td style="padding:6px 7px;border:'+BR+';text-align:right;font-weight:800;background:#f8fafc;white-space:nowrap">'+F(d.subFijo)+'</td><td style="border:'+BR+';background:#f8fafc"></td></tr></tfoot>'+
+    '</table>'+
+
+    // TOTALES + DIFERENCIA
+    '<div style="border:'+BR+';border-radius:11px;padding:12px 14px;background:#f8fafc;margin-bottom:14px">'+
+      '<div style="display:flex;justify-content:space-between;font-size:12.5px;padding:3px 0"><span>Calculado por el resumen</span><b>'+F(d.calc)+'</b></div>'+
+      (d.manual
+        ? '<div style="display:flex;justify-content:space-between;font-size:12.5px;padding:3px 0;color:#1d4ed8"><span>Resumen real cargado en la planilla</span><b>'+F(d.real)+'</b></div>'+
+          '<div style="display:flex;justify-content:space-between;align-items:center;font-size:12.5px;padding:6px 0;border-top:1px dashed '+_ECO_BRD+';margin-top:5px;color:'+(Math.abs(d.dif)<1?'#16a34a':'#c2410c')+'">'+
+            '<span><b>⚖️ Diferencia</b> <span style="font-size:10.5px;opacity:.85">'+(Math.abs(d.dif)<1?'· todo cargado':'· falta cargar este importe en compras')+'</span></span>'+
+            '<span style="display:flex;gap:8px;align-items:center"><b>'+F(d.dif)+'</b>'+
+              (Math.abs(d.dif)>=1? '<button onclick="_ecoResItemForm(-1,'+d.dif+')" style="border:none;background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;border-radius:7px;padding:4px 9px;cursor:pointer;font-size:11px;font-weight:700">Cargar como compra</button>':'')+
+            '</span>'+
+          '</div>'
+        : '<div style="font-size:10.5px;color:'+_ECO_TXT3+';padding:3px 0">La celda de la planilla la maneja este resumen. Si editás la celda a mano, acá aparece la diferencia hasta que cargues lo que falta.</div>')+
+      '<div style="display:flex;justify-content:space-between;font-size:15px;padding:8px 0 0;border-top:1px solid '+_ECO_BRD+';margin-top:6px"><span style="font-weight:800">TOTAL '+lblYm(ym).toUpperCase()+'</span><b style="font-weight:800">'+F(d.total)+'</b></div>'+
+    '</div>'+
+
+    // PROYECCIÓN
+    (proy? '<div style="font-size:13px;font-weight:800;color:'+_ECO_TXT+';margin-bottom:6px">📅 Proyección de los próximos 12 meses</div>'+
+      '<div style="overflow:auto;border:'+BR+';border-radius:9px;margin-bottom:6px">'+proy+'</div>'+
+      '<div style="font-size:10.5px;color:'+_ECO_TXT3+';margin-bottom:14px">En azul los meses donde ya cargaste el resumen real a mano. Las cuotas dejan de sumar cuando se terminan.</div>' : '')+
+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">'+
+      '<button onclick="ecoCloseResumen()" style="padding:10px 14px;border:'+BR+';background:#fff;color:'+_ECO_TXT2+';border-radius:9px;font-weight:600;cursor:pointer">Cerrar</button>'+
+      '<button onclick="_ecoResAplicar(\''+g.id+'\')" style="padding:10px 16px;border:none;background:#4f8ef7;color:#fff;border-radius:9px;font-weight:700;cursor:pointer">📥 Aplicar a la planilla</button>'+
+    '</div>';
+}
+function _ecoResSetMes(ym){ _ecoResState.ym=ym; _ecoResRender(); }
+
+// ── alta / edición de una compra ──
+function _ecoResItemForm(idx, montoSug){
+  const g=_ecoState.gastos.find(x=>x.id===_ecoResState.gid); if(!g) return;
+  const res=_ecoResDe(g);
+  const it = idx>=0 ? res.items[idx] : { f:new Date().toISOString().slice(0,10), n:'', imp:(montoSug||''), cuo:1, desde:_ecoResState.ym };
+  const BR='1px solid '+_ECO_BRD;
+  const inp='width:100%;padding:9px;border:'+BR+';border-radius:9px;font-size:13.5px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+';box-sizing:border-box';
+  const lab='font-size:11.5px;font-weight:600;color:'+_ECO_TXT2+';display:block;margin-bottom:4px';
+  const inner=
+    '<div style="font-size:15px;font-weight:800;margin-bottom:14px;color:'+_ECO_TXT+'">'+(idx>=0?'✎ Editar compra':'➕ Nueva compra')+'</div>'+
+    '<label style="'+lab+'">Fecha de la compra</label>'+
+    '<input type="date" id="eco-res-f" value="'+(it.f||'')+'" style="'+inp+';margin-bottom:10px">'+
+    '<label style="'+lab+'">Local / detalle</label>'+
+    '<input type="text" id="eco-res-n" value="'+String(it.n||'').replace(/"/g,'&quot;')+'" placeholder="Ej: Garbarino — Smart TV" style="'+inp+';margin-bottom:10px">'+
+    '<div style="display:flex;gap:8px;margin-bottom:10px">'+
+      '<div style="flex:1"><label style="'+lab+'">Importe total</label><input type="number" step="0.01" id="eco-res-imp" value="'+(it.imp!==''&&it.imp!=null?it.imp:'')+'" style="'+inp+'"></div>'+
+      '<div style="width:110px"><label style="'+lab+'">Cuotas</label><input type="number" min="1" step="1" id="eco-res-cuo" value="'+(it.cuo||1)+'" style="'+inp+'"></div>'+
+    '</div>'+
+    '<label style="'+lab+'">Primera cuota en</label>'+
+    '<input type="month" id="eco-res-desde" value="'+(it.desde||(it.f? it.f.slice(0,7):_ecoResState.ym))+'" style="'+inp+';margin-bottom:6px">'+
+    '<div style="font-size:10.5px;color:'+_ECO_TXT3+';margin-bottom:14px">La compra se reparte en partes iguales desde ese mes. Con 3 cuotas suma en 3 meses y en el cuarto ya no aparece.</div>'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end">'+
+      '<button onclick="document.querySelector(\'.eco-res-ov2\').remove()" style="padding:10px 14px;border:'+BR+';background:#fff;color:'+_ECO_TXT2+';border-radius:9px;font-weight:600;cursor:pointer">Cancelar</button>'+
+      '<button onclick="_ecoResItemSave('+idx+')" style="padding:10px 16px;border:none;background:#4f8ef7;color:#fff;border-radius:9px;font-weight:700;cursor:pointer">Guardar</button>'+
+    '</div>';
+  const ov=document.createElement('div');
+  ov.className='eco-res-ov2';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:100003;display:flex;align-items:center;justify-content:center;padding:16px';
+  ov.innerHTML='<div style="background:'+_ECO_MODAL_BG+';border-radius:14px;max-width:440px;width:100%;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.35);color:'+_ECO_TXT+';max-height:90vh;overflow:auto">'+inner+'</div>';
+  document.body.appendChild(ov);
+}
+function _ecoResItemSave(idx){
+  const g=_ecoState.gastos.find(x=>x.id===_ecoResState.gid); if(!g) return;
+  const res=_ecoResDe(g);
+  const f=document.getElementById('eco-res-f').value||'';
+  const n=(document.getElementById('eco-res-n').value||'').trim();
+  const imp=parseFloat(document.getElementById('eco-res-imp').value)||0;
+  const cuo=Math.max(1,Math.round(parseFloat(document.getElementById('eco-res-cuo').value)||1));
+  const desde=document.getElementById('eco-res-desde').value|| (f? f.slice(0,7):_ecoResState.ym);
+  if(!n){ showToast('Poné un detalle para la compra','error'); return; }
+  if(!imp){ showToast('Poné el importe total','error'); return; }
+  const obj={ f, n, imp, cuo, desde };
+  if(idx>=0) res.items[idx]=obj; else res.items.push(obj);
+  document.querySelector('.eco-res-ov2')?.remove();
+  _ecoResAplicar(g.id, true);
+  _ecoMarkDirty(); ecoRender(); _ecoResRender();
+  showToast('✓ Compra guardada','success');
+}
+function _ecoResItemDel(idx){
+  const g=_ecoState.gastos.find(x=>x.id===_ecoResState.gid); if(!g) return;
+  const res=_ecoResDe(g);
+  if(!confirm('¿Borrar "'+(res.items[idx]?.n||'')+'" del resumen?')) return;
+  res.items.splice(idx,1);
+  _ecoResAplicar(g.id, true);
+  _ecoMarkDirty(); ecoRender(); _ecoResRender();
+}
+
+// ── alta / edición de un concepto fijo ──
+function _ecoResFijoForm(idx){
+  const g=_ecoState.gastos.find(x=>x.id===_ecoResState.gid); if(!g) return;
+  const res=_ecoResDe(g);
+  const f = idx>=0 ? res.fijos[idx] : { n:'', tipo:'monto', val:'', desde:'', hasta:'' };
+  const BR='1px solid '+_ECO_BRD;
+  const inp='width:100%;padding:9px;border:'+BR+';border-radius:9px;font-size:13.5px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+';box-sizing:border-box';
+  const lab='font-size:11.5px;font-weight:600;color:'+_ECO_TXT2+';display:block;margin-bottom:4px';
+  const inner=
+    '<div style="font-size:15px;font-weight:800;margin-bottom:14px;color:'+_ECO_TXT+'">'+(idx>=0?'✎ Editar concepto fijo':'➕ Nuevo concepto fijo')+'</div>'+
+    '<label style="'+lab+'">Concepto</label>'+
+    '<input type="text" id="eco-resf-n" value="'+String(f.n||'').replace(/"/g,'&quot;')+'" placeholder="Ej: Costo fijo / IVA / Seguro de vida" style="'+inp+';margin-bottom:10px">'+
+    '<label style="'+lab+'">Tipo</label>'+
+    '<select id="eco-resf-tipo" style="'+inp+';margin-bottom:10px">'+
+      '<option value="monto"'+(f.tipo!=='pct'?' selected':'')+'>Importe fijo en $</option>'+
+      '<option value="pct"'+(f.tipo==='pct'?' selected':'')+'>Porcentaje de los consumos del mes</option>'+
+    '</select>'+
+    '<label style="'+lab+'">Valor <span style="font-weight:400;color:'+_ECO_TXT3+'">(monto en $ o el número de % según el tipo)</span></label>'+
+    '<input type="number" step="0.01" id="eco-resf-val" value="'+(f.val!==''&&f.val!=null?f.val:'')+'" style="'+inp+';margin-bottom:10px">'+
+    '<div style="display:flex;gap:8px;margin-bottom:6px">'+
+      '<div style="flex:1"><label style="'+lab+'">Desde (opcional)</label><input type="month" id="eco-resf-desde" value="'+(f.desde||'')+'" style="'+inp+'"></div>'+
+      '<div style="flex:1"><label style="'+lab+'">Hasta (opcional)</label><input type="month" id="eco-resf-hasta" value="'+(f.hasta||'')+'" style="'+inp+'"></div>'+
+    '</div>'+
+    '<div style="font-size:10.5px;color:'+_ECO_TXT3+';margin-bottom:14px">Si dejás las fechas vacías, el concepto se repite en todos los meses del resumen.</div>'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end">'+
+      '<button onclick="document.querySelector(\'.eco-res-ov2\').remove()" style="padding:10px 14px;border:'+BR+';background:#fff;color:'+_ECO_TXT2+';border-radius:9px;font-weight:600;cursor:pointer">Cancelar</button>'+
+      '<button onclick="_ecoResFijoSave('+idx+')" style="padding:10px 16px;border:none;background:#6d28d9;color:#fff;border-radius:9px;font-weight:700;cursor:pointer">Guardar</button>'+
+    '</div>';
+  const ov=document.createElement('div');
+  ov.className='eco-res-ov2';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:100003;display:flex;align-items:center;justify-content:center;padding:16px';
+  ov.innerHTML='<div style="background:'+_ECO_MODAL_BG+';border-radius:14px;max-width:440px;width:100%;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.35);color:'+_ECO_TXT+';max-height:90vh;overflow:auto">'+inner+'</div>';
+  document.body.appendChild(ov);
+}
+function _ecoResFijoSave(idx){
+  const g=_ecoState.gastos.find(x=>x.id===_ecoResState.gid); if(!g) return;
+  const res=_ecoResDe(g);
+  const n=(document.getElementById('eco-resf-n').value||'').trim();
+  const tipo=document.getElementById('eco-resf-tipo').value||'monto';
+  const val=parseFloat(document.getElementById('eco-resf-val').value)||0;
+  const desde=document.getElementById('eco-resf-desde').value||'';
+  const hasta=document.getElementById('eco-resf-hasta').value||'';
+  if(!n){ showToast('Poné un nombre para el concepto','error'); return; }
+  const obj={ n, tipo, val, desde, hasta };
+  if(idx>=0) res.fijos[idx]=obj; else res.fijos.push(obj);
+  document.querySelector('.eco-res-ov2')?.remove();
+  _ecoResAplicar(g.id, true);
+  _ecoMarkDirty(); ecoRender(); _ecoResRender();
+  showToast('✓ Concepto fijo guardado','success');
+}
+function _ecoResFijoDel(idx){
+  const g=_ecoState.gastos.find(x=>x.id===_ecoResState.gid); if(!g) return;
+  const res=_ecoResDe(g);
+  if(!confirm('¿Borrar el concepto "'+(res.fijos[idx]?.n||'')+'"?')) return;
+  res.fijos.splice(idx,1);
+  _ecoResAplicar(g.id, true);
+  _ecoMarkDirty(); ecoRender(); _ecoResRender();
 }
 function _ecoSaveGasto(gid){
   const g=_ecoState.gastos.find(x=>x.id===gid); if(!g) return;
