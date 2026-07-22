@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v231 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v232 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -31405,18 +31405,70 @@ function _ecoResDe(g){ if(!g.res || typeof g.res!=='object') g.res={items:[],fij
   if(!Array.isArray(g.res.fijos)) g.res.fijos=[];
   return g.res; }
 
+// ── v232 · CICLO DE FACTURACIÓN DE LA TARJETA ─────────────────────────────
+// cierre = día en que la tarjeta cierra el resumen
+// venc   = día en que hay que pagarlo
+// Regla: si venc <= cierre, el pago cae el MES SIGUIENTE al del cierre
+//        (cierre 25 → vence el 10 del mes que viene). Si venc > cierre, el pago
+//        cae en el MISMO mes del cierre (cierre 5 → vence el 20 de ese mes).
+function _ecoResCfg(g){
+  if(!g.resCfg || typeof g.resCfg!=='object') g.resCfg={ cierre:25, venc:10 };
+  if(!(g.resCfg.cierre>=1 && g.resCfg.cierre<=31)) g.resCfg.cierre=25;
+  if(!(g.resCfg.venc>=1 && g.resCfg.venc<=31)) g.resCfg.venc=10;
+  return g.resCfg;
+}
+function _ecoUltDia(y,m){ return new Date(y,m+1,0).getDate(); }         // m 0-based
+function _ecoDiaVal(y,m,d){ return Math.min(d, _ecoUltDia(y,m)); }      // 31 en feb → 28/29
+
+// Mes en que se PAGA una compra hecha el día f ('YYYY-MM-DD').
+// Si la compra fue después del cierre, entra recién en el resumen siguiente:
+// por eso una compra del 20 con cierre el 18 no se paga el mes que viene sino el otro.
+function _ecoResMesPago(g, f){
+  if(!f) return null;
+  const cfg=_ecoResCfg(g), C=cfg.cierre, V=cfg.venc;
+  const [y,mo,dd]=String(f).split('-').map(Number);
+  if(!y||!mo||!dd) return null;
+  const m0=mo-1;
+  let cy=y, cm=m0;                                   // mes del cierre que la toma
+  if(dd > _ecoDiaVal(y,m0,C)){ const d2=new Date(y,m0+1,1); cy=d2.getFullYear(); cm=d2.getMonth(); }
+  let py=cy, pm=cm;                                  // mes del pago
+  if(V<=C){ const d3=new Date(cy,cm+1,1); py=d3.getFullYear(); pm=d3.getMonth(); }
+  return py+'-'+String(pm+1).padStart(2,'0');
+}
+// Período de consumos que cubre el resumen que se paga en ymPago
+function _ecoResPeriodo(g, ymPago){
+  const cfg=_ecoResCfg(g), C=cfg.cierre, V=cfg.venc;
+  const [py,pm]=ymPago.split('-').map(Number);
+  let cy=py, cm=pm-1;                                // mes del cierre
+  if(V<=C){ const d=new Date(py,pm-2,1); cy=d.getFullYear(); cm=d.getMonth(); }
+  const hasta=new Date(cy,cm,_ecoDiaVal(cy,cm,C));   // día de cierre
+  const pd=new Date(cy,cm-1,1);                      // mes anterior
+  const desde=new Date(pd.getFullYear(),pd.getMonth(),_ecoDiaVal(pd.getFullYear(),pd.getMonth(),C)+1);
+  const venc=new Date(py,pm-1,_ecoDiaVal(py,pm-1,V));
+  return { desde, hasta, venc };
+}
+function _ecoResFmtD(d){ return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0'); }
+function _ecoResFmtDA(d){ return _ecoResFmtD(d)+'/'+d.getFullYear(); }
+// Mes de la primera cuota de una compra: se calcula solo desde la fecha y el
+// cierre, salvo que se haya forzado a mano.
+function _ecoResDesdeDe(g, it){
+  if(it.manualDesde && it.desde) return it.desde;
+  const auto=_ecoResMesPago(g, it.f);
+  return auto || it.desde || null;
+}
+
 // Calcula el resumen de un mes: cuotas activas + fijos + diferencia contra la celda
 function _ecoResMes(g, ym){
   const res=_ecoResDe(g);
   const consumos=[]; let subConsumo=0;
   res.items.forEach(it=>{
-    const desde = it.desde || (it.f? it.f.slice(0,7) : null);
+    const desde = _ecoResDesdeDe(g, it);       // v232: sale del cierre de la tarjeta
     if(!desde) return;
     const cuo = Math.max(1, Math.round(+it.cuo||1));
     const idx = _ecoYmDiff(desde, ym);
     if(idx<0 || idx>=cuo) return;              // fuera del plan de cuotas
     const sub = (+it.imp||0)/cuo;
-    consumos.push({ it, nro:idx+1, cuo, sub });
+    consumos.push({ it, nro:idx+1, cuo, sub, restan: cuo-(idx+1) });
     subConsumo += sub;
   });
   const fijos=[]; let subFijo=0;
@@ -31444,7 +31496,7 @@ function _ecoResRango(g){
   const res=_ecoResDe(g);
   let min=null, max=null;
   res.items.forEach(it=>{
-    const desde=it.desde||(it.f? it.f.slice(0,7):null); if(!desde) return;
+    const desde=_ecoResDesdeDe(g, it); if(!desde) return;
     const cuo=Math.max(1,Math.round(+it.cuo||1));
     const fin=_ecoYmAdd(desde, cuo-1);
     if(!min||desde<min) min=desde;
@@ -31480,7 +31532,7 @@ function _ecoResAplicar(gid, silencioso){
     ym=_ecoYmAdd(ym,1);
   }
   _ecoMarkDirty();
-  if(!silencioso){ ecoRender(); showToast('✓ Resumen aplicado a '+n+' mes(es)','success'); }
+  if(!silencioso){ ecoRender(); }   // v232: sin notificaciones en esta herramienta
   return n;
 }
 
@@ -31523,7 +31575,9 @@ function _ecoResRender(){
       '<td style="padding:5px 7px;border:'+BR+';white-space:nowrap">'+(c.it.f||'—')+'</td>'+
       '<td style="padding:5px 7px;border:'+BR+'">'+_persoEsc(c.it.n||'')+'</td>'+
       '<td style="padding:5px 7px;border:'+BR+';text-align:right;white-space:nowrap">'+F(c.it.imp)+'</td>'+
-      '<td style="padding:5px 7px;border:'+BR+';text-align:center;white-space:nowrap">'+c.nro+'/'+c.cuo+'</td>'+
+      '<td style="padding:5px 7px;border:'+BR+';text-align:center;white-space:nowrap">'+c.nro+'/'+c.cuo+
+        (c.restan>0? '<div style="font-size:9.5px;color:'+_ECO_TXT3+';font-weight:400">restan '+c.restan+'</div>'
+                   : '<div style="font-size:9.5px;color:#16a34a;font-weight:600">última</div>')+'</td>'+
       '<td style="padding:5px 7px;border:'+BR+';text-align:right;font-weight:700;white-space:nowrap">'+F(c.sub)+'</td>'+
       '<td style="padding:5px 7px;border:'+BR+';text-align:center;white-space:nowrap">'+
         '<button onclick="_ecoResItemForm('+i+')" style="border:none;background:#eef2f7;color:#334155;border-radius:6px;padding:4px 7px;cursor:pointer;font-size:11px">✎</button> '+
@@ -31561,6 +31615,8 @@ function _ecoResRender(){
       }).join('')+'</tr></tbody></table>';
   }
 
+  const cfg=_ecoResCfg(g);
+  const per=_ecoResPeriodo(g, ym);
   cont.innerHTML =
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;flex-wrap:wrap;gap:8px">'+
       '<div style="font-size:16px;font-weight:800;color:'+_ECO_TXT+'">💳 Resumen — '+_persoEsc(g.n)+'</div>'+
@@ -31571,7 +31627,20 @@ function _ecoResRender(){
         '<button onclick="ecoCloseResumen()" style="border:none;background:#eef2f7;width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:16px;color:'+_ECO_TXT2+'">✕</button>'+
       '</div>'+
     '</div>'+
-    '<div style="font-size:11px;color:'+_ECO_TXT3+';margin-bottom:14px">Cargá cada compra con sus cuotas: se reparten solas en los meses que corresponden y dejan de aparecer cuando terminan. Los conceptos fijos se repiten todos los meses.</div>'+
+    // v232: leyenda del período exacto que cubre este resumen
+    '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:9px 12px;margin-bottom:10px;font-size:12.5px;color:#1e40af;font-weight:600">'+
+      '🧾 Consumos realizados entre el <b>'+_ecoResFmtDA(per.desde)+'</b> y el <b>'+_ecoResFmtDA(per.hasta)+'</b> · se abona antes del <b>'+_ecoResFmtDA(per.venc)+'</b>'+
+    '</div>'+
+    // configuración del ciclo
+    '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:#f8fafc;border:'+BR+';border-radius:10px;padding:9px 12px;margin-bottom:12px">'+
+      '<span style="font-size:11.5px;font-weight:700;color:'+_ECO_TXT2+'">⚙️ Ciclo de la tarjeta:</span>'+
+      '<label style="font-size:11.5px;color:'+_ECO_TXT2+';display:flex;align-items:center;gap:5px">cierra el día '+
+        '<input type="number" min="1" max="31" value="'+cfg.cierre+'" onchange="_ecoResCfgSet(\'cierre\',this.value)" style="width:58px;padding:5px 6px;border:'+BR+';border-radius:7px;font-size:12px;text-align:center;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+'"></label>'+
+      '<label style="font-size:11.5px;color:'+_ECO_TXT2+';display:flex;align-items:center;gap:5px">se paga antes del día '+
+        '<input type="number" min="1" max="31" value="'+cfg.venc+'" onchange="_ecoResCfgSet(\'venc\',this.value)" style="width:58px;padding:5px 6px;border:'+BR+';border-radius:7px;font-size:12px;text-align:center;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+'"></label>'+
+      '<span style="font-size:10.5px;color:'+_ECO_TXT3+';flex:1;min-width:200px">Con esto cada compra se ubica sola en el mes que corresponde: si la hiciste después del cierre, entra en el resumen siguiente.</span>'+
+    '</div>'+
+    '<div style="font-size:11px;color:'+_ECO_TXT3+';margin-bottom:14px">Cargá cada compra con su fecha y sus cuotas: se reparten solas en los meses que corresponden y dejan de aparecer cuando terminan. Los conceptos fijos se repiten todos los meses.</div>'+
 
     // CONSUMOS
     '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'+
@@ -31623,12 +31692,21 @@ function _ecoResRender(){
     '</div>';
 }
 function _ecoResSetMes(ym){ _ecoResState.ym=ym; _ecoResRender(); }
+// v232: cambiar cierre/vencimiento redistribuye TODAS las compras ya cargadas
+function _ecoResCfgSet(campo, val){
+  const g=_ecoState.gastos.find(x=>x.id===_ecoResState.gid); if(!g) return;
+  const n=Math.max(1, Math.min(31, Math.round(parseFloat(val)||1)));
+  _ecoResCfg(g)[campo]=n;
+  _ecoResAplicar(g.id, true);
+  _ecoMarkDirty(); ecoRender(); _ecoResRender();
+}
 
 // ── alta / edición de una compra ──
 function _ecoResItemForm(idx, montoSug){
   const g=_ecoState.gastos.find(x=>x.id===_ecoResState.gid); if(!g) return;
   const res=_ecoResDe(g);
-  const it = idx>=0 ? res.items[idx] : { f:new Date().toISOString().slice(0,10), n:'', imp:(montoSug||''), cuo:1, desde:_ecoResState.ym };
+  const it = idx>=0 ? res.items[idx] : { f:new Date().toISOString().slice(0,10), n:'', imp:(montoSug||''), cuo:1 };
+  const cfg=_ecoResCfg(g);
   const BR='1px solid '+_ECO_BRD;
   const inp='width:100%;padding:9px;border:'+BR+';border-radius:9px;font-size:13.5px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+';box-sizing:border-box';
   const lab='font-size:11.5px;font-weight:600;color:'+_ECO_TXT2+';display:block;margin-bottom:4px';
@@ -31642,9 +31720,15 @@ function _ecoResItemForm(idx, montoSug){
       '<div style="flex:1"><label style="'+lab+'">Importe total</label><input type="number" step="0.01" id="eco-res-imp" value="'+(it.imp!==''&&it.imp!=null?it.imp:'')+'" style="'+inp+'"></div>'+
       '<div style="width:110px"><label style="'+lab+'">Cuotas</label><input type="number" min="1" step="1" id="eco-res-cuo" value="'+(it.cuo||1)+'" style="'+inp+'"></div>'+
     '</div>'+
-    '<label style="'+lab+'">Primera cuota en</label>'+
-    '<input type="month" id="eco-res-desde" value="'+(it.desde||(it.f? it.f.slice(0,7):_ecoResState.ym))+'" style="'+inp+';margin-bottom:6px">'+
-    '<div style="font-size:10.5px;color:'+_ECO_TXT3+';margin-bottom:14px">La compra se reparte en partes iguales desde ese mes. Con 3 cuotas suma en 3 meses y en el cuarto ya no aparece.</div>'+
+    // v232: el mes de la primera cuota lo deduce el ciclo de la tarjeta
+    '<div id="eco-res-auto" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:9px;padding:9px 11px;font-size:11.5px;color:#1e40af;margin-bottom:10px"></div>'+
+    '<label style="display:flex;align-items:center;gap:7px;font-size:11.5px;color:'+_ECO_TXT2+';cursor:pointer;margin-bottom:8px">'+
+      '<input type="checkbox" id="eco-res-man" '+(it.manualDesde?'checked':'')+' onchange="_ecoResAutoPrev()" style="width:15px;height:15px">'+
+      '<span>Elegir a mano el mes de la primera cuota</span>'+
+    '</label>'+
+    '<input type="month" id="eco-res-desde" value="'+(it.desde||_ecoResState.ym)+'" style="'+inp+';margin-bottom:6px;display:'+(it.manualDesde?'block':'none')+'">'+
+    '<div style="font-size:10.5px;color:'+_ECO_TXT3+';margin-bottom:10px">La compra se reparte en partes iguales. Con 3 cuotas suma en 3 meses y en el cuarto ya no aparece.</div>'+
+    '<div id="eco-res-err" style="display:none;font-size:11.5px;color:#b91c1c;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:8px 10px;margin-bottom:10px"></div>'+
     '<div style="display:flex;gap:8px;justify-content:flex-end">'+
       '<button onclick="document.querySelector(\'.eco-res-ov2\').remove()" style="padding:10px 14px;border:'+BR+';background:#fff;color:'+_ECO_TXT2+';border-radius:9px;font-weight:600;cursor:pointer">Cancelar</button>'+
       '<button onclick="_ecoResItemSave('+idx+')" style="padding:10px 16px;border:none;background:#4f8ef7;color:#fff;border-radius:9px;font-weight:700;cursor:pointer">Guardar</button>'+
@@ -31654,6 +31738,31 @@ function _ecoResItemForm(idx, montoSug){
   ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:100003;display:flex;align-items:center;justify-content:center;padding:16px';
   ov.innerHTML='<div style="background:'+_ECO_MODAL_BG+';border-radius:14px;max-width:440px;width:100%;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.35);color:'+_ECO_TXT+';max-height:90vh;overflow:auto">'+inner+'</div>';
   document.body.appendChild(ov);
+  document.getElementById('eco-res-f').addEventListener('change', _ecoResAutoPrev);
+  document.getElementById('eco-res-cuo').addEventListener('input', _ecoResAutoPrev);
+  _ecoResAutoPrev();
+}
+// v232: muestra en vivo en qué mes va a caer la primera cuota según el ciclo
+function _ecoResAutoPrev(){
+  const g=_ecoState.gastos.find(x=>x.id===_ecoResState.gid); if(!g) return;
+  const box=document.getElementById('eco-res-auto'); if(!box) return;
+  const man=document.getElementById('eco-res-man')?.checked;
+  const selDesde=document.getElementById('eco-res-desde');
+  if(selDesde) selDesde.style.display = man? 'block':'none';
+  const f=document.getElementById('eco-res-f')?.value||'';
+  const cuo=Math.max(1,Math.round(parseFloat(document.getElementById('eco-res-cuo')?.value)||1));
+  const cfg=_ecoResCfg(g);
+  const MC=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  const lbl=x=>MC[+x.slice(5,7)-1]+' '+x.slice(0,4);
+  if(man){ box.innerHTML='Mes elegido a mano. Las '+cuo+' cuota(s) arrancan en el mes que selecciones abajo.'; return; }
+  const ymP=_ecoResMesPago(g,f);
+  if(!ymP){ box.innerHTML='Cargá la fecha de la compra para calcular el mes.'; return; }
+  const dd=+f.slice(8,10);
+  const post = dd > _ecoDiaVal(+f.slice(0,4), +f.slice(5,7)-1, cfg.cierre);
+  const fin=_ecoYmAdd(ymP, cuo-1);
+  box.innerHTML='📅 La compra '+(post?'entró <b>después del cierre</b> (día '+cfg.cierre+'), así que va al resumen siguiente'
+                               :'entró <b>antes del cierre</b> (día '+cfg.cierre+')')+'.<br>'+
+    'Primera cuota: <b>'+lbl(ymP)+'</b>'+(cuo>1? ' · última: <b>'+lbl(fin)+'</b> ('+cuo+' cuotas)':' (1 pago)');
 }
 function _ecoResItemSave(idx){
   const g=_ecoState.gastos.find(x=>x.id===_ecoResState.gid); if(!g) return;
@@ -31662,15 +31771,20 @@ function _ecoResItemSave(idx){
   const n=(document.getElementById('eco-res-n').value||'').trim();
   const imp=parseFloat(document.getElementById('eco-res-imp').value)||0;
   const cuo=Math.max(1,Math.round(parseFloat(document.getElementById('eco-res-cuo').value)||1));
-  const desde=document.getElementById('eco-res-desde').value|| (f? f.slice(0,7):_ecoResState.ym);
-  if(!n){ showToast('Poné un detalle para la compra','error'); return; }
-  if(!imp){ showToast('Poné el importe total','error'); return; }
-  const obj={ f, n, imp, cuo, desde };
+  const manualDesde=!!document.getElementById('eco-res-man')?.checked;
+  const desde=document.getElementById('eco-res-desde').value||'';
+  const err=document.getElementById('eco-res-err');
+  const fallar=msg=>{ if(err){ err.style.display='block'; err.textContent=msg; } };
+  if(!n){ fallar('Poné un detalle para la compra.'); return; }
+  if(!imp){ fallar('Poné el importe total de la compra.'); return; }
+  if(!manualDesde && !f){ fallar('Poné la fecha de la compra (o elegí el mes a mano).'); return; }
+  if(manualDesde && !desde){ fallar('Elegí el mes de la primera cuota.'); return; }
+  const obj={ f, n, imp, cuo, manualDesde };
+  if(manualDesde) obj.desde=desde;
   if(idx>=0) res.items[idx]=obj; else res.items.push(obj);
   document.querySelector('.eco-res-ov2')?.remove();
   _ecoResAplicar(g.id, true);
   _ecoMarkDirty(); ecoRender(); _ecoResRender();
-  showToast('✓ Compra guardada','success');
 }
 function _ecoResItemDel(idx){
   const g=_ecoState.gastos.find(x=>x.id===_ecoResState.gid); if(!g) return;
@@ -31704,7 +31818,8 @@ function _ecoResFijoForm(idx){
       '<div style="flex:1"><label style="'+lab+'">Desde (opcional)</label><input type="month" id="eco-resf-desde" value="'+(f.desde||'')+'" style="'+inp+'"></div>'+
       '<div style="flex:1"><label style="'+lab+'">Hasta (opcional)</label><input type="month" id="eco-resf-hasta" value="'+(f.hasta||'')+'" style="'+inp+'"></div>'+
     '</div>'+
-    '<div style="font-size:10.5px;color:'+_ECO_TXT3+';margin-bottom:14px">Si dejás las fechas vacías, el concepto se repite en todos los meses del resumen.</div>'+
+    '<div style="font-size:10.5px;color:'+_ECO_TXT3+';margin-bottom:10px">Si dejás las fechas vacías, el concepto se repite en todos los meses del resumen.</div>'+
+    '<div id="eco-resf-err" style="display:none;font-size:11.5px;color:#b91c1c;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:8px 10px;margin-bottom:10px"></div>'+
     '<div style="display:flex;gap:8px;justify-content:flex-end">'+
       '<button onclick="document.querySelector(\'.eco-res-ov2\').remove()" style="padding:10px 14px;border:'+BR+';background:#fff;color:'+_ECO_TXT2+';border-radius:9px;font-weight:600;cursor:pointer">Cancelar</button>'+
       '<button onclick="_ecoResFijoSave('+idx+')" style="padding:10px 16px;border:none;background:#6d28d9;color:#fff;border-radius:9px;font-weight:700;cursor:pointer">Guardar</button>'+
@@ -31723,13 +31838,12 @@ function _ecoResFijoSave(idx){
   const val=parseFloat(document.getElementById('eco-resf-val').value)||0;
   const desde=document.getElementById('eco-resf-desde').value||'';
   const hasta=document.getElementById('eco-resf-hasta').value||'';
-  if(!n){ showToast('Poné un nombre para el concepto','error'); return; }
+  if(!n){ const e=document.getElementById('eco-resf-err'); if(e){ e.style.display='block'; e.textContent='Poné un nombre para el concepto.'; } return; }
   const obj={ n, tipo, val, desde, hasta };
   if(idx>=0) res.fijos[idx]=obj; else res.fijos.push(obj);
   document.querySelector('.eco-res-ov2')?.remove();
   _ecoResAplicar(g.id, true);
   _ecoMarkDirty(); ecoRender(); _ecoResRender();
-  showToast('✓ Concepto fijo guardado','success');
 }
 function _ecoResFijoDel(idx){
   const g=_ecoState.gastos.find(x=>x.id===_ecoResState.gid); if(!g) return;
