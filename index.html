@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v229 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v230 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -29964,10 +29964,29 @@ function _ecoMetCompute(ym, prevRow){
     gUsd:  (g!=null&&d>0)? g/d : null,
   };
   // v229: columnas propias — su valor se guarda igual que el resto en met[ym][id]
-  _ecoMetCols().forEach(c=>{ row[c.id] = (m[c.id]!=null && isFinite(m[c.id])) ? +m[c.id] : null; });
+  // v230: además pueden SUMAR a Ingresos US$ o RESTAR (sumar a Gastos US$).
+  // Si la columna está en $, se convierte a dólares con la cotización DE ESE MES
+  // (columna "Dólar $"). Si ya está en US$, entra tal cual. Las columnas en % o
+  // número no se agregan nunca (no tienen sentido monetario).
+  let _extraIng=0, _extraGas=0, _hayExtra=false;
+  _ecoMetCols().forEach(c=>{
+    row[c.id] = (m[c.id]!=null && isFinite(m[c.id])) ? +m[c.id] : null;
+    const val = row[c.id];
+    if(val==null || !c.agrega || c.agrega==='no') return;
+    let usd = null;
+    if(c.unidad==='US$') usd = val;
+    else if(c.unidad==='$' && d>0) usd = val/d;
+    if(usd==null) return;
+    if(c.agrega==='ing'){ _extraIng += usd; _hayExtra=true; }
+    else if(c.agrega==='gas'){ _extraGas += usd; _hayExtra=true; }
+  });
+  row.extraIngUsd=_extraIng; row.extraGasUsd=_extraGas;
   row.nDif = (row.scDif!=null&&ipc!=null)? row.scDif-ipc : null;   // Cristian % - IPC
   row.oDif = (row.sbDif!=null&&ipc!=null)? row.sbDif-ipc : null;   // Belén % - IPC
-  row.qIng = (row.vUsd!=null||row.scUsd!=null||row.sbUsd!=null)? ((row.vUsd||0)+(row.scUsd||0)+(row.sbUsd||0)) : null;
+  row.qIng = (row.vUsd!=null||row.scUsd!=null||row.sbUsd!=null||_extraIng!==0)
+    ? ((row.vUsd||0)+(row.scUsd||0)+(row.sbUsd||0)+_extraIng) : null;
+  // v230: los gastos propios se suman a Gastos US$
+  if(_extraGas!==0) row.gUsd = (row.gUsd||0) + _extraGas;
   row.saldo = (row.qIng!=null&&row.gUsd!=null)? row.qIng-row.gUsd : null;
   row.ahorro = (row.saldo!=null&&row.qIng>0)? (row.saldo/row.qIng*100) : null;   // T: tasa de ahorro
   return row;
@@ -30072,6 +30091,7 @@ function ecoOpenMetricas(){
     // ── CUERPO SCROLLEABLE ──
     '<div style="flex:1 1 auto;overflow:auto;padding:14px 20px 20px">'+
       '<div id="eco-met-resumen" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>'+
+      '<div id="eco-met-kpis12" style="margin-bottom:12px"></div>'+
       // comparador base 100 (entre los KPIs y la cuadrícula)
       '<div style="border:1px solid '+_ECO_BRD+';border-radius:11px;padding:12px 14px;margin-bottom:12px;background:#fbfcfe">'+
         '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">'+
@@ -30093,7 +30113,7 @@ function ecoOpenMetricas(){
         '<div id="eco-met-cmp-nota" style="font-size:11.5px;color:'+_ECO_TXT2+';margin-top:10px;line-height:1.7"></div>'+
       '</div>'+
       '<div style="overflow:auto;max-height:52vh;border:1px solid '+_ECO_BRD+';border-radius:10px">'+
-        '<table style="border-collapse:collapse;font-size:10.5px;min-width:1550px" id="eco-met-table">'+
+        '<table style="border-collapse:collapse;font-size:10.5px;width:max-content;min-width:100%" id="eco-met-table">'+
           '<thead><tr id="eco-met-thead-row">'+_ecoMetHeaders()+'</tr></thead>'+
           '<tbody id="eco-met-tbody"></tbody>'+
         '</table>'+
@@ -30126,8 +30146,15 @@ function _ecoMetColsManager(){
         base.map(b=>'<option value="'+b.id+'"'+(c.after===b.id?' selected':'')+'>después de "'+b.th+'"</option>').join('')+
         '<option value="__fin__"'+((!c.after||c.after==='__fin__')?' selected':'')+'>(al final)</option>'+
       '</select></td>'+
+      // v230: destino contable (suma a ingresos / resta como gasto / ninguno)
+      '<td style="padding:5px;border:1px solid '+_ECO_BRD+'"><select onchange="_ecoMetColSet('+i+',\'agrega\',this.value)" style="padding:5px;border:1px solid '+_ECO_BRD+';border-radius:6px;font-size:12px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+'"'+((c.unidad==='%'||c.unidad==='#')?' disabled title="Solo para columnas en $ o US$"':'')+'>'+
+        '<option value="no"'+((!c.agrega||c.agrega==='no')?' selected':'')+'>— no suma —</option>'+
+        '<option value="ing"'+(c.agrega==='ing'?' selected':'')+'>➕ suma a Ing US$</option>'+
+        '<option value="gas"'+(c.agrega==='gas'?' selected':'')+'>➖ suma a Gas US$</option>'+
+      '</select></td>'+
+      '<td style="padding:5px;border:1px solid '+_ECO_BRD+';text-align:center"><input type="color" value="'+(c.color||'#ede9fe')+'" onchange="_ecoMetColSet('+i+',\'color\',this.value)" title="Color de fondo de la columna" style="width:38px;height:26px;border:1px solid '+_ECO_BRD+';border-radius:6px;background:none;cursor:pointer;padding:1px"></td>'+
       '<td style="padding:5px;border:1px solid '+_ECO_BRD+';text-align:center"><button onclick="_ecoMetColDel('+i+')" style="border:none;background:#fee2e2;color:#b91c1c;border-radius:6px;padding:5px 9px;cursor:pointer;font-size:11px;font-weight:700">Borrar</button></td>'+
-    '</tr>').join('') : '<tr><td colspan="4" style="padding:14px;text-align:center;color:'+_ECO_TXT3+';border:1px solid '+_ECO_BRD+'">Todavía no agregaste columnas propias.</td></tr>';
+    '</tr>').join('') : '<tr><td colspan="6" style="padding:14px;text-align:center;color:'+_ECO_TXT3+';border:1px solid '+_ECO_BRD+'">Todavía no agregaste columnas propias.</td></tr>';
   const inner=
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'+
       '<div style="font-size:15px;font-weight:800;color:'+_ECO_TXT+'">🧩 Columnas propias de la planilla</div>'+
@@ -30135,13 +30162,16 @@ function _ecoMetColsManager(){
     '</div>'+
     '<div style="font-size:11.5px;color:'+_ECO_TXT3+';margin-bottom:10px;line-height:1.5">Agregá las columnas que necesites (otro ingreso, otro gasto, un dato a seguir) y elegí en qué lugar de la planilla van. Se cargan como cualquier otra celda y se pueden comparar en el gráfico.</div>'+
     '<table style="border-collapse:collapse;width:100%;font-size:12px;margin-bottom:12px">'+
-      '<thead><tr>'+['Nombre','Unidad','Posición',''].map(t=>'<th style="padding:6px;border:1px solid '+_ECO_BRD+';background:#eef2f7;font-size:11px">'+t+'</th>').join('')+'</tr></thead>'+
+      '<thead><tr>'+['Nombre','Unidad','Posición','Suma en','Color',''].map(t=>'<th style="padding:6px;border:1px solid '+_ECO_BRD+';background:#eef2f7;font-size:11px">'+t+'</th>').join('')+'</tr></thead>'+
       '<tbody>'+filas+'</tbody>'+
     '</table>'+
     '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-top:1px solid '+_ECO_BRD+';padding-top:12px">'+
       '<input id="eco-met-newcol-nom" placeholder="Nombre de la columna" style="flex:1;min-width:150px;padding:8px;border:1px solid '+_ECO_BRD+';border-radius:8px;font-size:13px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+'">'+
       '<select id="eco-met-newcol-uni" style="padding:8px;border:1px solid '+_ECO_BRD+';border-radius:8px;font-size:12.5px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+'">'+unis+'</select>'+
       '<select id="eco-met-newcol-pos" style="padding:8px;border:1px solid '+_ECO_BRD+';border-radius:8px;font-size:12.5px;max-width:190px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+'">'+anclas+'</select>'+
+      '<select id="eco-met-newcol-agr" style="padding:8px;border:1px solid '+_ECO_BRD+';border-radius:8px;font-size:12.5px;background:'+_ECO_INP_BG+';color:'+_ECO_TXT+'">'+
+        '<option value="no">— no suma —</option><option value="ing">➕ suma a Ing US$</option><option value="gas">➖ suma a Gas US$</option></select>'+
+      '<input type="color" id="eco-met-newcol-col" value="#ede9fe" title="Color de la columna" style="width:40px;height:36px;border:1px solid '+_ECO_BRD+';border-radius:8px;background:none;cursor:pointer;padding:1px">'+
       '<button onclick="_ecoMetColAdd()" style="padding:8px 14px;border:none;background:#2563eb;color:#fff;border-radius:8px;font-weight:700;cursor:pointer;font-size:12.5px">➕ Agregar</button>'+
     '</div>';
   const ov=document.createElement('div');
@@ -30155,9 +30185,11 @@ function _ecoMetColAdd(){
   if(!nom){ alert('Poné un nombre para la columna.'); return; }
   const uni=document.getElementById('eco-met-newcol-uni').value||'#';
   const pos=document.getElementById('eco-met-newcol-pos').value||'__fin__';
+  const agr=document.getElementById('eco-met-newcol-agr').value||'no';
+  const col=document.getElementById('eco-met-newcol-col').value||'#ede9fe';
   const cols=_ecoMetCols();
   const id='cc_'+Date.now().toString(36)+Math.floor(Math.random()*1000).toString(36);
-  cols.push({ id, nombre:nom, unidad:uni, after:pos, color:'#ede9fe' });
+  cols.push({ id, nombre:nom, unidad:uni, after:pos, color:col, agrega:agr });
   _ecoMetColsSave();
   document.querySelector('.eco-modal-ov2')?.remove();
   _ecoMetColsManager();
@@ -30432,7 +30464,11 @@ function _ecoMetOrder(){
   custom.forEach(c=>{ const k=c.after||'__fin__'; (porAncla[k]=porAncla[k]||[]).push(c); });
   const mkCustom=c=>({
     id:c.id, th:c.nombre, w:Math.max(56, Math.min(120, (c.nombre||'').length*8+28)),
-    bg:c.color||'#ede9fe', tip:(c.nota||c.nombre)+' (columna propia · '+((_ECO_MET_UNIDADES[c.unidad]||{}).lbl||'número')+')',
+    bg:c.color||'#ede9fe',
+    tip:(c.nota||c.nombre)+' (columna propia · '+((_ECO_MET_UNIDADES[c.unidad]||{}).lbl||'número')+')'+
+        (c.agrega==='ing'?' · suma a Ingresos US$'+(c.unidad==='$'?' (convertida con el dólar del mes)':''):
+         c.agrega==='gas'?' · suma a Gastos US$'+(c.unidad==='$'?' (convertida con el dólar del mes)':''):''),
+    agrega:c.agrega,
     type:'edit', campo:c.id, val:r=>r[c.id], fmt:_ecoMetUniFmt(c.unidad), custom:true,
   });
   if(porAncla['__ini__']) porAncla['__ini__'].forEach(c=>out.push(mkCustom(c)));
@@ -30444,11 +30480,15 @@ function _ecoMetOrder(){
   return out;
 }
 function _ecoMetHeaders(){
-  const th=(t,w,tip,bg,extra)=>'<th title="'+String(tip||t).replace(/"/g,'&quot;')+'" style="position:sticky;top:0;background:'+(bg||'#e9ebf0')+';color:#0f172a;padding:6px 5px;border:1px solid '+_ECO_BRD+';font-size:9.5px;font-weight:800;white-space:nowrap;z-index:2;'+(w?'min-width:'+w+'px;':'')+(extra||'')+'">'+t+'</th>';
+  // v230: sin min-width fijo → cada columna se ajusta al contenido más largo
+  // (autoajuste tipo doble clic de Excel). Lo hace el navegador con
+  // white-space:nowrap + width:max-content en la tabla.
+  const th=(t,w,tip,bg,extra)=>'<th title="'+String(tip||t).replace(/"/g,'&quot;')+'" style="position:sticky;top:0;background:'+(bg||'#e9ebf0')+';color:#0f172a;padding:6px 7px;border:1px solid '+_ECO_BRD+';font-size:9.5px;font-weight:800;white-space:nowrap;z-index:2;'+(extra||'')+'">'+t+'</th>';
   const C=_ECO_MET_COL;
-  let h=th('MES',72,'Mes y año',C.mes);
+  let h=th('MES',0,'Mes y año',C.mes,'left:0;z-index:4;');   // ya es sticky: fija arriba y a la izquierda
   _ecoMetOrder().forEach(col=>{
-    const marca = col.custom ? '<span style="opacity:.5;font-size:8px"> ✎</span>' : '';
+    const marca = col.custom
+      ? '<span style="opacity:.55;font-size:8px"> '+(col.agrega==='ing'?'➕':col.agrega==='gas'?'➖':'✎')+'</span>' : '';
     h+=th(col.th+marca, col.w, col.tip, col.bg);
   });
   return h;
@@ -30486,6 +30526,7 @@ function _ecoMetRedraw(){
     return '<tr>'+tds+'</tr>';
   }).join('');
   _ecoMetResumen(rows);
+  try{ _ecoMetKpis12(rows); }catch(e){ console.warn('[eco-met kpis12]', e.message); }
   try{ _ecoMetChartDraw(); }catch(e){ console.warn('[eco-met chart]', e.message); }
 }
 function _ecoMetResumen(rows){
@@ -30556,6 +30597,187 @@ function _ecoMetResumen(rows){
     (acumTotal!=null? box('ACUMULADO TOTAL', (acumTotal>=0?'+':'')+'US$'+Math.round(acumTotal).toLocaleString('es-AR'), acumTotal>=0?'#16a34a':'#dc2626', 'todo el histórico · '+conSaldo.length+' meses') : '')+
     kSueldoIpc + kSueldoIpcB + kSueldoUsd + kSueldoUsdB + kMejor + kPeor;
 }
+// ═══════════════════════════════════════════════════════════════════════════
+// v230 · KPIs de los ÚLTIMOS 12 MESES (se recalculan solos cada mes)
+// ───────────────────────────────────────────────────────────────────────────
+// Dos bloques:
+//   1) Una tarjeta por cada columna monetaria cargada (base + propias) que
+//      compara su evolución contra la inflación acumulada del período y, si
+//      quedó por debajo, calcula el valor que debería tener para equiparar.
+//      Para los GASTOS la lógica se invierte: quedar por debajo es bueno.
+//   2) Tarjetas de lectura económica: atraso/adelanto del dólar, capacidad de
+//      ahorro, consistencia, margen real y una recomendación de acción.
+// ───────────────────────────────────────────────────────────────────────────
+
+// Compara una serie contra la inflación acumulada en la ventana dada.
+// Devuelve base/actual/objetivo/puntos, o null si no hay datos suficientes.
+function _ecoMetVsInfl(win, campo){
+  const con = win.filter(r => r[campo]!=null && isFinite(r[campo]) && r[campo]>0);
+  if(con.length < 2) return null;
+  const ini = con[0], fin = con[con.length-1];
+  if(ini.ym === fin.ym) return null;
+  let f=1, n=0;
+  win.forEach(r=>{ if(r.ym>ini.ym && r.ym<=fin.ym && r.ipc!=null){ f*=(1+r.ipc/100); n++; } });
+  if(!n) return null;
+  const inflPct = (f-1)*100;
+  const varPct  = (fin[campo]-ini[campo])/ini[campo]*100;
+  const objetivo= ini[campo]*f;
+  return { base:ini[campo], actual:fin[campo], objetivo, inflPct, varPct,
+           pts: varPct-inflPct, iniYm:ini.ym, finYm:fin.ym, meses:n };
+}
+
+function _ecoMetKpis12(rows){
+  const cont=document.getElementById('eco-met-kpis12');
+  if(!cont) return;
+  const win = rows.slice(-12);                    // últimos 12 meses
+  if(win.length < 2){ cont.innerHTML=''; return; }
+  const MC=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  const lblYm=ym=>MC[+ym.slice(5,7)-1]+' '+ym.slice(2,4);
+  const box=(lbl,val,color,sub)=>'<div style="flex:1;min-width:150px;background:#f8fafc;border:1px solid '+_ECO_BRD+';border-radius:9px;padding:9px 11px"><div style="font-size:9.5px;color:#334155;font-weight:800;line-height:1.25">'+lbl+'</div><div style="font-size:16px;font-weight:800;color:'+(color||_ECO_TXT)+';margin:1px 0">'+val+'</div><div style="font-size:10.5px;color:#475569;font-weight:600;line-height:1.3">'+(sub||'')+'</div></div>';
+  const V=$=>'$'+Math.round($).toLocaleString('es-AR');
+  const U=$=>'US$'+Math.round($).toLocaleString('es-AR');
+  const fmtU=(u,n)=> u==='US$' ? (Math.abs(n)<100? 'US$'+(+n).toFixed(2) : U(n)) : V(n);
+
+  const cards=[];
+
+  // ── 1) Columnas monetarias vs inflación ────────────────────────────────
+  // (gasto=true invierte el criterio: subir menos que la inflación es bueno)
+  const objetivos=[
+    { campo:'sc', lbl:'Sueldo C $',  u:'$',   gasto:false },
+    { campo:'sb', lbl:'Sueldo B $',  u:'$',   gasto:false },
+    { campo:'v',  lbl:'Ventas $',    u:'$',   gasto:false },
+    { campo:'g',  lbl:'Gastos $',    u:'$',   gasto:true  },
+    { campo:'tz', lbl:'Precio Taza', u:'$',   gasto:false },
+  ];
+  (typeof _ecoMetCols==='function'? _ecoMetCols():[]).forEach(c=>{
+    if(c.unidad!=='$' && c.unidad!=='US$') return;
+    objetivos.push({ campo:c.id, lbl:c.nombre, u:c.unidad, gasto:(c.agrega==='gas') });
+  });
+
+  objetivos.forEach(o=>{
+    const d=_ecoMetVsInfl(win, o.campo);
+    if(!d) return;
+    const gana = o.gasto ? (d.pts<=0) : (d.pts>=0);
+    const signo = d.pts>=0?'+':'';
+    if(gana){
+      const sub = o.gasto
+        ? 'subió '+d.varPct.toFixed(1)+'% vs inflación '+d.inflPct.toFixed(1)+'% · contuviste el costo'
+        : 'bastaba '+fmtU(o.u,d.objetivo)+', hoy '+fmtU(o.u,d.actual);
+      cards.push(box(o.lbl+' vs IPC ('+lblYm(d.iniYm)+'→'+lblYm(d.finYm)+')',
+        signo+d.pts.toFixed(0)+' pts ✅', '#16a34a', sub));
+    } else {
+      const faltan = d.objetivo - d.actual;
+      const pct = d.actual>0 ? (faltan/d.actual*100) : null;
+      const sub = o.gasto
+        ? 'subió '+d.varPct.toFixed(1)+'% vs inflación '+d.inflPct.toFixed(1)+'% · revisá este gasto'
+        : 'debería ser '+fmtU(o.u,d.objetivo)+' (hoy '+fmtU(o.u,d.actual)+' → subir '+fmtU(o.u,faltan)+(pct!=null?', +'+pct.toFixed(1)+'%':'')+')';
+      cards.push(box(o.lbl+' vs IPC ('+lblYm(d.iniYm)+'→'+lblYm(d.finYm)+')',
+        signo+d.pts.toFixed(0)+' pts ⚠️', '#dc2626', sub));
+    }
+  });
+
+  // ── 2) Dólar vs inflación: atraso / adelanto ───────────────────────────
+  const dol=_ecoMetVsInfl(win,'d');
+  let dolEstado=null;
+  if(dol){
+    dolEstado = dol.pts < -5 ? 'atrasado' : (dol.pts > 5 ? 'adelantado' : 'en linea');
+    const txt = dolEstado==='atrasado'
+      ? { v:dol.pts.toFixed(0)+' pts 🟢', c:'#16a34a', s:'dólar ATRASADO: subió '+dol.varPct.toFixed(1)+'% vs inflación '+dol.inflPct.toFixed(1)+'% · dolarizar excedente es barato' }
+      : dolEstado==='adelantado'
+      ? { v:'+'+dol.pts.toFixed(0)+' pts 🔴', c:'#dc2626', s:'dólar ADELANTADO: subió '+dol.varPct.toFixed(1)+'% vs inflación '+dol.inflPct.toFixed(1)+'% · conviene stockear insumos' }
+      : { v:(dol.pts>=0?'+':'')+dol.pts.toFixed(0)+' pts 🟡', c:'#ca8a04', s:'dólar EN LÍNEA con la inflación ('+dol.varPct.toFixed(1)+'% vs '+dol.inflPct.toFixed(1)+'%)' };
+    cards.push(box('DÓLAR vs INFLACIÓN (12m)', txt.v, txt.c, txt.s));
+  }
+
+  // ── 3) Capacidad de ahorro promedio ────────────────────────────────────
+  const conSaldo=win.filter(r=>r.saldo!=null);
+  const ahorroProm = conSaldo.length ? conSaldo.reduce((a,r)=>a+(r.ahorro||0),0)/conSaldo.length : null;
+  const saldoProm  = conSaldo.length ? conSaldo.reduce((a,r)=>a+r.saldo,0)/conSaldo.length : null;
+  if(ahorroProm!=null){
+    const c = ahorroProm>=20?'#16a34a':(ahorroProm>=10?'#65a30d':(ahorroProm>=0?'#ca8a04':'#dc2626'));
+    const s = ahorroProm>=20?'excelente · sostené el ritmo e invertí el excedente'
+            : ahorroProm>=10?'saludable · margen para reforzar el stock'
+            : ahorroProm>=0 ?'ajustado · poco colchón ante imprevistos'
+            :                'negativo · estás consumiendo capital';
+    cards.push(box('CAPACIDAD DE AHORRO (12m)', ahorroProm.toFixed(1)+'%', c,
+      s+' · '+U(saldoProm)+'/mes promedio'));
+  }
+
+  // ── 4) Consistencia: meses en positivo ─────────────────────────────────
+  if(conSaldo.length>=3){
+    const pos=conSaldo.filter(r=>r.saldo>0).length;
+    const pctPos=pos/conSaldo.length*100;
+    cards.push(box('MESES EN POSITIVO (12m)', pos+'/'+conSaldo.length,
+      pctPos>=75?'#16a34a':(pctPos>=50?'#ca8a04':'#dc2626'),
+      pctPos>=75?'muy consistente':(pctPos>=50?'irregular · revisá los meses flojos':'mayoría en rojo · urgente ajustar')));
+  }
+
+  // ── 5) Ingresos y gastos en US$: cómo evolucionó el poder real ─────────
+  const ing=_ecoMetVsInfl(win,'qIng'), gas=_ecoMetVsInfl(win,'gUsd');
+  if(ing){
+    cards.push(box('INGRESOS US$ (12m)', (ing.varPct>=0?'+':'')+ing.varPct.toFixed(1)+'%',
+      ing.varPct>=0?'#16a34a':'#dc2626',
+      'de '+U(ing.base)+' a '+U(ing.actual)+' · poder de compra en dólares'));
+  }
+  if(gas){
+    cards.push(box('GASTOS US$ (12m)', (gas.varPct>=0?'+':'')+gas.varPct.toFixed(1)+'%',
+      gas.varPct<=0?'#16a34a':'#dc2626',
+      'de '+U(gas.base)+' a '+U(gas.actual)+' · '+(gas.varPct<=0?'costos contenidos':'costos en alza real')));
+  }
+  // brecha ingresos vs gastos
+  if(ing && gas){
+    const brecha=ing.varPct-gas.varPct;
+    cards.push(box('BRECHA INGRESOS − GASTOS (12m)', (brecha>=0?'+':'')+brecha.toFixed(1)+' pts',
+      brecha>=0?'#16a34a':'#dc2626',
+      brecha>=0?'los ingresos crecen más rápido que los costos ✅':'los costos crecen más rápido que los ingresos ⚠️'));
+  }
+
+  // ── 6) Margen real del producto (taza en US$) ──────────────────────────
+  const tz=_ecoMetVsInfl(win,'tzUsd');
+  if(tz){
+    cards.push(box('PRECIO TAZA EN US$ (12m)', (tz.varPct>=0?'+':'')+tz.varPct.toFixed(1)+'%',
+      tz.varPct>=0?'#16a34a':'#dc2626',
+      'de US$'+tz.base.toFixed(2)+' a US$'+tz.actual.toFixed(2)+' · '+
+      (tz.varPct>=0?'ganaste margen real':'tu precio real en dólares bajó: revisá la lista')));
+  }
+
+  // ── 7) Recomendación de acción (combina ahorro + dólar + brecha) ───────
+  if(ahorroProm!=null){
+    let tit='QUÉ CONVIENE HACER', val, col, sub;
+    if(ahorroProm < 0){
+      val='🛠️ Ajustar'; col='#dc2626';
+      sub='saldo negativo · recortá gastos antes de invertir o stockear';
+    } else if(dolEstado==='adelantado'){
+      val='📦 Stockear'; col='#c2410c';
+      sub='el dólar corre más rápido que los precios · adelantá compra de insumos y mercadería';
+    } else if(dolEstado==='atrasado' && ahorroProm>=10){
+      val='💵 Dolarizar'; col='#16a34a';
+      sub='dólar barato en términos reales y buen ahorro · pasá el excedente a dólares';
+    } else if(ahorroProm>=15){
+      val='📈 Invertir'; col='#16a34a';
+      sub='buen colchón · ampliá stock o capacidad, el ahorro rinde poco quieto';
+    } else {
+      val='⚖️ Sostener'; col='#ca8a04';
+      sub='sin señales fuertes · mantené el ritmo y reforzá el margen de las ventas';
+    }
+    cards.push(box(tit, val, col, sub));
+  }
+
+  // ── 8) Alerta de gasto más pesado ─────────────────────────────────────
+  const ultCon=conSaldo[conSaldo.length-1];
+  if(ultCon && ultCon.gUsd!=null && ultCon.qIng>0){
+    const peso=ultCon.gUsd/ultCon.qIng*100;
+    cards.push(box('PESO DE LOS GASTOS ('+lblYm(ultCon.ym)+')', peso.toFixed(0)+'%',
+      peso<=70?'#16a34a':(peso<=90?'#ca8a04':'#dc2626'),
+      peso<=70?'sobra margen':(peso<=90?'margen ajustado':'los gastos casi igualan los ingresos')));
+  }
+
+  if(!cards.length){ cont.innerHTML=''; return; }
+  cont.innerHTML =
+    '<div style="font-size:12px;font-weight:800;color:'+_ECO_TXT2+';margin:2px 0 7px">📅 Últimos 12 meses — lectura y recomendaciones</div>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">'+cards.join('')+'</div>';
+}
+
 // ── edición de celdas ──
 const _ECO_MET_CAMPOS={
   ipc:{lbl:'IPC mensual %',tip:'Dejá vacío para usar el dato automático de la API de inflación.'},
@@ -30768,8 +30990,11 @@ function ecoRender(){
     let totG=0, cels='';
     for(let m=0;m<12;m++){
       const v=_ecoVal(g,y,m), st=_ecoEst(g,y,m);
-      // v216: "proximos" (azul) NO suma al total (es un gasto futuro no pagado)
-      if(typeof v==='number' && st!=='proximos'){ totG+=v; totMes[m]+=v; }
+      // v230: TOTAL MES suma TODA celda que tenga un importe, sin importar el
+      // color/estado. Antes las marcadas "🔵 Próximos" quedaban afuera y por eso
+      // el total de la planilla no coincidía con el "Gastos $" de Métricas
+      // (que siempre sumó todo). Ahora los dos usan el mismo criterio.
+      if(typeof v==='number'){ totG+=v; totMes[m]+=v; }
       const bg=_ecoCellBg(v,st), fg=_ecoCellFg(v,st);
       const isSel = _ecoSel.some(s=>s.gid===g.id && s.mes===m);
       const selStyle = isSel ? 'outline:2px solid var(--accent);outline-offset:-2px;' : '';
