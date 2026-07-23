@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v232 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v233 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -29447,7 +29447,7 @@ function _ecoSaveLS(){
 function _ecoMarkDirty(){
   _ecoState.dirty = true; _ecoSaveLS();
   clearTimeout(_ecoState.saveTimer);
-  _ecoState.saveTimer = setTimeout(_ecoFlush, 3000);
+  _ecoState.saveTimer = setTimeout(_ecoFlush, 1200);   // v233: subir antes a la nube
 }
 async function _ecoFlush(){
   if(!_ecoState.dirty) return;
@@ -29459,30 +29459,116 @@ async function _ecoFlush(){
     });
   }catch(e){ console.warn('[eco] guardar nube:', e.message); }
 }
-async function _ecoSyncDown(){
+// ═══════════════════════════════════════════════════════════════════════════
+// v233 · SINCRONIZACIÓN DE ECONOMÍA — MERGE POR ENTIDAD
+// ───────────────────────────────────────────────────────────────────────────
+// Antes era "gana el que guardó último con TODO el objeto": si esta PC tenía
+// cualquier cambio local (aunque fuera pintar una celda), su savedAt quedaba más
+// nuevo y descartaba entero lo que había hecho la otra PC — por eso las columnas
+// y los montos nuevos de Métricas no aparecían nunca del otro lado.
+// Ahora se fusiona CELDA POR CELDA / COLUMNA POR COLUMNA:
+//   · lo que existe de un solo lado SIEMPRE se conserva (nunca se pierde un dato)
+//   · si el mismo dato difiere en las dos, gana el guardado más reciente
+// Efecto: dos PCs pueden trabajar a la vez y cada una ve lo de la otra.
+// Nota: por seguridad de datos financieros, un borrado puede "revivir" si la
+// otra PC todavía tenía el dato; preferimos recuperar de más que perder.
+function _ecoMergeMeses(la, ra, remoteGana){
+  const out = Array.isArray(la) ? la.slice() : [null,null,null,null,null,null,null,null,null,null,null,null];
+  const rr  = Array.isArray(ra) ? ra : [];
+  for(let i=0;i<12;i++){
+    const lv=out[i], rv=rr[i];
+    const lVacio=(lv==null||lv===''), rVacio=(rv==null||rv==='');
+    if(lVacio && !rVacio) out[i]=rv;                          // sólo en la nube → traer
+    else if(!lVacio && !rVacio && lv!==rv && remoteGana) out[i]=rv;  // conflicto → gana el más nuevo
+  }
+  return out;
+}
+function _ecoMergeGastos(locales, remotos, remoteGana){
+  const mapa=new Map((locales||[]).map(g=>[g.id,g]));
+  (remotos||[]).forEach(rg=>{
+    if(!rg||!rg.id) return;
+    const lg=mapa.get(rg.id);
+    if(!lg){ mapa.set(rg.id, rg); return; }                   // gasto que sólo está en la nube
+    // metadatos: gana el más nuevo
+    if(remoteGana){ lg.n=rg.n||lg.n; lg.cat=rg.cat||lg.cat; lg.e=rg.e||lg.e; lg.hidden=rg.hidden;
+      if(rg.res) lg.res=rg.res; if(rg.resCfg) lg.resCfg=rg.resCfg; if(rg.resAuto) lg.resAuto=rg.resAuto; }
+    else { if(!lg.res && rg.res) lg.res=rg.res; if(!lg.resCfg && rg.resCfg) lg.resCfg=rg.resCfg; }
+    // importes y colores: mes por mes
+    lg.d=lg.d||{}; lg.st=lg.st||{};
+    Object.keys(rg.d||{}).forEach(y=>{ lg.d[y]=_ecoMergeMeses(lg.d[y], rg.d[y], remoteGana); });
+    Object.keys(rg.st||{}).forEach(y=>{ lg.st[y]=_ecoMergeMeses(lg.st[y], rg.st[y], remoteGana); });
+  });
+  return [...mapa.values()];
+}
+function _ecoMergeMetricas(local, remoto, remoteGana){
+  const out = Object.assign({}, local||{});
+  Object.keys(remoto||{}).forEach(ym=>{
+    if(!out[ym]){ out[ym]=remoto[ym]; return; }
+    const l=out[ym], r=remoto[ym]||{};
+    Object.keys(r).forEach(k=>{
+      if(l[k]==null) l[k]=r[k];                               // campo sólo en la nube
+      else if(l[k]!==r[k] && remoteGana) l[k]=r[k];            // conflicto → gana el más nuevo
+    });
+  });
+  return out;
+}
+function _ecoMergePorId(locales, remotos, remoteGana){
+  const mapa=new Map((locales||[]).map(x=>[x.id,x]));
+  (remotos||[]).forEach(r=>{
+    if(!r||!r.id) return;
+    if(!mapa.has(r.id)) mapa.set(r.id, r);                     // sólo en la nube → traer
+    else if(remoteGana) mapa.set(r.id, r);
+  });
+  return [...mapa.values()];
+}
+
+let _ecoSyncing=false, _ecoLastSync=0;
+async function _ecoSyncDown(force){
+  if(_ecoSyncing) return;
+  if(!force && Date.now()-_ecoLastSync < 15000) return;        // no más de 1 cada 15s
+  _ecoSyncing=true;
   try{
-    const r = await fetch(WORKER + '/api/backup', { headers:{'Authorization':'Bearer '+token} });
+    const r = await fetch(WORKER + '/api/backup?_='+Date.now(), { cache:'no-store', headers:{'Authorization':'Bearer '+token} });
     const d = await r.json();
     if(d && d.economia && Array.isArray(d.economia.gastos)){
       const localTs = (()=>{ try{ return JSON.parse(localStorage.getItem(ECO_LS_KEY)||'{}').savedAt||0; }catch(e){ return 0; } })();
       const remoteTs = d.economia.savedAt||0;
-      // la nube gana si es más nueva o igual (y tiene datos)
-      if(remoteTs >= localTs && d.economia.gastos.length){
-        _ecoState.gastos = d.economia.gastos;
-        if(Array.isArray(d.economia.ingresos)) _ecoState.ingresos = d.economia.ingresos;
-        if(d.economia.metricas && typeof d.economia.metricas==='object') _ecoState.metricas = d.economia.metricas;
-        if(Array.isArray(d.economia.metricasCols)) _ecoState.metricasCols = d.economia.metricasCols;
-        if(Array.isArray(d.economia.acreditar)) _ecoState.acreditar = d.economia.acreditar;
-        if(Array.isArray(d.economia.ahorros)) _ecoState.ahorros = d.economia.ahorros;
-        _ecoSaveLS();
-        console.log('[eco] sincronizado desde la nube (guardado remoto '+new Date(remoteTs).toLocaleString('es-AR')+')');
-        if(document.getElementById('section-economia')?.classList.contains('active')) ecoRender();
-      } else {
-        console.log('[eco] local más nuevo que la nube, se conserva local');
+      const remoteGana = remoteTs >= localTs;
+      const e=d.economia;
+      _ecoState.gastos       = _ecoMergeGastos(_ecoState.gastos, e.gastos, remoteGana);
+      _ecoState.metricas     = _ecoMergeMetricas(_ecoState.metricas, e.metricas, remoteGana);
+      _ecoState.metricasCols = _ecoMergePorId(_ecoState.metricasCols, e.metricasCols, remoteGana);
+      _ecoState.ingresos     = _ecoMergePorId(_ecoState.ingresos, e.ingresos, remoteGana);
+      _ecoState.acreditar    = _ecoMergePorId(_ecoState.acreditar, e.acreditar, remoteGana);
+      _ecoState.ahorros      = _ecoMergePorId(_ecoState.ahorros, e.ahorros, remoteGana);
+      _ecoSaveLS();
+      _ecoLastSync=Date.now();
+      // repintar lo que esté a la vista
+      if(document.getElementById('section-economia')?.classList.contains('active')) ecoRender();
+      if(document.getElementById('eco-met-tbody')){            // ventana de Métricas abierta
+        try{ _ecoMetChipsRender(); _ecoMetRedraw(); }catch(err){}
+      }
+      if(document.getElementById('eco-res-body')){              // resumen de tarjeta abierto
+        try{ _ecoResRender(); }catch(err){}
       }
     }
   }catch(e){ console.warn('[eco] sync down:', e.message); }
+  finally{ _ecoSyncing=false; }
 }
+
+// v233: refresco automático mientras se usa la sección (o con Métricas abierta)
+setInterval(function(){
+  if(document.visibilityState!=='visible') return;
+  const act=document.getElementById('section-economia')?.classList.contains('active');
+  if(act || document.getElementById('eco-met-tbody')) _ecoSyncDown(false);
+}, 45000);
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState!=='visible') return;
+  if(document.getElementById('section-economia')?.classList.contains('active')) _ecoSyncDown(true);
+});
+window.addEventListener('focus', function(){
+  if(document.getElementById('section-economia')?.classList.contains('active')) _ecoSyncDown(true);
+});
 
 function _ecoVal(g, y, m){ const a=g.d && g.d[y]; return a ? a[m] : null; }
 function _ecoEst(g, y, m){ const a=g.st && g.st[y]; return a ? a[m] : null; }
@@ -29622,8 +29708,8 @@ async function _ecoDolarRefrescar(){
   ecoRender();
 }
 function _ecoDolarSaveManual(){
-  const c=parseFloat(document.getElementById('eco-dol-compra').value);
-  const v=parseFloat(document.getElementById('eco-dol-venta').value);
+  const c=_ecoNum(document.getElementById('eco-dol-compra').value);
+  const v=_ecoNum(document.getElementById('eco-dol-venta').value);
   if(isNaN(c)||c<=0){ showToast('Ingresá un valor de compra válido','error'); return; }
   _ecoDolar={ compra:c, venta:(isNaN(v)?c:v), ts:Date.now(), manual:true };
   _ecoDolarSave(); _ecoCellClose(); ecoRender();
@@ -29694,11 +29780,28 @@ function _ecoIngRedraw(){
   const ordenados=_ecoIngresos().slice().sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||'','es',{sensitivity:'base'}));
   tb.innerHTML = ordenados.map((i,idx)=>_ecoIngresoRow(i,idx)).join('');
 }
+// v233 ── Parser único de importes para TODA la sección Economía.
+// Antes el punto se interpretaba como separador de MILES (1.234 → 1234) y eso
+// rompía los decimales: escribir "1.50" daba 150. Ahora el punto y la coma son
+// lo mismo: separador DECIMAL. "1.50", "1,50" y "1.5" son todos 1,5.
+// Si vienen varios separadores (texto pegado tipo "1.234.56"), el ÚLTIMO es el
+// decimal y los anteriores se descartan como miles.
+function _ecoNum(val){
+  if(val==null) return NaN;
+  let s = String(val).trim().replace(/\s/g,'');
+  if(!s) return NaN;
+  const neg = /^-/.test(s);
+  s = s.replace(/,/g,'.').replace(/[^0-9.]/g,'');
+  if(!s) return NaN;
+  const partes = s.split('.');
+  if(partes.length > 2) s = partes.slice(0,-1).join('') + '.' + partes[partes.length-1];
+  const n = parseFloat(s);
+  if(isNaN(n)) return NaN;
+  return neg ? -n : n;
+}
 function _ecoIngParse(val){
-  // quita puntos de miles y usa coma como decimal
-  if(val==null) return 0;
-  const s = String(val).replace(/\./g,'').replace(/,/g,'.').replace(/[^0-9.\-]/g,'');
-  return parseFloat(s)||0;
+  const n = _ecoNum(val);
+  return isNaN(n) ? 0 : n;
 }
 function _ecoIngEdit(id, campo, val){
   const i=_ecoIngresos().find(x=>x.id===id); if(!i) return;
@@ -30127,6 +30230,7 @@ function ecoOpenMetricas(){
   _ecoModalShell(inner, 2400, true);   // v228: pantalla completa con scroll interno
   _ecoMetChipsRender();
   _ecoMetRedraw();
+  _ecoSyncDown(true);                  // v233: traer lo cargado desde la otra PC
 }
 // ── v229: gestor de columnas propias de la planilla ────────────────────────
 function _ecoMetColsManager(){
@@ -30821,7 +30925,7 @@ function _ecoMetEditSave(){
   if(!met[ym]) met[ym]={};
   if(raw===''){ delete met[ym][campo]; }
   else{
-    const n=parseFloat(raw.replace(/\./g,'').replace(/,/g,'.'));
+    const n=_ecoNum(raw);
     if(isNaN(n)){ showToast('Valor inválido','error'); return; }
     met[ym][campo]=n;
   }
@@ -31254,7 +31358,7 @@ function _ecoCellSave(){
       // v216: sin importe → solo aplica el color/estado (mantiene celda vacía)
       _ecoSet(g,y,m, null, estado);
     } else {
-      const val=parseFloat(raw.replace(/\./g,'').replace(/,/g,'.'));
+      const val=_ecoNum(raw);
       if(isNaN(val)){ showToast('Ingresá un importe válido o dejá vacío para solo el color','error'); return; }
       _ecoSet(g,y,m,val,estado);
     }
@@ -31516,6 +31620,7 @@ function _ecoResAplicar(gid, silencioso){
   const g=_ecoState.gastos.find(x=>x.id===gid); if(!g) return 0;
   const r=_ecoResRango(g); if(!r) return 0;
   if(!g.resAuto) g.resAuto={};
+  const hoy=_ecoYmHoy();
   let n=0, ym=r.min;
   while(ym<=r.max){
     const d=_ecoResMes(g, ym);
@@ -31524,7 +31629,12 @@ function _ecoResAplicar(gid, silencioso){
       const val = d.calc>0 ? Math.round(d.calc*100)/100 : null;
       const actual=_ecoVal(g,y,m);
       if(val!=null || actual!=null){
-        _ecoSet(g, y, m, val, _ecoEst(g,y,m));
+        // v233: los meses que todavía no llegaron quedan en 🔵 Próximos (azul):
+        // es plata proyectada por las cuotas, no un pago ya hecho. Los meses ya
+        // transcurridos conservan el color que tuvieran.
+        const estActual=_ecoEst(g,y,m);
+        const est = (ym>hoy && val!=null) ? 'proximos' : estActual;
+        _ecoSet(g, y, m, val, est);
         g.resAuto[ym]=val;
         n++;
       }
@@ -31532,8 +31642,21 @@ function _ecoResAplicar(gid, silencioso){
     ym=_ecoYmAdd(ym,1);
   }
   _ecoMarkDirty();
-  if(!silencioso){ ecoRender(); }   // v232: sin notificaciones en esta herramienta
+  if(!silencioso){ ecoRender(); }
   return n;
+}
+// v233: el botón del modal ahora sí responde — aplica, avisa y cierra.
+// (En v232 aplicaba en silencio y parecía que no hacía nada.)
+function _ecoResAplicarBtn(gid){
+  const btn=document.getElementById('eco-res-aplicar');
+  const n=_ecoResAplicar(gid, true);
+  ecoRender();
+  if(btn){
+    btn.textContent='✓ Aplicado a '+n+' mes(es)';
+    btn.style.background='#16a34a';
+    btn.disabled=true;
+  }
+  setTimeout(ecoCloseResumen, 900);
 }
 
 let _ecoResState={ gid:null, ym:null };
@@ -31684,18 +31807,18 @@ function _ecoResRender(){
     // PROYECCIÓN
     (proy? '<div style="font-size:13px;font-weight:800;color:'+_ECO_TXT+';margin-bottom:6px">📅 Proyección de los próximos 12 meses</div>'+
       '<div style="overflow:auto;border:'+BR+';border-radius:9px;margin-bottom:6px">'+proy+'</div>'+
-      '<div style="font-size:10.5px;color:'+_ECO_TXT3+';margin-bottom:14px">En azul los meses donde ya cargaste el resumen real a mano. Las cuotas dejan de sumar cuando se terminan.</div>' : '')+
+      '<div style="font-size:10.5px;color:'+_ECO_TXT3+';margin-bottom:14px">En azul los meses donde ya cargaste el resumen real a mano. Las cuotas dejan de sumar cuando se terminan. Al aplicar, los meses que todavía no llegaron quedan marcados como <b>🔵 Próximos</b> en la planilla.</div>' : '')+
 
     '<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">'+
       '<button onclick="ecoCloseResumen()" style="padding:10px 14px;border:'+BR+';background:#fff;color:'+_ECO_TXT2+';border-radius:9px;font-weight:600;cursor:pointer">Cerrar</button>'+
-      '<button onclick="_ecoResAplicar(\''+g.id+'\')" style="padding:10px 16px;border:none;background:#4f8ef7;color:#fff;border-radius:9px;font-weight:700;cursor:pointer">📥 Aplicar a la planilla</button>'+
+      '<button id="eco-res-aplicar" onclick="_ecoResAplicarBtn(\''+g.id+'\')" style="padding:10px 16px;border:none;background:#4f8ef7;color:#fff;border-radius:9px;font-weight:700;cursor:pointer">📥 Aplicar a la planilla</button>'+
     '</div>';
 }
 function _ecoResSetMes(ym){ _ecoResState.ym=ym; _ecoResRender(); }
 // v232: cambiar cierre/vencimiento redistribuye TODAS las compras ya cargadas
 function _ecoResCfgSet(campo, val){
   const g=_ecoState.gastos.find(x=>x.id===_ecoResState.gid); if(!g) return;
-  const n=Math.max(1, Math.min(31, Math.round(parseFloat(val)||1)));
+  const n=Math.max(1, Math.min(31, Math.round(_ecoNum(val)||1)));
   _ecoResCfg(g)[campo]=n;
   _ecoResAplicar(g.id, true);
   _ecoMarkDirty(); ecoRender(); _ecoResRender();
@@ -31717,7 +31840,7 @@ function _ecoResItemForm(idx, montoSug){
     '<label style="'+lab+'">Local / detalle</label>'+
     '<input type="text" id="eco-res-n" value="'+String(it.n||'').replace(/"/g,'&quot;')+'" placeholder="Ej: Garbarino — Smart TV" style="'+inp+';margin-bottom:10px">'+
     '<div style="display:flex;gap:8px;margin-bottom:10px">'+
-      '<div style="flex:1"><label style="'+lab+'">Importe total</label><input type="number" step="0.01" id="eco-res-imp" value="'+(it.imp!==''&&it.imp!=null?it.imp:'')+'" style="'+inp+'"></div>'+
+      '<div style="flex:1"><label style="'+lab+'">Importe total</label><input type="text" inputmode="decimal" id="eco-res-imp" value="'+(it.imp!==''&&it.imp!=null?it.imp:'')+'" placeholder="0,00" style="'+inp+'"></div>'+
       '<div style="width:110px"><label style="'+lab+'">Cuotas</label><input type="number" min="1" step="1" id="eco-res-cuo" value="'+(it.cuo||1)+'" style="'+inp+'"></div>'+
     '</div>'+
     // v232: el mes de la primera cuota lo deduce el ciclo de la tarjeta
@@ -31750,7 +31873,7 @@ function _ecoResAutoPrev(){
   const selDesde=document.getElementById('eco-res-desde');
   if(selDesde) selDesde.style.display = man? 'block':'none';
   const f=document.getElementById('eco-res-f')?.value||'';
-  const cuo=Math.max(1,Math.round(parseFloat(document.getElementById('eco-res-cuo')?.value)||1));
+  const cuo=Math.max(1,Math.round(_ecoNum(document.getElementById('eco-res-cuo')?.value)||1));
   const cfg=_ecoResCfg(g);
   const MC=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
   const lbl=x=>MC[+x.slice(5,7)-1]+' '+x.slice(0,4);
@@ -31769,8 +31892,9 @@ function _ecoResItemSave(idx){
   const res=_ecoResDe(g);
   const f=document.getElementById('eco-res-f').value||'';
   const n=(document.getElementById('eco-res-n').value||'').trim();
-  const imp=parseFloat(document.getElementById('eco-res-imp').value)||0;
-  const cuo=Math.max(1,Math.round(parseFloat(document.getElementById('eco-res-cuo').value)||1));
+  const impN=_ecoNum(document.getElementById('eco-res-imp').value);
+  const imp=isNaN(impN)?0:impN;
+  const cuo=Math.max(1,Math.round(_ecoNum(document.getElementById('eco-res-cuo').value)||1));
   const manualDesde=!!document.getElementById('eco-res-man')?.checked;
   const desde=document.getElementById('eco-res-desde').value||'';
   const err=document.getElementById('eco-res-err');
@@ -31813,7 +31937,7 @@ function _ecoResFijoForm(idx){
       '<option value="pct"'+(f.tipo==='pct'?' selected':'')+'>Porcentaje de los consumos del mes</option>'+
     '</select>'+
     '<label style="'+lab+'">Valor <span style="font-weight:400;color:'+_ECO_TXT3+'">(monto en $ o el número de % según el tipo)</span></label>'+
-    '<input type="number" step="0.01" id="eco-resf-val" value="'+(f.val!==''&&f.val!=null?f.val:'')+'" style="'+inp+';margin-bottom:10px">'+
+    '<input type="text" inputmode="decimal" id="eco-resf-val" value="'+(f.val!==''&&f.val!=null?f.val:'')+'" placeholder="0,00" style="'+inp+';margin-bottom:10px">'+
     '<div style="display:flex;gap:8px;margin-bottom:6px">'+
       '<div style="flex:1"><label style="'+lab+'">Desde (opcional)</label><input type="month" id="eco-resf-desde" value="'+(f.desde||'')+'" style="'+inp+'"></div>'+
       '<div style="flex:1"><label style="'+lab+'">Hasta (opcional)</label><input type="month" id="eco-resf-hasta" value="'+(f.hasta||'')+'" style="'+inp+'"></div>'+
@@ -31835,7 +31959,8 @@ function _ecoResFijoSave(idx){
   const res=_ecoResDe(g);
   const n=(document.getElementById('eco-resf-n').value||'').trim();
   const tipo=document.getElementById('eco-resf-tipo').value||'monto';
-  const val=parseFloat(document.getElementById('eco-resf-val').value)||0;
+  const valN=_ecoNum(document.getElementById('eco-resf-val').value);
+  const val=isNaN(valN)?0:valN;
   const desde=document.getElementById('eco-resf-desde').value||'';
   const hasta=document.getElementById('eco-resf-hasta').value||'';
   if(!n){ const e=document.getElementById('eco-resf-err'); if(e){ e.style.display='block'; e.textContent='Poné un nombre para el concepto.'; } return; }
@@ -33162,11 +33287,26 @@ const BKP_SECTIONS = {
     get: () => { try { return JSON.parse(localStorage.getItem('astro_biblioteca_v1') || '[]'); } catch { return []; } },
   },
   economia: {
-    label: 'Economía — gastos e ingresos',
+    label: 'Economía — gastos, ingresos, métricas y resúmenes de tarjeta',
     icon: '💰',
     get: () => {
       if(typeof _ecoState === 'undefined') return null;
-      return { gastos: _ecoState.gastos||[], ingresos: _ecoState.ingresos||[], metricas: _ecoState.metricas||{}, metricasCols: _ecoState.metricasCols||[], acreditar: _ecoState.acreditar||[], ahorros: _ecoState.ahorros||[], savedAt: Date.now() };
+      // v233: backup COMPLETO de la sección. Los resúmenes de tarjeta (res,
+      // resCfg, resAuto) viajan dentro de cada gasto. Se agregan además las
+      // columnas propias, las cotizaciones y la serie de inflación cacheadas,
+      // y la selección del comparador.
+      return {
+        gastos:       _ecoState.gastos||[],
+        ingresos:     _ecoState.ingresos||[],
+        metricas:     _ecoState.metricas||{},
+        metricasCols: _ecoState.metricasCols||[],
+        acreditar:    _ecoState.acreditar||[],
+        ahorros:      _ecoState.ahorros||[],
+        dolar:        (typeof _ecoDolar!=='undefined') ? _ecoDolar : null,
+        inflacion:    (typeof _ecoInfl !=='undefined') ? _ecoInfl  : null,
+        cmpSel:       (()=>{ try{ return JSON.parse(localStorage.getItem('eco_met_cmp_sel')||'null'); }catch(e){ return null; } })(),
+        savedAt: Date.now(),
+      };
     },
   },
   // v118: 'seoKeywords' eliminado del backup — el SEO Tracker viejo fue descontinuado
@@ -33329,6 +33469,12 @@ async function bkpApplyImport(data, selection){
       if(Array.isArray(data.economia.metricasCols)) _ecoState.metricasCols = data.economia.metricasCols;
       if(Array.isArray(data.economia.acreditar)) _ecoState.acreditar = data.economia.acreditar;
       if(Array.isArray(data.economia.ahorros)) _ecoState.ahorros = data.economia.ahorros;
+      // v233: cotizaciones, inflación y preferencias del comparador
+      try{
+        if(data.economia.dolar && typeof _ecoDolar!=='undefined'){ _ecoDolar = data.economia.dolar; _ecoDolarSave(); }
+        if(data.economia.inflacion && typeof _ecoInfl!=='undefined'){ _ecoInfl = data.economia.inflacion; _ecoInflSave(); }
+        if(Array.isArray(data.economia.cmpSel)) localStorage.setItem('eco_met_cmp_sel', JSON.stringify(data.economia.cmpSel));
+      }catch(e){}
       try{ localStorage.setItem(ECO_LS_KEY, JSON.stringify({ gastos:_ecoState.gastos, ingresos:_ecoState.ingresos, metricas:_ecoState.metricas||{}, savedAt:Date.now() })); }catch(e){}
       if(typeof ecoRender === 'function' && document.getElementById('section-economia')?.classList.contains('active')) ecoRender();
       console.log('[Backup] Economía restaurada: '+data.economia.gastos.length+' gastos, '+((data.economia.ingresos||[]).length)+' ingresos');
