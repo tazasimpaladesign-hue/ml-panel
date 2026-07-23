@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v235 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v236 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -24242,6 +24242,7 @@ async function ctaFlushDirty() {
         _ctaSnap(ym);
       }
       if (d.resumen) _ctaState.resumen[ym] = d.resumen;
+      if (d.ver) _ctaState.cloudVer = d.ver;   // v236: mi guardado ES la última versión
     }
     _ctaStatus('✓ Guardado ' + new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }));
     ctaRenderAll();
@@ -24267,6 +24268,22 @@ async function ctaRefreshCloud(force) {
   _ctaState.refreshing = true;
   try {
     if (_ctaState.dirty.size) { clearTimeout(_ctaSaveTimer); await ctaFlushDirty(); }
+    // v236: chequeo BARATO de versión (1 sola lectura de KV). Si la nube no
+    // cambió desde la última bajada, no se baja nada — antes cada refresco leía
+    // bootstrap + todos los meses (~15 lecturas) aunque no hubiera novedades.
+    try {
+      const rv = await fetch(WORKER + '/api/cta/ver?_=' + Date.now(), { cache: 'no-store' });
+      if (rv.ok) {
+        const dv = await rv.json();
+        if (dv && dv.ok && dv.ver && dv.ver !== '0') {
+          if (_ctaState.cloudVer && dv.ver === _ctaState.cloudVer) {
+            _ctaState.lastRefresh = Date.now();
+            return;                       // nada nuevo en la nube
+          }
+          _ctaState.cloudVer = dv.ver;    // hay cambios → bajar todo
+        }
+      }
+    } catch (e) { /* worker viejo sin /ver → refresco completo como siempre */ }
     // índice de meses + catálogo + resumen
     try {
       const rb = await fetch(WORKER + '/api/cta/bootstrap?_=' + Date.now(), { cache: 'no-store' });
@@ -24305,7 +24322,8 @@ setInterval(function () {
   if (s && s.classList.contains('active') && document.visibilityState === 'visible') {
     ctaRefreshCloud(false);
   }
-}, 60000);
+}, 180000);   // v236: 3 min (el chequeo por versión cuesta 1 lectura, y al
+              // enfocar la ventana o tocar Sincronizar sigue siendo inmediato)
 document.addEventListener('visibilitychange', function () {
   if (document.visibilityState !== 'visible') return;
   const s = document.getElementById('section-cta');
@@ -29447,16 +29465,24 @@ function _ecoSaveLS(){
 function _ecoMarkDirty(){
   _ecoState.dirty = true; _ecoSaveLS();
   clearTimeout(_ecoState.saveTimer);
-  _ecoState.saveTimer = setTimeout(_ecoFlush, 1200);   // v233: subir antes a la nube
+  _ecoState.saveTimer = setTimeout(_ecoFlush, 8000);   // v236: agrupa varias
+  // ediciones en un solo POST (el límite fino de KV son las ESCRITURAS: 1000/día).
+  // localStorage ya guardó todo al instante, así que no se pierde nada.
 }
+let _ecoUltimaFirma = null;   // v236: firma del último payload subido con éxito
 async function _ecoFlush(){
   if(!_ecoState.dirty) return;
   _ecoState.dirty = false;
+  const datos = { gastos:_ecoState.gastos, ingresos:_ecoState.ingresos||[], metricas:_ecoState.metricas||{}, metricasCols:_ecoState.metricasCols||[], acreditar:_ecoState.acreditar||[], ahorros:_ecoState.ahorros||[] };
+  const firma = JSON.stringify(datos);
+  // v236: si el contenido es idéntico a lo último subido, no gastamos la escritura
+  if(firma === _ecoUltimaFirma) return;
   try{
-    await fetch(WORKER + '/api/backup', {
+    const r = await fetch(WORKER + '/api/backup', {
       method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
-      body: JSON.stringify({ economia: { gastos:_ecoState.gastos, ingresos:_ecoState.ingresos||[], metricas:_ecoState.metricas||{}, metricasCols:_ecoState.metricasCols||[], acreditar:_ecoState.acreditar||[], ahorros:_ecoState.ahorros||[], savedAt:Date.now() } })
+      body: JSON.stringify({ economia: Object.assign({ savedAt:Date.now() }, datos) })
     });
+    if(r.ok) _ecoUltimaFirma = firma;
   }catch(e){ console.warn('[eco] guardar nube:', e.message); }
 }
 // ═══════════════════════════════════════════════════════════════════════════
@@ -29561,7 +29587,7 @@ setInterval(function(){
   if(document.visibilityState!=='visible') return;
   const act=document.getElementById('section-economia')?.classList.contains('active');
   if(act || document.getElementById('eco-met-tbody')) _ecoSyncDown(false);
-}, 45000);
+}, 180000);   // v236: 3 min en background (al enfocar/abrir sigue inmediato)
 document.addEventListener('visibilitychange', function(){
   if(document.visibilityState!=='visible') return;
   if(document.getElementById('section-economia')?.classList.contains('active')) _ecoSyncDown(true);
@@ -31000,57 +31026,108 @@ function _ecoMetIntel(rows){
     }
   }
 
-  // ── SEMÁFORO + IMPALA FINANCE SCORE ────────────────────────────────────
+  // ── IMPALA FINANCE SCORE (v236: gauge circular + barras + acción) ──────
+  // Tres zonas: medidor con el puntaje y su variación vs el mes pasado;
+  // barras por componente (se ve al toque QUÉ resta puntos); y la "próxima
+  // acción": el componente más flojo dicta una recomendación concreta.
   const semItems=[];
-  const sem=(emoji,lbl)=> semItems.push('<span style="white-space:nowrap">'+emoji+' '+lbl+'</span>');
+  const sem=(emoji,lbl)=> semItems.push('<span style="background:#fff;border:1px solid '+_ECO_BRD+';border-radius:20px;padding:3px 10px;font-size:10.5px;font-weight:700;color:#334155;white-space:nowrap">'+emoji+' '+lbl+'</span>');
   const luz=(v,verde,amarillo)=> v==null? '⚪' : (v>=verde? '🟢' : (v>=amarillo? '🟡' : '🔴'));
-  let score=0, maxScore=0; const razones=[];
-  const punto=(pts,max,txt)=>{ score+=pts; maxScore+=max; razones.push((pts>=max*0.7?'✔':(pts>=max*0.35?'~':'✘'))+' '+txt+' ('+Math.round(pts)+'/'+max+')'); };
+  const comp=[]; let score=0, maxScore=0;
+  const punto=(key,lblC,pts,max)=>{ score+=pts; maxScore+=max; comp.push({key,lbl:lblC,pts,max}); };
   if(ahorroProm!=null){
-    punto(_ecoClamp(ahorroProm,0,20)/20*25, 25, 'capacidad de ahorro '+ahorroProm.toFixed(1)+'%');
+    punto('ahorro','🐷 Ahorro ('+ahorroProm.toFixed(1)+'%)', _ecoClamp(ahorroProm,0,20)/20*25, 25);
     sem(luz(ahorroProm,15,5),'Ahorro');
   }
   if(conSaldo.length>=3){
     const pos=conSaldo.filter(r=>r.saldo>0).length/conSaldo.length;
-    punto(pos*15, 15, 'meses en positivo '+Math.round(pos*100)+'%');
+    punto('positivos','✅ Meses en positivo ('+Math.round(pos*100)+'%)', pos*15, 15);
   }
   if(tendSaldo!=null && gastoPromUsd>0){
-    const t=tendSaldo>=0? 1 : _ecoClamp(1+tendSaldo/(0.25*gastoPromUsd),0,1);
-    punto(t*15, 15, 'tendencia del saldo '+(tendSaldo>=0?'positiva':'negativa'));
+    const tN=tendSaldo>=0? 1 : _ecoClamp(1+tendSaldo/(0.25*gastoPromUsd),0,1);
+    punto('tendencia','📉 Tendencia del saldo', tN*15, 15);
     sem(tendSaldo>=0?'🟢':'🔴','Tendencia');
   }
   if(autonomia!=null){
-    punto(_ecoClamp(autonomia,0,12)/12*15, 15, 'colchón de '+autonomia.toFixed(1)+' meses');
+    punto('colchon','🛟 Colchón ('+autonomia.toFixed(1)+' meses)', _ecoClamp(autonomia,0,12)/12*15, 15);
     sem(luz(autonomia,6,3),'Liquidez');
   }
   if(fam){
-    punto(fam.pts>=0? 10 : _ecoClamp(1+fam.pts/50,0,1)*10, 10, 'poder adquisitivo del hogar '+(fam.pts>=0?'ganó':'perdió'));
+    punto('poder','🏠 Poder adquisitivo', fam.pts>=0? 10 : _ecoClamp(1+fam.pts/50,0,1)*10, 10);
     sem(fam.pts>=0?'🟢':'🔴','Poder adquisitivo');
   }
   if(inflPers){
-    const ok=inflPers.varPct<=inflPers.inflPct;
-    punto(ok? 10 : _ecoClamp(1-(inflPers.varPct-inflPers.inflPct)/50,0,1)*10, 10, 'inflación personal '+(ok?'contenida':'por encima del IPC'));
-    sem(ok?'🟢':'🔴','Inflación propia');
+    const okI=inflPers.varPct<=inflPers.inflPct;
+    punto('inflper','🌡️ Inflación propia', okI? 10 : _ecoClamp(1-(inflPers.varPct-inflPers.inflPct)/50,0,1)*10, 10);
+    sem(okI?'🟢':'🔴','Inflación propia');
   }
   if(maxShare!=null){
-    punto(_ecoClamp((1-maxShare)/0.5,0,1)*10, 10, 'diversificación de ingresos');
+    punto('diver','🧩 Diversificación', _ecoClamp((1-maxShare)/0.5,0,1)*10, 10);
     sem(maxShare<=0.5?'🟢':(maxShare<=0.65?'🟡':'🔴'),'Diversificación');
   }
   let scoreHtml='';
   if(maxScore>=60){
     const s100=Math.round(score/maxScore*100);
     const et = s100>=80?['Excelente','#16a34a'] : s100>=65?['Bueno','#65a30d'] : s100>=50?['Regular','#ca8a04'] : s100>=35?['Riesgoso','#ea580c'] : ['Crítico','#dc2626'];
+    // variación vs el mes pasado (histórico local del puntaje)
+    let deltaHtml='';
+    try{
+      const ymNow=win[win.length-1].ym;
+      const hist=JSON.parse(localStorage.getItem('eco_score_hist')||'{}');
+      const prev=hist[_ecoYmAdd(ymNow,-1)];
+      hist[ymNow]=s100;
+      localStorage.setItem('eco_score_hist', JSON.stringify(hist));
+      if(prev!=null && isFinite(prev)){
+        const dd=s100-prev;
+        deltaHtml='<div style="font-size:10.5px;font-weight:800;color:'+(dd>=0?'#16a34a':'#dc2626')+';margin-top:1px">'+(dd>0?'▲ +'+dd:(dd<0?'▼ '+dd:'= igual'))+' vs mes pasado</div>';
+      }
+    }catch(e){}
+    // medidor circular
+    const R=34, CIRC=2*Math.PI*R, off=CIRC*(1-s100/100);
+    const gauge='<svg width="98" height="98" viewBox="0 0 98 98" style="display:block">'+
+      '<circle cx="49" cy="49" r="'+R+'" fill="none" stroke="#e2e8f0" stroke-width="9"/>'+
+      '<circle cx="49" cy="49" r="'+R+'" fill="none" stroke="'+et[1]+'" stroke-width="9" stroke-linecap="round" stroke-dasharray="'+CIRC.toFixed(1)+'" stroke-dashoffset="'+off.toFixed(1)+'" transform="rotate(-90 49 49)"/>'+
+      '<text x="49" y="48" text-anchor="middle" font-size="26" font-weight="800" fill="'+et[1]+'" font-family="inherit">'+s100+'</text>'+
+      '<text x="49" y="64" text-anchor="middle" font-size="9" font-weight="700" fill="#94a3b8" font-family="inherit">/ 100</text></svg>';
+    // barras por componente (cuánto aporta cada uno de su máximo)
+    const barras=comp.map(c=>{
+      const pr=c.max>0? c.pts/c.max : 0;
+      const col=pr>=0.7?'#16a34a':(pr>=0.35?'#ca8a04':'#dc2626');
+      return '<div style="display:flex;align-items:center;gap:8px">'+
+        '<div style="width:172px;font-size:10.5px;font-weight:700;color:#334155;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+c.lbl.replace(/"/g,'&quot;')+'">'+c.lbl+'</div>'+
+        '<div style="flex:1;height:7px;background:#e2e8f0;border-radius:5px;overflow:hidden;min-width:60px"><div style="width:'+Math.round(pr*100)+'%;height:100%;background:'+col+';border-radius:5px"></div></div>'+
+        '<div style="width:40px;text-align:right;font-size:10px;font-weight:800;color:'+col+'">'+Math.round(c.pts)+'/'+c.max+'</div>'+
+      '</div>';
+    }).join('');
+    // próxima acción: manda el componente con peor porcentaje de su máximo
+    const peor=comp.slice().sort((a,b)=>(a.pts/a.max)-(b.pts/b.max))[0];
+    const ACC={
+      ahorro:'Recortá gastos o sumá ingresos: la capacidad de ahorro es tu punto más débil. Primera meta: superar el 10% mensual.',
+      positivos:'Apuntá a cerrar el próximo mes en positivo, aunque sea por poco: cortar la racha en rojo levanta todo el puntaje.',
+      tendencia:'Frená el deterioro: mirá en el comparador los 2-3 gastos que más crecieron y ajustalos este mes.',
+      colchon:'Priorizá armar reserva antes que cualquier gasto opcional. Primera meta: 3 meses de gastos guardados.',
+      poder:'Los ingresos del hogar pierden contra la inflación: renegociá los sueldos o subí los precios de Impala.',
+      inflper:'Tus gastos suben más que el IPC: auditá los servicios y renegociá los que más aumentaron.',
+      diver:'Mucha dependencia de una sola fuente: hacé crecer Impala para repartir el riesgo.',
+    };
+    const accion = peor ? (ACC[peor.key]||'') : '';
     scoreHtml=
-      '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:stretch;background:linear-gradient(135deg,#f8fafc,#eef2ff);border:1px solid '+_ECO_BRD+';border-radius:11px;padding:12px 15px;margin-bottom:9px">'+
-        '<div style="min-width:150px">'+
-          '<div style="font-size:10px;font-weight:800;color:#334155">🏆 IMPALA FINANCE SCORE</div>'+
-          '<div style="font-size:34px;font-weight:800;color:'+et[1]+';line-height:1.1">'+s100+'<span style="font-size:14px;color:#94a3b8">/100</span></div>'+
-          '<div style="font-size:13px;font-weight:800;color:'+et[1]+'">'+et[0]+'</div>'+
+      '<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:stretch;background:linear-gradient(135deg,#f8fafc,#eef2ff);border:1px solid '+_ECO_BRD+';border-radius:12px;padding:14px 16px;margin-bottom:10px">'+
+        '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:130px">'+
+          '<div style="font-size:9px;font-weight:800;letter-spacing:.5px;color:#64748b;text-transform:uppercase;margin-bottom:3px">🏆 Impala Finance Score</div>'+
+          gauge+
+          '<div style="font-size:15px;font-weight:800;color:'+et[1]+';margin-top:2px">'+et[0]+'</div>'+
+          deltaHtml+
         '</div>'+
-        '<div style="flex:1;min-width:240px">'+
-          '<div style="font-size:10px;font-weight:800;color:#334155;margin-bottom:3px">SALUD FINANCIERA</div>'+
-          '<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:11.5px;font-weight:700;color:#334155;margin-bottom:6px">'+semItems.join('')+'</div>'+
-          '<div style="font-size:10px;color:#64748b;line-height:1.6">'+razones.join(' · ')+'</div>'+
+        '<div style="flex:1.5;min-width:270px;display:flex;flex-direction:column;gap:5px;justify-content:center">'+
+          '<div style="font-size:9px;font-weight:800;letter-spacing:.5px;color:#64748b;text-transform:uppercase;margin-bottom:1px">Composición del puntaje</div>'+
+          barras+
+        '</div>'+
+        '<div style="flex:1;min-width:230px;display:flex;flex-direction:column;gap:8px;justify-content:center">'+
+          '<div style="display:flex;gap:5px;flex-wrap:wrap">'+semItems.join('')+'</div>'+
+          (accion? '<div style="background:#fff;border:1px solid '+_ECO_BRD+';border-left:4px solid '+et[1]+';border-radius:9px;padding:9px 11px">'+
+            '<div style="font-size:9px;font-weight:800;letter-spacing:.5px;color:#64748b;text-transform:uppercase">🎯 Próxima acción</div>'+
+            '<div style="font-size:11.5px;color:#334155;font-weight:600;line-height:1.55;margin-top:2px">'+accion+'</div></div>' : '')+
         '</div>'+
       '</div>';
   }
