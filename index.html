@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v233 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v234 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -30056,6 +30056,10 @@ function _ecoMetCompute(ym, prevRow){
   const pct=(a,b)=> (a!=null&&b!=null&&b>0)? ((a-b)/b*100) : null;
   const row={
     ym, ipc, d, sc, sb, v, g, tz,
+    // v234: componentes del gasto (la columna visible no cambia).
+    // gFam = gastos de la planilla de Economía (hogar) · gEmp = egresos de
+    // Cuenta Impala (emprendimiento). Alimentan los KPIs de inteligencia.
+    gFam: gPlan, gEmp: (cta? cta.eg : null),
     vAuto: (m.v==null && vAuto!=null), gAuto: (m.g==null && gAuto!=null), ipcAuto: (m.ipc==null && ipc!=null),
     dDif: pct(d, prevRow?prevRow.d:null),
     scDif: pct(sc, prevRow?prevRow.sc:null),
@@ -30194,6 +30198,7 @@ function ecoOpenMetricas(){
     // ── CUERPO SCROLLEABLE ──
     '<div style="flex:1 1 auto;overflow:auto;padding:14px 20px 20px">'+
       '<div id="eco-met-resumen" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>'+
+      '<div id="eco-met-intel" style="margin-bottom:12px"></div>'+
       '<div id="eco-met-kpis12" style="margin-bottom:12px"></div>'+
       // comparador base 100 (entre los KPIs y la cuadrícula)
       '<div style="border:1px solid '+_ECO_BRD+';border-radius:11px;padding:12px 14px;margin-bottom:12px;background:#fbfcfe">'+
@@ -30630,6 +30635,7 @@ function _ecoMetRedraw(){
     return '<tr>'+tds+'</tr>';
   }).join('');
   _ecoMetResumen(rows);
+  try{ _ecoMetIntel(rows); }catch(e){ console.warn('[eco-met intel]', e.message); }
   try{ _ecoMetKpis12(rows); }catch(e){ console.warn('[eco-met kpis12]', e.message); }
   try{ _ecoMetChartDraw(); }catch(e){ console.warn('[eco-met chart]', e.message); }
 }
@@ -30645,7 +30651,8 @@ function _ecoMetResumen(rows){
   const acum=anioRows.length? anioRows.reduce((a,r)=>a+r.saldo,0) : null;
   const acumTotal=conSaldo.length? conSaldo.reduce((a,r)=>a+r.saldo,0) : null;   // histórico completo
   const ahorro12=u12.length? u12.reduce((a,r)=>a+(r.ahorro||0),0)/u12.length : null;
-  const box=(lbl,val,color,sub)=>'<div style="flex:1;min-width:150px;background:#f8fafc;border:1px solid '+_ECO_BRD+';border-radius:9px;padding:9px 11px"><div style="font-size:9.5px;color:#334155;font-weight:800;line-height:1.25">'+lbl+'</div><div style="font-size:16px;font-weight:800;color:'+(color||_ECO_TXT)+';margin:1px 0">'+val+'</div><div style="font-size:10.5px;color:#475569;font-weight:600;line-height:1.3">'+(sub||'')+'</div></div>';
+  // v234: cada tarjeta puede llevar un mini-gráfico (sparkline) al lado del valor
+  const box=(lbl,val,color,sub,spark)=>'<div style="flex:1;min-width:150px;background:#f8fafc;border:1px solid '+_ECO_BRD+';border-radius:9px;padding:9px 11px"><div style="font-size:9.5px;color:#334155;font-weight:800;line-height:1.25">'+lbl+'</div><div style="display:flex;align-items:center;gap:8px"><div style="font-size:16px;font-weight:800;color:'+(color||_ECO_TXT)+';margin:1px 0;flex:1;min-width:0">'+val+'</div>'+(spark||'')+'</div><div style="font-size:10.5px;color:#475569;font-weight:600;line-height:1.3">'+(sub||'')+'</div></div>';
   const MESES_C=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
   const lblYm=ym=>MESES_C[+ym.slice(5,7)-1]+' '+ym.slice(2,4);
 
@@ -30730,6 +30737,312 @@ function _ecoMetVsInfl(win, campo){
            pts: varPct-inflPct, iniYm:ini.ym, finYm:fin.ym, meses:n };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// v234 · INTELIGENCIA FINANCIERA
+// ───────────────────────────────────────────────────────────────────────────
+// Pasa de KPIs descriptivos ("qué pasó") a predictivos ("qué va a pasar si
+// sigo igual"). Todo se calcula con lo ya cargado: IPC, dólar, sueldos,
+// ventas, gastos (separados internamente en hogar/emprendimiento), saldo,
+// ahorro y los fondos del panel de Ahorros. Sin datos nuevos que cargar.
+// ───────────────────────────────────────────────────────────────────────────
+
+// mini-gráfico inline (sparkline SVG) de una serie con nulls
+function _ecoSpark(vals, color, w, h){
+  const pts=vals.map((v,i)=>({v:+v,i})).filter(p=>p.v!=null&&isFinite(p.v));
+  if(pts.length<2) return '';
+  w=w||110; h=h||26;
+  const min=Math.min.apply(null,pts.map(p=>p.v)), max=Math.max.apply(null,pts.map(p=>p.v));
+  const rng=(max-min)||1;
+  const n=(vals.length-1)||1;
+  const X=p=>((p.i/n)*(w-6)+3).toFixed(1);
+  const Y=p=>((h-4)-((p.v-min)/rng*(h-8))).toFixed(1);
+  const path=pts.map((p,j)=>(j?'L':'M')+X(p)+','+Y(p)).join('');
+  const u=pts[pts.length-1];
+  return '<svg width="'+w+'" height="'+h+'" viewBox="0 0 '+w+' '+h+'" style="display:block;flex:none;opacity:.9">'+
+    '<path d="'+path+'" fill="none" stroke="'+color+'" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>'+
+    '<circle cx="'+X(u)+'" cy="'+Y(u)+'" r="2.3" fill="'+color+'"/></svg>';
+}
+// igual que _ecoMetVsInfl pero sobre una serie derivada (ej: sc+sb+v)
+function _ecoMetVsInflSerie(win, vals){
+  const idxs=[]; for(let i=0;i<win.length;i++){ if(vals[i]!=null&&isFinite(vals[i])&&vals[i]>0) idxs.push(i); }
+  if(idxs.length<2) return null;
+  const i0=idxs[0], i1=idxs[idxs.length-1];
+  if(i0===i1) return null;
+  let f=1,n=0;
+  for(let i=i0+1;i<=i1;i++){ const r=win[i]; if(r.ipc!=null){ f*=(1+r.ipc/100); n++; } }
+  if(!n) return null;
+  const inflPct=(f-1)*100;
+  const varPct=(vals[i1]-vals[i0])/vals[i0]*100;
+  return { base:vals[i0], actual:vals[i1], objetivo:vals[i0]*f, inflPct, varPct, pts:varPct-inflPct, iniYm:win[i0].ym, finYm:win[i1].ym };
+}
+// pendiente (regresión lineal simple) — unidades por mes
+function _ecoSlope(vals){
+  const p=vals.map((v,i)=>({v:+v,i})).filter(x=>x.v!=null&&isFinite(x.v));
+  if(p.length<3) return null;
+  const n=p.length;
+  let sx=0,sy=0,sxx=0,sxy=0;
+  p.forEach(x=>{ sx+=x.i; sy+=x.v; sxx+=x.i*x.i; sxy+=x.i*x.v; });
+  const den=n*sxx-sx*sx; if(!den) return null;
+  return (n*sxy-sx*sy)/den;
+}
+function _ecoClamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+
+function _ecoMetIntel(rows){
+  const cont=document.getElementById('eco-met-intel');
+  if(!cont) return;
+  const win=rows.slice(-12);
+  if(win.length<3){ cont.innerHTML=''; return; }
+  const MC=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  const lblYm=ym=>MC[+ym.slice(5,7)-1]+' '+ym.slice(2,4);
+  const U=n=>'US$'+Math.round(Math.abs(n)).toLocaleString('es-AR');
+  const Us=n=>(n>=0?'+':'−')+U(n);
+  const V=n=>'$'+Math.round(n).toLocaleString('es-AR');
+  const card=(lbl,val,color,sub,spark)=>'<div style="flex:1;min-width:170px;background:#f8fafc;border:1px solid '+_ECO_BRD+';border-radius:9px;padding:9px 11px">'+
+    '<div style="font-size:9.5px;color:#334155;font-weight:800;line-height:1.25">'+lbl+'</div>'+
+    '<div style="display:flex;align-items:center;gap:8px"><div style="font-size:16px;font-weight:800;color:'+(color||_ECO_TXT)+';margin:1px 0;flex:1;min-width:0">'+val+'</div>'+(spark||'')+'</div>'+
+    '<div style="font-size:10.5px;color:#475569;font-weight:600;line-height:1.35">'+(sub||'')+'</div></div>';
+
+  // ── datos base ─────────────────────────────────────────────────────────
+  const conSaldo=win.filter(r=>r.saldo!=null);
+  const saldoSerie=win.map(r=>r.saldo);
+  const saldoProm = conSaldo.length? conSaldo.reduce((a,r)=>a+r.saldo,0)/conSaldo.length : null;
+  const ahorroProm = conSaldo.length? conSaldo.reduce((a,r)=>a+(r.ahorro||0),0)/conSaldo.length : null;
+  const slope=_ecoSlope(rows.slice(-6).map(r=>r.saldo));       // US$/mes últimos 6m
+  const gUsdCon=win.filter(r=>r.gUsd!=null);
+  const gastoPromUsd = gUsdCon.length? gUsdCon.reduce((a,r)=>a+r.gUsd,0)/gUsdCon.length : null;
+  const ultimo = win[win.length-1];
+  const dAct = (()=>{ for(let i=win.length-1;i>=0;i--){ if(win[i].d>0) return win[i].d; } return (_ecoDolar&&_ecoDolar.compra>0)?_ecoDolar.compra:0; })();
+  // fondos disponibles = panel Ahorros (US$ + pesos convertidos)
+  let fondos=null;
+  try{ const a=_ecoListaTotales('ahorros'); fondos=(+a.dolares||0)+(dAct>0? (+a.pesos||0)/dAct : 0); }catch(e){}
+  const cards=[];
+
+  // ── 1) TENDENCIA DEL SALDO (velocidad de mejora/deterioro) ─────────────
+  let tendSaldo=null;
+  if(slope!=null){
+    tendSaldo=slope;
+    const mejora=slope>=0;
+    cards.push(card('📉 TENDENCIA DEL SALDO (últimos 6m)',
+      (mejora?'↗ +':'↘ −')+U(slope)+'/mes', mejora?'#16a34a':'#dc2626',
+      mejora?'mejorando: cada mes cierra mejor que el anterior':'empeorando: cada mes cierra peor que el anterior',
+      _ecoSpark(saldoSerie, mejora?'#16a34a':'#dc2626')));
+  }
+
+  // ── 2) PROYECCIÓN 6 / 12 MESES + MES DE QUIEBRE ────────────────────────
+  if(saldoProm!=null){
+    const p6=saldoProm*6, p12=saldoProm*12;
+    let quiebre='';
+    if(saldoProm<0 && fondos!=null && fondos>0){
+      const meses=fondos/Math.abs(saldoProm);
+      const dQ=new Date(); dQ.setMonth(dQ.getMonth()+Math.floor(meses));
+      quiebre=' · a este ritmo los fondos se agotan en <b>'+MC[dQ.getMonth()]+' '+dQ.getFullYear()+'</b>';
+    }
+    cards.push(card('🔮 SI SEGUÍS IGUAL (proyección)',
+      Us(p12)+' en 12m', p12>=0?'#16a34a':'#dc2626',
+      '6 meses: '+Us(p6)+' · promedio '+Us(saldoProm)+'/mes'+quiebre));
+  }
+
+  // ── 3) MESES DE AUTONOMÍA (colchón) ────────────────────────────────────
+  let autonomia=null;
+  if(fondos!=null && gastoPromUsd>0){
+    autonomia=fondos/gastoPromUsd;
+    cards.push(card('🛟 MESES DE AUTONOMÍA',
+      autonomia.toFixed(1)+' meses',
+      autonomia>=6?'#16a34a':(autonomia>=3?'#ca8a04':'#dc2626'),
+      'fondos '+U(fondos)+' ÷ gasto promedio '+U(gastoPromUsd)+'/mes · '+
+      (autonomia>=6?'colchón sólido':(autonomia>=3?'colchón justo: ideal llegar a 6':'colchón crítico: priorizar reserva'))));
+  }
+
+  // ── 4) INFLACIÓN PERSONAL (tus gastos vs IPC) ──────────────────────────
+  const inflPers=_ecoMetVsInfl(win,'g');
+  if(inflPers){
+    const peor=inflPers.varPct>inflPers.inflPct;
+    cards.push(card('🌡️ TU INFLACIÓN PERSONAL ('+lblYm(inflPers.iniYm)+'→'+lblYm(inflPers.finYm)+')',
+      inflPers.varPct.toFixed(1)+'%', peor?'#dc2626':'#16a34a',
+      'IPC del período: '+inflPers.inflPct.toFixed(1)+'% · '+
+      (peor?'vivís una inflación MAYOR al promedio (tus gastos corren más rápido)':'tus gastos suben menos que el IPC: le ganás al promedio'),
+      _ecoSpark(win.map(r=>r.g),'#ea580c')));
+  }
+
+  // ── 5) INGRESO FAMILIAR REAL (todo el hogar vs IPC) ────────────────────
+  const ingTot=win.map(r=> (r.sc!=null||r.sb!=null||r.v!=null)? (r.sc||0)+(r.sb||0)+(r.v||0) : null);
+  const fam=_ecoMetVsInflSerie(win, ingTot);
+  if(fam){
+    cards.push(card('🏠 INGRESO FAMILIAR REAL vs IPC',
+      (fam.pts>=0?'+':'')+fam.pts.toFixed(0)+' pts '+(fam.pts>=0?'✅':'⚠️'),
+      fam.pts>=0?'#16a34a':'#dc2626',
+      'sueldos + Impala: '+(fam.pts>=0?'ganaron':'perdieron')+' poder de compra ('+fam.varPct.toFixed(1)+'% vs IPC '+fam.inflPct.toFixed(1)+'%)'+
+      (fam.pts<0? ' · para empatar el hogar debería ingresar '+V(fam.objetivo)+'/mes (hoy '+V(fam.actual)+')':''),
+      _ecoSpark(ingTot,'#2563eb')));
+  }
+
+  // ── 6) DEPENDENCIA DE INGRESOS (diversificación) ───────────────────────
+  let maxShare=null;
+  {
+    const u=(()=>{ for(let i=win.length-1;i>=0;i--){ const r=win[i]; if((r.sc||0)+(r.sb||0)+(r.v||0)>0) return r; } return null; })();
+    const p0=(()=>{ for(let i=0;i<win.length;i++){ const r=win[i]; if((r.sc||0)+(r.sb||0)+(r.v||0)>0) return r; } return null; })();
+    if(u){
+      const tot=(u.sc||0)+(u.sb||0)+(u.v||0);
+      const shC=(u.sc||0)/tot*100, shB=(u.sb||0)/tot*100, shI=(u.v||0)/tot*100;
+      maxShare=Math.max(shC,shB,shI)/100;
+      let evo='';
+      if(p0 && p0!==u){
+        const t0=(p0.sc||0)+(p0.sb||0)+(p0.v||0);
+        const shI0=(p0.v||0)/t0*100;
+        const dI=shI-shI0;
+        evo=' · Impala '+(dI>=0?'creció':'bajó')+' de '+shI0.toFixed(0)+'% a '+shI.toFixed(0)+'%'+(dI>=5?' 🚀':'');
+      }
+      const barra='<div style="display:flex;height:8px;border-radius:5px;overflow:hidden;margin-top:3px">'+
+        '<div style="width:'+shC.toFixed(1)+'%;background:#16a34a" title="Sueldo C"></div>'+
+        '<div style="width:'+shB.toFixed(1)+'%;background:#db2777" title="Sueldo B"></div>'+
+        '<div style="width:'+shI.toFixed(1)+'%;background:#ea580c" title="Impala"></div></div>';
+      cards.push(card('🧩 DE DÓNDE VIENE LA PLATA ('+lblYm(u.ym)+')',
+        'C '+shC.toFixed(0)+'% · B '+shB.toFixed(0)+'% · Impala '+shI.toFixed(0)+'%',
+        _ECO_TXT,
+        (maxShare>0.6?'muy concentrado en una fuente: riesgo alto si falla':'ingresos razonablemente diversificados')+evo+barra));
+    }
+  }
+
+  // ── 7) ¿IMPALA SOSTIENE LOS GASTOS DEL HOGAR? ──────────────────────────
+  {
+    const u=(()=>{ for(let i=win.length-1;i>=0;i--){ const r=win[i]; if(r.v!=null && (r.gFam!=null||r.g!=null)) return r; } return null; })();
+    if(u){
+      const neto=(u.v||0)-(u.gEmp||0);                 // lo que deja Impala
+      const hogar=(u.gFam!=null)? u.gFam : u.g;        // gastos del hogar
+      if(hogar>0){
+        const cob=neto/hogar*100;
+        cards.push(card('🏪 IMPALA vs GASTOS DEL HOGAR ('+lblYm(u.ym)+')',
+          cob.toFixed(0)+'%', cob>=100?'#16a34a':(cob>=50?'#ca8a04':'#dc2626'),
+          (cob>=100?'el emprendimiento ya sostiene el hogar solo ✅':'Impala (neto '+V(neto)+') cubre esa parte de los gastos del hogar ('+V(hogar)+')')));
+      }
+    }
+  }
+
+  // ── 8) RENTABILIDAD REAL DE IMPALA (12m) ───────────────────────────────
+  {
+    let sv=0, sg=0, hay=false;
+    win.forEach(r=>{ if(r.v!=null && r.gEmp!=null){ sv+=r.v; sg+=r.gEmp; hay=true; } });
+    if(hay && sv>0){
+      const marg=(sv-sg)/sv*100;
+      cards.push(card('💼 RENTABILIDAD IMPALA (12m)',
+        marg.toFixed(1)+'%', marg>=40?'#16a34a':(marg>=20?'#ca8a04':'#dc2626'),
+        'vendiste '+V(sv)+' · egresos '+V(sg)+' · ganancia '+V(sv-sg),
+        _ecoSpark(win.map(r=>(r.v!=null&&r.gEmp!=null)? r.v-r.gEmp:null),'#7c3aed')));
+    }
+  }
+
+  // ── 9) PUNTO DE EQUILIBRIO (en tazas) ──────────────────────────────────
+  {
+    const u=(()=>{ for(let i=win.length-1;i>=0;i--){ const r=win[i]; if(r.tz>0 && (r.gEmp!=null||r.g!=null)) return r; } return null; })();
+    if(u && u.tz>0){
+      const nEmp=(u.gEmp!=null)? Math.ceil(u.gEmp/u.tz) : null;
+      const nTodo=(u.g!=null)? Math.ceil(u.g/u.tz) : null;
+      if(nEmp!=null || nTodo!=null){
+        cards.push(card('⚖️ PUNTO DE EQUILIBRIO ('+lblYm(u.ym)+')',
+          (nEmp!=null? nEmp+' tazas':'—'), _ECO_TXT,
+          (nEmp!=null?'para cubrir los gastos del emprendimiento':'')+
+          (nTodo!=null?' · '+nTodo+' tazas para cubrir TODOS los gastos del mes':'')+
+          ' (a '+V(u.tz)+' c/u)'));
+      }
+    }
+  }
+
+  // ── 10) PRECIO SUGERIDO DE LA TAZA ─────────────────────────────────────
+  {
+    const conTz=win.filter(r=>r.tz>0);
+    if(conTz.length>=2 && dAct>0){
+      const b=conTz[0], u=conTz[conTz.length-1];
+      let f=1; win.forEach(r=>{ if(r.ym>b.ym && r.ym<=u.ym && r.ipc!=null) f*=(1+r.ipc/100); });
+      const segunIpc=b.tz*f;
+      const segunDolar=(b.tzUsd||0)*dAct;
+      const sugerido=Math.max(segunIpc, segunDolar||0);
+      const atras=u.tz<sugerido*0.97;
+      cards.push(card('🏷️ PRECIO TAZA: ACTUAL vs SUGERIDO',
+        V(u.tz)+(atras?' ⚠️':' ✅'), atras?'#dc2626':'#16a34a',
+        'según IPC: '+V(segunIpc)+(segunDolar>0?' · según dólar: '+V(segunDolar):'')+
+        (atras?' · tu precio quedó atrás: actualizá la Lista de Precios':' · precio al día con los aumentos'),
+        _ecoSpark(win.map(r=>r.tz),'#0891b2')));
+    }
+  }
+
+  // ── 11) SIMULADOR RÁPIDO (qué pasa si…) ────────────────────────────────
+  {
+    const w6=rows.slice(-6);
+    const prom=k=>{ const c=w6.filter(r=>r[k]!=null); return c.length? c.reduce((a,r)=>a+r[k],0)/c.length : null; };
+    const vP=prom('v'), gP=prom('g');
+    if(vP!=null && gP!=null && dAct>0 && saldoProm!=null){
+      const mPrecio=vP*0.05/dAct;                       // +5% precio (mismo volumen)
+      const mGastos=gP*0.10/dAct;                       // −10% gastos
+      let margen=0.3; try{ let sv=0,sg=0; win.forEach(r=>{ if(r.v!=null&&r.gEmp!=null){sv+=r.v;sg+=r.gEmp;} }); if(sv>0) margen=(sv-sg)/sv; }catch(e){}
+      const mVentas=vP*0.20*Math.max(0.1,margen)/dAct;  // +20% ventas (solo el margen)
+      const linea=(t,m)=>t+' → saldo '+Us(saldoProm+m)+'/mes ('+Us(m)+')';
+      cards.push(card('🧪 SIMULADOR: ¿QUÉ PASA SI…?',
+        '3 palancas', _ECO_TXT,
+        linea('· precio +5%', mPrecio)+'<br>'+linea('· gastos −10%', mGastos)+'<br>'+linea('· ventas +20%', mVentas)));
+    }
+  }
+
+  // ── SEMÁFORO + IMPALA FINANCE SCORE ────────────────────────────────────
+  const semItems=[];
+  const sem=(emoji,lbl)=> semItems.push('<span style="white-space:nowrap">'+emoji+' '+lbl+'</span>');
+  const luz=(v,verde,amarillo)=> v==null? '⚪' : (v>=verde? '🟢' : (v>=amarillo? '🟡' : '🔴'));
+  let score=0, maxScore=0; const razones=[];
+  const punto=(pts,max,txt)=>{ score+=pts; maxScore+=max; razones.push((pts>=max*0.7?'✔':(pts>=max*0.35?'~':'✘'))+' '+txt+' ('+Math.round(pts)+'/'+max+')'); };
+  if(ahorroProm!=null){
+    punto(_ecoClamp(ahorroProm,0,20)/20*25, 25, 'capacidad de ahorro '+ahorroProm.toFixed(1)+'%');
+    sem(luz(ahorroProm,15,5),'Ahorro');
+  }
+  if(conSaldo.length>=3){
+    const pos=conSaldo.filter(r=>r.saldo>0).length/conSaldo.length;
+    punto(pos*15, 15, 'meses en positivo '+Math.round(pos*100)+'%');
+  }
+  if(tendSaldo!=null && gastoPromUsd>0){
+    const t=tendSaldo>=0? 1 : _ecoClamp(1+tendSaldo/(0.25*gastoPromUsd),0,1);
+    punto(t*15, 15, 'tendencia del saldo '+(tendSaldo>=0?'positiva':'negativa'));
+    sem(tendSaldo>=0?'🟢':'🔴','Tendencia');
+  }
+  if(autonomia!=null){
+    punto(_ecoClamp(autonomia,0,12)/12*15, 15, 'colchón de '+autonomia.toFixed(1)+' meses');
+    sem(luz(autonomia,6,3),'Liquidez');
+  }
+  if(fam){
+    punto(fam.pts>=0? 10 : _ecoClamp(1+fam.pts/50,0,1)*10, 10, 'poder adquisitivo del hogar '+(fam.pts>=0?'ganó':'perdió'));
+    sem(fam.pts>=0?'🟢':'🔴','Poder adquisitivo');
+  }
+  if(inflPers){
+    const ok=inflPers.varPct<=inflPers.inflPct;
+    punto(ok? 10 : _ecoClamp(1-(inflPers.varPct-inflPers.inflPct)/50,0,1)*10, 10, 'inflación personal '+(ok?'contenida':'por encima del IPC'));
+    sem(ok?'🟢':'🔴','Inflación propia');
+  }
+  if(maxShare!=null){
+    punto(_ecoClamp((1-maxShare)/0.5,0,1)*10, 10, 'diversificación de ingresos');
+    sem(maxShare<=0.5?'🟢':(maxShare<=0.65?'🟡':'🔴'),'Diversificación');
+  }
+  let scoreHtml='';
+  if(maxScore>=60){
+    const s100=Math.round(score/maxScore*100);
+    const et = s100>=80?['Excelente','#16a34a'] : s100>=65?['Bueno','#65a30d'] : s100>=50?['Regular','#ca8a04'] : s100>=35?['Riesgoso','#ea580c'] : ['Crítico','#dc2626'];
+    scoreHtml=
+      '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:stretch;background:linear-gradient(135deg,#f8fafc,#eef2ff);border:1px solid '+_ECO_BRD+';border-radius:11px;padding:12px 15px;margin-bottom:9px">'+
+        '<div style="min-width:150px">'+
+          '<div style="font-size:10px;font-weight:800;color:#334155">🏆 IMPALA FINANCE SCORE</div>'+
+          '<div style="font-size:34px;font-weight:800;color:'+et[1]+';line-height:1.1">'+s100+'<span style="font-size:14px;color:#94a3b8">/100</span></div>'+
+          '<div style="font-size:13px;font-weight:800;color:'+et[1]+'">'+et[0]+'</div>'+
+        '</div>'+
+        '<div style="flex:1;min-width:240px">'+
+          '<div style="font-size:10px;font-weight:800;color:#334155;margin-bottom:3px">SALUD FINANCIERA</div>'+
+          '<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:11.5px;font-weight:700;color:#334155;margin-bottom:6px">'+semItems.join('')+'</div>'+
+          '<div style="font-size:10px;color:#64748b;line-height:1.6">'+razones.join(' · ')+'</div>'+
+        '</div>'+
+      '</div>';
+  }
+
+  cont.innerHTML = cards.length ?
+    scoreHtml+
+    '<div style="font-size:12px;font-weight:800;color:'+_ECO_TXT2+';margin:2px 0 7px">🧠 Inteligencia financiera — qué va a pasar si seguís igual</div>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">'+cards.join('')+'</div>' : scoreHtml;
+}
+
 function _ecoMetKpis12(rows){
   const cont=document.getElementById('eco-met-kpis12');
   if(!cont) return;
@@ -30737,7 +31050,8 @@ function _ecoMetKpis12(rows){
   if(win.length < 2){ cont.innerHTML=''; return; }
   const MC=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
   const lblYm=ym=>MC[+ym.slice(5,7)-1]+' '+ym.slice(2,4);
-  const box=(lbl,val,color,sub)=>'<div style="flex:1;min-width:150px;background:#f8fafc;border:1px solid '+_ECO_BRD+';border-radius:9px;padding:9px 11px"><div style="font-size:9.5px;color:#334155;font-weight:800;line-height:1.25">'+lbl+'</div><div style="font-size:16px;font-weight:800;color:'+(color||_ECO_TXT)+';margin:1px 0">'+val+'</div><div style="font-size:10.5px;color:#475569;font-weight:600;line-height:1.3">'+(sub||'')+'</div></div>';
+  // v234: cada tarjeta puede llevar un mini-gráfico (sparkline) al lado del valor
+  const box=(lbl,val,color,sub,spark)=>'<div style="flex:1;min-width:150px;background:#f8fafc;border:1px solid '+_ECO_BRD+';border-radius:9px;padding:9px 11px"><div style="font-size:9.5px;color:#334155;font-weight:800;line-height:1.25">'+lbl+'</div><div style="display:flex;align-items:center;gap:8px"><div style="font-size:16px;font-weight:800;color:'+(color||_ECO_TXT)+';margin:1px 0;flex:1;min-width:0">'+val+'</div>'+(spark||'')+'</div><div style="font-size:10.5px;color:#475569;font-weight:600;line-height:1.3">'+(sub||'')+'</div></div>';
   const V=$=>'$'+Math.round($).toLocaleString('es-AR');
   const U=$=>'US$'+Math.round($).toLocaleString('es-AR');
   const fmtU=(u,n)=> u==='US$' ? (Math.abs(n)<100? 'US$'+(+n).toFixed(2) : U(n)) : V(n);
@@ -30763,12 +31077,14 @@ function _ecoMetKpis12(rows){
     if(!d) return;
     const gana = o.gasto ? (d.pts<=0) : (d.pts>=0);
     const signo = d.pts>=0?'+':'';
+    // v234: mini-gráfico con la evolución real de la serie en la ventana
+    const spk=_ecoSpark(win.map(r=> (r[o.campo]!=null&&isFinite(r[o.campo]))? +r[o.campo] : null), gana?'#16a34a':'#dc2626', 84, 24);
     if(gana){
       const sub = o.gasto
         ? 'subió '+d.varPct.toFixed(1)+'% vs inflación '+d.inflPct.toFixed(1)+'% · contuviste el costo'
         : 'bastaba '+fmtU(o.u,d.objetivo)+', hoy '+fmtU(o.u,d.actual);
       cards.push(box(o.lbl+' vs IPC ('+lblYm(d.iniYm)+'→'+lblYm(d.finYm)+')',
-        signo+d.pts.toFixed(0)+' pts ✅', '#16a34a', sub));
+        signo+d.pts.toFixed(0)+' pts ✅', '#16a34a', sub, spk));
     } else {
       const faltan = d.objetivo - d.actual;
       const pct = d.actual>0 ? (faltan/d.actual*100) : null;
@@ -30776,7 +31092,7 @@ function _ecoMetKpis12(rows){
         ? 'subió '+d.varPct.toFixed(1)+'% vs inflación '+d.inflPct.toFixed(1)+'% · revisá este gasto'
         : 'debería ser '+fmtU(o.u,d.objetivo)+' (hoy '+fmtU(o.u,d.actual)+' → subir '+fmtU(o.u,faltan)+(pct!=null?', +'+pct.toFixed(1)+'%':'')+')';
       cards.push(box(o.lbl+' vs IPC ('+lblYm(d.iniYm)+'→'+lblYm(d.finYm)+')',
-        signo+d.pts.toFixed(0)+' pts ⚠️', '#dc2626', sub));
+        signo+d.pts.toFixed(0)+' pts ⚠️', '#dc2626', sub, spk));
     }
   });
 
@@ -30790,7 +31106,8 @@ function _ecoMetKpis12(rows){
       : dolEstado==='adelantado'
       ? { v:'+'+dol.pts.toFixed(0)+' pts 🔴', c:'#dc2626', s:'dólar ADELANTADO: subió '+dol.varPct.toFixed(1)+'% vs inflación '+dol.inflPct.toFixed(1)+'% · conviene stockear insumos' }
       : { v:(dol.pts>=0?'+':'')+dol.pts.toFixed(0)+' pts 🟡', c:'#ca8a04', s:'dólar EN LÍNEA con la inflación ('+dol.varPct.toFixed(1)+'% vs '+dol.inflPct.toFixed(1)+'%)' };
-    cards.push(box('DÓLAR vs INFLACIÓN (12m)', txt.v, txt.c, txt.s));
+    cards.push(box('DÓLAR vs INFLACIÓN (12m)', txt.v, txt.c, txt.s,
+      _ecoSpark(win.map(r=>r.d),'#ca8a04', 84, 24)));
   }
 
   // ── 3) Capacidad de ahorro promedio ────────────────────────────────────
@@ -30804,7 +31121,8 @@ function _ecoMetKpis12(rows){
             : ahorroProm>=0 ?'ajustado · poco colchón ante imprevistos'
             :                'negativo · estás consumiendo capital';
     cards.push(box('CAPACIDAD DE AHORRO (12m)', ahorroProm.toFixed(1)+'%', c,
-      s+' · '+U(saldoProm)+'/mes promedio'));
+      s+' · '+U(saldoProm)+'/mes promedio',
+      _ecoSpark(win.map(r=>r.saldo), c, 84, 24)));
   }
 
   // ── 4) Consistencia: meses en positivo ─────────────────────────────────
