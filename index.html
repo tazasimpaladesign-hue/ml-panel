@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v236 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v237 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -30679,13 +30679,15 @@ function _ecoMetResumen(rows){
   const ahorro12=u12.length? u12.reduce((a,r)=>a+(r.ahorro||0),0)/u12.length : null;
   // v235: tarjeta rediseñada — etiqueta en mayúsculas, valor grande, borde de
   // color según estado y sparkline a lo ancho debajo del valor.
-  const box=(lbl,val,color,sub,spark)=>{
+  // v237: más padding (aire), descripción en NEGRO legible (el gris se perdía)
+  // y tooltip opcional con el detalle completo cuando el texto se resume.
+  const box=(lbl,val,color,sub,spark,tip)=>{
     const c=color||'#64748b';
-    return '<div style="flex:1;min-width:185px;background:#fff;border:1px solid '+_ECO_BRD+';border-left:4px solid '+c+';border-radius:10px;padding:10px 12px;box-shadow:0 1px 2px rgba(15,23,42,.04)">'+
-      '<div style="font-size:9px;color:#64748b;font-weight:800;letter-spacing:.4px;text-transform:uppercase;line-height:1.35">'+lbl+'</div>'+
-      '<div style="font-size:19px;font-weight:800;color:'+c+';line-height:1.15;margin:3px 0 2px">'+val+'</div>'+
-      (spark? '<div style="margin:3px 0 4px">'+spark+'</div>' : '')+
-      '<div style="font-size:10.5px;color:#475569;font-weight:500;line-height:1.5">'+(sub||'')+'</div>'+
+    return '<div '+(tip?'title="'+String(tip).replace(/"/g,'&quot;')+'" ':'')+'style="flex:1;min-width:190px;background:#fff;border:1px solid '+_ECO_BRD+';border-left:4px solid '+c+';border-radius:11px;padding:14px 16px;box-shadow:0 1px 3px rgba(15,23,42,.05)">'+
+      '<div style="font-size:9px;color:#475569;font-weight:800;letter-spacing:.4px;text-transform:uppercase;line-height:1.35">'+lbl+'</div>'+
+      '<div style="font-size:21px;font-weight:800;color:'+c+';line-height:1.15;margin:4px 0 3px">'+val+'</div>'+
+      (spark? '<div style="margin:4px 0 5px">'+spark+'</div>' : '')+
+      '<div style="font-size:11px;color:#1e293b;font-weight:500;line-height:1.55">'+(sub||'')+'</div>'+
     '</div>';
   };
   const MESES_C=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
@@ -30707,10 +30709,11 @@ function _ecoMetResumen(rows){
           const ipcAcum=(f-1)*100;
           const dif=sVar-ipcAcum;
           const gano = dif>=0;
+          const nivS=_ecoNivelPts(dif);
           kIpc=box('SUELDO '+letra+' vs IPC ('+lblYm(ant.ym)+'→'+lblYm(now.ym)+')',
-            (gano?'+':'')+dif.toFixed(1)+' pts',
-            gano?'#16a34a':'#dc2626',
-            (gano?'✅ le ganó a la inflación':'⚠️ perdió contra la inflación')+' · sueldo '+_ECO_MET_FMTP(sVar)+' vs ipc +'+ipcAcum.toFixed(1)+'%');
+            (gano?'+':'')+dif.toFixed(1)+' pts '+nivS.e,
+            nivS.c,
+            (gano?'le ganó a la inflación':'perdió contra la inflación')+' · sueldo '+_ECO_MET_FMTP(sVar)+' vs ipc +'+ipcAcum.toFixed(1)+'%');
         }
       }
       if(now[campoUsd]!=null){
@@ -30733,11 +30736,23 @@ function _ecoMetResumen(rows){
   if(u12.length){
     const mejor=u12.reduce((a,r)=>r.saldo>a.saldo?r:a);
     const peor=u12.reduce((a,r)=>r.saldo<a.saldo?r:a);
-    kMejor=box('MEJOR MES (12m)','+US$'+Math.round(mejor.saldo).toLocaleString('es-AR'),'#16a34a',lblYm(mejor.ym)+' · ahorro '+_ECO_MET_FMTP(mejor.ahorro));
-    kPeor=box('PEOR MES (12m)',(peor.saldo>=0?'+':'')+'US$'+Math.round(peor.saldo).toLocaleString('es-AR'),peor.saldo>=0?'#16a34a':'#dc2626',lblYm(peor.ym)+' · ahorro '+_ECO_MET_FMTP(peor.ahorro));
+    // v237: si el mes actual ES el récord (bueno o malo), destacarlo
+    const esRecordMejor = ult && mejor.ym===ult.ym;
+    const esRecordPeor  = ult && peor.ym===ult.ym;
+    kMejor=box('🏆 MEJOR MES (12m)','+US$'+Math.round(mejor.saldo).toLocaleString('es-AR'),'#16a34a',
+      lblYm(mejor.ym)+' · ahorro '+_ECO_MET_FMTP(mejor.ahorro)+(esRecordMejor?' · <b>🥇 ¡nuevo récord este mes!</b>':''));
+    kPeor=box('📉 PEOR MES (12m)',(peor.saldo>=0?'+':'')+'US$'+Math.round(peor.saldo).toLocaleString('es-AR'),peor.saldo>=0?'#16a34a':'#dc2626',
+      lblYm(peor.ym)+' · ahorro '+_ECO_MET_FMTP(peor.ahorro)+(esRecordPeor?' · <b style="color:#dc2626">es el mes actual ⚠️</b>':''));
+  }
+  // v237: comparación con el mes anterior en el saldo principal
+  let subUlt='ahorro '+_ECO_MET_FMTP(ult?ult.ahorro:null);
+  if(ult && conSaldo.length>=2){
+    const ant=conSaldo[conSaldo.length-2];
+    const dif=ult.saldo-ant.saldo;
+    subUlt += ' · vs '+lblYm(ant.ym)+': <b style="color:'+(dif>=0?'#16a34a':'#dc2626')+'">'+(dif>=0?'▲ +':'▼ −')+'US$'+Math.round(Math.abs(dif)).toLocaleString('es-AR')+'</b>';
   }
   cont.innerHTML =
-    (ult? box('⚖️ ÚLTIMO SALDO ('+MESES_C[+ult.ym.slice(5,7)-1]+' '+ult.ym.slice(0,4)+')', (ult.saldo>=0?'+':'')+'US$'+Math.round(ult.saldo).toLocaleString('es-AR'), ult.saldo>=0?'#16a34a':'#dc2626', 'ahorro '+_ECO_MET_FMTP(ult.ahorro)) : '')+
+    (ult? box('⚖️ ÚLTIMO SALDO ('+MESES_C[+ult.ym.slice(5,7)-1]+' '+ult.ym.slice(0,4)+')', (ult.saldo>=0?'+':'')+'US$'+Math.round(ult.saldo).toLocaleString('es-AR'), ult.saldo>=0?'#16a34a':'#dc2626', subUlt) : '')+
     (prom12!=null? box('📊 PROMEDIO 12 MESES', (prom12>=0?'+':'')+'US$'+Math.round(prom12).toLocaleString('es-AR'), prom12>=0?'#16a34a':'#dc2626', 'ahorro medio '+_ECO_MET_FMTP(ahorro12)) : '')+
     (acum!=null? box('ACUMULADO '+anio, (acum>=0?'+':'')+'US$'+Math.round(acum).toLocaleString('es-AR'), acum>=0?'#16a34a':'#dc2626', anioRows.length+' mes(es)') : '')+
     (acumTotal!=null? box('🏦 ACUMULADO TOTAL', (acumTotal>=0?'+':'')+'US$'+Math.round(acumTotal).toLocaleString('es-AR'), acumTotal>=0?'#16a34a':'#dc2626', 'todo el histórico · '+conSaldo.length+' meses') : '')+
@@ -30780,6 +30795,18 @@ function _ecoMetVsInfl(win, campo){
 // ventas, gastos (separados internamente en hogar/emprendimiento), saldo,
 // ahorro y los fondos del panel de Ahorros. Sin datos nuevos que cargar.
 // ───────────────────────────────────────────────────────────────────────────
+
+// v237 ── ESCALA DE 4 NIVELES para "puntos vs inflación".
+// Antes cualquier valor negativo era rojo y el panel se sentía agresivo: el ojo
+// no sabía dónde mirar. Ahora el rojo queda reservado para lo realmente grave.
+//   🟢 ≥ 0 pts · 🟡 hasta −15 · 🟠 hasta −40 · 🔴 peor que −40
+function _ecoNivelPts(pts){
+  if(pts==null||!isFinite(pts)) return { c:'#64748b', e:'⚪', lbl:'sin dato' };
+  if(pts>=0)   return { c:'#16a34a', e:'🟢', lbl:'bien' };
+  if(pts>=-15) return { c:'#ca8a04', e:'🟡', lbl:'atención' };
+  if(pts>=-40) return { c:'#ea580c', e:'🟠', lbl:'riesgo' };
+  return { c:'#dc2626', e:'🔴', lbl:'crítico' };
+}
 
 // mini-gráfico inline (sparkline SVG) de una serie con nulls
 function _ecoSpark(vals, color, w, h){
@@ -30836,13 +30863,13 @@ function _ecoMetIntel(rows){
   const U=n=>'US$'+Math.round(Math.abs(n)).toLocaleString('es-AR');
   const Us=n=>(n>=0?'+':'−')+U(n);
   const V=n=>'$'+Math.round(n).toLocaleString('es-AR');
-  const card=(lbl,val,color,sub,spark)=>{
+  const card=(lbl,val,color,sub,spark,tip)=>{
     const c=color||'#64748b';
-    return '<div style="flex:1;min-width:195px;background:#fff;border:1px solid '+_ECO_BRD+';border-left:4px solid '+c+';border-radius:10px;padding:10px 12px;box-shadow:0 1px 2px rgba(15,23,42,.04)">'+
-      '<div style="font-size:9px;color:#64748b;font-weight:800;letter-spacing:.4px;text-transform:uppercase;line-height:1.35">'+lbl+'</div>'+
-      '<div style="font-size:19px;font-weight:800;color:'+c+';line-height:1.15;margin:3px 0 2px">'+val+'</div>'+
-      (spark? '<div style="margin:3px 0 4px">'+spark+'</div>' : '')+
-      '<div style="font-size:10.5px;color:#475569;font-weight:500;line-height:1.5">'+(sub||'')+'</div>'+
+    return '<div '+(tip?'title="'+String(tip).replace(/"/g,'&quot;')+'" ':'')+'style="flex:1;min-width:200px;background:#fff;border:1px solid '+_ECO_BRD+';border-left:4px solid '+c+';border-radius:11px;padding:14px 16px;box-shadow:0 1px 3px rgba(15,23,42,.05)">'+
+      '<div style="font-size:9px;color:#475569;font-weight:800;letter-spacing:.4px;text-transform:uppercase;line-height:1.35">'+lbl+'</div>'+
+      '<div style="font-size:21px;font-weight:800;color:'+c+';line-height:1.15;margin:4px 0 3px">'+val+'</div>'+
+      (spark? '<div style="margin:4px 0 5px">'+spark+'</div>' : '')+
+      '<div style="font-size:11px;color:#1e293b;font-weight:500;line-height:1.55">'+(sub||'')+'</div>'+
     '</div>';
   };
 
@@ -30881,9 +30908,22 @@ function _ecoMetIntel(rows){
       const dQ=new Date(); dQ.setMonth(dQ.getMonth()+Math.floor(meses));
       quiebre=' · a este ritmo los fondos se agotan en <b>'+MC[dQ.getMonth()]+' '+dQ.getFullYear()+'</b>';
     }
+    // v237: confianza de la proyección según qué tan parejos vienen tus meses.
+    // Meses estables → proyección creíble; meses que saltan mucho → tomarla
+    // con pinzas. Se calcula con el desvío de los saldos vs el gasto promedio.
+    let confTxt='';
+    if(conSaldo.length>=4 && gastoPromUsd>0){
+      const media=saldoProm;
+      const varza=conSaldo.reduce((a,r)=>a+Math.pow(r.saldo-media,2),0)/conSaldo.length;
+      const desvio=Math.sqrt(varza);
+      const conf=Math.round(_ecoClamp(95-(desvio/gastoPromUsd)*60, 35, 95));
+      confTxt=' · confianza ~<b>'+conf+'%</b>';
+    }
     cards.push(card('🔮 SI SEGUÍS IGUAL (proyección)',
       Us(p12)+' en 12m', p12>=0?'#16a34a':'#dc2626',
-      '6 meses: '+Us(p6)+' · promedio '+Us(saldoProm)+'/mes'+quiebre));
+      '6 meses: '+Us(p6)+' · promedio '+Us(saldoProm)+'/mes'+quiebre+confTxt,
+      null,
+      'La confianza baja cuando tus meses son muy dispares entre sí: una proyección sobre meses estables es más creíble que sobre meses que saltan de +2000 a -3000.'));
   }
 
   // ── 3) MESES DE AUTONOMÍA (colchón) ────────────────────────────────────
@@ -30912,9 +30952,10 @@ function _ecoMetIntel(rows){
   const ingTot=win.map(r=> (r.sc!=null||r.sb!=null||r.v!=null)? (r.sc||0)+(r.sb||0)+(r.v||0) : null);
   const fam=_ecoMetVsInflSerie(win, ingTot);
   if(fam){
+    const nivFam=_ecoNivelPts(fam.pts);
     cards.push(card('🏠 INGRESO FAMILIAR REAL vs IPC',
-      (fam.pts>=0?'+':'')+fam.pts.toFixed(0)+' pts '+(fam.pts>=0?'✅':'⚠️'),
-      fam.pts>=0?'#16a34a':'#dc2626',
+      (fam.pts>=0?'+':'')+fam.pts.toFixed(0)+' pts '+nivFam.e,
+      nivFam.c,
       'sueldos + Impala '+(fam.pts>=0?'le ganan':'pierden contra')+' la inflación ('+fam.varPct.toFixed(1)+'% vs '+fam.inflPct.toFixed(1)+'%)'+
       (fam.pts<0? '<br>para empatar: <b>'+V(fam.objetivo)+'/mes</b> (hoy '+V(fam.actual)+')':''),
       _ecoSpark(ingTot,'#2563eb')));
@@ -31065,6 +31106,52 @@ function _ecoMetIntel(rows){
     punto('diver','🧩 Diversificación', _ecoClamp((1-maxShare)/0.5,0,1)*10, 10);
     sem(maxShare<=0.5?'🟢':(maxShare<=0.65?'🟡':'🔴'),'Diversificación');
   }
+  // ── 📋 RESUMEN DEL MES (v237) ──────────────────────────────────────────
+  // Un párrafo en lenguaje humano que sintetiza el mes: se genera acá mismo con
+  // los datos ya calculados (sin IA: instantáneo, gratis y siempre disponible).
+  // La idea: entrar, leer 20 segundos y entender qué pasó sin recorrer tarjetas.
+  let _resumenMesHtml='';
+  try{
+    const u=conSaldo[conSaldo.length-1];
+    if(u){
+      const mesN=MC[+u.ym.slice(5,7)-1]+' '+u.ym.slice(0,4);
+      const frases=[];
+      // 1) cómo cerró el mes (¿récord?)
+      const esPeor = conSaldo.length>=6 && u.saldo<=Math.min.apply(null,conSaldo.map(r=>r.saldo));
+      const esMejor= conSaldo.length>=6 && u.saldo>=Math.max.apply(null,conSaldo.map(r=>r.saldo));
+      frases.push('<b>'+mesN+'</b> cerró con un saldo de <b>'+Us(u.saldo)+'</b>'+
+        (esPeor?' — el peor de los últimos 12 meses 📉':(esMejor?' — ¡el mejor de los últimos 12 meses! 🥇':''))+'.');
+      // 2) causa principal (ingresos vs gastos)
+      if(fam && inflPers){
+        if(inflPers.varPct > fam.varPct + 5) frases.push('La causa principal: los gastos crecen más rápido ('+inflPers.varPct.toFixed(0)+'%) que los ingresos ('+fam.varPct.toFixed(0)+'%).');
+        else if(fam.varPct > inflPers.varPct + 5) frases.push('Buen dato de fondo: los ingresos crecen más rápido ('+fam.varPct.toFixed(0)+'%) que los gastos ('+inflPers.varPct.toFixed(0)+'%).');
+      }
+      // 3) algo positivo
+      const dolInfo=_ecoMetVsInfl(win,'d');
+      const tzInfo=_ecoMetVsInfl(win,'tz');
+      if(dolInfo && dolInfo.pts<-5) frases.push('El dólar sigue atrasado frente a la inflación: comprar dólares o activos dolarizados está barato en términos reales.');
+      else if(dolInfo && dolInfo.pts>5) frases.push('El dólar corre por encima de la inflación: conviene adelantar la compra de insumos.');
+      if(tzInfo && Math.abs(tzInfo.pts)<=5) frases.push('El precio de la taza acompañó la inflación 👍.');
+      else if(tzInfo && tzInfo.pts<-5) frases.push('El precio de la taza quedó atrás de la inflación: revisá la Lista de Precios.');
+      // 4) prioridad del mes que viene
+      const dP=new Date(+u.ym.slice(0,4), +u.ym.slice(5,7), 1);
+      const proxMes=MC[dP.getMonth()];
+      if(ahorroProm!=null && ahorroProm<0){
+        const pctNec=(gastoPromUsd>0 && saldoProm<0)? Math.min(60, Math.round(Math.abs(saldoProm)/gastoPromUsd*100+5)) : null;
+        frases.push('<b>Prioridad para '+proxMes+':</b> reducir gastos o aumentar ingresos'+(pctNec?' en al menos un '+pctNec+'%':'')+' para volver a un flujo positivo.');
+      } else if(tendSaldo!=null && tendSaldo<0){
+        frases.push('<b>Prioridad para '+proxMes+':</b> frenar el deterioro del saldo — revisá en el comparador los gastos que más subieron.');
+      } else if(ahorroProm!=null){
+        frases.push('<b>Para '+proxMes+':</b> sostener el ritmo y derivar el excedente a reserva o stock.');
+      }
+      _resumenMesHtml=
+        '<div style="background:linear-gradient(135deg,#eff6ff,#f5f3ff);border:1px solid #c7d2fe;border-radius:12px;padding:14px 16px;margin-bottom:10px">'+
+          '<div style="font-size:9.5px;font-weight:800;letter-spacing:.5px;color:#4338ca;text-transform:uppercase;margin-bottom:5px">📋 Resumen del mes</div>'+
+          '<div style="font-size:12.5px;color:#1e293b;font-weight:500;line-height:1.7">'+frases.join(' ')+'</div>'+
+        '</div>';
+    }
+  }catch(e){ console.warn('[resumen mes]', e.message); }
+
   let scoreHtml='';
   if(maxScore>=60){
     const s100=Math.round(score/maxScore*100);
@@ -31090,13 +31177,16 @@ function _ecoMetIntel(rows){
       '<text x="49" y="48" text-anchor="middle" font-size="26" font-weight="800" fill="'+et[1]+'" font-family="inherit">'+s100+'</text>'+
       '<text x="49" y="64" text-anchor="middle" font-size="9" font-weight="700" fill="#94a3b8" font-family="inherit">/ 100</text></svg>';
     // barras por componente (cuánto aporta cada uno de su máximo)
+    // v237: estrellas (más intuitivas que el número) + barra animada al abrir
     const barras=comp.map(c=>{
       const pr=c.max>0? c.pts/c.max : 0;
-      const col=pr>=0.7?'#16a34a':(pr>=0.35?'#ca8a04':'#dc2626');
-      return '<div style="display:flex;align-items:center;gap:8px">'+
-        '<div style="width:172px;font-size:10.5px;font-weight:700;color:#334155;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+c.lbl.replace(/"/g,'&quot;')+'">'+c.lbl+'</div>'+
-        '<div style="flex:1;height:7px;background:#e2e8f0;border-radius:5px;overflow:hidden;min-width:60px"><div style="width:'+Math.round(pr*100)+'%;height:100%;background:'+col+';border-radius:5px"></div></div>'+
-        '<div style="width:40px;text-align:right;font-size:10px;font-weight:800;color:'+col+'">'+Math.round(c.pts)+'/'+c.max+'</div>'+
+      const col=pr>=0.7?'#16a34a':(pr>=0.5?'#65a30d':(pr>=0.35?'#ca8a04':(pr>=0.15?'#ea580c':'#dc2626')));
+      const nEst=Math.round(pr*5);
+      const stars='<span style="color:'+col+'">'+'★'.repeat(nEst)+'</span><span style="color:#cbd5e1">'+'★'.repeat(5-nEst)+'</span>';
+      return '<div style="display:flex;align-items:center;gap:8px" title="'+c.lbl.replace(/"/g,'&quot;')+': '+Math.round(c.pts)+' de '+c.max+' puntos">'+
+        '<div style="width:172px;font-size:10.5px;font-weight:700;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+c.lbl+'</div>'+
+        '<div style="flex:1;height:7px;background:#e2e8f0;border-radius:5px;overflow:hidden;min-width:60px"><div class="eco-scorebar" data-w="'+Math.round(pr*100)+'" style="width:0%;height:100%;background:'+col+';border-radius:5px;transition:width .8s cubic-bezier(.22,.8,.36,1)"></div></div>'+
+        '<div style="width:56px;text-align:right;font-size:11px;letter-spacing:-.5px;white-space:nowrap">'+stars+'</div>'+
       '</div>';
     }).join('');
     // próxima acción: manda el componente con peor porcentaje de su máximo
@@ -31132,10 +31222,13 @@ function _ecoMetIntel(rows){
       '</div>';
   }
 
+  // v237: animación sutil — las barras del score crecen al renderizar
+  const _animarBarras=()=>{ requestAnimationFrame(()=>{ cont.querySelectorAll('.eco-scorebar').forEach(b=>{ b.style.width=b.getAttribute('data-w')+'%'; }); }); };
   cont.innerHTML = cards.length ?
-    scoreHtml+
+    _resumenMesHtml+scoreHtml+
     '<div style="font-size:12px;font-weight:800;color:'+_ECO_TXT2+';margin:2px 0 7px">🧠 Inteligencia financiera — qué va a pasar si seguís igual</div>'+
-    '<div style="display:flex;gap:8px;flex-wrap:wrap">'+cards.join('')+'</div>' : scoreHtml;
+    '<div style="display:flex;gap:10px;flex-wrap:wrap">'+cards.join('')+'</div>' : (_resumenMesHtml+scoreHtml);
+  _animarBarras();
 }
 
 function _ecoMetKpis12(rows){
@@ -31147,13 +31240,15 @@ function _ecoMetKpis12(rows){
   const lblYm=ym=>MC[+ym.slice(5,7)-1]+' '+ym.slice(2,4);
   // v235: tarjeta rediseñada — etiqueta en mayúsculas, valor grande, borde de
   // color según estado y sparkline a lo ancho debajo del valor.
-  const box=(lbl,val,color,sub,spark)=>{
+  // v237: más padding (aire), descripción en NEGRO legible (el gris se perdía)
+  // y tooltip opcional con el detalle completo cuando el texto se resume.
+  const box=(lbl,val,color,sub,spark,tip)=>{
     const c=color||'#64748b';
-    return '<div style="flex:1;min-width:185px;background:#fff;border:1px solid '+_ECO_BRD+';border-left:4px solid '+c+';border-radius:10px;padding:10px 12px;box-shadow:0 1px 2px rgba(15,23,42,.04)">'+
-      '<div style="font-size:9px;color:#64748b;font-weight:800;letter-spacing:.4px;text-transform:uppercase;line-height:1.35">'+lbl+'</div>'+
-      '<div style="font-size:19px;font-weight:800;color:'+c+';line-height:1.15;margin:3px 0 2px">'+val+'</div>'+
-      (spark? '<div style="margin:3px 0 4px">'+spark+'</div>' : '')+
-      '<div style="font-size:10.5px;color:#475569;font-weight:500;line-height:1.5">'+(sub||'')+'</div>'+
+    return '<div '+(tip?'title="'+String(tip).replace(/"/g,'&quot;')+'" ':'')+'style="flex:1;min-width:190px;background:#fff;border:1px solid '+_ECO_BRD+';border-left:4px solid '+c+';border-radius:11px;padding:14px 16px;box-shadow:0 1px 3px rgba(15,23,42,.05)">'+
+      '<div style="font-size:9px;color:#475569;font-weight:800;letter-spacing:.4px;text-transform:uppercase;line-height:1.35">'+lbl+'</div>'+
+      '<div style="font-size:21px;font-weight:800;color:'+c+';line-height:1.15;margin:4px 0 3px">'+val+'</div>'+
+      (spark? '<div style="margin:4px 0 5px">'+spark+'</div>' : '')+
+      '<div style="font-size:11px;color:#1e293b;font-weight:500;line-height:1.55">'+(sub||'')+'</div>'+
     '</div>';
   };
   const V=$=>'$'+Math.round($).toLocaleString('es-AR');
@@ -31179,25 +31274,31 @@ function _ecoMetKpis12(rows){
   objetivos.forEach(o=>{
     const d=_ecoMetVsInfl(win, o.campo);
     if(!d) return;
-    const gana = o.gasto ? (d.pts<=0) : (d.pts>=0);
+    // v237: nivel de 4 colores (para gastos el criterio se invierte) y texto
+    // corto — el detalle completo queda en el tooltip de la tarjeta.
+    const ptsEf = o.gasto ? -d.pts : d.pts;         // en gastos, subir menos es bueno
+    const niv=_ecoNivelPts(ptsEf);
     const signo = d.pts>=0?'+':'';
-    // v234: mini-gráfico con la evolución real de la serie en la ventana
-    const spk=_ecoSpark(win.map(r=> (r[o.campo]!=null&&isFinite(r[o.campo]))? +r[o.campo] : null), gana?'#16a34a':'#dc2626', 84, 24);
-    if(gana){
-      const sub = o.gasto
-        ? 'subió '+d.varPct.toFixed(1)+'% vs inflación '+d.inflPct.toFixed(1)+'% · contuviste el costo'
-        : 'bastaba '+fmtU(o.u,d.objetivo)+', hoy '+fmtU(o.u,d.actual);
-      cards.push(box(o.lbl+' vs IPC ('+lblYm(d.iniYm)+'→'+lblYm(d.finYm)+')',
-        signo+d.pts.toFixed(0)+' pts ✅', '#16a34a', sub, spk));
+    const spk=_ecoSpark(win.map(r=> (r[o.campo]!=null&&isFinite(r[o.campo]))? +r[o.campo] : null), niv.c, 84, 24);
+    let sub, tip;
+    if(ptsEf>=0){
+      sub = o.gasto ? 'contuviste el costo frente a la inflación'
+                    : 'le ganás a la inflación · hoy '+fmtU(o.u,d.actual);
+      tip = o.gasto ? 'Subió '+d.varPct.toFixed(1)+'% con una inflación de '+d.inflPct.toFixed(1)+'%.'
+                    : 'Para empatar bastaba '+fmtU(o.u,d.objetivo)+' y hoy está en '+fmtU(o.u,d.actual)+'.';
     } else {
-      const faltan = d.objetivo - d.actual;
-      const pct = d.actual>0 ? (faltan/d.actual*100) : null;
-      const sub = o.gasto
-        ? 'subió '+d.varPct.toFixed(1)+'% vs inflación '+d.inflPct.toFixed(1)+'% · revisá este gasto'
-        : 'debería ser '+fmtU(o.u,d.objetivo)+' (hoy '+fmtU(o.u,d.actual)+' → subir '+fmtU(o.u,faltan)+(pct!=null?', +'+pct.toFixed(1)+'%':'')+')';
-      cards.push(box(o.lbl+' vs IPC ('+lblYm(d.iniYm)+'→'+lblYm(d.finYm)+')',
-        signo+d.pts.toFixed(0)+' pts ⚠️', '#dc2626', sub, spk));
+      if(o.gasto){
+        sub='subió '+d.varPct.toFixed(1)+'% (IPC '+d.inflPct.toFixed(1)+'%) · revisá este gasto';
+        tip='Este gasto creció por encima de la inflación del período.';
+      } else {
+        const faltan = d.objetivo - d.actual;
+        const pct = d.actual>0 ? (faltan/d.actual*100) : null;
+        sub='Faltan <b>'+fmtU(o.u,faltan)+'</b>'+(pct!=null?' (+'+pct.toFixed(0)+'%)':'')+' para empatar la inflación';
+        tip='Debería ser '+fmtU(o.u,d.objetivo)+' · hoy '+fmtU(o.u,d.actual)+' · subió '+d.varPct.toFixed(1)+'% con una inflación de '+d.inflPct.toFixed(1)+'%.';
+      }
     }
+    cards.push(box(o.lbl+' vs IPC ('+lblYm(d.iniYm)+'→'+lblYm(d.finYm)+')',
+      signo+d.pts.toFixed(0)+' pts '+niv.e, niv.c, sub, spk, tip));
   });
 
   // ── 2) Dólar vs inflación: atraso / adelanto ───────────────────────────
@@ -31220,10 +31321,11 @@ function _ecoMetKpis12(rows){
   const saldoProm  = conSaldo.length ? conSaldo.reduce((a,r)=>a+r.saldo,0)/conSaldo.length : null;
   if(ahorroProm!=null){
     const c = ahorroProm>=20?'#16a34a':(ahorroProm>=10?'#65a30d':(ahorroProm>=0?'#ca8a04':'#dc2626'));
-    const s = ahorroProm>=20?'excelente · sostené el ritmo e invertí el excedente'
-            : ahorroProm>=10?'saludable · margen para reforzar el stock'
-            : ahorroProm>=0 ?'ajustado · poco colchón ante imprevistos'
-            :                'negativo · estás consumiendo capital';
+    // v237: frase humana primero — se entiende en un segundo, sin leer números
+    const s = ahorroProm>=20?'🟢 <b>Ahorrás fuerte.</b> Sostené el ritmo e invertí el excedente'
+            : ahorroProm>=10?'🟢 <b>Ya ahorrás bien.</b> Hay margen para reforzar stock'
+            : ahorroProm>=0 ?'🟡 <b>Ahorro flojo.</b> Poco colchón ante imprevistos'
+            :                '🔥 <b>Estás consumiendo ahorro.</b> Los gastos superan los ingresos';
     cards.push(box('🐷 CAPACIDAD DE AHORRO (12m)', ahorroProm.toFixed(1)+'%', c,
       s+' · '+U(saldoProm)+'/mes promedio',
       _ecoSpark(win.map(r=>r.saldo), c, 84, 24)));
@@ -31253,8 +31355,9 @@ function _ecoMetKpis12(rows){
   // brecha ingresos vs gastos
   if(ing && gas){
     const brecha=ing.varPct-gas.varPct;
-    cards.push(box('↔️ BRECHA INGRESOS − GASTOS (12m)', (brecha>=0?'+':'')+brecha.toFixed(1)+' pts',
-      brecha>=0?'#16a34a':'#dc2626',
+    const nivBre=_ecoNivelPts(brecha);
+    cards.push(box('↔️ BRECHA INGRESOS − GASTOS (12m)', (brecha>=0?'+':'')+brecha.toFixed(1)+' pts '+nivBre.e,
+      nivBre.c,
       brecha>=0?'los ingresos crecen más rápido que los costos ✅':'los costos crecen más rápido que los ingresos ⚠️'));
   }
 
@@ -31301,7 +31404,7 @@ function _ecoMetKpis12(rows){
   if(!cards.length){ cont.innerHTML=''; return; }
   cont.innerHTML =
     '<div style="font-size:12px;font-weight:800;color:'+_ECO_TXT2+';margin:2px 0 7px">📅 Últimos 12 meses — lectura y recomendaciones</div>'+
-    '<div style="display:flex;gap:8px;flex-wrap:wrap">'+cards.join('')+'</div>';
+    '<div style="display:flex;gap:10px;flex-wrap:wrap">'+cards.join('')+'</div>';
 }
 
 // ── edición de celdas ──
