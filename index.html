@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v242 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v243 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4407,6 +4407,9 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
   <!-- KPIs del mes actual -->
   <div id="eco-kpis" style="display:flex;gap:10px;flex-wrap:nowrap;overflow-x:auto;margin-bottom:14px"></div>
+
+  <!-- v243: Banner de Liquidez Real (entre los KPIs y el Asistente) -->
+  <div id="eco-liquidez" style="margin-bottom:14px"></div>
 
   <!-- v238: Asistente Financiero (copiloto) -->
   <div id="eco-ia-panel" class="mb"></div>
@@ -31943,6 +31946,68 @@ function ecoRenderKPIs(gastos, y, totMes){
     kAcreditar+
     kAhorros+
     K('📊','PROMEDIO MENSUAL', _ecoFmt(prom), 'meses con gastos', 'var(--text)');
+
+  // v243: banner de liquidez real — usa las MISMAS fuentes que los KPIs de
+  // arriba (activos + a acreditarse + ahorros − por pagar), respetando el signo
+  // de cada uno (los ahorros pueden venir negativos).
+  try{ _ecoRenderLiquidez({ act, acr, aho, porPagar }); }catch(e){ console.warn('[liquidez]', e.message); }
+}
+
+// ── Banner de Liquidez Real ────────────────────────────────────────────────
+function _ecoRenderLiquidez(k){
+  const cont=document.getElementById('eco-liquidez');
+  if(!cont) return;
+
+  const UMBRAL_ALERTA = 50000;   // ← umbral del estado "margen ajustado" (editable)
+
+  // formato moneda ARS con puntos de miles
+  const fmtARS = n => '$'+Math.round(n).toLocaleString('es-AR');
+  // dólares aparte (informativo), como en los KPIs
+  const dolar = (_ecoDolar && _ecoDolar.compra>0) ? _ecoDolar.compra : 0;
+
+  // Liquidez Real = (Activos + A Acreditarse + Ahorros) − Por Pagar
+  const activos    = +(k.act&&k.act.pesos)   || 0;
+  const acreditar  = +(k.acr&&k.acr.pesos)   || 0;
+  const ahorros    = +(k.aho&&k.aho.pesos)   || 0;   // puede ser negativo
+  const porPagar   = +k.porPagar             || 0;
+  const liquidez   = (activos + acreditar + ahorros) - porPagar;
+  const liqUsd     = dolar>0 ? liquidez/dolar : null;
+
+  // estados
+  let est;
+  if(liquidez < 0){
+    est={ bg:'#fef2f2', bd:'#fecaca', tx:'#991b1b', chip:'#dc2626', emoji:'🚨',
+      msg:'¡Atención! Necesitás conseguir <b>'+fmtARS(Math.abs(liquidez))+'</b> para cubrir y poder pagar los gastos fijos y pendientes.' };
+  } else if(liquidez < UMBRAL_ALERTA){
+    est={ bg:'#fffbeb', bd:'#fde68a', tx:'#92400e', chip:'#d97706', emoji:'⚠️',
+      msg:'¡Atentos! Estás en positivo por <b>'+fmtARS(liquidez)+'</b>, pero el margen es muy ajustado. Evitá gastos innecesarios por ahora.' };
+  } else {
+    est={ bg:'#ecfdf5', bd:'#a7f3d0', tx:'#065f46', chip:'#059669', emoji:'✨',
+      msg:'¡Todo en orden! Tenés un sobrante operativo de <b>'+fmtARS(liquidez)+'</b>. Podés comprar dólares 💵 (aprovechá si está atrasado) o reinvertir.' };
+  }
+
+  // desglose de la fórmula en chips
+  const chip=(lbl,val,neg)=>'<span style="display:inline-flex;align-items:center;gap:3px;background:rgba(255,255,255,.7);border:1px solid '+est.bd+';border-radius:20px;padding:2px 9px;font-size:10.5px;font-weight:700;color:'+est.tx+';white-space:nowrap">'+lbl+' '+(neg?'−':'')+fmtARS(Math.abs(val)).replace('$','$')+'</span>';
+
+  cont.innerHTML =
+    '<div style="background:'+est.bg+';border:1px solid '+est.bd+';border-radius:14px;padding:16px 20px;display:flex;flex-direction:column;gap:11px">'+
+      '<div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">'+
+        '<div style="font-size:34px;line-height:1;flex:none">'+est.emoji+'</div>'+
+        '<div style="flex:1;min-width:220px">'+
+          '<div style="font-size:9.5px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:'+est.tx+';opacity:.8">💧 Liquidez real</div>'+
+          '<div style="font-size:30px;font-weight:800;color:'+est.tx+';line-height:1.1;margin:1px 0">'+(liquidez>=0?'':'−')+fmtARS(Math.abs(liquidez)).replace('$','$')+'</div>'+
+          (liqUsd!=null? '<div style="font-size:11.5px;font-weight:700;color:'+est.tx+';opacity:.75">'+(liqUsd>=0?'':'−')+'US$'+Math.round(Math.abs(liqUsd)).toLocaleString('es-AR')+' · al dólar '+fmtARS(dolar)+'</div>':'')+
+        '</div>'+
+        '<div style="flex:2;min-width:250px;font-size:13.5px;font-weight:500;line-height:1.55;color:'+est.tx+'">'+est.msg+'</div>'+
+      '</div>'+
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding-top:9px;border-top:1px solid '+est.bd+'">'+
+        '<span style="font-size:10px;font-weight:800;color:'+est.tx+';opacity:.7;text-transform:uppercase;letter-spacing:.4px">Cálculo:</span>'+
+        chip('🏦 Activos',activos)+
+        chip('⏳ A acreditar',acreditar)+
+        chip('🐷 Ahorros',ahorros, ahorros<0)+
+        chip('🔴 Por pagar',porPagar, true)+
+      '</div>'+
+    '</div>';
 }
 
 function _ecoUltimoValor(g, y, m){
