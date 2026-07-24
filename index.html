@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v239 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v240 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -5483,7 +5483,7 @@ async function loadItemsFast(){
     // _nocache rompe cualquier caché de red/Worker — health incluido en atributos
     const nc=Date.now();
     const results=await Promise.all(chunks.map(chunk=>
-      mlGet('/items?ids='+chunk.join(',')+'&include_attributes=all&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations,health,date_created&_nocache='+nc)
+      mlGet('/items?ids='+chunk.join(',')+'&include_attributes=all&attributes=id,title,price,status,sub_status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations,health,date_created&_nocache='+nc)
     ));
     allItems=[];
     results.forEach(r=>{ r.forEach(x=>{if(x.code===200)allItems.push(x.body);}); });
@@ -5709,7 +5709,7 @@ async function loadItemsFull(){
       const batch = chunks.slice(i, i+PARALLEL);
       const results = await Promise.all(batch.map(async (chunk) => {
         try{
-          const r = await mlGet('/items?ids='+chunk.join(',')+'&include_attributes=all&attributes=id,title,price,status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations,health,date_created');
+          const r = await mlGet('/items?ids='+chunk.join(',')+'&include_attributes=all&attributes=id,title,price,status,sub_status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations,health,date_created');
           return r || [];
         }catch(e){ return []; }
       }));
@@ -6117,6 +6117,7 @@ function _saveDataCache(){
       thumbnail: i.thumbnail, category_id: i.category_id,
       listing_type_id: i.listing_type_id, health: i.health,
       catalog_listing: i.catalog_listing, catalog_product_id: i.catalog_product_id,
+      sub_status: i.sub_status,
       video_id: i.video_id, date_created: i.date_created,
       last_updated: i.last_updated,
       seller_custom_field: i.seller_custom_field, tags: i.tags,
@@ -9555,14 +9556,89 @@ const SEO_SCENARIOS = {
     description: 'Publicaciones que actualmente tienen un descuento aplicado (precio menor al original).',
     actionMain:      'Verificá si los descuentos están generando más visitas y ventas.',
     actionSecondary: 'Mantené el descuento en las que convierten y sacá el de las que no.',
-    filter: i => _itemTieneDescuento(i),
+    // v240: solo activas — antes el conteo sumaba pausadas e inactivas y el
+    // chip mostraba más publicaciones de las que realmente están a la venta.
+    filter: i => i.status === 'active' && _itemTieneDescuento(i),
   },
   'sin_descuento': {
     emoji: '🔖', label: 'Sin Descuento', color: '#6366f1',
-    description: 'Publicaciones a precio lleno, sin descuento. Candidatas a aplicar promo para mejorar visibilidad.',
+    description: 'Publicaciones ACTIVAS a precio lleno, sin descuento. Candidatas a aplicar promo para mejorar visibilidad.',
     actionMain:      'Probá aplicar un descuento estratégico para fomentar visitas y posicionamiento.',
     actionSecondary: 'Priorizá las de buen stock y baja rotación para activar la demanda.',
-    filter: i => !_itemTieneDescuento(i),
+    filter: i => i.status === 'active' && !_itemTieneDescuento(i),   // v240: solo activas
+  },
+
+  // ── v240: Escenarios espejo de "Gestión de publicaciones" de MercadoLibre ──
+  // Usan los datos que ya bajan con cada ítem (tags, sub_status, health,
+  // catalog_listing), así que filtran al instante sin llamadas extra.
+  'ml_elegible_catalogo': {
+    emoji: '⚖️', label: 'Elegible Catálogo', color: '#0ea5e9',
+    description: 'ML marcó estas publicaciones como elegibles para competir en catálogo y todavía no compiten. Es el "Elegibles para competir" del Gestor.',
+    actionMain:      'Optá por catálogo en las que tengas precio competitivo: ganás exposición compartida.',
+    actionSecondary: 'Antes de optar, revisá precio vs competencia para no entrar perdiendo.',
+    filter: i => i.status === 'active' && !i.catalog_listing && !i.catalog_product_id &&
+                 Array.isArray(i.tags) && (i.tags.includes('catalog_listing_eligible') || i.tags.includes('catalog_boost')),
+  },
+  'ml_politicas': {
+    emoji: '🚫', label: 'Políticas ML', color: '#dc2626',
+    description: 'Inactivas o penalizadas por incumplir políticas de MercadoLibre (moderadas, suspendidas o en revisión). Es el "Inactivas por incumplir políticas" del Gestor.',
+    actionMain:      'Entrá a cada publicación en ML y corregí la infracción indicada para reactivarla.',
+    actionSecondary: 'Revisá marcas/imágenes con derechos y ficha técnica: son las causas más comunes.',
+    filter: i => {
+      const sub = String(i.sub_status || '').toLowerCase();
+      const mod = ['moderat','suspend','banned','forbidden','under_review','waiting_for_patch'].some(s => sub.includes(s));
+      return i.status === 'under_review' || (i.status === 'inactive') || mod ||
+             (Array.isArray(i.tags) && i.tags.includes('moderation_penalty'));
+    },
+  },
+  'ml_volver_vender': {
+    emoji: '🔁', label: 'Volver a Vender', color: '#7c3aed',
+    description: 'Pausadas sin stock: publicaciones que se frenaron por quedarse en cero. Es el "Para volver a vender" del Gestor.',
+    actionMain:      'Reponé stock y reactivá: el historial de ventas se conserva y arrancan mejor posicionadas.',
+    actionSecondary: 'Si el producto no vuelve, evaluá reconvertir la publicación a una variante que sí tengas.',
+    filter: i => i.status === 'paused' &&
+                 ((+i.available_quantity || 0) === 0 || String(i.sub_status||'').toLowerCase().includes('out_of_stock')),
+  },
+  'ml_pendientes': {
+    emoji: '🛠️', label: 'Pendientes de Corregir', color: '#f97316',
+    description: 'Publicaciones no activas con un sub-estado que requiere acción (distinto de sin stock). Es el "Pendientes por corregir" del Gestor.',
+    actionMain:      'Abrí cada una en ML: el sub-estado indica exactamente qué corregir para reactivar.',
+    actionSecondary: 'Priorizá las que tenían ventas: recuperan posicionamiento más rápido.',
+    filter: i => {
+      if(i.status === 'active') return false;
+      const sub = String(i.sub_status || '').toLowerCase();
+      return !!sub && !sub.includes('out_of_stock') && !sub.includes('deleted');
+    },
+  },
+  'ml_objetivo_calidad': {
+    emoji: '🩺', label: 'Objetivo de Calidad', color: '#0891b2',
+    description: 'Activas con salud (health) de MercadoLibre por debajo del máximo: ML les pide completar objetivos de calidad. Es el "Con objetivos de calidad por lograr" del Gestor.',
+    actionMain:      'Completá lo que pide ML: ficha técnica, fotos, video, EAN. Cada objetivo mejora exposición.',
+    actionSecondary: 'Cruzalo con la columna Calidad del panel para atacar primero las de mayor tráfico.',
+    filter: i => i.status === 'active' && i.health != null && i.health < 1,
+  },
+  'ml_ficha_tecnica': {
+    emoji: '📋', label: 'Ficha Incompleta', color: '#ca8a04',
+    description: 'ML las marcó con ficha técnica incompleta (pierden exposición hasta completarla). Es el "Con ficha técnica para revisar" del Gestor.',
+    actionMain:      'Completá los atributos faltantes desde el editor masivo de ML o desde el panel.',
+    actionSecondary: 'El EAN y la marca son los campos que más pesan para el posicionamiento.',
+    filter: i => Array.isArray(i.tags) && i.tags.some(t => String(t).includes('incomplete_technical_specs')),
+  },
+  'ml_precio_mercado': {
+    emoji: '💲', label: 'Precio vs Mercado', color: '#be123c',
+    description: 'Publicaciones con precio ALTO según las sugerencias de precio de MercadoLibre (incluye "precio mínimo por encima de la competencia" y "precio alto" del Gestor). Requiere un análisis bajo demanda: apretá el botón de abajo.',
+    actionMain:      'Cargá el análisis y ajustá el precio de las marcadas: ML les baja exposición por caras.',
+    actionSecondary: 'El análisis consulta las sugerencias de precio de ML para tus activas con más tráfico y queda cacheado 24 h.',
+    lazy: 'precio',
+    filter: i => i.status === 'active' && _sugPrecioGet(i.id) != null && ['highest','with_benchmark_highest'].includes(_sugPrecioGet(i.id)),
+  },
+  'ml_ganar_catalogo': {
+    emoji: '🏁', label: 'Ganar Catálogo', color: '#15803d',
+    description: 'Publicaciones de catálogo que HOY no están ganando la competencia (otro vendedor se lleva la venta). Es el "Para ganar la competencia" del Gestor. Requiere análisis bajo demanda.',
+    actionMain:      'Cargá el análisis: ML te dice el precio exacto para ganar (price to win) en cada una.',
+    actionSecondary: 'Si ganar exige vender a pérdida, evaluá mejorar envío/cuotas o soltar esa competencia.',
+    lazy: 'ptw',
+    filter: i => i.status === 'active' && (i.catalog_listing === true) && _ptwGet(i.id) != null && _ptwGet(i.id) !== 'winning',
   },
   // ── Fusionados desde chips originales (prioridad emoji original) ────────────
   'sin_fotos': {
@@ -9835,6 +9911,9 @@ const SEO_SCENARIO_ORDER = [
   'termo_bajo_seo',
   // v201: filtros de descuento (requieren cargar datos con Cargar métricas)
   'con_descuento', 'sin_descuento',
+  // v240: espejo de Gestión de publicaciones de ML
+  'ml_politicas', 'ml_pendientes', 'ml_volver_vender', 'ml_elegible_catalogo',
+  'ml_objetivo_calidad', 'ml_ficha_tecnica', 'ml_precio_mercado', 'ml_ganar_catalogo',
 ];
 
 // v80: ¿Califica un ítem para un escenario? Esta función es la fuente de verdad
@@ -10344,6 +10423,76 @@ function renderSEOSection(){
   renderSEOTable();
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// v240 · Análisis de precio bajo demanda para los escenarios de ML
+// ───────────────────────────────────────────────────────────────────────────
+// Dos fuentes oficiales de ML, consultadas SOLO cuando el usuario lo pide
+// (son 1 llamada por publicación, no se pueden bajar en masa):
+//   · /suggestions/items/{id}/details → si tu precio está alto vs el mercado
+//   · /items/{id}/price_to_win        → si estás ganando la competencia de catálogo
+// Resultados cacheados 24 h en localStorage para no repetir llamadas.
+// El de precio analiza las activas con MÁS TRÁFICO (hasta 200) porque ahí está
+// la plata; el de catálogo analiza todas las de catálogo activas (son pocas).
+// ───────────────────────────────────────────────────────────────────────────
+let _sugPrecioCache=null, _ptwCache=null;
+function _lazyCache(key){
+  try{ const d=JSON.parse(localStorage.getItem(key)||'null');
+    if(d && d.ts && Date.now()-d.ts < 24*3600*1000 && d.data) return d;
+  }catch(e){}
+  return { ts:0, data:{} };
+}
+function _sugPrecioGet(id){ if(!_sugPrecioCache) _sugPrecioCache=_lazyCache('mlp_sug_precio_v1'); return _sugPrecioCache.data[id]!==undefined? _sugPrecioCache.data[id] : null; }
+function _ptwGet(id){ if(!_ptwCache) _ptwCache=_lazyCache('mlp_ptw_v1'); return _ptwCache.data[id]!==undefined? _ptwCache.data[id] : null; }
+
+async function seoLazyAnalizar(tipo){
+  const btn=document.getElementById('seo-lazy-btn');
+  const prog=document.getElementById('seo-lazy-prog');
+  if(btn) btn.disabled=true;
+  const setP=t=>{ if(prog) prog.textContent=t; };
+  try{
+    let lista;
+    if(tipo==='precio'){
+      // activas con más visitas 30d primero (tope 200 para cuidar el rate limit)
+      lista=(allItems||[]).filter(i=>i&&i.status==='active')
+        .sort((a,b)=>((itemMetrics[b.id]?.visits30)||0)-((itemMetrics[a.id]?.visits30)||0))
+        .slice(0,200);
+    } else {
+      lista=(allItems||[]).filter(i=>i&&i.status==='active'&&i.catalog_listing===true);
+    }
+    const cache = tipo==='precio' ? (_sugPrecioCache=_lazyCache('mlp_sug_precio_v1')) : (_ptwCache=_lazyCache('mlp_ptw_v1'));
+    const pendientes=lista.filter(i=>cache.data[i.id]===undefined);
+    if(!pendientes.length){ setP('✓ Análisis al día ('+lista.length+' publicaciones, cache de 24 h).'); seoInvalidateScenarioCounts(); renderScenarioChips(); renderSEOTable(); return; }
+    let hechos=0, marcadas=0;
+    const CH=8;
+    for(let i=0;i<pendientes.length;i+=CH){
+      const lote=pendientes.slice(i,i+CH);
+      await Promise.all(lote.map(async it=>{
+        try{
+          if(tipo==='precio'){
+            const r=await mlGet('/suggestions/items/'+it.id+'/details');
+            cache.data[it.id]=(r&&r.status)? r.status : 'sin_dato';
+            if(['highest','with_benchmark_highest'].includes(cache.data[it.id])) marcadas++;
+          } else {
+            const r=await mlGet('/items/'+it.id+'/price_to_win?siteId=MLA');
+            cache.data[it.id]=(r&&r.status)? r.status : 'sin_dato';
+            if(cache.data[it.id]!=='winning'&&cache.data[it.id]!=='sin_dato') marcadas++;
+          }
+        }catch(e){ cache.data[it.id]='sin_dato'; }
+      }));
+      hechos+=lote.length;
+      setP('Analizando… '+hechos+'/'+pendientes.length+(marcadas?' · '+marcadas+' con problema':''));
+      await new Promise(res=>setTimeout(res,250));
+    }
+    cache.ts=Date.now();
+    try{ localStorage.setItem(tipo==='precio'?'mlp_sug_precio_v1':'mlp_ptw_v1', JSON.stringify(cache)); }catch(e){}
+    setP('✓ Listo: '+hechos+' analizadas'+(marcadas?' · '+marcadas+' requieren acción':' · todo en orden'));
+    seoInvalidateScenarioCounts();
+    renderScenarioChips();
+    renderSEOTable();
+  }catch(e){ setP('⚠ Error: '+(e.message||'desconocido')); }
+  finally{ if(btn) btn.disabled=false; }
+}
+
 // v79: Sistema de Escenarios — reemplaza el viejo seoSetFilter
 // Estado: cuál escenario está activo (key del SEO_SCENARIOS o null)
 let _seoActiveScenario = null;
@@ -10457,7 +10606,15 @@ function seoSetScenario(key){
           <span style="color:var(--text2)">${sc.actionSecondary}</span>
         </div>
       </div>
-      ${orderPills}`;
+      ${orderPills}
+      ${sc.lazy ? `<div style="margin-top:9px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <button id="seo-lazy-btn" class="btn btn-sm" onclick="seoLazyAnalizar('${sc.lazy}')"
+          style="background:${sc.color};color:#fff;border:none;font-weight:700">🔍 ${sc.lazy==='precio'?'Analizar precios vs mercado':'Analizar competencia de catálogo'}</button>
+        <span id="seo-lazy-prog" style="font-size:11px;color:var(--text2);font-weight:600">${
+          (sc.lazy==='precio'? (_sugPrecioCache&&_sugPrecioCache.ts) : (_ptwCache&&_ptwCache.ts))
+            ? 'Último análisis: '+new Date(sc.lazy==='precio'?_sugPrecioCache.ts:_ptwCache.ts).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})
+            : 'Todavía sin analizar — 1 llamada por publicación, queda cacheado 24 h.'}</span>
+      </div>` : ''}`;
     info.style.display = 'block';
   }
 
