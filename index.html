@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v237 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v238 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4407,6 +4407,9 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
   <!-- KPIs del mes actual -->
   <div id="eco-kpis" style="display:flex;gap:10px;flex-wrap:nowrap;overflow-x:auto;margin-bottom:14px"></div>
+
+  <!-- v238: Asistente Financiero (copiloto) -->
+  <div id="eco-ia-panel" class="mb"></div>
 
   <!-- Grilla de gastos x meses -->
   <div class="card mb" style="overflow:hidden">
@@ -31588,6 +31591,10 @@ function ecoChangeYear(y){
 }
 function ecoRender(){
   if(!_ecoState.gastos.length) _ecoState.gastos = _ecoLoad();
+  // v238: el Asistente se recalcula (con debounce) en cada render de la
+  // sección — o sea, en cada cambio de datos: gastos, tarjetas, métricas,
+  // ahorros, sync de la otra PC. Es el comportamiento "copiloto".
+  try{ ecoIASchedule(); }catch(e){}
   const sel = document.getElementById('eco-year');
   const years = _ecoYears();
   if(sel){
@@ -31810,6 +31817,425 @@ function ecoRenderSummary(y, totMes, totAnual){
 
 // ═══ MODALES (colores explícitos, legibles en fondo claro) ═══
 const _ECO_MODAL_BG='#ffffff', _ECO_TXT='#0f172a', _ECO_TXT2='#334155', _ECO_TXT3='#64748b', _ECO_BRD='#cbd5e1', _ECO_INP_BG='#f8fafc';
+// ═══════════════════════════════════════════════════════════════════════════
+// v238 · 🤖 ASISTENTE FINANCIERO — el "cerebro" de Economía
+// ───────────────────────────────────────────────────────────────────────────
+// Dos capas:
+//   1) MOTOR LOCAL (reglas): lee TODO — planilla de gastos (valores + estados),
+//      resúmenes de tarjeta (cuotas, cierres, vencimientos), métricas (sueldos,
+//      ventas, IPC, dólar), ahorros, activos, a acreditarse — y arma un informe
+//      ejecutivo por tarjetas. Se recalcula solo con cada cambio de datos y
+//      OCULTA las secciones sin nada relevante que decir.
+//   2) CHAT CON IA: le podés preguntar lo que quieras; la pregunta viaja al
+//      worker (/ai, cascada Gemini→OpenRouter) junto con un dossier compacto
+//      de todos los datos, y responde como asesor financiero.
+// ───────────────────────────────────────────────────────────────────────────
+let _iaTimer=null, _iaChatHist=[], _iaCtxCache=null;
+function ecoIASchedule(){ clearTimeout(_iaTimer); _iaTimer=setTimeout(ecoIARender, 400); }
+
+const _IA_NIV={ ok:{c:'#16a34a',e:'🟢'}, aten:{c:'#ca8a04',e:'🟡'}, riesgo:{c:'#ea580c',e:'🟠'}, crit:{c:'#dc2626',e:'🔴'}, info:{c:'#2563eb',e:'🔵'} };
+const _IA_U=n=>'US$'+Math.round(Math.abs(n)).toLocaleString('es-AR');
+const _IA_Us=n=>(n>=0?'+':'−')+_IA_U(n);
+const _IA_V=n=>'$'+Math.round(n).toLocaleString('es-AR');
+const _IA_MC=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+const _IA_lblYm=ym=>_IA_MC[+ym.slice(5,7)-1]+' '+ym.slice(2,4);
+
+// ── CONTEXTO: junta todos los datos del sistema ────────────────────────────
+function _iaCtx(){
+  const yms=_ecoMetYms(); const rows=[]; let prev=null;
+  yms.forEach(ym=>{ const r=_ecoMetCompute(ym,prev); rows.push(r); prev=r; });
+  const win=rows.slice(-12);
+  const conSaldo=win.filter(r=>r.saldo!=null);
+  const u=conSaldo[conSaldo.length-1]||null;
+  const hoyYm=_ecoYmHoy();
+  const hoy=new Date();
+  const dAct=(()=>{ for(let i=rows.length-1;i>=0;i--){ if(rows[i].d>0) return rows[i].d; } return (_ecoDolar&&_ecoDolar.compra>0)?_ecoDolar.compra:0; })();
+  const gCon=win.filter(r=>r.g!=null);
+  const gastoProm=gCon.length? gCon.reduce((a,r)=>a+r.g,0)/gCon.length : null;      // $ / mes
+  const gUsdCon=win.filter(r=>r.gUsd!=null);
+  const gastoPromUsd=gUsdCon.length? gUsdCon.reduce((a,r)=>a+r.gUsd,0)/gUsdCon.length : null;
+  const saldoProm=conSaldo.length? conSaldo.reduce((a,r)=>a+r.saldo,0)/conSaldo.length : null;
+  // caja
+  const aho=_ecoListaTotales('ahorros'), acr=_ecoListaTotales('acreditar'), act=_ecoActivosTotales();
+  const cajaUsd=(aho.dolares||0)+(dAct>0? (aho.pesos||0)/dAct : 0);
+  const acrUsd=(acr.dolares||0)+(dAct>0? (acr.pesos||0)/dAct : 0);
+  // tarjetas (leen sus resúmenes completos)
+  const tarjetas=(_ecoState.gastos||[]).filter(g=>g.cat==='Tarjetas').map(g=>{
+    const cfg=(typeof _ecoResCfg==='function')? _ecoResCfg(g) : {cierre:25,venc:10};
+    const tieneRes=!!(g.res && ((g.res.items&&g.res.items.length)||(g.res.fijos&&g.res.fijos.length)));
+    const mesAct=tieneRes? _ecoResMes(g,hoyYm) : null;
+    const mesSig=tieneRes? _ecoResMes(g,_ecoYmAdd(hoyYm,1)) : null;
+    let cuotasPend=0, compFuturo=0, finCuotas=null;
+    if(tieneRes){
+      g.res.items.forEach(it=>{
+        const desde=_ecoResDesdeDe(g,it); if(!desde) return;
+        const cuo=Math.max(1,Math.round(+it.cuo||1));
+        const fin=_ecoYmAdd(desde,cuo-1);
+        if(fin>hoyYm && (!finCuotas||fin>finCuotas)) finCuotas=fin;
+        for(let k=0;k<cuo;k++){ const ymK=_ecoYmAdd(desde,k); if(ymK>hoyYm){ cuotasPend++; compFuturo+=(+it.imp||0)/cuo; } }
+      });
+    }
+    const y=+hoyYm.slice(0,4), m=+hoyYm.slice(5,7)-1;
+    const celda=_ecoVal(g,y,m);
+    return { n:g.n, cfg, tieneRes,
+      totalMes: mesAct? mesAct.total : (typeof celda==='number'? celda : 0),
+      totalSig: mesSig? mesSig.total : null,
+      cuotasPend, compFuturo, finCuotas };
+  });
+  // agenda financiera 30 días (vencimientos + cobros)
+  const agenda=[];
+  const en30=d=>{ const diff=(d-hoy)/86400000; return diff>=-1 && diff<=31; };
+  tarjetas.forEach(t=>{
+    [0,1].forEach(k=>{
+      const tot= k===0? t.totalMes : t.totalSig;
+      if(!(tot>0)) return;
+      const ymP=_ecoYmAdd(hoyYm,k);
+      const vy=+ymP.slice(0,4), vm=+ymP.slice(5,7)-1;
+      const dV=new Date(vy,vm,_ecoDiaVal(vy,vm,t.cfg.venc));
+      if(en30(dV)) agenda.push({ f:dV, e:'💳', txt:t.n, monto:tot });
+    });
+  });
+  (_ecoState.gastos||[]).forEach(g=>{
+    if(g.cat==='Tarjetas') return;
+    [0,1].forEach(k=>{
+      const ymP=_ecoYmAdd(hoyYm,k); const y=+ymP.slice(0,4), m=+ymP.slice(5,7)-1;
+      const v=_ecoVal(g,y,m), st=_ecoEst(g,y,m);
+      if(typeof v!=='number'||v<=0) return;
+      if(st==='porpagar'||st==='proximos'){
+        const dV=new Date(y,m,10);
+        if(en30(dV)) agenda.push({ f:dV, e:(st==='porpagar'?'🔴':'🔵'), txt:(g.e?g.e+' ':'')+g.n, monto:v });
+      }
+    });
+  });
+  _ecoLista('acreditar').forEach(a=>{
+    const p=(+a.pesos||0), du=(+a.dolares||0);
+    if(p+du>0) agenda.push({ f:null, e:'💵', txt:'Cobro: '+(a.n||a.nombre||'a acreditarse'), monto:p, montoUsd:du, cobro:true });
+  });
+  agenda.sort((a,b)=>(a.f?a.f.getTime():9e15)-(b.f?b.f.getTime():9e15));
+  const pagos30=agenda.filter(x=>!x.cobro).reduce((s,x)=>s+(x.monto||0),0);
+  // análisis vs inflación (reusa los helpers de Métricas)
+  const fam=_ecoMetVsInflSerie(win, win.map(r=> (r.sc!=null||r.sb!=null||r.v!=null)? (r.sc||0)+(r.sb||0)+(r.v||0) : null));
+  return { rows, win, conSaldo, u, hoyYm, dAct, gastoProm, gastoPromUsd, saldoProm,
+    aho, acr, act, cajaUsd, acrUsd, tarjetas, agenda, pagos30, fam,
+    sc:_ecoMetVsInfl(win,'sc'), sb:_ecoMetVsInfl(win,'sb'), v:_ecoMetVsInfl(win,'v'),
+    g:_ecoMetVsInfl(win,'g'), dol:_ecoMetVsInfl(win,'d'), tz:_ecoMetVsInfl(win,'tz') };
+}
+
+// ── SECCIONES: cada una devuelve una tarjeta o null (se oculta sola) ───────
+function _iaSecciones(c){
+  const S=[];
+  const add=(prio,icon,tit,nivel,html)=>{ if(html) S.push({prio,icon,tit,nivel,html}); };
+  const chip=(niv,txt)=>'<span style="display:inline-flex;align-items:center;gap:4px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:700;color:#1e293b;margin:2px 3px 2px 0;white-space:nowrap">'+(_IA_NIV[niv]?_IA_NIV[niv].e+' ':'')+txt+'</span>';
+  const li=txt=>'<div style="display:flex;gap:6px;font-size:11.5px;color:#1e293b;font-weight:500;line-height:1.55;margin:3px 0"><span style="flex:none">·</span><span>'+txt+'</span></div>';
+
+  // 🚨 ESTADO GENERAL — siempre (interpretación, no repetición)
+  if(c.u){
+    const ant=c.conSaldo[c.conSaldo.length-2]||null;
+    const esPeor = c.conSaldo.length>=6 && c.u.saldo<=Math.min.apply(null,c.conSaldo.map(r=>r.saldo));
+    const esMejor= c.conSaldo.length>=6 && c.u.saldo>=Math.max.apply(null,c.conSaldo.map(r=>r.saldo));
+    const niv = c.u.saldo>0 ? (c.u.ahorro>=15?'ok':'aten') : (esPeor?'crit':'riesgo');
+    let causa='';
+    if(c.g && c.fam){
+      if(c.g.varPct > c.fam.varPct+5) causa='La causa de fondo: los gastos crecen más rápido ('+c.g.varPct.toFixed(0)+'%) que los ingresos ('+c.fam.varPct.toFixed(0)+'%).';
+      else if(c.fam.varPct > c.g.varPct+5) causa='Los ingresos crecen más rápido que los gastos: la base va mejorando.';
+    }
+    let html='<div style="font-size:13px;color:#1e293b;font-weight:600;line-height:1.6">'+
+      '<b>'+_IA_lblYm(c.u.ym)+'</b> cerró en <b style="color:'+_IA_NIV[niv].c+'">'+_IA_Us(c.u.saldo)+'</b>'+
+      (esPeor?' — el peor mes de los últimos 12 📉':(esMejor?' — ¡el mejor de los últimos 12! 🥇':''))+
+      (ant? ' · vs '+_IA_lblYm(ant.ym)+': <b style="color:'+((c.u.saldo-ant.saldo)>=0?'#16a34a':'#dc2626')+'">'+_IA_Us(c.u.saldo-ant.saldo)+'</b>':'')+'.'+
+      (causa? ' '+causa : '')+'</div>';
+    add(100,'🚨','Estado general',niv,html);
+  }
+
+  // 💼 SUELDOS (cuánto deberían ser hoy)
+  {
+    const filas=[];
+    [['Sueldo C',c.sc],['Sueldo B',c.sb]].forEach(([nom,d])=>{
+      if(!d) return;
+      const niv=_ecoNivelPts(d.pts);
+      if(d.pts>=0) filas.push(li('<b>'+nom+'</b> '+niv.e+' le gana a la inflación por <b>'+d.pts.toFixed(0)+' pts</b> (hoy '+_IA_V(d.actual)+').'));
+      else filas.push(li('<b>'+nom+'</b> '+niv.e+' perdió <b>'+Math.abs(d.pts).toFixed(0)+' pts</b>: hoy debería ser <b>'+_IA_V(d.objetivo)+'</b> — faltan <b>'+_IA_V(d.objetivo-d.actual)+'</b> ('+((d.objetivo-d.actual)/d.actual*100).toFixed(0)+'%).'));
+    });
+    if(filas.length){
+      const peor=Math.min(c.sc?c.sc.pts:99, c.sb?c.sb.pts:99);
+      add(80,'💼','Sueldos', peor>=0?'ok':(peor>=-15?'aten':(peor>=-40?'riesgo':'crit')), filas.join(''));
+    }
+  }
+
+  // 🏪 EMPRENDIMIENTO
+  {
+    const filas=[];
+    let sv=0,sg=0,hayM=false; c.win.forEach(r=>{ if(r.v!=null&&r.gEmp!=null){ sv+=r.v; sg+=r.gEmp; hayM=true; } });
+    const margen=hayM&&sv>0? (sv-sg)/sv*100 : null;
+    if(c.v){
+      if(c.v.pts<0) filas.push(li('Las ventas corren <b>'+Math.abs(c.v.pts).toFixed(0)+' pts abajo</b> de la inflación: hay que vender más o subir precios.'));
+      else filas.push(li('Las ventas le ganan a la inflación por <b>'+c.v.pts.toFixed(0)+' pts</b> ✔.'));
+    }
+    if(margen!=null) filas.push(li('Margen real 12m: <b>'+margen.toFixed(1)+'%</b> (ganancia '+_IA_V(sv-sg)+').'));
+    if(c.tz && c.dAct>0){
+      if(c.tz.pts<-5) filas.push(li('☕ El precio de la taza quedó <b>atrás del IPC</b>: llevalo a ~<b>'+_IA_V(c.tz.objetivo)+'</b> (hoy '+_IA_V(c.tz.actual)+') → actualizá la Lista de Precios.'));
+      else filas.push(li('☕ El precio de la taza acompaña la inflación ✔.'));
+    }
+    if(filas.length){
+      const niv = (c.v&&c.v.pts<-15)||(c.tz&&c.tz.pts<-15)?'riesgo':((c.v&&c.v.pts<0)?'aten':'ok');
+      add(70,'🏪','Emprendimiento',niv,filas.join(''));
+    }
+  }
+
+  // 💰 CAJA DEL HOGAR (proyectada vs pagos próximos)
+  if(c.dAct>0 && (c.cajaUsd>0 || c.acrUsd>0 || c.pagos30>0)){
+    const pagosUsd=c.pagos30/c.dAct;
+    const proye=c.cajaUsd+c.acrUsd;
+    const sobra=proye-pagosUsd;
+    const dias=(c.gastoPromUsd>0)? Math.round(proye/(c.gastoPromUsd/30)) : null;
+    const niv= sobra<0?'crit':(dias!=null&&dias<45?'riesgo':(dias!=null&&dias<90?'aten':'ok'));
+    let html=
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:5px">'+
+        chip('info','Disponible '+_IA_U(c.cajaUsd))+
+        (c.acrUsd>0? chip('info','+ a acreditar '+_IA_U(c.acrUsd)) : '')+
+        chip('info','= caja proyectada <b>'+_IA_U(proye)+'</b>')+
+        (c.pagos30>0? chip(sobra>=0?'ok':'crit','pagos 30 días '+_IA_U(pagosUsd)) : '')+
+      '</div>'+
+      li(sobra>=0? 'Después de los pagos del mes te quedan <b>'+_IA_U(sobra)+'</b>.' : '⚠ La caja proyectada <b>no cubre</b> los pagos próximos: faltan <b>'+_IA_U(Math.abs(sobra))+'</b>.')+
+      (dias!=null? li('Al ritmo de gasto actual, la caja alcanza para <b>'+dias+' días</b>.') : '');
+    add(75,'💰','Caja del hogar',niv,html);
+  }
+
+  // 💳 TARJETAS
+  {
+    const conTar=c.tarjetas.filter(t=>t.totalMes>0||t.totalSig>0||t.cuotasPend>0);
+    if(conTar.length){
+      const filas=[];
+      const mayor=conTar.slice().sort((a,b)=>b.totalMes-a.totalMes)[0];
+      if(mayor&&mayor.totalMes>0) filas.push(li('Mayor vencimiento del mes: <b>'+mayor.n+'</b> por <b>'+_IA_V(mayor.totalMes)+'</b>.'));
+      let pesado=false;
+      conTar.forEach(t=>{
+        if(t.totalSig!=null && t.totalMes>0 && t.totalSig>t.totalMes*1.25){ pesado=true; filas.push(li('⚠ <b>'+t.n+'</b>: el mes que viene sube a <b>'+_IA_V(t.totalSig)+'</b> ('+Math.round((t.totalSig/t.totalMes-1)*100)+'% más).')); }
+        if(t.finCuotas) filas.push(li('<b>'+t.n+'</b>: '+t.cuotasPend+' cuota(s) pendientes por '+_IA_V(t.compFuturo)+' · terminan en <b>'+_IA_lblYm(t.finCuotas)+'</b> 🎉.'));
+      });
+      const masComp=conTar.slice().sort((a,b)=>b.compFuturo-a.compFuturo)[0];
+      if(masComp&&masComp.compFuturo>0&&conTar.length>1) filas.push(li('La de mayor compromiso futuro es <b>'+masComp.n+'</b>: conviene frenar las compras ahí.'));
+      add(65,'💳','Tarjetas', pesado?'riesgo':'aten', filas.join(''));
+    }
+  }
+
+  // 📅 PRÓXIMOS 30 DÍAS (agenda)
+  if(c.agenda.length){
+    const items=c.agenda.slice(0,7).map(a=>{
+      const f=a.f? String(a.f.getDate()).padStart(2,'0')+'/'+String(a.f.getMonth()+1).padStart(2,'0') : '—';
+      const monto=(a.monto>0?_IA_V(a.monto):'')+(a.montoUsd>0?(a.monto>0?' + ':'')+_IA_U(a.montoUsd):'');
+      return '<div style="display:flex;gap:8px;align-items:center;font-size:11.5px;color:#1e293b;font-weight:500;padding:3px 0;border-bottom:1px dashed #e2e8f0">'+
+        '<span style="font-weight:800;color:#475569;min-width:40px">'+f+'</span><span>'+a.e+'</span>'+
+        '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+a.txt+'</span>'+
+        '<b style="color:'+(a.cobro?'#16a34a':'#1e293b')+';white-space:nowrap">'+(a.cobro?'+':'')+monto+'</b></div>';
+    }).join('');
+    add(60,'📅','Próximos 30 días','info',items);
+  }
+
+  // 🎯 OBJETIVO DEL MES (cuánto vender para ahorrar 10/15/20%)
+  if(c.u && c.gastoProm>0){
+    const ing0=(c.u.sc||0)+(c.u.sb||0)+(c.u.v||0);
+    if(ing0>0){
+      const chips=[10,15,20].map(t=>{
+        const x=(c.gastoProm/(1-t/100))-ing0;
+        return chip(x<=0?'ok':'info', t+'% ahorro: '+(x<=0?'✔ ya alcanzás':'vender +'+_IA_V(x)));
+      }).join('');
+      add(55,'🎯','Objetivo del mes','info',
+        '<div style="font-size:11px;color:#475569;font-weight:600;margin-bottom:4px">Ventas extra de Impala necesarias (con ingresos actuales y gastos proyectados):</div>'+chips);
+    }
+  }
+
+  // 💡 OPORTUNIDADES (solo si existen)
+  {
+    const ops=[];
+    if(c.dol && c.dol.pts<-5) ops.push(li('💵 <b>Dólar atrasado</b> ('+Math.abs(c.dol.pts).toFixed(0)+' pts bajo el IPC): buen momento para dolarizar excedente.'));
+    if(c.dol && c.dol.pts>5) ops.push(li('📦 El dólar corre arriba del IPC: adelantá compra de insumos.'));
+    if(c.g && c.g.pts<0) ops.push(li('✂️ Contuviste los gastos por debajo de la inflación: sostenelo.'));
+    // ahorro creciendo 3 meses seguidos
+    const s3=c.conSaldo.slice(-3);
+    if(s3.length===3 && s3[2].saldo>s3[1].saldo && s3[1].saldo>s3[0].saldo) ops.push(li('📈 El saldo mejora hace 3 meses seguidos.'));
+    if(ops.length) add(50,'💡','Oportunidades','ok',ops.join(''));
+  }
+
+  // ⚠ ALERTAS (solo si existen)
+  {
+    const al=[];
+    if(c.saldoProm!=null && c.saldoProm<0) al.push(li('El flujo mensual promedio es <b>negativo</b> ('+_IA_Us(c.saldoProm)+'/mes): consumís reservas.'));
+    if(c.gastoPromUsd>0 && (c.cajaUsd/c.gastoPromUsd)<3) al.push(li('Colchón por debajo de <b>3 meses</b> de gastos: reservas justas.'));
+    // gasto que saltó fuerte vs mes pasado
+    if(c.u){
+      const y=+c.hoyYm.slice(0,4), m=+c.hoyYm.slice(5,7)-1;
+      const yA=m===0?y-1:y, mA=m===0?11:m-1;
+      let topG=null;
+      (_ecoState.gastos||[]).forEach(g=>{
+        const v1=_ecoVal(g,y,m), v0=_ecoVal(g,yA,mA);
+        if(typeof v1==='number'&&typeof v0==='number'&&v0>1000&&v1>v0*1.4){
+          if(!topG||v1-v0>topG.d) topG={g,d:v1-v0,v0,v1};
+        }
+      });
+      if(topG) al.push(li('<b>'+(topG.g.e?topG.g.e+' ':'')+topG.g.n+'</b> saltó '+_IA_V(topG.v0)+' → <b>'+_IA_V(topG.v1)+'</b> este mes ('+Math.round((topG.v1/topG.v0-1)*100)+'%).'));
+    }
+    if(al.length) add(85,'⚠️','Alertas', al.length>=3?'crit':'riesgo', al.join(''));
+  }
+
+  // ✅ PRIORIDADES (checklist derivado de todo lo anterior)
+  {
+    const pr=[];
+    if(c.saldoProm!=null && c.saldoProm<0) pr.push('Recortar gastos variables este mes');
+    if(c.acrUsd>0.01) pr.push('Cobrar lo pendiente de acreditar ('+_IA_U(c.acrUsd)+')');
+    if(c.tz && c.tz.pts<-5) pr.push('Actualizar la Lista de Precios (taza atrasada)');
+    if(c.dol && c.dol.pts<-5 && c.saldoProm!=null && c.saldoProm>=0) pr.push('Pasar excedente a dólares (está barato)');
+    if(c.sb && c.sb.pts<-15) pr.push('Renegociar el sueldo B (muy atrás del IPC)');
+    const masComp=c.tarjetas.filter(t=>t.compFuturo>0).sort((a,b)=>b.compFuturo-a.compFuturo)[0];
+    if(masComp) pr.push('Evitar cuotas nuevas en '+masComp.n);
+    if(pr.length) add(45,'✅','Prioridades','info',
+      pr.slice(0,5).map(t=>'<div style="display:flex;gap:7px;align-items:center;font-size:11.5px;color:#1e293b;font-weight:600;margin:3px 0"><span style="width:15px;height:15px;border:2px solid #94a3b8;border-radius:4px;flex:none"></span>'+t+'</div>').join(''));
+  }
+
+  // 🧠 INSIGHTS (patrones que no se ven a simple vista)
+  {
+    const ins=[];
+    // estacionalidad: ¿este mes suele ser más caro que el promedio del año?
+    const mesNum=+c.hoyYm.slice(5,7);
+    const mismos=c.rows.filter(r=>+r.ym.slice(5,7)===mesNum && r.g!=null && r.ym<c.hoyYm);
+    if(mismos.length>=2 && c.gastoProm>0){
+      const promMes=mismos.reduce((a,r)=>a+r.g,0)/mismos.length;
+      const dif=(promMes/c.gastoProm-1)*100;
+      if(Math.abs(dif)>=12) ins.push(li('Históricamente, cada <b>'+_IA_MC[mesNum-1].toLowerCase()+'</b> gastás <b>'+(dif>0?'+':'')+dif.toFixed(0)+'%</b> vs tu promedio.'));
+    }
+    // servicio que más subió vs IPC (año contra año)
+    if(c.g && c.g.inflPct>0){
+      let top=null;
+      (_ecoState.gastos||[]).forEach(g=>{
+        if(g.cat==='Tarjetas') return;
+        const vals=c.win.map(r=>{ const y=+r.ym.slice(0,4), m=+r.ym.slice(5,7)-1; const v=_ecoVal(g,y,m); return (typeof v==='number'&&v>0)?v:null; });
+        const conV=vals.filter(v=>v!=null);
+        if(conV.length<6) return;
+        const varPct=(conV[conV.length-1]-conV[0])/conV[0]*100;
+        const exceso=varPct-c.g.inflPct;
+        if(exceso>15 && (!top||exceso>top.ex)) top={g,ex:exceso,varPct};
+      });
+      if(top) ins.push(li('<b>'+(top.g.e?top.g.e+' ':'')+top.g.n+'</b> subió <b>'+top.varPct.toFixed(0)+'%</b> en el período — '+top.ex.toFixed(0)+' pts más que la inflación.'));
+    }
+    // peso de las cuotas sobre los gastos
+    const compTot=c.tarjetas.reduce((s,t)=>s+t.compFuturo,0);
+    const totMesTar=c.tarjetas.reduce((s,t)=>s+(t.totalMes||0),0);
+    if(c.gastoProm>0 && totMesTar>0){
+      const pct=totMesTar/c.gastoProm*100;
+      if(pct>=25) ins.push(li('Las tarjetas representan el <b>'+pct.toFixed(0)+'%</b> de tus gastos del mes'+(compTot>0?' y hay '+_IA_V(compTot)+' comprometidos a futuro':'')+'.'));
+    }
+    if(ins.length) add(40,'🧠','Insights','info',ins.join(''));
+  }
+  return S.sort((a,b)=>b.prio-a.prio);
+}
+
+// ── RENDER ─────────────────────────────────────────────────────────────────
+function ecoIARender(){
+  const cont=document.getElementById('eco-ia-panel');
+  if(!cont) return;
+  let c;
+  try{ c=_iaCtx(); _iaCtxCache=c; }catch(e){ console.warn('[ia]', e.message); return; }
+  const abierto = localStorage.getItem('eco_ia_open')!=='0';
+  const S=_iaSecciones(c);
+  if(!S.length){ cont.innerHTML=''; return; }
+  const estado=S.find(s=>s.tit==='Estado general');
+  const resto=S.filter(s=>s.tit!=='Estado general');
+  const cardHtml=s=>{
+    const nv=_IA_NIV[s.nivel]||_IA_NIV.info;
+    return '<div style="flex:1;min-width:250px;max-width:100%;background:#fff;border:1px solid var(--border);border-left:4px solid '+nv.c+';border-radius:11px;padding:12px 14px;box-shadow:0 1px 3px rgba(15,23,42,.05)">'+
+      '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">'+
+        '<span style="font-size:14px">'+s.icon+'</span>'+
+        '<span style="font-size:10px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;color:#475569">'+s.tit+'</span>'+
+        '<span style="margin-left:auto;font-size:12px">'+nv.e+'</span>'+
+      '</div>'+s.html+'</div>';
+  };
+  const hora=new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+  cont.innerHTML=
+    '<div class="card" style="background:linear-gradient(135deg,var(--card),var(--bg2));border:1px solid var(--border)">'+
+      '<div style="display:flex;align-items:center;gap:10px;cursor:pointer" onclick="ecoIAToggle()">'+
+        '<div style="font-size:20px">🤖</div>'+
+        '<div><div class="card-title" style="margin:0">Asistente Financiero</div>'+
+        '<div style="font-size:10.5px;color:var(--text3)">Analiza todo el sistema en cada cambio · actualizado '+hora+'</div></div>'+
+        '<span id="eco-ia-arrow" style="margin-left:auto;font-size:14px;color:var(--text3)">'+(abierto?'▾':'▸')+'</span>'+
+      '</div>'+
+      '<div id="eco-ia-body" style="display:'+(abierto?'block':'none')+';margin-top:12px">'+
+        (estado? '<div style="background:#fff;border:1px solid var(--border);border-left:4px solid '+(_IA_NIV[estado.nivel]||_IA_NIV.info).c+';border-radius:11px;padding:12px 14px;margin-bottom:10px;box-shadow:0 1px 3px rgba(15,23,42,.05)">'+estado.html+'</div>' : '')+
+        '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:stretch">'+resto.map(cardHtml).join('')+'</div>'+
+        // chat
+        '<div id="eco-ia-chat" style="display:'+(_iaChatHist.length?'block':'none')+';margin-top:12px"></div>'+
+        '<div style="display:flex;gap:8px;margin-top:12px">'+
+          '<input id="eco-ia-q" type="text" placeholder="💬 Preguntale al asesor… (ej: ¿me conviene comprar dólares este mes?)" '+
+            'onkeydown="if(event.key===\'Enter\')ecoIAPreguntar()" '+
+            'style="flex:1;padding:11px 14px;border:1px solid var(--border);border-radius:11px;font-size:13px;background:var(--card);color:var(--text)">'+
+          '<button onclick="ecoIAPreguntar()" style="padding:11px 18px;border:none;background:var(--accent);color:#fff;border-radius:11px;font-weight:700;cursor:pointer;font-size:13px">Preguntar</button>'+
+        '</div>'+
+      '</div>'+
+    '</div>';
+  if(_iaChatHist.length) _iaChatPintar();
+}
+function ecoIAToggle(){
+  const b=document.getElementById('eco-ia-body'), a=document.getElementById('eco-ia-arrow');
+  if(!b) return;
+  const abrir=b.style.display==='none';
+  b.style.display=abrir?'block':'none';
+  if(a) a.textContent=abrir?'▾':'▸';
+  try{ localStorage.setItem('eco_ia_open', abrir?'1':'0'); }catch(e){}
+}
+
+// ── CHAT con la IA (dossier + pregunta → worker /ai) ───────────────────────
+function _iaDossier(c){
+  const L=[];
+  const F=n=>Math.round(n).toLocaleString('es-AR');
+  if(c.u) L.push('MES ACTUAL '+c.u.ym+': saldo US$'+F(c.u.saldo)+', ahorro '+(c.u.ahorro!=null?c.u.ahorro.toFixed(1):'?')+'%, sueldoC $'+F(c.u.sc||0)+', sueldoB $'+F(c.u.sb||0)+', ventas Impala $'+F(c.u.v||0)+', gastos $'+F(c.u.g||0)+' (hogar $'+F(c.u.gFam||0)+' / emprendimiento $'+F(c.u.gEmp||0)+'), dolar $'+F(c.u.d||0)+', IPC mes '+(c.u.ipc!=null?c.u.ipc:'?')+'%.');
+  const vs=(nom,d)=>{ if(d) L.push(nom+': var '+d.varPct.toFixed(1)+'% vs IPC '+d.inflPct.toFixed(1)+'% ('+(d.pts>=0?'+':'')+d.pts.toFixed(0)+' pts; para empatar deberia ser '+F(d.objetivo)+').'); };
+  vs('SUELDO C 12m',c.sc); vs('SUELDO B 12m',c.sb); vs('VENTAS 12m',c.v); vs('GASTOS 12m',c.g); vs('DOLAR 12m',c.dol); vs('PRECIO TAZA 12m',c.tz);
+  if(c.saldoProm!=null) L.push('FLUJO promedio 12m: US$'+F(c.saldoProm)+'/mes. Gasto promedio: $'+F(c.gastoProm||0)+' (US$'+F(c.gastoPromUsd||0)+').');
+  L.push('CAJA: ahorros US$'+F(c.cajaUsd)+' (+ a acreditar US$'+F(c.acrUsd)+'). Activos: $'+F(c.act.pesos||0)+' + US$'+F(c.act.dolares||0)+'. Pagos proximos 30 dias: $'+F(c.pagos30)+'.');
+  c.tarjetas.forEach(t=>{ if(t.totalMes>0||t.cuotasPend>0) L.push('TARJETA '+t.n+': este mes $'+F(t.totalMes)+(t.totalSig!=null?', proximo $'+F(t.totalSig):'')+', cuotas pendientes '+t.cuotasPend+' por $'+F(t.compFuturo)+(t.finCuotas?' (terminan '+t.finCuotas+')':'')+'. Cierra dia '+t.cfg.cierre+', vence dia '+t.cfg.venc+'.'); });
+  c.agenda.slice(0,8).forEach(a=>{ L.push('AGENDA '+(a.f? a.f.toISOString().slice(0,10):'s/f')+' '+(a.cobro?'COBRO ':'PAGO ')+a.txt+' $'+F(a.monto||0)+(a.montoUsd?' + US$'+F(a.montoUsd):'')); });
+  // top gastos del mes
+  if(c.u){
+    const y=+c.hoyYm.slice(0,4), m=+c.hoyYm.slice(5,7)-1;
+    const tops=(_ecoState.gastos||[]).map(g=>({n:g.n,cat:g.cat,v:_ecoVal(g,y,m)})).filter(x=>typeof x.v==='number'&&x.v>0).sort((a,b)=>b.v-a.v).slice(0,10);
+    if(tops.length) L.push('TOP GASTOS DEL MES: '+tops.map(t=>t.n+' ('+t.cat+') $'+F(t.v)).join('; ')+'.');
+  }
+  return L.join('\n');
+}
+async function ecoIAPreguntar(){
+  const inp=document.getElementById('eco-ia-q');
+  const q=(inp&&inp.value||'').trim();
+  if(!q) return;
+  inp.value='';
+  _iaChatHist.push({role:'user',content:q});
+  const chat=document.getElementById('eco-ia-chat');
+  if(chat){ chat.style.display='block'; _iaChatPintar(); chat.insertAdjacentHTML('beforeend','<div id="eco-ia-wait" style="font-size:11.5px;color:var(--text3);padding:6px 2px">🤖 analizando tus números…</div>'); }
+  try{
+    const c=_iaCtxCache||_iaCtx();
+    const sys='Sos un asesor financiero profesional argentino. Hablás en español rioplatense (vos), claro y directo, sin alarmismo ni optimismo artificial. '+
+      'Respondé SOLO con base en los datos del usuario que siguen; si falta un dato, decilo. Máximo 6-8 líneas, con recomendaciones concretas y el porqué. Montos en $ o US$ como correspondan.\n\nDATOS DEL USUARIO:\n'+_iaDossier(c);
+    const r=await fetch(WORKER+'/ai',{ method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+      body: JSON.stringify({ system: sys, messages: _iaChatHist.slice(-6), max_tokens: 500, temperature: 0.4 }) });
+    const d=await r.json();
+    if(!r.ok || d.error) throw new Error(d.error||('HTTP '+r.status));
+    const text=(d.content||[]).map(x=>x.text||'').join('').trim() || 'Sin respuesta.';
+    _iaChatHist.push({role:'assistant',content:text});
+    if(_iaChatHist.length>10) _iaChatHist=_iaChatHist.slice(-10);
+  }catch(e){
+    _iaChatHist.push({role:'assistant',content:'⚠ No pude conectar con la IA: '+(e.message||'error desconocido')+'. Probá de nuevo en un rato.'});
+  }
+  _iaChatPintar();
+}
+function _iaChatPintar(){
+  const chat=document.getElementById('eco-ia-chat');
+  if(!chat) return;
+  const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+  chat.innerHTML=_iaChatHist.map(m=> m.role==='user'
+    ? '<div style="display:flex;justify-content:flex-end;margin:6px 0"><div style="max-width:82%;background:var(--accent);color:#fff;border-radius:14px 14px 3px 14px;padding:9px 13px;font-size:12.5px;font-weight:500;line-height:1.5">'+esc(m.content)+'</div></div>'
+    : '<div style="display:flex;gap:8px;margin:6px 0"><div style="font-size:16px;flex:none">🤖</div><div style="max-width:85%;background:var(--bg2);border:1px solid var(--border);border-radius:3px 14px 14px 14px;padding:9px 13px;font-size:12.5px;color:var(--text);font-weight:500;line-height:1.6">'+esc(m.content)+'</div></div>'
+  ).join('');
+  chat.scrollTop=chat.scrollHeight;
+}
+
 function _ecoModalShell(inner, maxw, fullHeight){
   const ov=document.createElement('div');
   ov.className='eco-modal-ov';
