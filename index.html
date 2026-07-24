@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v241 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v242 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -31928,7 +31928,10 @@ function ecoRenderKPIs(gastos, y, totMes){
   const kAcreditar='<div onclick="ecoOpenLista(\'acreditar\')" title="Clic para ver/editar" style="flex:1;min-width:150px;background:var(--card);border:1px solid var(--border);border-radius:11px;padding:11px 13px;cursor:pointer"><div style="font-size:10px;color:var(--text3);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">⏳ A ACREDITARSE</div><div style="font-size:18px;font-weight:800;color:var(--text);line-height:1.15;margin-top:2px">$'+Math.round(acr.pesos).toLocaleString('es-AR')+'</div><div style="font-size:11px;color:#16a34a;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">US$'+Math.round(acr.dolares).toLocaleString('es-AR')+'</div></div>';
   // KPI Ahorros
   const aho=_ecoListaTotales('ahorros');
-  const kAhorros='<div onclick="ecoOpenLista(\'ahorros\')" title="Clic para ver/editar" style="flex:1;min-width:150px;background:var(--card);border:1px solid var(--border);border-radius:11px;padding:11px 13px;cursor:pointer"><div style="font-size:10px;color:var(--text3);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">🐷 AHORROS</div><div style="font-size:18px;font-weight:800;color:var(--text);line-height:1.15;margin-top:2px">$'+Math.round(aho.pesos).toLocaleString('es-AR')+'</div><div style="font-size:11px;color:#16a34a;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">US$'+Math.round(aho.dolares).toLocaleString('es-AR')+'</div></div>';
+  // v242: si el ahorro quedó en negativo, tanto el valor en pesos como el de
+  // dólares se pintan en rojo — a simple vista se ve que hay un problema.
+  const ahoNeg = (aho.pesos<0 || aho.dolares<0);
+  const kAhorros='<div onclick="ecoOpenLista(\'ahorros\')" title="Clic para ver/editar" style="flex:1;min-width:150px;background:var(--card);border:1px solid var(--border);border-radius:11px;padding:11px 13px;cursor:pointer"><div style="font-size:10px;color:var(--text3);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">🐷 AHORROS</div><div style="font-size:18px;font-weight:800;color:'+(ahoNeg?'#dc2626':'var(--text)')+';line-height:1.15;margin-top:2px">$'+Math.round(aho.pesos).toLocaleString('es-AR')+'</div><div style="font-size:11px;color:'+(ahoNeg?'#dc2626':'#16a34a')+';font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">US$'+Math.round(aho.dolares).toLocaleString('es-AR')+'</div></div>';
 
   cont.innerHTML =
     K('💸','GASTADO '+ECO_MESES_FULL[mesRef].toUpperCase(), _ecoFmt(totMesActual), (y===cy?'mes en curso':'diciembre'), 'var(--text)')+
@@ -32110,7 +32113,22 @@ function _iaCtx(){
   // análisis vs inflación (reusa los helpers de Métricas)
   const fam=_ecoMetVsInflSerie(win, win.map(r=> (r.sc!=null||r.sb!=null||r.v!=null)? (r.sc||0)+(r.sb||0)+(r.v||0) : null));
   const mesPag=_iaPagosMes(+hoyYm.slice(0,4), +hoyYm.slice(5,7)-1);   // v241
+  // v242: réplica EXACTA de los KPIs de la sección Economía — misma fuente,
+  // mismos números. Antes la Caja mezclaba la lista de Ahorros convertida a
+  // pesos y no coincidía con lo que muestran los KPIs de arriba.
+  //   ⚖️ SALDO      = Activos ($) − Por pagar del año (celdas rojas+amarillas)
+  //   ⏳ ACREDITARSE = pesos y dólares POR SEPARADO (los KPIs no los mezclan)
+  const kpiY=+hoyYm.slice(0,4);
+  let porPagarAno=0;
+  (_ecoState.gastos||[]).forEach(g=>{
+    for(let m2=0;m2<12;m2++){
+      const v=_ecoVal(g,kpiY,m2), st=_ecoEst(g,kpiY,m2);
+      if((st==='porpagar'||st==='estimado') && typeof v==='number') porPagarAno+=v;
+    }
+  });
+  const saldoKpi=(act.pesos||0)-porPagarAno;
   return { rows, win, conSaldo, u, hoyYm, dAct, gastoProm, gastoPromUsd, saldoProm,
+    porPagarAno, saldoKpi,
     aho, acr, act, cajaUsd, acrUsd, tarjetas, agenda, pagos30, mesPag, fam,
     sc:_ecoMetVsInfl(win,'sc'), sb:_ecoMetVsInfl(win,'sb'), v:_ecoMetVsInfl(win,'v'),
     g:_ecoMetVsInfl(win,'g'), dol:_ecoMetVsInfl(win,'d'), tz:_ecoMetVsInfl(win,'tz') };
@@ -32274,27 +32292,32 @@ function _iaSecciones(c){
     }
   }
 
-  // ── 💰 CAJA DEL HOGAR (v239: TODO EN PESOS — es caja cotidiana) ────────
-  if(cajaPesos>0 || acrPesos>0 || c.pagos30>0){
-    const proye=cajaPesos+acrPesos;
-    const sobra=proye-c.pagos30;
-    const dias=(c.gastoProm>0)? Math.round(proye/(c.gastoProm/30)) : null;
-    const niv= sobra<0?'crit':(dias!=null&&dias<45?'riesgo':(dias!=null&&dias<90?'aten':'ok'));
+  // ── 💰 CAJA DEL HOGAR (v242: MISMOS NÚMEROS que los KPIs de Economía) ──
+  // Fórmula oficial de la sección: ⚖️ Saldo = 🏦 Activos − 🔴 Por pagar (año),
+  // y proyectada = Saldo + ⏳ A acreditarse (pesos). Los US$ van aparte, como
+  // en los KPIs — no se mezclan con la caja en pesos.
+  if((c.act.pesos||0)!==0 || c.porPagarAno>0 || (c.acr.pesos||0)>0){
+    const proye=c.saldoKpi+(c.acr.pesos||0);
+    const dias=(c.gastoProm>0 && proye>0)? Math.round(proye/(c.gastoProm/30)) : null;
+    const niv= proye<0?'crit':(c.saldoKpi<0?'riesgo':(dias!=null&&dias<45?'riesgo':(dias!=null&&dias<90?'aten':'ok')));
+    const usdExtra=[];
+    if((c.act.dolares||0)>0) usdExtra.push('activos US$'+Math.round(c.act.dolares).toLocaleString('es-AR'));
+    if((c.acr.dolares||0)>0) usdExtra.push('a acreditar US$'+Math.round(c.acr.dolares).toLocaleString('es-AR'));
+    if((c.aho.dolares||0)!==0) usdExtra.push('ahorros US$'+Math.round(c.aho.dolares).toLocaleString('es-AR'));
     const html=
-      '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">'+
-        chip('info','Disponible '+_IA_V(cajaPesos))+
-        (acrPesos>0? chip('info','+ a acreditar '+_IA_V(acrPesos)) : '')+
-        chip('info','= proyectada <b>'+_IA_V(proye)+'</b>')+
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;align-items:center">'+
+        chip('info','🏦 Activos '+_IA_V(c.act.pesos||0))+
+        chip(c.porPagarAno>0?'crit':'info','− por pagar '+_IA_V(c.porPagarAno))+
+        chip(c.saldoKpi>=0?'ok':'crit','= ⚖️ saldo <b>'+(c.saldoKpi>=0?'+':'−')+_IA_V(Math.abs(c.saldoKpi)).slice(1)+'</b>')+
+        ((c.acr.pesos||0)>0? chip('info','+ ⏳ a acreditar '+_IA_V(c.acr.pesos)) : '')+
+        chip(proye>=0?'ok':'crit','= proyectada <b>'+(proye>=0?'':'−')+_IA_V(Math.abs(proye)).slice(1)+'</b>')+
       '</div>'+
-      (c.pagos30>0? '<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">'+
-        '<span style="font-size:10.5px;font-weight:700;color:#475569;white-space:nowrap">Pagos 30 días '+_IA_V(c.pagos30)+'</span>'+
-        barra(c.pagos30/Math.max(proye,1)*100, sobra>=0?'#16a34a':'#dc2626')+'</div>' : '')+
-      li(sobra>=0? 'Después de los pagos del mes quedan <b>'+_IA_V(sobra)+'</b>.' : '⚠ La caja proyectada <b>no cubre</b> los pagos: faltan <b>'+_IA_V(Math.abs(sobra))+'</b>.')+
-      // v241: qué parte del mes ya salió de la caja y qué parte todavía va a salir
+      li(proye>=0? 'Cobrando lo pendiente, la caja queda en <b>'+_IA_V(proye)+'</b>.'
+                 : '⚠ Aun cobrando lo pendiente, la caja queda <b>'+_IA_V(Math.abs(proye))+' abajo</b>: los pagos del año superan los activos.')+
       ((c.mesPag && (c.mesPag.pagado>0||c.mesPag.pendiente>0))?
         li('Gastos de este mes: <b style="color:#16a34a">'+_IA_V(c.mesPag.pagado)+' ya pagados</b> ✅ · <b style="color:#dc2626">'+_IA_V(c.mesPag.pendiente)+' pendientes</b> (celdas rojas/amarillas/azules).') : '')+
-      (dias!=null? li('Al ritmo actual de gasto, alcanza para <b>'+dias+' días</b>'+(colchonM!=null?' ('+colchonM.toFixed(1)+' meses de colchón)':'')+'.') : '')+
-      '<div style="font-size:10px;color:#64748b;font-weight:500;margin-top:4px">Los dólares están valuados al oficial ('+_IA_V(c.dAct)+'); el detalle en US$ vive en 📊 Métricas.</div>';
+      (dias!=null? li('La caja proyectada cubre <b>'+dias+' días</b> al ritmo de gasto actual.') : '')+
+      (usdExtra.length? '<div style="font-size:10px;color:#64748b;font-weight:500;margin-top:4px">En US$ (aparte, como en los KPIs): '+usdExtra.join(' · ')+'.</div>' : '');
     add(75,'💰','Caja del hogar',niv,html);
   }
 
@@ -32444,7 +32467,8 @@ function _iaSecciones(c){
   {
     const pr=[];
     if(c.saldoProm!=null && c.saldoProm<0) pr.push('Recortar gastos variables este mes');
-    if(acrPesos>1000) pr.push('Cobrar lo pendiente de acreditar ('+_IA_V(acrPesos)+')');
+    if((c.acr.pesos||0)>1000 || (c.acr.dolares||0)>0)
+      pr.push('Cobrar lo pendiente de acreditar ('+_IA_V(c.acr.pesos||0)+((c.acr.dolares||0)>0?' + US$'+Math.round(c.acr.dolares).toLocaleString('es-AR'):'')+')');
     if(c.tz && c.tz.pts<-5) pr.push('Actualizar la Lista de Precios (taza atrasada)');
     if(c.dol && c.dol.pts<-5 && c.saldoProm!=null && c.saldoProm>=0) pr.push('Pasar excedente a dólares (está barato)');
     if(c.sb && c.sb.pts<-15) pr.push('Renegociar el sueldo B (muy atrás del IPC)');
@@ -32574,9 +32598,28 @@ function _iaDossier(c){
   const vs=(nom,d)=>{ if(d) L.push(nom+': var '+d.varPct.toFixed(1)+'% vs IPC '+d.inflPct.toFixed(1)+'% ('+(d.pts>=0?'+':'')+d.pts.toFixed(0)+' pts; para empatar deberia ser '+F(d.objetivo)+').'); };
   vs('SUELDO C 12m',c.sc); vs('SUELDO B 12m',c.sb); vs('VENTAS 12m',c.v); vs('GASTOS 12m',c.g); vs('DOLAR 12m',c.dol); vs('PRECIO TAZA 12m',c.tz);
   if(c.saldoProm!=null) L.push('FLUJO promedio 12m: US$'+F(c.saldoProm)+'/mes. Gasto promedio: $'+F(c.gastoProm||0)+' (US$'+F(c.gastoPromUsd||0)+').');
-  L.push('CAJA: ahorros US$'+F(c.cajaUsd)+' (+ a acreditar US$'+F(c.acrUsd)+'). Activos: $'+F(c.act.pesos||0)+' + US$'+F(c.act.dolares||0)+'. Pagos proximos 30 dias: $'+F(c.pagos30)+'.');
+  // v242: los mismos números que los KPIs de la sección Economía
+  L.push('KPIS DE ECONOMIA (fuente oficial): ACTIVOS $'+F(c.act.pesos||0)+' + US$'+F(c.act.dolares||0)+'. POR PAGAR del anio (celdas rojas+amarillas): $'+F(c.porPagarAno||0)+'. SALDO (activos - por pagar): $'+F(c.saldoKpi||0)+'. A ACREDITARSE: $'+F(c.acr.pesos||0)+' + US$'+F(c.acr.dolares||0)+'. AHORROS: $'+F(c.aho.pesos||0)+' + US$'+F(c.aho.dolares||0)+'. Caja proyectada = saldo + a acreditarse en pesos = $'+F((c.saldoKpi||0)+(c.acr.pesos||0))+'. Colchon en US$ (ahorros valuados): US$'+F(c.cajaUsd)+'. Pagos proximos 30 dias: $'+F(c.pagos30)+'.');
   if(c.mesPag) L.push('GASTOS DEL MES ACTUAL POR ESTADO: ya pagados $'+F(c.mesPag.pagado)+' (celdas blancas o verdes: esa plata YA salio de la caja), pendientes de pago $'+F(c.mesPag.pendiente)+' (celdas rojas=por pagar, amarillas=estimado, azules=proximos: esa plata VA A salir). Las celdas grises no corresponden ese mes. IMPORTANTE: al analizar liquidez, del total del mes solo lo pendiente compromete la caja de aca en adelante.');
   c.tarjetas.forEach(t=>{ if(t.totalMes>0||t.cuotasPend>0) L.push('TARJETA '+t.n+': este mes $'+F(t.totalMes)+(t.totalSig!=null?', proximo $'+F(t.totalSig):'')+', cuotas pendientes '+t.cuotasPend+' por $'+F(t.compFuturo)+(t.finCuotas?' (terminan '+t.finCuotas+')':'')+'. Cierra dia '+t.cfg.cierre+', vence dia '+t.cfg.venc+'.'); });
+  // v242: detalle de CADA compra cargada en los resumenes de tarjeta, para que
+  // la IA pueda responder "cuando termino de pagar X" o simular compras nuevas.
+  try{
+    (_ecoState.gastos||[]).forEach(g=>{
+      if(g.cat!=='Tarjetas' || !g.res) return;
+      (g.res.items||[]).slice(-15).forEach(it=>{
+        const desde=_ecoResDesdeDe(g,it); if(!desde) return;
+        const cuo=Math.max(1,Math.round(+it.cuo||1));
+        const fin=_ecoYmAdd(desde,cuo-1);
+        if(fin < _ecoYmAdd(c.hoyYm,-3)) return;   // terminadas hace mucho no aportan
+        const fact=Math.max(0,Math.min(cuo,_ecoYmDiff(desde,c.hoyYm)+1));
+        L.push('COMPRA en tarjeta '+g.n+': "'+String(it.n||'').slice(0,60)+'" fecha '+(it.f||'?')+', total $'+F(+it.imp||0)+' en '+cuo+' cuota(s) de $'+F((+it.imp||0)/cuo)+', primera cuota '+desde+', ULTIMA CUOTA (mes en que se termina de pagar): '+fin+', facturadas '+fact+' de '+cuo+'.');
+      });
+      (g.res.fijos||[]).forEach(fj=>{
+        L.push('CONCEPTO FIJO en tarjeta '+g.n+': "'+String(fj.n||'').slice(0,40)+'" = '+(fj.tipo==='pct'? (+fj.val||0)+'% de los consumos del mes' : '$'+F(+fj.val||0)+' fijo por mes')+'.');
+      });
+    });
+  }catch(e){}
   c.agenda.slice(0,8).forEach(a=>{ L.push('AGENDA '+(a.f? a.f.toISOString().slice(0,10):'s/f')+' '+(a.cobro?'COBRO ':'PAGO ')+a.txt+' $'+F(a.monto||0)+(a.montoUsd?' + US$'+F(a.montoUsd):'')); });
   // top gastos del mes
   if(c.u){
@@ -32597,7 +32640,8 @@ async function ecoIAPreguntar(){
   try{
     const c=_iaCtxCache||_iaCtx();
     const sys='Sos un asesor financiero profesional argentino. Hablás en español rioplatense (vos), claro y directo, sin alarmismo ni optimismo artificial. '+
-      'Respondé SOLO con base en los datos del usuario que siguen; si falta un dato, decilo. Máximo 6-8 líneas, con recomendaciones concretas y el porqué. Montos en $ o US$ como correspondan.\n\nDATOS DEL USUARIO:\n'+_iaDossier(c);
+      'Respondé SOLO con base en los datos del usuario que siguen; si falta un dato, decilo. Máximo 6-8 líneas, con recomendaciones concretas y el porqué. Montos en $ o US$ como correspondan. '+
+      'REGLAS DE TARJETAS (usalas para responder sobre compras y para SIMULAR compras nuevas): cada tarjeta tiene día de CIERRE y día de VENCIMIENTO (figuran en los datos). Una compra hecha DESPUÉS del día de cierre entra al resumen del mes SIGUIENTE; hecha antes o el mismo día, entra al de ese ciclo. Cuotas sin interés = total ÷ cuotas, una por mes desde la primera cuota. Si el usuario simula una compra nueva ("si compro X en N pagos, cuánto llega el resumen"), calculá el mes de la primera cuota con la regla del cierre, sumá la cuota a los totales de los próximos resúmenes que figuran en los datos y aplicá los conceptos fijos porcentuales (como IVA % de consumos) sobre los consumos nuevos. Para "cuándo termino de pagar X", buscá la compra en los datos y respondé con su ULTIMA CUOTA y el valor de la cuota.\n\nDATOS DEL USUARIO:\n'+_iaDossier(c);
     const r=await fetch(WORKER+'/ai',{ method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
       body: JSON.stringify({ system: sys, messages: _iaChatHist.slice(-6), max_tokens: 500, temperature: 0.4 }) });
     const d=await r.json();
