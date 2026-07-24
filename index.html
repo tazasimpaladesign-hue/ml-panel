@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v240 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v241 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -7534,7 +7534,7 @@ function dashRow(thumb, title, editUrl, metricHtml, statusActive){
   var onCl   = editUrl ? 'onclick="window.open(\''+editUrl+'\',\'_blank\')"' : '';
   var cursor = editUrl ? 'cursor:pointer;' : '';
   var imgEl  = thumb
-    ? '<img src="'+thumb+'" onerror="this.parentElement.textContent=\'☕\'">'
+    ? '<img loading="lazy" decoding="async" fetchpriority="low" src="'+String(thumb).replace('http://','https://')+'" onerror="this.parentElement.textContent=\'☕\'">'
     : '☕';
   return '<div style="display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid var(--border);'+cursor+'" '+onCl+'>'
     +'<div class="item-thumb" style="flex-shrink:0">'+imgEl+'</div>'
@@ -7593,7 +7593,7 @@ function renderDashTopPubs(){
       +(sc!=null?' · <span style="'+DASH_C_QUAL+'">Calidad: '+sc+'%</span>':'')
       +_mlaTag(itemId);
     const onCl    = editUrl ? 'onclick="window.open(\''+editUrl+'\',\'_blank\')"' : '';
-    const imgEl   = thumb ? '<img src="'+thumb+'" onerror="this.parentElement.textContent=\'☕\'">':'☕';
+    const imgEl   = thumb ? '<img loading="lazy" decoding="async" fetchpriority="low" src="'+String(thumb).replace('http://','https://')+'" onerror="this.parentElement.textContent=\'☕\'">':'☕';
     return '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);'+(editUrl?'cursor:pointer;':'')+'" '+onCl+'>'
       +'<span style="font-size:'+(idx<3?'15':'12')+'px;font-weight:700;color:var(--text3);width:20px;text-align:center;flex-shrink:0">'+medal+'</span>'
       +(arrow?'<span style="width:14px;flex-shrink:0">'+arrow+'</span>':'<span style="width:14px;flex-shrink:0"></span>')
@@ -9576,12 +9576,17 @@ const SEO_SCENARIOS = {
     description: 'ML marcó estas publicaciones como elegibles para competir en catálogo y todavía no compiten. Es el "Elegibles para competir" del Gestor.',
     actionMain:      'Optá por catálogo en las que tengas precio competitivo: ganás exposición compartida.',
     actionSecondary: 'Antes de optar, revisá precio vs competencia para no entrar perdiendo.',
-    filter: i => i.status === 'active' && !i.catalog_listing && !i.catalog_product_id &&
-                 Array.isArray(i.tags) && (i.tags.includes('catalog_listing_eligible') || i.tags.includes('catalog_boost')),
+    // v241: además del tag oficial, ML considera elegible a toda publicación
+    // ACTIVA que tiene un producto de catálogo asociado (catalog_product_id)
+    // pero todavía no compite (catalog_listing=false). Con el tag solo, el chip
+    // quedaba en 0 en cuentas donde ML no lo expone.
+    filter: i => i.status === 'active' && i.catalog_listing !== true &&
+                 ( (Array.isArray(i.tags) && (i.tags.includes('catalog_listing_eligible') || i.tags.includes('catalog_boost')))
+                   || !!i.catalog_product_id ),
   },
   'ml_politicas': {
     emoji: '🚫', label: 'Políticas ML', color: '#dc2626',
-    description: 'Inactivas o penalizadas por incumplir políticas de MercadoLibre (moderadas, suspendidas o en revisión). Es el "Inactivas por incumplir políticas" del Gestor.',
+    description: 'Inactivas o penalizadas por incumplir políticas de MercadoLibre (moderadas, suspendidas o en revisión). Es el "Inactivas por incumplir políticas" del Gestor. Si ves 0 y ML muestra casos, hacé un Refresh total para bajar el sub-estado actualizado de cada publicación.',
     actionMain:      'Entrá a cada publicación en ML y corregí la infracción indicada para reactivarla.',
     actionSecondary: 'Revisá marcas/imágenes con derechos y ficha técnica: son las causas más comunes.',
     filter: i => {
@@ -9615,14 +9620,21 @@ const SEO_SCENARIOS = {
     description: 'Activas con salud (health) de MercadoLibre por debajo del máximo: ML les pide completar objetivos de calidad. Es el "Con objetivos de calidad por lograr" del Gestor.',
     actionMain:      'Completá lo que pide ML: ficha técnica, fotos, video, EAN. Cada objetivo mejora exposición.',
     actionSecondary: 'Cruzalo con la columna Calidad del panel para atacar primero las de mayor tráfico.',
-    filter: i => i.status === 'active' && i.health != null && i.health < 1,
+    // v241: health puede venir en escala 0-1 o 0-100 según el endpoint que lo
+    // haya traído → normalizamos. Con <1 estricto y health=75 (escala 100) el
+    // chip contaba cualquier cosa o directamente 0.
+    filter: i => {
+      if(i.status !== 'active' || i.health == null) return false;
+      const h = (+i.health > 1) ? (+i.health / 100) : +i.health;
+      return h < 0.999;
+    },
   },
   'ml_ficha_tecnica': {
     emoji: '📋', label: 'Ficha Incompleta', color: '#ca8a04',
     description: 'ML las marcó con ficha técnica incompleta (pierden exposición hasta completarla). Es el "Con ficha técnica para revisar" del Gestor.',
     actionMain:      'Completá los atributos faltantes desde el editor masivo de ML o desde el panel.',
     actionSecondary: 'El EAN y la marca son los campos que más pesan para el posicionamiento.',
-    filter: i => Array.isArray(i.tags) && i.tags.some(t => String(t).includes('incomplete_technical_specs')),
+    filter: i => i.status === 'active' && Array.isArray(i.tags) && i.tags.some(t => String(t).includes('incomplete_technical_specs')),   // v241: solo activas
   },
   'ml_precio_mercado': {
     emoji: '💲', label: 'Precio vs Mercado', color: '#be123c',
@@ -21843,7 +21855,7 @@ function renderLast50(){
     var fecha    = sale.date
       ? new Date(sale.date).toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})
       : '—';
-    var imgEl    = thumb ? '<img src="'+thumb+'" onerror="this.parentElement.textContent=\'☕\'">':'☕';
+    var imgEl    = thumb ? '<img loading="lazy" decoding="async" fetchpriority="low" src="'+String(thumb).replace('http://','https://')+'" onerror="this.parentElement.textContent=\'☕\'">':'☕';
     var metric   =
       '<span style="color:var(--text3)">'+fecha+'</span>'
       +' · <span style="'+DASH_C_PRICE+'">$'+price.toLocaleString('es-AR')+'</span>'
@@ -29628,6 +29640,11 @@ function _ecoMarkDirty(){
   _ecoState.saveTimer = setTimeout(_ecoFlush, 8000);   // v236: agrupa varias
   // ediciones en un solo POST (el límite fino de KV son las ESCRITURAS: 1000/día).
   // localStorage ya guardó todo al instante, así que no se pierde nada.
+  // v241: TODO guardado de Economía pasa por acá (gastos, ingresos, activos,
+  // ahorros, acreditar, tarjetas) → es el punto perfecto para que el Asistente
+  // se reinterprete. Antes solo se recalculaba con ecoRender, y los modales de
+  // Ingresos/Ahorros guardaban sin repintar la sección → quedaba viejo.
+  try{ _iaCtxCache=null; ecoIASchedule(); }catch(e){}
 }
 let _ecoUltimaFirma = null;   // v236: firma del último payload subido con éxito
 async function _ecoFlush(){
@@ -31997,6 +32014,25 @@ const _IA_V=n=>'$'+Math.round(n).toLocaleString('es-AR');
 const _IA_MC=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 const _IA_lblYm=ym=>_IA_MC[+ym.slice(5,7)-1]+' '+ym.slice(2,4);
 
+// v241 ── SEMÁNTICA DE COLORES DE LA PLANILLA (clave para leer bien la caja):
+//   · blanco (sin estado) o 🟢 verde  → gasto YA PAGADO: esa plata ya salió
+//   · 🔴 rojo (por pagar) · 🟡 amarillo (estimado) · 🔵 azul (próximos)
+//                                     → gasto PENDIENTE: esa plata va a salir
+//   · gris / no aplica               → ese mes no corresponde: se excluye
+// El total de un mes NO es lo que falta pagar: hay que descontar lo blanco/verde.
+function _iaPagosMes(y,m){
+  let pagado=0, pendiente=0;
+  (_ecoState.gastos||[]).forEach(g=>{
+    const v=_ecoVal(g,y,m);
+    if(typeof v!=='number'||v<=0) return;
+    const st=_ecoEst(g,y,m)||'';
+    if(st==='gris'||st==='na') return;
+    if(st==='porpagar'||st==='estimado'||st==='proximos') pendiente+=v;
+    else pagado+=v;                       // blanco o verde = ya pagado
+  });
+  return { pagado, pendiente };
+}
+
 // ── CONTEXTO: junta todos los datos del sistema ────────────────────────────
 function _iaCtx(){
   const yms=_ecoMetYms(); const rows=[]; let prev=null;
@@ -32058,9 +32094,10 @@ function _iaCtx(){
       const ymP=_ecoYmAdd(hoyYm,k); const y=+ymP.slice(0,4), m=+ymP.slice(5,7)-1;
       const v=_ecoVal(g,y,m), st=_ecoEst(g,y,m);
       if(typeof v!=='number'||v<=0) return;
-      if(st==='porpagar'||st==='proximos'){
+      // v241: los 🟡 estimados también son plata que va a salir
+      if(st==='porpagar'||st==='proximos'||st==='estimado'){
         const dV=new Date(y,m,10);
-        if(en30(dV)) agenda.push({ f:dV, e:(st==='porpagar'?'🔴':'🔵'), txt:(g.e?g.e+' ':'')+g.n, monto:v });
+        if(en30(dV)) agenda.push({ f:dV, e:(st==='porpagar'?'🔴':(st==='estimado'?'🟡':'🔵')), txt:(g.e?g.e+' ':'')+g.n, monto:v });
       }
     });
   });
@@ -32072,8 +32109,9 @@ function _iaCtx(){
   const pagos30=agenda.filter(x=>!x.cobro).reduce((s,x)=>s+(x.monto||0),0);
   // análisis vs inflación (reusa los helpers de Métricas)
   const fam=_ecoMetVsInflSerie(win, win.map(r=> (r.sc!=null||r.sb!=null||r.v!=null)? (r.sc||0)+(r.sb||0)+(r.v||0) : null));
+  const mesPag=_iaPagosMes(+hoyYm.slice(0,4), +hoyYm.slice(5,7)-1);   // v241
   return { rows, win, conSaldo, u, hoyYm, dAct, gastoProm, gastoPromUsd, saldoProm,
-    aho, acr, act, cajaUsd, acrUsd, tarjetas, agenda, pagos30, fam,
+    aho, acr, act, cajaUsd, acrUsd, tarjetas, agenda, pagos30, mesPag, fam,
     sc:_ecoMetVsInfl(win,'sc'), sb:_ecoMetVsInfl(win,'sb'), v:_ecoMetVsInfl(win,'v'),
     g:_ecoMetVsInfl(win,'g'), dol:_ecoMetVsInfl(win,'d'), tz:_ecoMetVsInfl(win,'tz') };
 }
@@ -32252,6 +32290,9 @@ function _iaSecciones(c){
         '<span style="font-size:10.5px;font-weight:700;color:#475569;white-space:nowrap">Pagos 30 días '+_IA_V(c.pagos30)+'</span>'+
         barra(c.pagos30/Math.max(proye,1)*100, sobra>=0?'#16a34a':'#dc2626')+'</div>' : '')+
       li(sobra>=0? 'Después de los pagos del mes quedan <b>'+_IA_V(sobra)+'</b>.' : '⚠ La caja proyectada <b>no cubre</b> los pagos: faltan <b>'+_IA_V(Math.abs(sobra))+'</b>.')+
+      // v241: qué parte del mes ya salió de la caja y qué parte todavía va a salir
+      ((c.mesPag && (c.mesPag.pagado>0||c.mesPag.pendiente>0))?
+        li('Gastos de este mes: <b style="color:#16a34a">'+_IA_V(c.mesPag.pagado)+' ya pagados</b> ✅ · <b style="color:#dc2626">'+_IA_V(c.mesPag.pendiente)+' pendientes</b> (celdas rojas/amarillas/azules).') : '')+
       (dias!=null? li('Al ritmo actual de gasto, alcanza para <b>'+dias+' días</b>'+(colchonM!=null?' ('+colchonM.toFixed(1)+' meses de colchón)':'')+'.') : '')+
       '<div style="font-size:10px;color:#64748b;font-weight:500;margin-top:4px">Los dólares están valuados al oficial ('+_IA_V(c.dAct)+'); el detalle en US$ vive en 📊 Métricas.</div>';
     add(75,'💰','Caja del hogar',niv,html);
@@ -32489,7 +32530,9 @@ function ecoIARender(){
         '<div style="font-size:20px">🤖</div>'+
         '<div><div class="card-title" style="margin:0">Asistente Financiero</div>'+
         '<div style="font-size:10.5px;color:var(--text3)">Analiza todo el sistema en cada cambio · actualizado '+hora+'</div></div>'+
-        '<span id="eco-ia-arrow" style="margin-left:auto;font-size:14px;color:var(--text3)">'+(abierto?'▾':'▸')+'</span>'+
+        '<button onclick="event.stopPropagation();ecoIARefrescar(this)" title="Recalcular el análisis con los datos actuales" '+
+          'style="margin-left:auto;border:1px solid var(--border);background:var(--card);color:var(--text2);border-radius:8px;padding:5px 11px;font-size:11.5px;font-weight:700;cursor:pointer;flex:none">🔄 Actualizar análisis</button>'+
+        '<span id="eco-ia-arrow" style="font-size:14px;color:var(--text3)">'+(abierto?'▾':'▸')+'</span>'+
       '</div>'+
       '<div id="eco-ia-body" style="display:'+(abierto?'block':'none')+';margin-top:12px">'+
         (estado? '<div style="background:linear-gradient(135deg,#eff6ff,#eef2ff);border:1px solid #c7d2fe;border-left:4px solid '+(_IA_NIV[estado.nivel]||_IA_NIV.info).c+';border-radius:11px;padding:13px 15px;margin-bottom:10px;box-shadow:0 1px 3px rgba(15,23,42,.06)">'+
@@ -32506,6 +32549,13 @@ function ecoIARender(){
       '</div>'+
     '</div>';
   if(_iaChatHist.length) _iaChatPintar();
+}
+// v241: recalcula el análisis al instante, descartando cualquier cache
+function ecoIARefrescar(btn){
+  if(btn){ btn.textContent='⏳ Analizando…'; btn.disabled=true; }
+  _iaCtxCache=null;
+  clearTimeout(_iaTimer);
+  setTimeout(ecoIARender, 60);
 }
 function ecoIAToggle(){
   const b=document.getElementById('eco-ia-body'), a=document.getElementById('eco-ia-arrow');
@@ -32525,6 +32575,7 @@ function _iaDossier(c){
   vs('SUELDO C 12m',c.sc); vs('SUELDO B 12m',c.sb); vs('VENTAS 12m',c.v); vs('GASTOS 12m',c.g); vs('DOLAR 12m',c.dol); vs('PRECIO TAZA 12m',c.tz);
   if(c.saldoProm!=null) L.push('FLUJO promedio 12m: US$'+F(c.saldoProm)+'/mes. Gasto promedio: $'+F(c.gastoProm||0)+' (US$'+F(c.gastoPromUsd||0)+').');
   L.push('CAJA: ahorros US$'+F(c.cajaUsd)+' (+ a acreditar US$'+F(c.acrUsd)+'). Activos: $'+F(c.act.pesos||0)+' + US$'+F(c.act.dolares||0)+'. Pagos proximos 30 dias: $'+F(c.pagos30)+'.');
+  if(c.mesPag) L.push('GASTOS DEL MES ACTUAL POR ESTADO: ya pagados $'+F(c.mesPag.pagado)+' (celdas blancas o verdes: esa plata YA salio de la caja), pendientes de pago $'+F(c.mesPag.pendiente)+' (celdas rojas=por pagar, amarillas=estimado, azules=proximos: esa plata VA A salir). Las celdas grises no corresponden ese mes. IMPORTANTE: al analizar liquidez, del total del mes solo lo pendiente compromete la caja de aca en adelante.');
   c.tarjetas.forEach(t=>{ if(t.totalMes>0||t.cuotasPend>0) L.push('TARJETA '+t.n+': este mes $'+F(t.totalMes)+(t.totalSig!=null?', proximo $'+F(t.totalSig):'')+', cuotas pendientes '+t.cuotasPend+' por $'+F(t.compFuturo)+(t.finCuotas?' (terminan '+t.finCuotas+')':'')+'. Cierra dia '+t.cfg.cierre+', vence dia '+t.cfg.venc+'.'); });
   c.agenda.slice(0,8).forEach(a=>{ L.push('AGENDA '+(a.f? a.f.toISOString().slice(0,10):'s/f')+' '+(a.cobro?'COBRO ':'PAGO ')+a.txt+' $'+F(a.monto||0)+(a.montoUsd?' + US$'+F(a.montoUsd):'')); });
   // top gastos del mes
