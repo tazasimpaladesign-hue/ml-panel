@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v244 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v245 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1401,6 +1401,8 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <span style="font-size:11px;color:var(--text3);font-weight:600;white-space:nowrap;padding-top:5px">Escenarios:</span>
       <div class="chips" id="seo-scenario-chips" style="margin:0;gap:5px;flex:1"></div>
     </div>
+    <!-- v245: filtros dinámicos declarados por el servidor de ML -->
+    <div id="seo-mlfilters" style="display:none;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-top:6px"></div>
     <!-- v79: Panel descriptivo del escenario activo (vacío si no hay ninguno seleccionado) -->
     <div id="seo-scenario-info" style="display:none;margin-top:8px;background:var(--bg2);border:1px solid var(--border);border-left-width:4px;border-radius:6px;padding:10px 14px;font-size:12px;line-height:1.45"></div>
   </div>
@@ -1419,6 +1421,8 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <button class="btn btn-ghost btn-sm" onclick="loadSEOMetrics()" id="seo-metrics-btn" title="Carga TODO desde ML: visitas reales, fecha de modificación, tiempo de disponibilidad y descuentos. Los datos quedan guardados y visibles (también en otras PCs) hasta que lo vuelvas a tocar. Pausado para no saturar.">📊 Cargar métricas</button>
         <button class="btn btn-ghost btn-sm" onclick="loadSEOMetricsFull()" id="seo-metrics-full-btn" title="Forzar refresh COMPLETO: borra el caché local y vuelve a pedir todas las métricas a ML. Más lento pero garantiza datos 100% frescos.">🔄 Refresh total</button>
         <button class="btn btn-ghost btn-sm" onclick="abrirDescuentoMasivo()" id="seo-desc-masivo-btn" title="Aplicar un descuento propio a TODAS las publicaciones que tenés filtradas en este momento (usá los escenarios y la búsqueda para filtrar primero)." style="border:1px solid #16a34a;color:#16a34a;white-space:nowrap">🏷️ Descuento masivo</button>
+        <button class="btn btn-ghost btn-sm" onclick="seoCampaniasOpen()" title="Campañas y promociones que ML tiene disponibles o activas para tu cuenta, con su estado. Las de tipo descuento por ítem estancado se cruzan con el Termómetro Bajo.">🎫 Campañas ML</button>
+        <button class="btn btn-ghost btn-sm" onclick="seoTendenciasOpen()" title="Las búsquedas en tendencia de tus categorías principales en MercadoLibre — ideas para nuevos diseños.">📈 Tendencias</button>
         <button class="btn btn-ghost btn-sm" onclick="analyzeSEOAll()">↻ Actualizar</button>
         <button class="btn btn-primary btn-sm" onclick="seoExportOpen()" id="seo-export-btn" title="Exportar las publicaciones filtradas a un archivo .xlsx para subir a una IA y pedirle estrategia">📥 Exportar reporte</button>
         <button class="btn btn-ghost btn-sm" onclick="seoImportOpen()" id="seo-import-btn" title="Importar un .xlsx (con el mismo formato del reporte) para hacer cambios masivos en MercadoLibre: SKU, estado, precio, stock, código universal y tiempo de disponibilidad" style="border:1px solid var(--accent);color:var(--accent)">📤 Importar cambios</button>
@@ -9656,6 +9660,13 @@ const SEO_SCENARIOS = {
       return i.status === 'active' && Array.isArray(i.tags) && i.tags.some(t => String(t).includes('incomplete_technical_specs'));
     },
   },
+  'ml_reputacion': {
+    emoji: '🧯', label: 'Daña Reputación', color: '#b91c1c',
+    description: 'Publicaciones que MercadoLibre marca como dañinas para tu reputación (reputation_health_gauge=unhealthy): cancelaciones, reclamos o demoras concentrados. Conteo oficial del servidor.',
+    actionMain:      'Revisá stock real, tiempos de despacho y descripción de cada una: son las que te bajan el termómetro.',
+    actionSecondary: 'Si una no la podés sostener bien, pausala: una venta problemática cuesta más que no vender.',
+    filter: i => { const srv=_mlSrvGet('ml_reputacion'); return !!(srv && srv.ids.length && srv.ids.includes(i.id)); },
+  },
   'ml_precio_mercado': {
     emoji: '💲', label: 'Precio vs Mercado', color: '#be123c',
     description: 'Publicaciones con precio ALTO según las sugerencias de precio de MercadoLibre (incluye "precio mínimo por encima de la competencia" y "precio alto" del Gestor). Requiere un análisis bajo demanda: apretá el botón de abajo.',
@@ -9946,6 +9957,7 @@ const SEO_SCENARIO_ORDER = [
   // v240: espejo de Gestión de publicaciones de ML
   'ml_politicas', 'ml_pendientes', 'ml_volver_vender', 'ml_elegible_catalogo',
   'ml_objetivo_calidad', 'ml_ficha_tecnica', 'ml_precio_mercado', 'ml_ganar_catalogo',
+  'ml_reputacion',
 ];
 
 // v80: ¿Califica un ítem para un escenario? Esta función es la fuente de verdad
@@ -10480,6 +10492,7 @@ function renderSEOSection(){
 // Con esto los chips dejan de ser heurísticas locales y muestran lo mismo que ML.
 // Cache 6 h en localStorage; el botón del panel de info permite forzar.
 const ML_SRV_QUERIES = {
+  ml_reputacion:        ['reputation_health_gauge=unhealthy'],   // v245
   ml_elegible_catalogo: ['tags=catalog_listing_eligible'],
   ml_politicas:         ['status=under_review'],
   ml_pendientes:        ['sub_status=warning', 'sub_status=waiting_for_patch'],
@@ -10490,7 +10503,7 @@ let _mlSrv=null;   // { ts, data:{ key:{ total, ids:[...] } } }
 function _mlSrvLoad(){
   if(_mlSrv) return _mlSrv;
   try{ const d=JSON.parse(localStorage.getItem('mlp_srv_esc_v1')||'null');
-    if(d && d.ts && Date.now()-d.ts < 6*3600*1000 && d.data){ _mlSrv=d; return d; }
+    if(d && d.ts && Date.now()-d.ts < 24*3600*1000 && d.data){ _mlSrv=d; return d; }   // v245: 24 h
   }catch(e){}
   _mlSrv={ ts:0, data:{} };
   return _mlSrv;
@@ -10514,7 +10527,7 @@ async function _mlSrvQuery(q, maxIds){
 
 async function seoMLServerSync(force){
   const cache=_mlSrvLoad();
-  if(!force && cache.ts && Date.now()-cache.ts < 6*3600*1000) return cache;
+  if(!force && cache.ts && Date.now()-cache.ts < 24*3600*1000) return cache;   // v245: 24 h
   for(const key of Object.keys(ML_SRV_QUERIES)){
     try{
       let total=0, ids=[];
@@ -10526,6 +10539,12 @@ async function seoMLServerSync(force){
       cache.data[key]={ total, ids };
     }catch(e){ console.warn('[ml srv]', key, e.message); }
   }
+  // v245: filtros dinámicos que el propio servidor declara disponibles
+  // (available_filters trae cada filtro con sus valores y CONTEOS exactos)
+  try{
+    const base=await mlGet('/users/'+userId+'/items/search?limit=1');
+    if(base && Array.isArray(base.available_filters)) cache.filters=base.available_filters;
+  }catch(e){}
   cache.ts=Date.now();
   _mlSrv=cache;
   try{ localStorage.setItem('mlp_srv_esc_v1', JSON.stringify(cache)); }catch(e){}
@@ -10616,9 +10635,135 @@ async function seoLazyAnalizar(tipo){
 let _seoActiveScenario = null;
 
 // Renderizar todos los chips de escenarios al cargar la sección
+// v245 ── chips dinámicos: lo que el servidor de ML declara filtrable, con
+// sus conteos exactos. Clic → baja los IDs de ese filtro y filtra la tabla.
+function renderMLDynFilters(){
+  const cont=document.getElementById('seo-mlfilters');
+  if(!cont) return;
+  const cache=_mlSrvLoad();
+  const fl=cache.filters;
+  if(!Array.isArray(fl) || !fl.length){ cont.style.display='none'; return; }
+  const INTERES=['status','sub_status','tags','listing_type_id','catalog_listing','shipping'];
+  const grupos=fl.filter(f=>INTERES.includes(f.id) && Array.isArray(f.values) && f.values.length);
+  if(!grupos.length){ cont.style.display='none'; return; }
+  cont.style.display='flex';
+  cont.innerHTML='<span style="font-size:11px;color:var(--text3);font-weight:600;white-space:nowrap;padding-top:4px">📡 Filtros ML:</span>'+
+    '<div style="display:flex;gap:4px;flex-wrap:wrap;flex:1">'+
+    grupos.map(f=>f.values.slice(0,10).map(v=>{
+      const q=f.id+'='+encodeURIComponent(v.id);
+      const activo=_mlDynSel && _mlDynSel.q===q;
+      return '<span onclick="seoMLDynApply(\''+q.replace(/'/g,"\\'")+'\',\''+String(f.name+': '+v.name).replace(/'/g,'')+'\')" '+
+        'style="cursor:pointer;font-size:10px;font-weight:700;padding:3px 9px;border-radius:12px;border:1px solid '+(activo?'var(--accent)':'var(--border)')+';background:'+(activo?'var(--accent)':'var(--card)')+';color:'+(activo?'#fff':'var(--text2)')+';white-space:nowrap">'+
+        v.name+' <b>'+(v.results!=null?v.results:'')+'</b></span>';
+    }).join('')).join('')+
+    (_mlDynSel? '<span onclick="seoMLDynApply(null)" style="cursor:pointer;font-size:10px;font-weight:700;padding:3px 9px;border-radius:12px;border:1px solid #dc2626;color:#dc2626;background:var(--card)">✕ quitar filtro ML</span>':'')+
+    '</div>';
+}
+let _mlDynSel=null;
+// v245: consulta oficial de por qué una publicación es o no elegible a catálogo
+async function seoVerElegibilidad(){
+  const inp=document.getElementById('seo-eleg-id');
+  const out=document.getElementById('seo-eleg-out');
+  const id=(inp&&inp.value||'').trim().toUpperCase();
+  if(!id){ if(out) out.textContent='Pegá el ID (MLA…) de la publicación.'; return; }
+  if(out) out.textContent='Consultando…';
+  try{
+    const r=await mlGet('/items/'+id+'/catalog_listing_eligibility');
+    if(!r){ if(out) out.textContent='Sin respuesta de ML.'; return; }
+    const st=r.status||r.eligibility_status||'?';
+    const razones=(r.reasons||r.buyable_reasons||[]).map(x=>x.code||x).join(', ');
+    if(out) out.innerHTML='Estado: <b>'+st+'</b>'+(r.catalog_product_id?' · producto '+r.catalog_product_id:'')+(razones?' · motivos: '+razones:' · sin impedimentos ✓');
+  }catch(e){ if(out) out.textContent='⚠ '+(e.message||'error'); }
+}
+async function seoMLDynApply(q, label){
+  if(!q){ _mlDynSel=null; renderMLDynFilters(); renderSEOTable(); return; }
+  _mlDynSel={ q, label, ids:null };
+  renderMLDynFilters();
+  try{
+    const r=await _mlSrvQuery(q, 800);
+    _mlDynSel.ids=new Set(r.ids);
+    _mlDynSel.total=r.total;
+  }catch(e){ _mlDynSel=null; }
+  renderMLDynFilters(); renderSEOTable();
+}
+
+// ═══ v245 · 🎫 CAMPAÑAS ML ═════════════════════════════════════════════════
+async function seoCampaniasOpen(){
+  const ov=document.createElement('div');
+  ov.className='seo-camp-ov';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:100002;display:flex;align-items:flex-start;justify-content:center;padding:4vh 14px';
+  ov.innerHTML='<div style="background:var(--card);border-radius:14px;max-width:760px;width:100%;max-height:90vh;overflow:auto;padding:18px 20px;color:var(--text)">'+
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><div style="font-size:16px;font-weight:800">🎫 Campañas y promociones de ML</div>'+
+    '<button onclick="document.querySelector(\'.seo-camp-ov\').remove()" style="margin-left:auto;border:none;background:var(--bg2);width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:15px;color:var(--text2)">✕</button></div>'+
+    '<div id="seo-camp-body" style="font-size:12px;color:var(--text2)">Consultando a ML…</div></div>';
+  document.body.appendChild(ov);
+  const body=()=>document.getElementById('seo-camp-body');
+  try{
+    const r=await mlGet('/seller-promotions/users/'+userId+'?app_version=v2');
+    const lista=(r && (r.results||r.promotions)) || (Array.isArray(r)? r : []);
+    if(!lista.length){ body().innerHTML='ML no informa campañas disponibles ni activas en este momento.'; return; }
+    const EST={ started:['#16a34a','activa'], pending:['#ca8a04','pendiente'], candidate:['#2563eb','disponible: podés sumarte'], finished:['#64748b','finalizada'] };
+    body().innerHTML=lista.map(c2=>{
+      const st=String(c2.status||'').toLowerCase();
+      const e=EST[st]||['#64748b',st||'—'];
+      const tipo=String(c2.type||'').toUpperCase();
+      const stancado=/MARKDOWN|UNHEALTHY|SMART/.test(tipo);
+      const f=d=>d? String(d).slice(0,10).split('-').reverse().join('/') : '—';
+      return '<div style="border:1px solid var(--border);border-left:4px solid '+e[0]+';border-radius:10px;padding:10px 12px;margin-bottom:8px">'+
+        '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
+          '<b style="font-size:12.5px;color:var(--text)">'+(c2.name||tipo||'Campaña')+'</b>'+
+          '<span style="font-size:10px;font-weight:800;color:'+e[0]+';border:1px solid '+e[0]+';border-radius:10px;padding:1px 8px">'+e[1]+'</span>'+
+          '<span style="font-size:10px;color:var(--text3)">'+tipo+'</span>'+
+          '<span style="margin-left:auto;font-size:10.5px;color:var(--text3)">'+f(c2.start_date)+' → '+f(c2.finish_date)+'</span>'+
+        '</div>'+
+        (stancado? '<div style="font-size:10.5px;color:#c2410c;font-weight:600;margin-top:4px">🌡️ Descuento por ítems estancados: cruzala con el escenario "Termómetro Bajo" para elegir qué publicaciones sumar.</div>':'')+
+        ((c2.benefits&&c2.benefits.meli_percent!=null)? '<div style="font-size:10.5px;color:var(--text2);margin-top:3px">ML aporta '+c2.benefits.meli_percent+'%'+(c2.benefits.seller_percent!=null?' · vos '+c2.benefits.seller_percent+'%':'')+'</div>':'')+
+      '</div>';
+    }).join('');
+  }catch(e){ if(body()) body().innerHTML='⚠ No se pudo consultar: '+(e.message||'error'); }
+}
+
+// ═══ v245 · 📈 TENDENCIAS DE BÚSQUEDA ══════════════════════════════════════
+async function seoTendenciasOpen(){
+  const ov=document.createElement('div');
+  ov.className='seo-trend-ov';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:100002;display:flex;align-items:flex-start;justify-content:center;padding:4vh 14px';
+  ov.innerHTML='<div style="background:var(--card);border-radius:14px;max-width:860px;width:100%;max-height:90vh;overflow:auto;padding:18px 20px;color:var(--text)">'+
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><div style="font-size:16px;font-weight:800">📈 Tendencias de búsqueda en tus categorías</div>'+
+    '<button onclick="document.querySelector(\'.seo-trend-ov\').remove()" style="margin-left:auto;border:none;background:var(--bg2);width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:15px;color:var(--text2)">✕</button></div>'+
+    '<div style="font-size:10.5px;color:var(--text3);margin-bottom:10px">Lo que la gente está buscando en MercadoLibre dentro de tus categorías principales — ideas para nuevos diseños de tazas y productos.</div>'+
+    '<div id="seo-trend-body" style="font-size:12px;color:var(--text2)">Consultando a ML…</div></div>';
+  document.body.appendChild(ov);
+  const body=()=>document.getElementById('seo-trend-body');
+  try{
+    // top 3 categorías por cantidad de publicaciones activas
+    const cnt={};
+    (allItems||[]).forEach(i=>{ if(i&&i.status==='active'&&i.category_id) cnt[i.category_id]=(cnt[i.category_id]||0)+1; });
+    const tops=Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a]).slice(0,3);
+    if(!tops.length){ body().innerHTML='No hay categorías activas para consultar.'; return; }
+    const cols=[];
+    for(const cat of tops){
+      let nombre=cat;
+      try{ const ci=await mlGet('/categories/'+cat); if(ci&&ci.name) nombre=ci.name; }catch(e){}
+      let kws=[];
+      try{
+        const t2=await mlGet('/trends/MLA/'+cat);
+        kws=(Array.isArray(t2)? t2 : (t2&&t2.results)||[]).slice(0,20);
+      }catch(e){}
+      cols.push('<div style="flex:1;min-width:220px">'+
+        '<div style="font-size:12px;font-weight:800;color:var(--text);margin-bottom:6px">'+nombre+' <span style="font-weight:600;color:var(--text3)">('+cnt[cat]+' publicaciones)</span></div>'+
+        (kws.length? kws.map((k,i2)=>'<div style="display:flex;gap:7px;align-items:center;padding:3px 0;border-bottom:1px dashed var(--border);font-size:11.5px"><span style="font-weight:800;color:var(--text3);min-width:20px">'+(i2+1)+'.</span><a href="'+(k.url||'#')+'" target="_blank" style="color:var(--accent);text-decoration:none;font-weight:600">'+(k.keyword||'')+'</a></div>').join('')
+                   : '<div style="font-size:11px;color:var(--text3)">ML no publica tendencias para esta categoría.</div>')+
+      '</div>');
+    }
+    body().innerHTML='<div style="display:flex;gap:18px;flex-wrap:wrap">'+cols.join('')+'</div>';
+  }catch(e){ if(body()) body().innerHTML='⚠ No se pudo consultar: '+(e.message||'error'); }
+}
+
 function renderScenarioChips(){
   const cont = document.getElementById('seo-scenario-chips');
   if(!cont) return;
+  try{ renderMLDynFilters(); }catch(e){}
   // v80: Calcular cuántos ítems califican para cada escenario
   const counts = _getScenarioCounts();
   const html = SEO_SCENARIO_ORDER.map(key => {
@@ -10725,6 +10870,11 @@ function seoSetScenario(key){
         </div>
       </div>
       ${orderPills}
+      ${key==='ml_elegible_catalogo' ? `<div style="margin-top:9px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input id="seo-eleg-id" type="text" placeholder="MLA… ¿por qué es / no es elegible?" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:11.5px;background:var(--card);color:var(--text);width:250px">
+        <button class="btn btn-sm" onclick="seoVerElegibilidad()" style="border:1px solid ${sc.color};color:${sc.color};font-weight:700">🔎 Ver motivo</button>
+        <span id="seo-eleg-out" style="font-size:11px;color:var(--text2);font-weight:600"></span>
+      </div>` : ''}
       ${ML_SRV_QUERIES[key] ? `<div style="margin-top:9px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <button class="btn btn-sm" onclick="seoMLServerSync(true).then(()=>seoSetScenario('${key}'))"
           style="background:${sc.color};color:#fff;border:none;font-weight:700">📡 Contar en ML (oficial)</button>
@@ -11683,6 +11833,8 @@ function seoGetFilteredItems(){
     if(_seoActiveScenario){
       if(!_scenarioMatchesItem(_seoActiveScenario, i)) return false;
     }
+    // v245: filtro dinámico de ML (available_filters) — se suma al escenario
+    if(_mlDynSel && _mlDynSel.ids && !_mlDynSel.ids.has(i.id)) return false;
 
     // Filtros viejos de score/calidad (retro-compat con insightGoToSEO)
     if(!f) return true;
@@ -11953,7 +12105,9 @@ function renderSEOTable(){
             const bg = t.color + '22';
             return `<span title="${t.description.replace(/"/g,'&quot;')}" style="display:inline-flex;align-items:center;gap:3px;font-size:9px;padding:2px 6px;border-radius:10px;background:${bg};color:${t.color};border:1px solid ${t.color}55;white-space:nowrap;margin-bottom:3px;font-weight:600">${t.emoji} ${t.label}</span>`;
           }).join('');
-          const moreSpan = more>0 ? `<span style="font-size:9px;color:var(--text3)">+${more} más</span>` : '';
+          // v245: los que no entran se listan en el tooltip (hover) del "+N más"
+          const resto = more>0 ? tags.slice(3).map(t=>t.emoji+' '+t.label).join('  ·  ') : '';
+          const moreSpan = more>0 ? `<span title="${resto.replace(/"/g,'&quot;')}" style="font-size:9px;color:var(--accent);font-weight:700;cursor:help;border-bottom:1px dotted var(--accent)">+${more} más</span>` : '';
           return `<div style="display:flex;flex-direction:column;align-items:flex-start;gap:2px">${html}${moreSpan}</div>`;
         })()}
       </td>
@@ -12445,6 +12599,19 @@ async function loadSEOMetricsFull(){
   const mainBtn = document.getElementById('seo-metrics-btn');
   if(btn){ btn.disabled = true; btn.textContent = '⏳ Limpiando caché...'; }
   if(mainBtn) mainBtn.disabled = true;
+  // v245: el Refresh total también renueva los escenarios de ML (conteos
+  // oficiales del servidor + análisis de precios + competencia de catálogo).
+  // Se limpian los caches y se recargan EN SEGUNDO PLANO mientras corren las
+  // métricas de siempre; después quedan válidos 24 h o hasta el próximo Refresh.
+  try{
+    localStorage.removeItem('mlp_srv_esc_v1');  _mlSrv=null;
+    localStorage.removeItem('mlp_sug_precio_v1'); _sugPrecioCache=null;
+    localStorage.removeItem('mlp_ptw_v1'); _ptwCache=null;
+    seoMLServerSync(true)
+      .then(()=>seoLazyAnalizar('precio'))
+      .then(()=>seoLazyAnalizar('ptw'))
+      .catch(e=>console.warn('[refresh esc ML]', e.message));
+  }catch(e){}
 
   // Filtrar items visibles (igual que en loadSEOMetrics) para borrar cache
   const searchQ = (document.getElementById('seo-search')?.value||'').toLowerCase();
