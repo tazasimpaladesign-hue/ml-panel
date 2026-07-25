@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v243 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v244 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -9579,23 +9579,27 @@ const SEO_SCENARIOS = {
     description: 'ML marcó estas publicaciones como elegibles para competir en catálogo y todavía no compiten. Es el "Elegibles para competir" del Gestor.',
     actionMain:      'Optá por catálogo en las que tengas precio competitivo: ganás exposición compartida.',
     actionSecondary: 'Antes de optar, revisá precio vs competencia para no entrar perdiendo.',
-    // v241: además del tag oficial, ML considera elegible a toda publicación
-    // ACTIVA que tiene un producto de catálogo asociado (catalog_product_id)
-    // pero todavía no compite (catalog_listing=false). Con el tag solo, el chip
-    // quedaba en 0 en cuentas donde ML no lo expone.
-    filter: i => i.status === 'active' && i.catalog_listing !== true &&
-                 ( (Array.isArray(i.tags) && (i.tags.includes('catalog_listing_eligible') || i.tags.includes('catalog_boost')))
-                   || !!i.catalog_product_id ),
+    // v244: si ya bajamos la lista oficial del servidor (misma consulta que el
+    // Gestor: tags=catalog_listing_eligible), se usa esa; si no, heurística local.
+    filter: i => {
+      const srv=_mlSrvGet('ml_elegible_catalogo');
+      if(srv && srv.ids.length) return srv.ids.includes(i.id);
+      return i.status === 'active' && i.catalog_listing !== true &&
+             Array.isArray(i.tags) && (i.tags.includes('catalog_listing_eligible') || i.tags.includes('catalog_boost'));
+    },
   },
   'ml_politicas': {
     emoji: '🚫', label: 'Políticas ML', color: '#dc2626',
     description: 'Inactivas o penalizadas por incumplir políticas de MercadoLibre (moderadas, suspendidas o en revisión). Es el "Inactivas por incumplir políticas" del Gestor. Si ves 0 y ML muestra casos, hacé un Refresh total para bajar el sub-estado actualizado de cada publicación.',
     actionMain:      'Entrá a cada publicación en ML y corregí la infracción indicada para reactivarla.',
     actionSecondary: 'Revisá marcas/imágenes con derechos y ficha técnica: son las causas más comunes.',
+    // v244: server-first (status=under_review, el criterio real de ML). La
+    // heurística vieja contaba 122 porque "suspend" matcheaba también las
+    // pausadas manualmente por el vendedor (sub_status 'suspended').
     filter: i => {
-      const sub = String(i.sub_status || '').toLowerCase();
-      const mod = ['moderat','suspend','banned','forbidden','under_review','waiting_for_patch'].some(s => sub.includes(s));
-      return i.status === 'under_review' || (i.status === 'inactive') || mod ||
+      const srv=_mlSrvGet('ml_politicas');
+      if(srv && srv.ids.length) return srv.ids.includes(i.id);
+      return i.status === 'under_review' ||
              (Array.isArray(i.tags) && i.tags.includes('moderation_penalty'));
     },
   },
@@ -9604,18 +9608,27 @@ const SEO_SCENARIOS = {
     description: 'Pausadas sin stock: publicaciones que se frenaron por quedarse en cero. Es el "Para volver a vender" del Gestor.',
     actionMain:      'Reponé stock y reactivá: el historial de ventas se conserva y arrancan mejor posicionadas.',
     actionSecondary: 'Si el producto no vuelve, evaluá reconvertir la publicación a una variante que sí tengas.',
-    filter: i => i.status === 'paused' &&
-                 ((+i.available_quantity || 0) === 0 || String(i.sub_status||'').toLowerCase().includes('out_of_stock')),
+    // v244: server-first (sub_status=out_of_stock, el criterio real de ML).
+    filter: i => {
+      const srv=_mlSrvGet('ml_volver_vender');
+      if(srv && srv.ids.length) return srv.ids.includes(i.id);
+      return i.status === 'paused' &&
+             ((+i.available_quantity || 0) === 0 || String(i.sub_status||'').toLowerCase().includes('out_of_stock'));
+    },
   },
   'ml_pendientes': {
     emoji: '🛠️', label: 'Pendientes de Corregir', color: '#f97316',
     description: 'Publicaciones no activas con un sub-estado que requiere acción (distinto de sin stock). Es el "Pendientes por corregir" del Gestor.',
     actionMain:      'Abrí cada una en ML: el sub-estado indica exactamente qué corregir para reactivar.',
     actionSecondary: 'Priorizá las que tenían ventas: recuperan posicionamiento más rápido.',
+    // v244: server-first (sub_status warning + waiting_for_patch, el criterio de
+    // ML). La heurística vieja contaba 936 porque toda pausada manual tiene
+    // sub_status 'suspended' y quedaba adentro.
     filter: i => {
-      if(i.status === 'active') return false;
+      const srv=_mlSrvGet('ml_pendientes');
+      if(srv && srv.ids.length) return srv.ids.includes(i.id);
       const sub = String(i.sub_status || '').toLowerCase();
-      return !!sub && !sub.includes('out_of_stock') && !sub.includes('deleted');
+      return i.status !== 'active' && (sub.includes('warning') || sub.includes('waiting_for_patch'));
     },
   },
   'ml_objetivo_calidad': {
@@ -9637,7 +9650,11 @@ const SEO_SCENARIOS = {
     description: 'ML las marcó con ficha técnica incompleta (pierden exposición hasta completarla). Es el "Con ficha técnica para revisar" del Gestor.',
     actionMain:      'Completá los atributos faltantes desde el editor masivo de ML o desde el panel.',
     actionSecondary: 'El EAN y la marca son los campos que más pesan para el posicionamiento.',
-    filter: i => i.status === 'active' && Array.isArray(i.tags) && i.tags.some(t => String(t).includes('incomplete_technical_specs')),   // v241: solo activas
+    filter: i => {
+      const srv=_mlSrvGet('ml_ficha_tecnica');   // v244: server-first
+      if(srv && srv.ids.length) return srv.ids.includes(i.id);
+      return i.status === 'active' && Array.isArray(i.tags) && i.tags.some(t => String(t).includes('incomplete_technical_specs'));
+    },
   },
   'ml_precio_mercado': {
     emoji: '💲', label: 'Precio vs Mercado', color: '#be123c',
@@ -10449,6 +10466,73 @@ function renderSEOSection(){
 // El de precio analiza las activas con MÁS TRÁFICO (hasta 200) porque ahí está
 // la plata; el de catálogo analiza todas las de catálogo activas (son pocas).
 // ───────────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// v244 · CONTEOS OFICIALES DEL SERVIDOR para los escenarios de ML
+// ───────────────────────────────────────────────────────────────────────────
+// Investigación sobre la doc oficial (developers.mercadolibre.com.ar):
+//   · /users/{id}/items/search acepta FILTROS EN EL SERVIDOR — tags=..., status=...,
+//     sub_status=..., missing_product_identifiers=true — y devuelve paging.total
+//     EXACTO + los IDs. Es la MISMA fuente que usa el Gestor de publicaciones.
+//   · /suggestions/user/{id}/items devuelve DE UNA los item_ids que tienen
+//     sugerencia de precio (no hace falta consultar 200 ítems uno por uno).
+//   · /items/{id}/price_to_win?version=v2 (competencia de catálogo) → status
+//     winning / sharing_first_place / losing / listed (+ reason y price_to_win).
+// Con esto los chips dejan de ser heurísticas locales y muestran lo mismo que ML.
+// Cache 6 h en localStorage; el botón del panel de info permite forzar.
+const ML_SRV_QUERIES = {
+  ml_elegible_catalogo: ['tags=catalog_listing_eligible'],
+  ml_politicas:         ['status=under_review'],
+  ml_pendientes:        ['sub_status=warning', 'sub_status=waiting_for_patch'],
+  ml_volver_vender:     ['sub_status=out_of_stock'],
+  ml_ficha_tecnica:     ['tags=incomplete_technical_specs'],
+};
+let _mlSrv=null;   // { ts, data:{ key:{ total, ids:[...] } } }
+function _mlSrvLoad(){
+  if(_mlSrv) return _mlSrv;
+  try{ const d=JSON.parse(localStorage.getItem('mlp_srv_esc_v1')||'null');
+    if(d && d.ts && Date.now()-d.ts < 6*3600*1000 && d.data){ _mlSrv=d; return d; }
+  }catch(e){}
+  _mlSrv={ ts:0, data:{} };
+  return _mlSrv;
+}
+function _mlSrvGet(key){ const d=_mlSrvLoad(); return d.data[key]||null; }
+
+async function _mlSrvQuery(q, maxIds){
+  // baja total + ids paginando (limit 100); corta en maxIds para no abusar
+  let ids=[], total=0, offset=0;
+  while(true){
+    const r=await mlGet('/users/'+userId+'/items/search?'+q+'&limit=100&offset='+offset);
+    if(!r || !Array.isArray(r.results)) break;
+    total = (r.paging&&r.paging.total)!=null ? r.paging.total : (offset+r.results.length);
+    ids = ids.concat(r.results);
+    offset += r.results.length;
+    if(!r.results.length || offset>=total || ids.length>=(maxIds||600)) break;
+    await new Promise(res=>setTimeout(res,180));
+  }
+  return { total, ids };
+}
+
+async function seoMLServerSync(force){
+  const cache=_mlSrvLoad();
+  if(!force && cache.ts && Date.now()-cache.ts < 6*3600*1000) return cache;
+  for(const key of Object.keys(ML_SRV_QUERIES)){
+    try{
+      let total=0, ids=[];
+      for(const q of ML_SRV_QUERIES[key]){
+        const r=await _mlSrvQuery(q);
+        total += r.total;
+        ids = ids.concat(r.ids);
+      }
+      cache.data[key]={ total, ids };
+    }catch(e){ console.warn('[ml srv]', key, e.message); }
+  }
+  cache.ts=Date.now();
+  _mlSrv=cache;
+  try{ localStorage.setItem('mlp_srv_esc_v1', JSON.stringify(cache)); }catch(e){}
+  try{ seoInvalidateScenarioCounts(); renderScenarioChips(); }catch(e){}
+  return cache;
+}
+
 let _sugPrecioCache=null, _ptwCache=null;
 function _lazyCache(key){
   try{ const d=JSON.parse(localStorage.getItem(key)||'null');
@@ -10467,10 +10551,28 @@ async function seoLazyAnalizar(tipo){
   try{
     let lista;
     if(tipo==='precio'){
-      // activas con más visitas 30d primero (tope 200 para cuidar el rate limit)
-      lista=(allItems||[]).filter(i=>i&&i.status==='active')
-        .sort((a,b)=>((itemMetrics[b.id]?.visits30)||0)-((itemMetrics[a.id]?.visits30)||0))
-        .slice(0,200);
+      // v244: ML tiene un endpoint MASIVO que lista qué publicaciones tienen
+      // sugerencia de precio (/suggestions/user/{id}/items) — se consultan los
+      // detalles SOLO de esas (que son pocas), no de 200 al azar. Por eso antes
+      // el chip daba 0: analizábamos por tráfico y las sugeridas quedaban afuera.
+      setP('Buscando publicaciones con sugerencia de precio…');
+      let conSug=[];
+      try{
+        let offset=0;
+        while(true){
+          const r=await mlGet('/suggestions/user/'+userId+'/items?limit=50&offset='+offset);
+          const arr=(r&&(r.results||r.items))||[];
+          const ids=arr.map(x=> typeof x==='string'? x : (x.item_id||x.id)).filter(Boolean);
+          conSug=conSug.concat(ids);
+          if(!ids.length || ids.length<50 || conSug.length>=400) break;
+          offset+=ids.length;
+          await new Promise(res=>setTimeout(res,180));
+        }
+      }catch(e){ console.warn('[sug masivo]', e.message); }
+      const setSug=new Set(conSug);
+      lista=(allItems||[]).filter(i=>i&&setSug.has(i.id));
+      if(!lista.length){ setP('ML no informa sugerencias de precio pendientes para tu cuenta ahora mismo ✓'); seoInvalidateScenarioCounts(); renderScenarioChips(); renderSEOTable(); return; }
+      setP(lista.length+' con sugerencia — consultando el detalle…');
     } else {
       lista=(allItems||[]).filter(i=>i&&i.status==='active'&&i.catalog_listing===true);
     }
@@ -10488,7 +10590,8 @@ async function seoLazyAnalizar(tipo){
             cache.data[it.id]=(r&&r.status)? r.status : 'sin_dato';
             if(['highest','with_benchmark_highest'].includes(cache.data[it.id])) marcadas++;
           } else {
-            const r=await mlGet('/items/'+it.id+'/price_to_win?siteId=MLA');
+            // v244: la versión v2 es la vigente (winning/sharing_first_place/losing/listed)
+            const r=await mlGet('/items/'+it.id+'/price_to_win?siteId=MLA&version=v2');
             cache.data[it.id]=(r&&r.status)? r.status : 'sin_dato';
             if(cache.data[it.id]!=='winning'&&cache.data[it.id]!=='sin_dato') marcadas++;
           }
@@ -10622,6 +10725,13 @@ function seoSetScenario(key){
         </div>
       </div>
       ${orderPills}
+      ${ML_SRV_QUERIES[key] ? `<div style="margin-top:9px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-sm" onclick="seoMLServerSync(true).then(()=>seoSetScenario('${key}'))"
+          style="background:${sc.color};color:#fff;border:none;font-weight:700">📡 Contar en ML (oficial)</button>
+        <span style="font-size:11px;color:var(--text2);font-weight:600">${
+          _mlSrvGet(key) ? 'Conteo oficial: '+_mlSrvGet(key).total+' · consulta directa al servidor de ML ('+new Date(_mlSrvLoad().ts).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+')'
+                         : 'Todavía sin consultar — trae el número EXACTO del Gestor de ML (cache 6 h).'}</span>
+      </div>` : ''}
       ${sc.lazy ? `<div style="margin-top:9px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <button id="seo-lazy-btn" class="btn btn-sm" onclick="seoLazyAnalizar('${sc.lazy}')"
           style="background:${sc.color};color:#fff;border:none;font-weight:700">🔍 ${sc.lazy==='precio'?'Analizar precios vs mercado':'Analizar competencia de catálogo'}</button>
