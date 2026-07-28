@@ -38753,6 +38753,16 @@ details.plegable[open]>summary::after{content:'Cerrar ▴'}
 details.plegable[open]>summary{margin-bottom:12px;padding-bottom:9px;border-bottom:1px solid rgba(216,182,92,.2)}
 .resumen-verde{color:var(--armonico)}
 @media(max-width:640px){.idx-fila{grid-template-columns:88px 1fr 30px}.lt-item{grid-template-columns:1fr}}
+
+/* v247 Tu Periodo */
+.tp-box{margin-top:6px}
+.tp-cals{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px}
+.tp-cal{background:var(--noche-2);border:1px solid var(--linea);border-radius:10px;padding:12px}
+.tp-dia{transition:transform .12s}
+.tp-dia:hover{transform:scale(1.12);position:relative;z-index:2;box-shadow:0 3px 10px rgba(0,0,0,.4)}
+.tp-hm{transition:opacity .12s}.tp-hm:hover{opacity:.7}
+.btn-mini{background:var(--noche-3);border:1px solid var(--linea);color:var(--marfil);border-radius:8px;cursor:pointer;font-size:.82rem;font-weight:600}
+.btn-mini:hover{border-color:var(--oro-suave);color:var(--oro)}
 </style>
 </head>
 <body>
@@ -40604,6 +40614,349 @@ async function iaEnviar() {
 }
 
 /* ---- Render: carta individual ---- */
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   v247 · 🧭 TU PERÍODO — panel de inteligencia astrológica visual y dinámico
+   ───────────────────────────────────────────────────────────────────────────
+   Consume calcularRadarVida(carta, fechaISO) (las 7 AREAS_VIDA, 0-100 + tono),
+   sin tocar ninguna fórmula ni peso. Recorre un período de fechas, cachea cada
+   día calculado y arma: calendario semáforo, tarjeta-resumen, mejores/peores
+   días, tendencia (sparkline SVG), comparador vs período previo, heatmap anual
+   estilo GitHub y buscador de oportunidades (mejores ventanas por área).
+   Todo el pesado corre en bloques con requestAnimationFrame + barra de progreso.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+let _tpCache = new Map();      // 'YYYY-MM-DD' -> [{area,nivel,tono,...}] (radar de esa fecha)
+let _tpCarta = null;           // carta activa del módulo
+let _tpAbort = 0;              // token para cancelar corridas viejas
+
+const _TP_MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+const _TP_MESESL = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+const _TP_DIAS = ['Do','Lu','Ma','Mi','Ju','Vi','Sa'];
+
+function _tpISO(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function _tpParse(iso){ const [a,m,d]=iso.split('-').map(Number); return new Date(a,m-1,d); }
+function _tpAddDias(iso,n){ const d=_tpParse(iso); d.setDate(d.getDate()+n); return _tpISO(d); }
+function _tpFechaCorta(iso){ const d=_tpParse(iso); return d.getDate()+' '+_TP_MESES[d.getMonth()]; }
+function _tpFechaLarga(iso){ const d=_tpParse(iso); return d.getDate()+' de '+_TP_MESESL[d.getMonth()]; }
+
+// color según nivel 0-100 (rojo→amarillo→verde), con el tono como matiz
+function _tpColor(nivel){
+  if(nivel>=80) return '#3fb562';
+  if(nivel>=66) return '#6fae4e';
+  if(nivel>=50) return '#c8a53e';
+  if(nivel>=34) return '#cd7a3a';
+  return '#c14b4b';
+}
+function _tpColorBg(nivel){
+  if(nivel>=80) return 'rgba(63,181,98,.18)';
+  if(nivel>=66) return 'rgba(111,174,78,.16)';
+  if(nivel>=50) return 'rgba(200,165,62,.15)';
+  if(nivel>=34) return 'rgba(205,122,58,.15)';
+  return 'rgba(193,75,75,.15)';
+}
+function _tpEtiqueta(n){ return n>=80?'Excelente':n>=66?'Muy bueno':n>=50?'Favorable':n>=34?'Flojo':'Difícil'; }
+
+// score de un área (o 'general' = promedio de las 7) para un radar ya calculado
+function _tpScore(radar, areaId){
+  if(areaId==='general'){
+    const s=radar.reduce((a,r)=>a+r.nivel,0)/radar.length;
+    return Math.round(s);
+  }
+  const r=radar.find(x=>x.area.id===areaId);
+  return r? r.nivel : 0;
+}
+function _tpTono(radar, areaId){
+  if(areaId==='general'){
+    const s=radar.reduce((a,r)=>a+r.tonoRaw,0)/radar.length;
+    return s>0.3?'a favor':s<-0.3?'en contra':'mezclado';
+  }
+  const r=radar.find(x=>x.area.id===areaId);
+  return r? r.tono : 'mezclado';
+}
+function _tpFactores(radar, areaId){
+  if(areaId==='general'){
+    // top factores de todas las áreas juntas
+    const todos=[]; radar.forEach(r=>r.factores.forEach(f=>todos.push(f)));
+    todos.sort((a,b)=>b.peso-a.peso);
+    return todos.slice(0,3);
+  }
+  const r=radar.find(x=>x.area.id===areaId);
+  return r? r.factores : [];
+}
+
+// calcula (o toma del cache) el radar de una fecha
+async function _tpRadar(iso){
+  if(_tpCache.has(iso)) return _tpCache.get(iso);
+  const R = await calcularRadarVida(_tpCarta, iso);
+  _tpCache.set(iso, R);
+  return R;
+}
+
+// recorre un rango [desdeISO, hastaISO] en bloques, con progreso; devuelve
+// [{iso, radar}] o null si fue cancelada por otra corrida
+async function _tpRecorrer(desdeISO, hastaISO, onProgress){
+  const miToken = ++_tpAbort;
+  const fechas=[]; let cur=desdeISO;
+  while(cur<=hastaISO){ fechas.push(cur); cur=_tpAddDias(cur,1); }
+  const total=fechas.length;
+  const out=[];
+  const BLOQUE=8;
+  for(let i=0;i<total;i+=BLOQUE){
+    if(miToken!==_tpAbort) return null;         // otra corrida la reemplazó
+    const lote=fechas.slice(i,i+BLOQUE);
+    for(const f of lote){ out.push({ iso:f, radar: await _tpRadar(f) }); }
+    if(onProgress) onProgress(Math.min(total,i+BLOQUE), total);
+    await new Promise(r=>requestAnimationFrame(r));  // no traba la UI
+  }
+  return out;
+}
+
+// ── rangos según el selector de período ────────────────────────────────────
+function _tpRango(tipo){
+  const hoy=new Date(); const y=hoy.getFullYear(), m=hoy.getMonth();
+  if(tipo==='7'){ const h=_tpISO(hoy); return { desde:h, hasta:_tpAddDias(h,6), lbl:'Próximos 7 días' }; }
+  if(tipo==='30'){ const h=_tpISO(hoy); return { desde:h, hasta:_tpAddDias(h,29), lbl:'Próximos 30 días' }; }
+  if(tipo==='mes'){ return { desde:_tpISO(new Date(y,m,1)), hasta:_tpISO(new Date(y,m+1,0)), lbl:_TP_MESESL[m]+' '+y }; }
+  if(tipo==='mesq'){ return { desde:_tpISO(new Date(y,m+1,1)), hasta:_tpISO(new Date(y,m+2,0)), lbl:_TP_MESESL[(m+1)%12]+' '+(m===11?y+1:y) }; }
+  if(tipo==='ano'){ return { desde:_tpISO(new Date(y,0,1)), hasta:_tpISO(new Date(y,11,31)), lbl:'Año '+y, anual:true }; }
+  return { desde:_tpISO(hoy), hasta:_tpAddDias(_tpISO(hoy),29), lbl:'Próximos 30 días' };
+}
+
+// ═══ HTML del contenedor (se rellena async) ════════════════════════════════
+function htmlTuPeriodo(carta){
+  _tpCarta = carta;
+  const opAreas = [{id:'general',ico:'🌟',rot:'Visión general'}].concat(AREAS_VIDA)
+    .map(a=>'<option value="'+a.id+'">'+a.ico+' '+a.rot+'</option>').join('');
+  let h='';
+  h += '<details class="plegable tp-wrap" open><summary><span class="resumen-verde">🧭</span> <strong>Tu período</strong> — tu clima astrológico día por día, para planificar</summary>';
+  h += '<div class="tp-box">';
+  h += '<p class="seccion-sub" style="margin-bottom:14px">Elegí un área y un período: el sistema recorre cada día y te muestra cuándo tenés el viento a favor. Todo se calcula con tu carta y los tránsitos reales, sin inventar nada.</p>';
+  // controles
+  h += '<div class="ficha" data-noprint style="margin-bottom:16px"><div class="fila" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">'
+     + '<div class="campo"><label>Área de tu vida</label><select id="tp-area" onchange="tpActualizar()">'+opAreas+'</select></div>'
+     + '<div class="campo"><label>Período</label><select id="tp-periodo" onchange="tpActualizar()">'
+       + '<option value="30">Próximos 30 días</option>'
+       + '<option value="7">Próximos 7 días</option>'
+       + '<option value="mes">Este mes</option>'
+       + '<option value="mesq">Mes que viene</option>'
+       + '<option value="ano">Todo el año (heatmap)</option>'
+     + '</select></div>'
+     + '<button class="btn-mini" onclick="tpActualizar()" style="padding:9px 16px">Actualizar</button>'
+     + '</div></div>';
+  // progreso
+  h += '<div id="tp-prog" style="display:none;margin:10px 0"><div style="font-size:.8rem;color:var(--marfil-dim);margin-bottom:5px" id="tp-prog-txt">Calculando…</div>'
+     + '<div style="height:6px;background:var(--noche-3);border-radius:4px;overflow:hidden"><div id="tp-prog-bar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--oro-suave),var(--oro));transition:width .2s"></div></div></div>';
+  // salida
+  h += '<div id="tp-salida"></div>';
+  h += '</div></details>';
+  return h;
+}
+
+// arranca el primer render cuando el informe ya está en el DOM
+function tpInit(){
+  if(document.getElementById('tp-area')) tpActualizar();
+}
+
+async function tpActualizar(){
+  const areaSel=document.getElementById('tp-area'); if(!areaSel) return;
+  const areaId=areaSel.value;
+  const tipo=document.getElementById('tp-periodo').value;
+  const rango=_tpRango(tipo);
+  const prog=document.getElementById('tp-prog');
+  const progBar=document.getElementById('tp-prog-bar');
+  const progTxt=document.getElementById('tp-prog-txt');
+  const salida=document.getElementById('tp-salida');
+  if(prog) prog.style.display='block';
+  const datos = await _tpRecorrer(rango.desde, rango.hasta, (hecho,total)=>{
+    if(progBar) progBar.style.width=Math.round(hecho/total*100)+'%';
+    if(progTxt) progTxt.textContent='Calculando tu clima día por día… '+hecho+'/'+total;
+  });
+  if(datos===null) return;                 // corrida cancelada
+  if(prog) prog.style.display='none';
+  // comparación con período previo (misma longitud, justo antes)
+  const dias=datos.length;
+  const prevHasta=_tpAddDias(rango.desde,-1);
+  const prevDesde=_tpAddDias(prevHasta,-(dias-1));
+  let comp=null;
+  const prevDatos=await _tpRecorrer(prevDesde, prevHasta, null);
+  if(prevDatos){
+    const prom=arr=>arr.reduce((a,x)=>a+_tpScore(x.radar,areaId),0)/arr.length;
+    comp={ actual:prom(datos), previo:prom(prevDatos) };
+  }
+  salida.innerHTML = rango.anual
+    ? _tpRenderAnual(datos, areaId, rango)
+    : _tpRenderPeriodo(datos, areaId, rango, comp);
+  // enganchar tooltips del heatmap
+  if(rango.anual) _tpBindHeatmap();
+}
+
+// ═══ VISTA PERÍODO (calendario + resumen + top + tendencia + comparador) ════
+function _tpRenderPeriodo(datos, areaId, rango, comp){
+  const areaNom = areaId==='general'?'🌟 Visión general':(function(){const a=AREAS_VIDA.find(x=>x.id===areaId);return a.ico+' '+a.rot;})();
+  const scores=datos.map(d=>({iso:d.iso, n:_tpScore(d.radar,areaId), tono:_tpTono(d.radar,areaId)}));
+  const prom=Math.round(scores.reduce((a,s)=>a+s.n,0)/scores.length);
+  const ordenados=scores.slice().sort((a,b)=>b.n-a.n);
+  const mejores=ordenados.slice(0,3);
+  const peores=ordenados.slice(-3).reverse();
+
+  let h='';
+  // ── tarjeta resumen ──
+  h += '<div class="tp-resumen" style="background:'+_tpColorBg(prom)+';border:1px solid '+_tpColor(prom)+';border-radius:12px;padding:16px 18px;margin-bottom:16px">'
+     + '<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">'
+     + '<div style="font-size:2.6rem;font-weight:700;color:'+_tpColor(prom)+';line-height:1">'+prom+'</div>'
+     + '<div style="flex:1;min-width:180px"><div style="font-size:1.05rem;font-weight:600;color:var(--marfil)">'+areaNom+' · '+_tpEtiqueta(prom)+'</div>'
+     + '<div style="font-size:.82rem;color:var(--marfil-dim)">Promedio de '+rango.lbl.toLowerCase()+' ('+datos.length+' días)</div></div>'
+     + (comp? _tpComparador(comp):'')
+     + '</div>';
+  // barra de tendencia (sparkline)
+  h += _tpSparkline(scores.map(s=>s.n)) ;
+  h += '</div>';
+
+  // ── mejores / peores días ──
+  h += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">';
+  h += _tpTopCard('☀️ Mejores días', mejores, '#3fb562');
+  h += _tpTopCard('🌧️ Días flojos', peores, '#c14b4b');
+  h += '</div>';
+
+  // ── calendario semáforo ──
+  h += '<h4 style="font-family:var(--font-display);color:var(--marfil);font-size:1.1rem;margin:0 0 10px">Calendario</h4>';
+  h += _tpCalendario(scores, areaId);
+
+  return h;
+}
+
+function _tpComparador(comp){
+  const dif=comp.actual-comp.previo;
+  const flecha=dif>3?'⬆':dif<-3?'⬇':'➡';
+  const color=dif>3?'#3fb562':dif<-3?'#c14b4b':'var(--marfil-dim)';
+  const txt=dif>3?'mejor que el período previo':dif<-3?'peor que el período previo':'similar al período previo';
+  return '<div style="text-align:right"><div style="font-size:1.4rem;color:'+color+';font-weight:700">'+flecha+' '+(dif>=0?'+':'')+Math.round(dif)+'</div>'
+       + '<div style="font-size:.72rem;color:var(--marfil-dim);max-width:120px">'+txt+'</div></div>';
+}
+
+function _tpTopCard(titulo, dias, color){
+  let h='<div style="flex:1;min-width:190px;background:var(--noche-2);border:1px solid var(--linea);border-radius:10px;padding:12px 14px">';
+  h += '<div style="font-size:.9rem;font-weight:600;color:var(--marfil);margin-bottom:8px">'+titulo+'</div>';
+  dias.forEach(d=>{
+    h += '<div style="display:flex;align-items:center;gap:8px;padding:3px 0">'
+       + '<span style="width:34px;height:22px;border-radius:5px;background:'+_tpColor(d.n)+';color:#0b0e1a;font-weight:700;font-size:.78rem;display:flex;align-items:center;justify-content:center">'+d.n+'</span>'
+       + '<span style="font-size:.85rem;color:var(--marfil)">'+_tpFechaLarga(d.iso)+'</span>'
+       + '<span style="font-size:.72rem;color:var(--marfil-dim);margin-left:auto">'+d.tono+'</span></div>';
+  });
+  h += '</div>';
+  return h;
+}
+
+function _tpSparkline(vals){
+  if(vals.length<2) return '';
+  const w=600,hh=48,pad=4;
+  const min=Math.min(...vals),max=Math.max(...vals),rng=(max-min)||1;
+  const n=vals.length-1;
+  const X=i=>(i/n*(w-2*pad)+pad).toFixed(1);
+  const Y=v=>((hh-pad)-((v-min)/rng*(hh-2*pad))).toFixed(1);
+  const path=vals.map((v,i)=>(i?'L':'M')+X(i)+','+Y(v)).join('');
+  const area='M'+X(0)+','+(hh-1)+' '+vals.map((v,i)=>'L'+X(i)+','+Y(v)).join(' ')+' L'+X(n)+','+(hh-1)+' Z';
+  return '<div style="margin-top:12px"><svg viewBox="0 0 '+w+' '+hh+'" preserveAspectRatio="none" style="width:100%;height:44px;display:block">'
+    + '<path d="'+area+'" fill="var(--oro)" opacity="0.10"/>'
+    + '<path d="'+path+'" fill="none" stroke="var(--oro)" stroke-width="1.6" vector-effect="non-scaling-stroke"/></svg>'
+    + '<div style="font-size:.68rem;color:var(--marfil-dim);text-align:center">Tendencia del período</div></div>';
+}
+
+// calendario tipo grilla mensual con celdas coloreadas + tooltip
+function _tpCalendario(scores, areaId){
+  const byMes={};
+  scores.forEach(s=>{ const d=_tpParse(s.iso); const k=d.getFullYear()+'-'+d.getMonth(); (byMes[k]=byMes[k]||[]).push(s); });
+  let h='<div class="tp-cals">';
+  Object.keys(byMes).forEach(k=>{
+    const [y,m]=k.split('-').map(Number);
+    const dias=byMes[k];
+    const primerDia=new Date(y,m,1).getDay();
+    h += '<div class="tp-cal">';
+    h += '<div style="text-align:center;font-weight:600;color:var(--oro);font-size:.9rem;margin-bottom:6px">'+_TP_MESESL[m]+' '+y+'</div>';
+    h += '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">';
+    _TP_DIAS.forEach(dn=>h+='<div style="text-align:center;font-size:.6rem;color:var(--marfil-dim)">'+dn+'</div>');
+    for(let i=0;i<primerDia;i++) h+='<div></div>';
+    const mapa={}; dias.forEach(s=>{ mapa[_tpParse(s.iso).getDate()]=s; });
+    const ultimo=new Date(y,m+1,0).getDate();
+    for(let d=1;d<=ultimo;d++){
+      const s=mapa[d];
+      if(!s){ h+='<div style="aspect-ratio:1;border-radius:5px;background:var(--noche-3);opacity:.35"></div>'; continue; }
+      h += '<div class="tp-dia" data-iso="'+s.iso+'" data-area="'+areaId+'" title="'+_tpFechaLarga(s.iso)+': '+s.n+'/100 · '+s.tono+'" '
+         + 'style="aspect-ratio:1;border-radius:5px;background:'+_tpColor(s.n)+';color:#0b0e1a;font-weight:700;font-size:.72rem;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:default">'
+         + '<span>'+d+'</span><span style="font-size:.58rem;opacity:.8">'+s.n+'</span></div>';
+    }
+    h += '</div></div>';
+  });
+  h += '</div>';
+  return h;
+}
+
+// ═══ VISTA ANUAL (heatmap estilo GitHub: filas=áreas, cols=semanas) ═════════
+function _tpRenderAnual(datos, areaId, rango){
+  const y=parseInt(rango.desde);
+  // matriz por área: para cada fecha, nivel del área
+  const areas=[{id:'general',ico:'🌟',rot:'General'}].concat(AREAS_VIDA);
+  // agrupar por semana ISO simple (columna = índice de semana desde 1 ene)
+  const primero=_tpParse(rango.desde);
+  const colDe=iso=>{ const d=_tpParse(iso); return Math.floor((d-primero)/(7*86400000)); };
+  const nCols=colDe(rango.hasta)+1;
+  const cell=10, gap=2, rowH=cell+gap;
+  const wSVG=nCols*(cell+gap)+70;
+  let h='<p style="font-size:.82rem;color:var(--marfil-dim);margin-bottom:10px">Cada columna es una semana del año; cada fila, un área. Cuanto más verde, mejor tu clima. Pasá el cursor por una celda para ver el detalle.</p>';
+  h += '<div style="overflow-x:auto"><svg width="'+wSVG+'" height="'+(areas.length*rowH+30)+'" style="font-family:var(--font-mono)">';
+  // etiquetas de meses arriba
+  for(let mm=0; mm<12; mm++){
+    const col=colDe(_tpISO(new Date(y,mm,1)));
+    h += '<text x="'+(70+col*(cell+gap))+'" y="12" fill="var(--marfil-dim)" font-size="8">'+_TP_MESES[mm]+'</text>';
+  }
+  areas.forEach((a,ri)=>{
+    const yRow=22+ri*rowH;
+    h += '<text x="0" y="'+(yRow+cell-1)+'" fill="var(--marfil)" font-size="8.5">'+a.ico+'</text>';
+    datos.forEach(d=>{
+      const nivel=_tpScore(d.radar,a.id);
+      const col=colDe(d.iso);
+      const x=70+col*(cell+gap);
+      h += '<rect class="tp-hm" data-iso="'+d.iso+'" data-area="'+a.id+'" x="'+x+'" y="'+yRow+'" width="'+cell+'" height="'+cell+'" rx="2" fill="'+_tpColor(nivel)+'"><title>'+a.rot+' · '+_tpFechaLarga(d.iso)+': '+nivel+'/100</title></rect>';
+    });
+  });
+  h += '</svg></div>';
+  // leyenda
+  h += '<div style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:.72rem;color:var(--marfil-dim)">Menos'
+     + [10,40,55,72,88].map(n=>'<span style="width:12px;height:12px;border-radius:3px;background:'+_tpColor(n)+';display:inline-block"></span>').join('')
+     + 'Más</div>';
+  // buscador de oportunidades: mejores ventanas por área
+  h += _tpBuscadorVentanas(datos);
+  return h;
+}
+
+// mejores VENTANAS (rachas de días buenos) por área en todo el período
+function _tpBuscadorVentanas(datos){
+  const areas=[{id:'general',ico:'🌟',rot:'Visión general'}].concat(AREAS_VIDA);
+  let h='<h4 style="font-family:var(--font-display);color:var(--marfil);font-size:1.15rem;margin:22px 0 4px">🔍 Tus mejores ventanas del año</h4>';
+  h += '<p class="seccion-sub" style="margin-bottom:14px">La racha de días consecutivos con mejor clima para cada área — ideal para elegir cuándo lanzar algo, competir o cerrar un trato.</p>';
+  h += '<div style="display:flex;flex-direction:column;gap:8px">';
+  areas.forEach(a=>{
+    // ventana de 5 días con mayor promedio
+    const win=5; let best=null;
+    for(let i=0;i+win<=datos.length;i++){
+      const seg=datos.slice(i,i+win);
+      const prom=seg.reduce((s,d)=>s+_tpScore(d.radar,a.id),0)/win;
+      if(!best||prom>best.prom) best={prom:Math.round(prom), desde:seg[0].iso, hasta:seg[win-1].iso};
+    }
+    if(!best) return;
+    h += '<div style="display:flex;align-items:center;gap:12px;background:var(--noche-2);border:1px solid var(--linea);border-left:3px solid '+_tpColor(best.prom)+';border-radius:8px;padding:9px 13px">'
+       + '<span style="font-size:1.1rem">'+a.ico+'</span>'
+       + '<span style="font-weight:600;color:var(--marfil);min-width:150px">'+a.rot+'</span>'
+       + '<span style="width:38px;height:24px;border-radius:5px;background:'+_tpColor(best.prom)+';color:#0b0e1a;font-weight:700;font-size:.8rem;display:flex;align-items:center;justify-content:center">'+best.prom+'</span>'
+       + '<span style="font-size:.86rem;color:var(--marfil)">'+_tpFechaCorta(best.desde)+' → '+_tpFechaCorta(best.hasta)+'</span></div>';
+  });
+  h += '</div>';
+  return h;
+}
+
+function _tpBindHeatmap(){ /* los <title> nativos del SVG ya dan tooltip; hook reservado para futuras mejoras */ }
+
 async function renderIndividual(carta, transitoHoy) {
   const internos = calcularAspectos(carta.planetas, carta.planetas, true);
   const dom = calcularDominancias(carta);   // FIX v222: faltaba declararlo
@@ -40619,6 +40972,7 @@ async function renderIndividual(carta, transitoHoy) {
   h += htmlDiezClaves(carta, dom, internos);
   h += htmlIndicePersonalidad(carta, dom, internos);
   h += htmlRadarVida(await calcularRadarVida(carta, _hoyISO()), _hoyISO());
+  h += await htmlTuPeriodo(carta);   // v247: modulo Tu Periodo
   h += '<h3 class="seccion-titulo" style="font-size:1.35rem">Distribución</h3>';
   h += htmlElementosPct(carta);
   h += htmlSintesis(carta);
@@ -40888,6 +41242,7 @@ async function trazar() {
     cont.innerHTML = '<div class="acciones-resultado" data-noprint><button class="btn-pdf" onclick="descargarPDF()">📄 Descargar informe en PDF</button>' +
       '<button class="btn-pdf" onclick="guardarActual()">💾 Guardar en la biblioteca</button></div>' + html;
     cont.classList.add('visible');
+    try{ if(typeof tpInit==='function') setTimeout(tpInit, 60); }catch(e){}
     cont.scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (err) {
     avisar('No se pudo calcular la carta: ' + esc(err.message), 'error');
