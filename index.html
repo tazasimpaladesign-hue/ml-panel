@@ -38763,6 +38763,11 @@ details.plegable[open]>summary{margin-bottom:12px;padding-bottom:9px;border-bott
 .tp-hm{transition:opacity .12s}.tp-hm:hover{opacity:.7}
 .btn-mini{background:var(--noche-3);border:1px solid var(--linea);color:var(--marfil);border-radius:8px;cursor:pointer;font-size:.82rem;font-weight:600}
 .btn-mini:hover{border-color:var(--oro-suave);color:var(--oro)}
+
+@keyframes tpFade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.tp-cals{grid-template-columns:repeat(auto-fill,minmax(200px,1fr)) !important;gap:12px !important}
+.tp-cal{padding:9px !important}
+.tp-hero{box-shadow:0 4px 24px rgba(0,0,0,.25)}
 </style>
 </head>
 <body>
@@ -40615,20 +40620,21 @@ async function iaEnviar() {
 
 /* ---- Render: carta individual ---- */
 
+
 /* ═══════════════════════════════════════════════════════════════════════════
-   v247 · 🧭 TU PERÍODO — panel de inteligencia astrológica visual y dinámico
+   v247b · 🧭 TU PERÍODO — panel de inteligencia astrológica (rediseño)
    ───────────────────────────────────────────────────────────────────────────
-   Consume calcularRadarVida(carta, fechaISO) (las 7 AREAS_VIDA, 0-100 + tono),
-   sin tocar ninguna fórmula ni peso. Recorre un período de fechas, cachea cada
-   día calculado y arma: calendario semáforo, tarjeta-resumen, mejores/peores
-   días, tendencia (sparkline SVG), comparador vs período previo, heatmap anual
-   estilo GitHub y buscador de oportunidades (mejores ventanas por área).
-   Todo el pesado corre en bloques con requestAnimationFrame + barra de progreso.
+   Consume calcularRadarVida(carta, fechaISO) sin tocar fórmulas. Mejoras:
+   metáfora climática, score gigante + barra + veredicto de 1 frase (reglas),
+   comparador mes vs mes, estabilidad, detalle al clic del día (con factores),
+   heatmap con hover+clic, marcador de HOY, top oportunidades con estrellas y
+   racha, período mes anterior + rango personalizado. Todo SVG, sin librerías.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-let _tpCache = new Map();      // 'YYYY-MM-DD' -> [{area,nivel,tono,...}] (radar de esa fecha)
-let _tpCarta = null;           // carta activa del módulo
-let _tpAbort = 0;              // token para cancelar corridas viejas
+let _tpCache = new Map();
+let _tpCarta = null;
+let _tpAbort = 0;
+let _tpUlt = null;   // último dataset renderizado (para clic en día/heatmap)
 
 const _TP_MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 const _TP_MESESL = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
@@ -40639,123 +40645,128 @@ function _tpParse(iso){ const [a,m,d]=iso.split('-').map(Number); return new Dat
 function _tpAddDias(iso,n){ const d=_tpParse(iso); d.setDate(d.getDate()+n); return _tpISO(d); }
 function _tpFechaCorta(iso){ const d=_tpParse(iso); return d.getDate()+' '+_TP_MESES[d.getMonth()]; }
 function _tpFechaLarga(iso){ const d=_tpParse(iso); return d.getDate()+' de '+_TP_MESESL[d.getMonth()]; }
+function _tpHoyISO(){ return _tpISO(new Date()); }
 
-// color según nivel 0-100 (rojo→amarillo→verde), con el tono como matiz
-function _tpColor(nivel){
-  if(nivel>=80) return '#3fb562';
-  if(nivel>=66) return '#6fae4e';
-  if(nivel>=50) return '#c8a53e';
-  if(nivel>=34) return '#cd7a3a';
-  return '#c14b4b';
-}
-function _tpColorBg(nivel){
-  if(nivel>=80) return 'rgba(63,181,98,.18)';
-  if(nivel>=66) return 'rgba(111,174,78,.16)';
-  if(nivel>=50) return 'rgba(200,165,62,.15)';
-  if(nivel>=34) return 'rgba(205,122,58,.15)';
-  return 'rgba(193,75,75,.15)';
-}
-function _tpEtiqueta(n){ return n>=80?'Excelente':n>=66?'Muy bueno':n>=50?'Favorable':n>=34?'Flojo':'Difícil'; }
+function _tpColor(n){ return n>=80?'#3fb562':n>=66?'#6fae4e':n>=50?'#c8a53e':n>=34?'#cd7a3a':'#c14b4b'; }
+function _tpColorBg(n){ return n>=80?'rgba(63,181,98,.16)':n>=66?'rgba(111,174,78,.14)':n>=50?'rgba(200,165,62,.13)':n>=34?'rgba(205,122,58,.13)':'rgba(193,75,75,.13)'; }
+function _tpEtiqueta(n){ return n>=80?'EXCELENTE':n>=66?'MUY FAVORABLE':n>=50?'FAVORABLE':n>=34?'PRECAUCIÓN':'DIFÍCIL'; }
+function _tpSemaforo(n){ return n>=66?'🟢':n>=50?'🟡':n>=34?'🟠':'🔴'; }
 
-// score de un área (o 'general' = promedio de las 7) para un radar ya calculado
+// metáfora climática según nivel + tendencia
+function _tpClima(nivel, pendiente){
+  if(pendiente>6) return {ico:'🌤', txt:'Mejorando'};
+  if(pendiente<-6) return {ico:'🌥', txt:'Aflojando'};
+  if(nivel>=72) return {ico:'☀️', txt:'Despejado'};
+  if(nivel>=50) return {ico:'⛅', txt:'Variable'};
+  if(nivel>=34) return {ico:'🌥', txt:'Nublado'};
+  return {ico:'🌧', txt:'Complicado'};
+}
+
+// veredicto de 1-2 frases por área y nivel (reglas, sin IA)
+const _TP_VEREDICTO = {
+  trabajo:    { alto:'Buen día para avanzar proyectos y tomar la iniciativa.', medio:'Rinde para tareas de rutina; no fuerces decisiones grandes.', bajo:'Mejor cerrar pendientes que abrir frentes nuevos.' },
+  amor:       { alto:'Muy propicio para conversaciones y encuentros importantes.', medio:'Clima tranquilo; buen momento para gestos simples.', bajo:'Evitá temas espinosos; la comunicación viene trabada.' },
+  dinero:     { alto:'Momento fértil para cerrar acuerdos o cobrar.', medio:'Buen día para ordenar finanzas, no para inversiones grandes.', bajo:'Cuidá los gastos y postergá decisiones económicas fuertes.' },
+  desarrollo: { alto:'Ideal para estudiar, planificar y expandir horizontes.', medio:'Avanzá de a poco; la claridad llega si no te apurás.', bajo:'Día para consolidar, no para arrancar algo ambicioso.' },
+  competencia:{ alto:'Energía alta para competir, entrenar o exponerte.', medio:'Rendís bien con esfuerzo medido; dosificá.', bajo:'Cuidá el cuerpo y evitá sobreexigencias hoy.' },
+  relaciones: { alto:'Excelente para vínculos, redes y trabajo en equipo.', medio:'Buen clima social sin grandes sobresaltos.', bajo:'Reservá energía; los grupos pueden desgastar hoy.' },
+  espiritual: { alto:'Muy propicio para introspección y prácticas internas.', medio:'Buen momento para pausar y reconectar sin exigencias.', bajo:'La sensibilidad está alta; cuidá tu descanso.' },
+  general:    { alto:'Día con el viento a favor: aprovechá el impulso.', medio:'Jornada equilibrada; elegí bien dónde poner la energía.', bajo:'Día para ir con calma y no forzar la maquinaria.' }
+};
+function _tpVeredicto(areaId, nivel){
+  const v=_TP_VEREDICTO[areaId]||_TP_VEREDICTO.general;
+  return nivel>=66? v.alto : nivel>=40? v.medio : v.bajo;
+}
+
 function _tpScore(radar, areaId){
-  if(areaId==='general'){
-    const s=radar.reduce((a,r)=>a+r.nivel,0)/radar.length;
-    return Math.round(s);
-  }
-  const r=radar.find(x=>x.area.id===areaId);
-  return r? r.nivel : 0;
+  if(areaId==='general') return Math.round(radar.reduce((a,r)=>a+r.nivel,0)/radar.length);
+  const r=radar.find(x=>x.area.id===areaId); return r?r.nivel:0;
 }
 function _tpTono(radar, areaId){
-  if(areaId==='general'){
-    const s=radar.reduce((a,r)=>a+r.tonoRaw,0)/radar.length;
-    return s>0.3?'a favor':s<-0.3?'en contra':'mezclado';
-  }
-  const r=radar.find(x=>x.area.id===areaId);
-  return r? r.tono : 'mezclado';
+  if(areaId==='general'){ const s=radar.reduce((a,r)=>a+r.tonoRaw,0)/radar.length; return s>0.3?'a favor':s<-0.3?'en contra':'mezclado'; }
+  const r=radar.find(x=>x.area.id===areaId); return r?r.tono:'mezclado';
 }
 function _tpFactores(radar, areaId){
-  if(areaId==='general'){
-    // top factores de todas las áreas juntas
-    const todos=[]; radar.forEach(r=>r.factores.forEach(f=>todos.push(f)));
-    todos.sort((a,b)=>b.peso-a.peso);
-    return todos.slice(0,3);
-  }
-  const r=radar.find(x=>x.area.id===areaId);
-  return r? r.factores : [];
+  if(areaId==='general'){ const t=[]; radar.forEach(r=>r.factores.forEach(f=>t.push(f))); t.sort((a,b)=>b.peso-a.peso); return t.slice(0,3); }
+  const r=radar.find(x=>x.area.id===areaId); return r?r.factores:[];
 }
 
-// calcula (o toma del cache) el radar de una fecha
 async function _tpRadar(iso){
   if(_tpCache.has(iso)) return _tpCache.get(iso);
-  const R = await calcularRadarVida(_tpCarta, iso);
-  _tpCache.set(iso, R);
-  return R;
+  const R=await calcularRadarVida(_tpCarta, iso);
+  _tpCache.set(iso,R); return R;
 }
-
-// recorre un rango [desdeISO, hastaISO] en bloques, con progreso; devuelve
-// [{iso, radar}] o null si fue cancelada por otra corrida
 async function _tpRecorrer(desdeISO, hastaISO, onProgress){
-  const miToken = ++_tpAbort;
+  const miToken=++_tpAbort;
   const fechas=[]; let cur=desdeISO;
   while(cur<=hastaISO){ fechas.push(cur); cur=_tpAddDias(cur,1); }
-  const total=fechas.length;
-  const out=[];
-  const BLOQUE=8;
+  const total=fechas.length, out=[], BLOQUE=8;
   for(let i=0;i<total;i+=BLOQUE){
-    if(miToken!==_tpAbort) return null;         // otra corrida la reemplazó
-    const lote=fechas.slice(i,i+BLOQUE);
-    for(const f of lote){ out.push({ iso:f, radar: await _tpRadar(f) }); }
+    if(miToken!==_tpAbort) return null;
+    for(const f of fechas.slice(i,i+BLOQUE)) out.push({iso:f, radar:await _tpRadar(f)});
     if(onProgress) onProgress(Math.min(total,i+BLOQUE), total);
-    await new Promise(r=>requestAnimationFrame(r));  // no traba la UI
+    await new Promise(r=>requestAnimationFrame(r));
   }
   return out;
 }
 
-// ── rangos según el selector de período ────────────────────────────────────
 function _tpRango(tipo){
   const hoy=new Date(); const y=hoy.getFullYear(), m=hoy.getMonth();
-  if(tipo==='7'){ const h=_tpISO(hoy); return { desde:h, hasta:_tpAddDias(h,6), lbl:'Próximos 7 días' }; }
-  if(tipo==='30'){ const h=_tpISO(hoy); return { desde:h, hasta:_tpAddDias(h,29), lbl:'Próximos 30 días' }; }
-  if(tipo==='mes'){ return { desde:_tpISO(new Date(y,m,1)), hasta:_tpISO(new Date(y,m+1,0)), lbl:_TP_MESESL[m]+' '+y }; }
-  if(tipo==='mesq'){ return { desde:_tpISO(new Date(y,m+1,1)), hasta:_tpISO(new Date(y,m+2,0)), lbl:_TP_MESESL[(m+1)%12]+' '+(m===11?y+1:y) }; }
-  if(tipo==='ano'){ return { desde:_tpISO(new Date(y,0,1)), hasta:_tpISO(new Date(y,11,31)), lbl:'Año '+y, anual:true }; }
-  return { desde:_tpISO(hoy), hasta:_tpAddDias(_tpISO(hoy),29), lbl:'Próximos 30 días' };
+  if(tipo==='7'){ const h=_tpISO(hoy); return {desde:h, hasta:_tpAddDias(h,6), lbl:'Próximos 7 días'}; }
+  if(tipo==='30'){ const h=_tpISO(hoy); return {desde:h, hasta:_tpAddDias(h,29), lbl:'Próximos 30 días'}; }
+  if(tipo==='mes'){ return {desde:_tpISO(new Date(y,m,1)), hasta:_tpISO(new Date(y,m+1,0)), lbl:_TP_MESESL[m]+' '+y}; }
+  if(tipo==='mesant'){ return {desde:_tpISO(new Date(y,m-1,1)), hasta:_tpISO(new Date(y,m,0)), lbl:_TP_MESESL[(m+11)%12]+' '+(m===0?y-1:y)}; }
+  if(tipo==='mesq'){ return {desde:_tpISO(new Date(y,m+1,1)), hasta:_tpISO(new Date(y,m+2,0)), lbl:_TP_MESESL[(m+1)%12]+' '+(m===11?y+1:y)}; }
+  if(tipo==='ano'){ return {desde:_tpISO(new Date(y,0,1)), hasta:_tpISO(new Date(y,11,31)), lbl:'Año '+y, anual:true}; }
+  if(tipo==='rango'){
+    const d1=document.getElementById('tp-desde'), d2=document.getElementById('tp-hasta');
+    let desde=d1&&d1.value? d1.value : _tpISO(hoy);
+    let hasta=d2&&d2.value? d2.value : _tpAddDias(desde,29);
+    if(hasta<desde){ const t=hasta; hasta=desde; desde=t; }
+    // tope de seguridad: 366 días
+    if(_tpParse(hasta)-_tpParse(desde) > 366*86400000) hasta=_tpAddDias(desde,366);
+    const anual=(_tpParse(hasta)-_tpParse(desde))>70*86400000;
+    return {desde, hasta, lbl:'Del '+_tpFechaCorta(desde)+' al '+_tpFechaCorta(hasta), anual};
+  }
+  const h=_tpISO(hoy); return {desde:h, hasta:_tpAddDias(h,29), lbl:'Próximos 30 días'};
 }
 
-// ═══ HTML del contenedor (se rellena async) ════════════════════════════════
 function htmlTuPeriodo(carta){
-  _tpCarta = carta;
-  const opAreas = [{id:'general',ico:'🌟',rot:'Visión general'}].concat(AREAS_VIDA)
+  _tpCarta=carta;
+  const opAreas=[{id:'general',ico:'🌟',rot:'Visión general'}].concat(AREAS_VIDA)
     .map(a=>'<option value="'+a.id+'">'+a.ico+' '+a.rot+'</option>').join('');
   let h='';
-  h += '<details class="plegable tp-wrap" open><summary><span class="resumen-verde">🧭</span> <strong>Tu período</strong> — tu clima astrológico día por día, para planificar</summary>';
-  h += '<div class="tp-box">';
-  h += '<p class="seccion-sub" style="margin-bottom:14px">Elegí un área y un período: el sistema recorre cada día y te muestra cuándo tenés el viento a favor. Todo se calcula con tu carta y los tránsitos reales, sin inventar nada.</p>';
-  // controles
-  h += '<div class="ficha" data-noprint style="margin-bottom:16px"><div class="fila" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">'
-     + '<div class="campo"><label>Área de tu vida</label><select id="tp-area" onchange="tpActualizar()">'+opAreas+'</select></div>'
-     + '<div class="campo"><label>Período</label><select id="tp-periodo" onchange="tpActualizar()">'
-       + '<option value="30">Próximos 30 días</option>'
-       + '<option value="7">Próximos 7 días</option>'
-       + '<option value="mes">Este mes</option>'
-       + '<option value="mesq">Mes que viene</option>'
-       + '<option value="ano">Todo el año (heatmap)</option>'
-     + '</select></div>'
-     + '<button class="btn-mini" onclick="tpActualizar()" style="padding:9px 16px">Actualizar</button>'
-     + '</div></div>';
-  // progreso
-  h += '<div id="tp-prog" style="display:none;margin:10px 0"><div style="font-size:.8rem;color:var(--marfil-dim);margin-bottom:5px" id="tp-prog-txt">Calculando…</div>'
-     + '<div style="height:6px;background:var(--noche-3);border-radius:4px;overflow:hidden"><div id="tp-prog-bar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--oro-suave),var(--oro));transition:width .2s"></div></div></div>';
-  // salida
-  h += '<div id="tp-salida"></div>';
-  h += '</div></details>';
+  h+='<details class="plegable tp-wrap" open><summary><span class="resumen-verde">🧭</span> <strong>Tu período</strong> — tu clima astrológico día por día, para planificar</summary>';
+  h+='<div class="tp-box">';
+  h+='<p class="seccion-sub" style="margin-bottom:14px">Elegí un área y un período: el sistema recorre cada día y te muestra cuándo tenés el viento a favor. Todo con tu carta y los tránsitos reales.</p>';
+  h+='<div class="ficha" data-noprint style="margin-bottom:16px"><div class="fila" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">'
+    +'<div class="campo"><label>Área de tu vida</label><select id="tp-area" onchange="tpActualizar()">'+opAreas+'</select></div>'
+    +'<div class="campo"><label>Período</label><select id="tp-periodo" onchange="tpPeriodoChange()">'
+      +'<option value="30">Próximos 30 días</option>'
+      +'<option value="7">Próximos 7 días</option>'
+      +'<option value="mes">Este mes</option>'
+      +'<option value="mesant">Mes anterior</option>'
+      +'<option value="mesq">Mes que viene</option>'
+      +'<option value="ano">Todo el año (heatmap)</option>'
+      +'<option value="rango">Rango personalizado…</option>'
+    +'</select></div>'
+    +'<div class="campo" id="tp-rango-box" style="display:none"><label>Desde / Hasta</label>'
+      +'<div style="display:flex;gap:6px"><input type="date" id="tp-desde" onchange="tpActualizar()"><input type="date" id="tp-hasta" onchange="tpActualizar()"></div></div>'
+    +'<button class="btn-mini" onclick="tpActualizar()" style="padding:9px 16px">Actualizar</button>'
+    +'</div></div>';
+  h+='<div id="tp-prog" style="display:none;margin:10px 0"><div style="font-size:.8rem;color:var(--marfil-dim);margin-bottom:5px" id="tp-prog-txt">Calculando…</div>'
+    +'<div style="height:6px;background:var(--noche-3);border-radius:4px;overflow:hidden"><div id="tp-prog-bar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--oro-suave),var(--oro));transition:width .2s"></div></div></div>';
+  h+='<div id="tp-salida"></div>';
+  h+='<div id="tp-detalle"></div>';   // panel de detalle al clic en un día
+  h+='</div></details>';
   return h;
 }
 
-// arranca el primer render cuando el informe ya está en el DOM
-function tpInit(){
-  if(document.getElementById('tp-area')) tpActualizar();
+function tpInit(){ if(document.getElementById('tp-area')) tpActualizar(); }
+function tpPeriodoChange(){
+  const box=document.getElementById('tp-rango-box');
+  if(box) box.style.display = document.getElementById('tp-periodo').value==='rango' ? 'block':'none';
+  if(document.getElementById('tp-periodo').value!=='rango') tpActualizar();
 }
 
 async function tpActualizar(){
@@ -40763,199 +40774,265 @@ async function tpActualizar(){
   const areaId=areaSel.value;
   const tipo=document.getElementById('tp-periodo').value;
   const rango=_tpRango(tipo);
-  const prog=document.getElementById('tp-prog');
-  const progBar=document.getElementById('tp-prog-bar');
-  const progTxt=document.getElementById('tp-prog-txt');
+  const prog=document.getElementById('tp-prog'), progBar=document.getElementById('tp-prog-bar'), progTxt=document.getElementById('tp-prog-txt');
   const salida=document.getElementById('tp-salida');
+  const det=document.getElementById('tp-detalle'); if(det) det.innerHTML='';
   if(prog) prog.style.display='block';
-  const datos = await _tpRecorrer(rango.desde, rango.hasta, (hecho,total)=>{
+  const datos=await _tpRecorrer(rango.desde, rango.hasta, (hecho,total)=>{
     if(progBar) progBar.style.width=Math.round(hecho/total*100)+'%';
     if(progTxt) progTxt.textContent='Calculando tu clima día por día… '+hecho+'/'+total;
   });
-  if(datos===null) return;                 // corrida cancelada
+  if(datos===null) return;
   if(prog) prog.style.display='none';
   // comparación con período previo (misma longitud, justo antes)
   const dias=datos.length;
-  const prevHasta=_tpAddDias(rango.desde,-1);
-  const prevDesde=_tpAddDias(prevHasta,-(dias-1));
+  const prevHasta=_tpAddDias(rango.desde,-1), prevDesde=_tpAddDias(prevHasta,-(dias-1));
   let comp=null;
   const prevDatos=await _tpRecorrer(prevDesde, prevHasta, null);
-  if(prevDatos){
-    const prom=arr=>arr.reduce((a,x)=>a+_tpScore(x.radar,areaId),0)/arr.length;
-    comp={ actual:prom(datos), previo:prom(prevDatos) };
-  }
-  salida.innerHTML = rango.anual
-    ? _tpRenderAnual(datos, areaId, rango)
-    : _tpRenderPeriodo(datos, areaId, rango, comp);
-  // enganchar tooltips del heatmap
-  if(rango.anual) _tpBindHeatmap();
+  if(prevDatos){ const prom=arr=>arr.reduce((a,x)=>a+_tpScore(x.radar,areaId),0)/arr.length; comp={actual:prom(datos), previo:prom(prevDatos)}; }
+  _tpUlt={datos, areaId, rango};
+  salida.innerHTML = rango.anual ? _tpRenderAnual(datos, areaId, rango) : _tpRenderPeriodo(datos, areaId, rango, comp);
 }
 
-// ═══ VISTA PERÍODO (calendario + resumen + top + tendencia + comparador) ════
+// ═══ estabilidad: 100 - dispersión relativa ════════════════════════════════
+function _tpEstabilidad(vals){
+  if(vals.length<2) return {pct:100, txt:'Estable'};
+  const m=vals.reduce((a,b)=>a+b,0)/vals.length;
+  const va=vals.reduce((a,b)=>a+(b-m)*(b-m),0)/vals.length;
+  const sd=Math.sqrt(va);
+  const pct=Math.max(0, Math.min(100, Math.round(100 - sd*2.2)));   // sd 0→100, sd~45→0
+  const txt=pct>=70?'Alta':pct>=45?'Media':'Baja (montaña rusa)';
+  return {pct, txt};
+}
+
+// ═══ VISTA PERÍODO ══════════════════════════════════════════════════════════
 function _tpRenderPeriodo(datos, areaId, rango, comp){
-  const areaNom = areaId==='general'?'🌟 Visión general':(function(){const a=AREAS_VIDA.find(x=>x.id===areaId);return a.ico+' '+a.rot;})();
+  const areaNom=areaId==='general'?'Visión general':(function(){const a=AREAS_VIDA.find(x=>x.id===areaId);return a.rot;})();
+  const areaIco=areaId==='general'?'🌟':(function(){const a=AREAS_VIDA.find(x=>x.id===areaId);return a.ico;})();
   const scores=datos.map(d=>({iso:d.iso, n:_tpScore(d.radar,areaId), tono:_tpTono(d.radar,areaId)}));
-  const prom=Math.round(scores.reduce((a,s)=>a+s.n,0)/scores.length);
-  const ordenados=scores.slice().sort((a,b)=>b.n-a.n);
-  const mejores=ordenados.slice(0,3);
-  const peores=ordenados.slice(-3).reverse();
+  const vals=scores.map(s=>s.n);
+  const prom=Math.round(vals.reduce((a,b)=>a+b,0)/vals.length);
+  const ord=scores.slice().sort((a,b)=>b.n-a.n);
+  const mejores=ord.slice(0,3), peores=ord.slice(-3).reverse();
+  const pendiente=vals.length>1? (vals.slice(-Math.ceil(vals.length/3)).reduce((a,b)=>a+b,0)/Math.ceil(vals.length/3)) - (vals.slice(0,Math.ceil(vals.length/3)).reduce((a,b)=>a+b,0)/Math.ceil(vals.length/3)) : 0;
+  const clima=_tpClima(prom, pendiente);
+  const estab=_tpEstabilidad(vals);
+  const idxMejor=vals.indexOf(Math.max.apply(null,vals));
 
   let h='';
-  // ── tarjeta resumen ──
-  h += '<div class="tp-resumen" style="background:'+_tpColorBg(prom)+';border:1px solid '+_tpColor(prom)+';border-radius:12px;padding:16px 18px;margin-bottom:16px">'
-     + '<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">'
-     + '<div style="font-size:2.6rem;font-weight:700;color:'+_tpColor(prom)+';line-height:1">'+prom+'</div>'
-     + '<div style="flex:1;min-width:180px"><div style="font-size:1.05rem;font-weight:600;color:var(--marfil)">'+areaNom+' · '+_tpEtiqueta(prom)+'</div>'
-     + '<div style="font-size:.82rem;color:var(--marfil-dim)">Promedio de '+rango.lbl.toLowerCase()+' ('+datos.length+' días)</div></div>'
-     + (comp? _tpComparador(comp):'')
-     + '</div>';
-  // barra de tendencia (sparkline)
-  h += _tpSparkline(scores.map(s=>s.n)) ;
-  h += '</div>';
+  // ── HERO: clima + score gigante + barra + veredicto ──
+  h+='<div class="tp-hero" style="background:linear-gradient(135deg,'+_tpColorBg(prom)+',rgba(17,21,39,.4));border:1px solid '+_tpColor(prom)+';border-radius:16px;padding:22px;margin-bottom:16px;text-align:center">';
+  h+='<div style="font-size:.8rem;color:var(--marfil-dim);text-transform:uppercase;letter-spacing:.2em;margin-bottom:6px">'+clima.ico+' '+clima.txt+' · '+areaIco+' '+areaNom+'</div>';
+  h+='<div style="font-size:5rem;font-weight:800;color:'+_tpColor(prom)+';line-height:.95;font-family:var(--font-display)">'+prom+'</div>';
+  h+='<div style="font-size:1.15rem;font-weight:700;letter-spacing:.15em;color:'+_tpColor(prom)+';margin:2px 0 12px">'+_tpEtiqueta(prom)+'</div>';
+  // barra grande
+  h+='<div style="max-width:340px;margin:0 auto 12px"><div style="height:12px;background:var(--noche-3);border-radius:8px;overflow:hidden"><div style="width:'+prom+'%;height:100%;background:'+_tpColor(prom)+';border-radius:8px;transition:width .5s"></div></div></div>';
+  // veredicto 1 frase
+  h+='<div style="font-size:1rem;color:var(--marfil);max-width:440px;margin:0 auto;line-height:1.5">'+_tpVeredicto(areaId,prom)+'</div>';
+  h+='<div style="font-size:.78rem;color:var(--marfil-dim);margin-top:8px">Promedio de '+rango.lbl.toLowerCase()+' · '+datos.length+' días</div>';
+  h+='</div>';
 
-  // ── mejores / peores días ──
-  h += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">';
-  h += _tpTopCard('☀️ Mejores días', mejores, '#3fb562');
-  h += _tpTopCard('🌧️ Días flojos', peores, '#c14b4b');
-  h += '</div>';
+  // ── fila de métricas: comparador + estabilidad ──
+  h+='<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">';
+  if(comp){
+    const dif=comp.actual-comp.previo;
+    const fl=dif>3?'▲':dif<-3?'▼':'▬';
+    const col=dif>3?'#3fb562':dif<-3?'#c14b4b':'var(--marfil-dim)';
+    h+='<div style="flex:1;min-width:170px;background:var(--noche-2);border:1px solid var(--linea);border-radius:12px;padding:13px 16px">'
+      +'<div style="font-size:.72rem;color:var(--marfil-dim);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px">Comparación</div>'
+      +'<div style="display:flex;align-items:center;gap:12px">'
+        +'<div style="text-align:center"><div style="font-size:1.5rem;font-weight:800;color:var(--marfil)">'+Math.round(comp.actual)+'</div><div style="font-size:.65rem;color:var(--marfil-dim)">este período</div></div>'
+        +'<div style="font-size:1.3rem;color:'+col+';font-weight:800">'+fl+' '+(dif>=0?'+':'')+Math.round(dif)+'</div>'
+        +'<div style="text-align:center"><div style="font-size:1.5rem;font-weight:800;color:var(--marfil-dim)">'+Math.round(comp.previo)+'</div><div style="font-size:.65rem;color:var(--marfil-dim)">período previo</div></div>'
+      +'</div></div>';
+  }
+  h+='<div style="flex:1;min-width:170px;background:var(--noche-2);border:1px solid var(--linea);border-radius:12px;padding:13px 16px">'
+    +'<div style="font-size:.72rem;color:var(--marfil-dim);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px">Estabilidad</div>'
+    +'<div style="display:flex;align-items:center;gap:10px"><div style="flex:1;height:10px;background:var(--noche-3);border-radius:6px;overflow:hidden"><div style="width:'+estab.pct+'%;height:100%;background:linear-gradient(90deg,var(--oro-suave),var(--oro));border-radius:6px"></div></div>'
+      +'<span style="font-size:.85rem;font-weight:700;color:var(--marfil);white-space:nowrap">'+estab.txt+'</span></div>'
+    +'<div style="font-size:.68rem;color:var(--marfil-dim);margin-top:5px">'+(estab.pct>=70?'Clima parejo, sin sobresaltos.':estab.pct>=45?'Altibajos moderados.':'Días muy dispares: elegí bien las fechas.')+'</div>'
+    +'</div>';
+  h+='</div>';
 
-  // ── calendario semáforo ──
-  h += '<h4 style="font-family:var(--font-display);color:var(--marfil);font-size:1.1rem;margin:0 0 10px">Calendario</h4>';
-  h += _tpCalendario(scores, areaId);
+  // ── mejores / peores (accionable) ──
+  h+='<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">';
+  h+=_tpTopCard('☀️ Mejores días', mejores, areaId);
+  h+=_tpTopCard('🌧️ Días flojos', peores, areaId);
+  h+='</div>';
 
+  // ── tendencia con punto en el mejor día ──
+  h+=_tpSparkline(vals, idxMejor);
+
+  // ── calendario (más compacto) ──
+  h+='<h4 style="font-family:var(--font-display);color:var(--marfil);font-size:1.05rem;margin:16px 0 8px">Calendario <span style="font-size:.72rem;color:var(--marfil-dim);font-weight:400">· tocá un día para ver por qué</span></h4>';
+  h+=_tpCalendario(scores, areaId);
   return h;
 }
 
-function _tpComparador(comp){
-  const dif=comp.actual-comp.previo;
-  const flecha=dif>3?'⬆':dif<-3?'⬇':'➡';
-  const color=dif>3?'#3fb562':dif<-3?'#c14b4b':'var(--marfil-dim)';
-  const txt=dif>3?'mejor que el período previo':dif<-3?'peor que el período previo':'similar al período previo';
-  return '<div style="text-align:right"><div style="font-size:1.4rem;color:'+color+';font-weight:700">'+flecha+' '+(dif>=0?'+':'')+Math.round(dif)+'</div>'
-       + '<div style="font-size:.72rem;color:var(--marfil-dim);max-width:120px">'+txt+'</div></div>';
-}
-
-function _tpTopCard(titulo, dias, color){
-  let h='<div style="flex:1;min-width:190px;background:var(--noche-2);border:1px solid var(--linea);border-radius:10px;padding:12px 14px">';
-  h += '<div style="font-size:.9rem;font-weight:600;color:var(--marfil);margin-bottom:8px">'+titulo+'</div>';
-  dias.forEach(d=>{
-    h += '<div style="display:flex;align-items:center;gap:8px;padding:3px 0">'
-       + '<span style="width:34px;height:22px;border-radius:5px;background:'+_tpColor(d.n)+';color:#0b0e1a;font-weight:700;font-size:.78rem;display:flex;align-items:center;justify-content:center">'+d.n+'</span>'
-       + '<span style="font-size:.85rem;color:var(--marfil)">'+_tpFechaLarga(d.iso)+'</span>'
-       + '<span style="font-size:.72rem;color:var(--marfil-dim);margin-left:auto">'+d.tono+'</span></div>';
+function _tpTopCard(titulo, dias, areaId){
+  let h='<div style="flex:1;min-width:210px;background:var(--noche-2);border:1px solid var(--linea);border-radius:12px;padding:13px 15px">';
+  h+='<div style="font-size:.92rem;font-weight:700;color:var(--marfil);margin-bottom:9px">'+titulo+'</div>';
+  dias.forEach((d,i)=>{
+    h+='<div onclick="tpDetalle(\''+d.iso+'\',\''+areaId+'\')" style="display:flex;align-items:center;gap:9px;padding:5px 0;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.04)">'
+      +'<span style="font-size:.75rem;color:var(--oro);font-weight:700;width:16px">'+(i+1)+'°</span>'
+      +'<span style="width:38px;height:26px;border-radius:6px;background:'+_tpColor(d.n)+';color:#0b0e1a;font-weight:800;font-size:.82rem;display:flex;align-items:center;justify-content:center">'+d.n+'</span>'
+      +'<span style="font-size:.9rem;color:var(--marfil);flex:1">'+_tpFechaLarga(d.iso)+'</span>'
+      +'<span style="font-size:1rem">'+_tpSemaforo(d.n)+'</span></div>';
   });
-  h += '</div>';
+  h+='<div style="font-size:.66rem;color:var(--marfil-dim);margin-top:6px;text-align:center">tocá un día para el detalle</div>';
+  h+='</div>';
   return h;
 }
 
-function _tpSparkline(vals){
+function _tpSparkline(vals, idxMejor){
   if(vals.length<2) return '';
-  const w=600,hh=48,pad=4;
-  const min=Math.min(...vals),max=Math.max(...vals),rng=(max-min)||1;
+  const w=600,hh=60,pad=6;
+  const min=Math.min.apply(null,vals),max=Math.max.apply(null,vals),rng=(max-min)||1;
   const n=vals.length-1;
-  const X=i=>(i/n*(w-2*pad)+pad).toFixed(1);
-  const Y=v=>((hh-pad)-((v-min)/rng*(hh-2*pad))).toFixed(1);
-  const path=vals.map((v,i)=>(i?'L':'M')+X(i)+','+Y(v)).join('');
-  const area='M'+X(0)+','+(hh-1)+' '+vals.map((v,i)=>'L'+X(i)+','+Y(v)).join(' ')+' L'+X(n)+','+(hh-1)+' Z';
-  return '<div style="margin-top:12px"><svg viewBox="0 0 '+w+' '+hh+'" preserveAspectRatio="none" style="width:100%;height:44px;display:block">'
-    + '<path d="'+area+'" fill="var(--oro)" opacity="0.10"/>'
-    + '<path d="'+path+'" fill="none" stroke="var(--oro)" stroke-width="1.6" vector-effect="non-scaling-stroke"/></svg>'
-    + '<div style="font-size:.68rem;color:var(--marfil-dim);text-align:center">Tendencia del período</div></div>';
+  const X=i=>(i/n*(w-2*pad)+pad);
+  const Y=v=>((hh-pad)-((v-min)/rng*(hh-2*pad)));
+  const path=vals.map((v,i)=>(i?'L':'M')+X(i).toFixed(1)+','+Y(v).toFixed(1)).join('');
+  const area='M'+X(0).toFixed(1)+','+(hh-1)+' '+vals.map((v,i)=>'L'+X(i).toFixed(1)+','+Y(v).toFixed(1)).join(' ')+' L'+X(n).toFixed(1)+','+(hh-1)+' Z';
+  // marcador HOY si está en el rango
+  let hoyMark='';
+  if(_tpUlt){ const hoyIdx=_tpUlt.datos.findIndex(d=>d.iso===_tpHoyISO()); if(hoyIdx>=0){ const x=X(hoyIdx); hoyMark='<line x1="'+x.toFixed(1)+'" y1="2" x2="'+x.toFixed(1)+'" y2="'+(hh-1)+'" stroke="var(--celeste)" stroke-width="1" stroke-dasharray="2,2" opacity="0.7"/><circle cx="'+x.toFixed(1)+'" cy="'+Y(vals[hoyIdx]).toFixed(1)+'" r="3.5" fill="var(--celeste)"/>'; } }
+  // punto en el mejor día
+  let mejorMark='';
+  if(idxMejor>=0){ const x=X(idxMejor), y=Y(vals[idxMejor]); mejorMark='<circle cx="'+x.toFixed(1)+'" cy="'+y.toFixed(1)+'" r="4" fill="#3fb562" stroke="#0b0e1a" stroke-width="1"/><text x="'+x.toFixed(1)+'" y="'+(y-7).toFixed(1)+'" fill="#3fb562" font-size="9" text-anchor="middle">★</text>'; }
+  return '<div style="background:var(--noche-2);border:1px solid var(--linea);border-radius:12px;padding:12px 14px"><div style="font-size:.72rem;color:var(--marfil-dim);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px">Tendencia del período</div>'
+    +'<svg viewBox="0 0 '+w+' '+hh+'" preserveAspectRatio="none" style="width:100%;height:56px;display:block">'
+    +'<path d="'+area+'" fill="var(--oro)" opacity="0.10"/>'
+    +'<path d="'+path+'" fill="none" stroke="var(--oro)" stroke-width="1.6" vector-effect="non-scaling-stroke"/>'
+    +hoyMark+mejorMark+'</svg>'
+    +'<div style="display:flex;justify-content:space-between;font-size:.66rem;color:var(--marfil-dim);margin-top:3px"><span>★ mejor día</span>'+(_tpUlt&&_tpUlt.datos.some(d=>d.iso===_tpHoyISO())?'<span style="color:var(--celeste)">● hoy</span>':'')+'</div></div>';
 }
 
-// calendario tipo grilla mensual con celdas coloreadas + tooltip
 function _tpCalendario(scores, areaId){
+  const hoyISO=_tpHoyISO();
   const byMes={};
   scores.forEach(s=>{ const d=_tpParse(s.iso); const k=d.getFullYear()+'-'+d.getMonth(); (byMes[k]=byMes[k]||[]).push(s); });
   let h='<div class="tp-cals">';
   Object.keys(byMes).forEach(k=>{
     const [y,m]=k.split('-').map(Number);
-    const dias=byMes[k];
     const primerDia=new Date(y,m,1).getDay();
-    h += '<div class="tp-cal">';
-    h += '<div style="text-align:center;font-weight:600;color:var(--oro);font-size:.9rem;margin-bottom:6px">'+_TP_MESESL[m]+' '+y+'</div>';
-    h += '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">';
-    _TP_DIAS.forEach(dn=>h+='<div style="text-align:center;font-size:.6rem;color:var(--marfil-dim)">'+dn+'</div>');
+    h+='<div class="tp-cal">';
+    h+='<div style="text-align:center;font-weight:600;color:var(--oro);font-size:.85rem;margin-bottom:5px">'+_TP_MESESL[m]+' '+y+'</div>';
+    h+='<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px">';
+    _TP_DIAS.forEach(dn=>h+='<div style="text-align:center;font-size:.55rem;color:var(--marfil-dim)">'+dn+'</div>');
     for(let i=0;i<primerDia;i++) h+='<div></div>';
-    const mapa={}; dias.forEach(s=>{ mapa[_tpParse(s.iso).getDate()]=s; });
+    const mapa={}; scores.forEach(s=>{ const d=_tpParse(s.iso); if(d.getFullYear()===y&&d.getMonth()===m) mapa[d.getDate()]=s; });
     const ultimo=new Date(y,m+1,0).getDate();
     for(let d=1;d<=ultimo;d++){
       const s=mapa[d];
-      if(!s){ h+='<div style="aspect-ratio:1;border-radius:5px;background:var(--noche-3);opacity:.35"></div>'; continue; }
-      h += '<div class="tp-dia" data-iso="'+s.iso+'" data-area="'+areaId+'" title="'+_tpFechaLarga(s.iso)+': '+s.n+'/100 · '+s.tono+'" '
-         + 'style="aspect-ratio:1;border-radius:5px;background:'+_tpColor(s.n)+';color:#0b0e1a;font-weight:700;font-size:.72rem;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:default">'
-         + '<span>'+d+'</span><span style="font-size:.58rem;opacity:.8">'+s.n+'</span></div>';
+      if(!s){ h+='<div style="aspect-ratio:1;border-radius:4px;background:var(--noche-3);opacity:.3"></div>'; continue; }
+      const esHoy=s.iso===hoyISO;
+      h+='<div class="tp-dia" onclick="tpDetalle(\''+s.iso+'\',\''+areaId+'\')" title="'+_tpFechaLarga(s.iso)+': '+s.n+'/100 · '+s.tono+'" '
+        +'style="aspect-ratio:1;border-radius:4px;background:'+_tpColor(s.n)+';color:#0b0e1a;font-weight:700;font-size:.66rem;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;position:relative'+(esHoy?';box-shadow:0 0 0 2px var(--celeste)':'')+'">'
+        +(esHoy?'<span style="position:absolute;top:-1px;right:1px;font-size:.5rem;color:var(--celeste)">●</span>':'')
+        +'<span>'+d+'</span></div>';
     }
-    h += '</div></div>';
+    h+='</div></div>';
   });
-  h += '</div>';
+  h+='</div>';
   return h;
 }
 
-// ═══ VISTA ANUAL (heatmap estilo GitHub: filas=áreas, cols=semanas) ═════════
+// ═══ DETALLE del día (al clic) ══════════════════════════════════════════════
+function tpDetalle(iso, areaId){
+  const det=document.getElementById('tp-detalle'); if(!det) return;
+  const radar=_tpCache.get(iso); if(!radar) return;
+  const n=_tpScore(radar,areaId), tono=_tpTono(radar,areaId), facs=_tpFactores(radar,areaId);
+  const areaNom=areaId==='general'?'🌟 Visión general':(function(){const a=AREAS_VIDA.find(x=>x.id===areaId);return a.ico+' '+a.rot;})();
+  let h='<div style="background:var(--noche-3);border:1px solid '+_tpColor(n)+';border-radius:12px;padding:16px;margin-top:14px;animation:tpFade .25s ease">';
+  h+='<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">';
+  h+='<div style="text-align:center;min-width:70px"><div style="font-size:2.6rem;font-weight:800;color:'+_tpColor(n)+';line-height:1">'+n+'</div><div style="font-size:.72rem;color:'+_tpColor(n)+';font-weight:700">'+_tpEtiqueta(n)+'</div></div>';
+  h+='<div style="flex:1;min-width:200px"><div style="font-size:1.05rem;font-weight:700;color:var(--marfil)">'+_tpFechaLarga(iso)+' · '+areaNom+'</div>';
+  h+='<div style="font-size:.85rem;color:var(--marfil-dim);margin:2px 0 6px">Clima: '+_tpSemaforo(n)+' '+tono+'</div>';
+  h+='<div style="font-size:.92rem;color:var(--marfil);line-height:1.5">'+_tpVeredicto(areaId,n)+'</div></div>';
+  h+='</div>';
+  if(facs.length){
+    h+='<div style="margin-top:12px;border-top:1px solid var(--linea);padding-top:10px"><div style="font-size:.72rem;color:var(--marfil-dim);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px">¿Por qué?</div>';
+    facs.forEach(f=>{
+      const c=f.signo>0?'#3fb562':f.signo<0?'#c14b4b':'var(--marfil-dim)';
+      h+='<div style="display:flex;align-items:center;gap:8px;font-size:.85rem;color:var(--marfil);padding:2px 0"><span style="color:'+c+';font-weight:800">'+(f.signo>0?'▲':f.signo<0?'▼':'▬')+'</span>'+f.txt+'</div>';
+    });
+    h+='</div>';
+  }
+  h+='<div style="margin-top:10px;text-align:right"><button class="btn-mini" style="padding:6px 12px;font-size:.78rem" onclick="document.getElementById(\'tp-detalle\').innerHTML=\'\'">Cerrar</button></div>';
+  h+='</div>';
+  det.innerHTML=h;
+  det.scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+
+// ═══ VISTA ANUAL (heatmap con hover+clic) ═══════════════════════════════════
 function _tpRenderAnual(datos, areaId, rango){
   const y=parseInt(rango.desde);
-  // matriz por área: para cada fecha, nivel del área
   const areas=[{id:'general',ico:'🌟',rot:'General'}].concat(AREAS_VIDA);
-  // agrupar por semana ISO simple (columna = índice de semana desde 1 ene)
   const primero=_tpParse(rango.desde);
-  const colDe=iso=>{ const d=_tpParse(iso); return Math.floor((d-primero)/(7*86400000)); };
+  const colDe=iso=>Math.floor((_tpParse(iso)-primero)/(7*86400000));
   const nCols=colDe(rango.hasta)+1;
-  const cell=10, gap=2, rowH=cell+gap;
-  const wSVG=nCols*(cell+gap)+70;
-  let h='<p style="font-size:.82rem;color:var(--marfil-dim);margin-bottom:10px">Cada columna es una semana del año; cada fila, un área. Cuanto más verde, mejor tu clima. Pasá el cursor por una celda para ver el detalle.</p>';
-  h += '<div style="overflow-x:auto"><svg width="'+wSVG+'" height="'+(areas.length*rowH+30)+'" style="font-family:var(--font-mono)">';
-  // etiquetas de meses arriba
-  for(let mm=0; mm<12; mm++){
-    const col=colDe(_tpISO(new Date(y,mm,1)));
-    h += '<text x="'+(70+col*(cell+gap))+'" y="12" fill="var(--marfil-dim)" font-size="8">'+_TP_MESES[mm]+'</text>';
-  }
+  const cell=11, gap=2, rowH=cell+gap, x0=76;
+  const wSVG=nCols*(cell+gap)+x0;
+  const hoyISO=_tpHoyISO();
+  let h='<p style="font-size:.82rem;color:var(--marfil-dim);margin-bottom:10px">Cada columna es una semana; cada fila, un área. Más verde = mejor clima. Pasá el cursor o tocá una celda para el detalle.</p>';
+  h+='<div style="overflow-x:auto"><svg width="'+wSVG+'" height="'+(areas.length*rowH+26)+'" style="font-family:var(--font-mono)">';
+  for(let mm=0;mm<12;mm++){ const col=colDe(_tpISO(new Date(y,mm,1))); if(col>=0&&col<nCols) h+='<text x="'+(x0+col*(cell+gap))+'" y="11" fill="var(--marfil-dim)" font-size="8">'+_TP_MESES[mm]+'</text>'; }
   areas.forEach((a,ri)=>{
-    const yRow=22+ri*rowH;
-    h += '<text x="0" y="'+(yRow+cell-1)+'" fill="var(--marfil)" font-size="8.5">'+a.ico+'</text>';
+    const yRow=20+ri*rowH;
+    h+='<text x="0" y="'+(yRow+cell-2)+'" fill="var(--marfil)" font-size="9">'+a.ico+' '+a.rot.slice(0,7)+'</text>';
     datos.forEach(d=>{
-      const nivel=_tpScore(d.radar,a.id);
-      const col=colDe(d.iso);
-      const x=70+col*(cell+gap);
-      h += '<rect class="tp-hm" data-iso="'+d.iso+'" data-area="'+a.id+'" x="'+x+'" y="'+yRow+'" width="'+cell+'" height="'+cell+'" rx="2" fill="'+_tpColor(nivel)+'"><title>'+a.rot+' · '+_tpFechaLarga(d.iso)+': '+nivel+'/100</title></rect>';
+      const nivel=_tpScore(d.radar,a.id), col=colDe(d.iso), x=x0+col*(cell+gap);
+      const esHoy=d.iso===hoyISO && a.id===areaId;
+      h+='<rect class="tp-hm" onmouseover="tpHover(event,\''+d.iso+'\',\''+a.id+'\')" onmouseout="tpHoverOut()" onclick="tpDetalle(\''+d.iso+'\',\''+a.id+'\')" data-iso="'+d.iso+'" x="'+x+'" y="'+yRow+'" width="'+cell+'" height="'+cell+'" rx="2" fill="'+_tpColor(nivel)+'"'+(esHoy?' stroke="var(--celeste)" stroke-width="1.5"':'')+'></rect>';
     });
   });
-  h += '</svg></div>';
-  // leyenda
-  h += '<div style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:.72rem;color:var(--marfil-dim)">Menos'
-     + [10,40,55,72,88].map(n=>'<span style="width:12px;height:12px;border-radius:3px;background:'+_tpColor(n)+';display:inline-block"></span>').join('')
-     + 'Más</div>';
-  // buscador de oportunidades: mejores ventanas por área
-  h += _tpBuscadorVentanas(datos);
+  h+='</svg></div>';
+  h+='<div style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:.72rem;color:var(--marfil-dim)">Menos'
+    +[10,40,55,72,88].map(n=>'<span style="width:12px;height:12px;border-radius:3px;background:'+_tpColor(n)+';display:inline-block"></span>').join('')+'Más'
+    +'<span style="margin-left:12px;color:var(--celeste)">● hoy</span></div>';
+  h+='<div id="tp-hovbox" style="display:none;position:fixed;z-index:99;background:var(--noche);border:1px solid var(--oro-suave);border-radius:8px;padding:8px 11px;font-size:.8rem;color:var(--marfil);pointer-events:none;box-shadow:0 6px 20px rgba(0,0,0,.5);max-width:220px"></div>';
+  h+=_tpBuscadorVentanas(datos);
   return h;
 }
+function tpHover(ev, iso, areaId){
+  const box=document.getElementById('tp-hovbox'); if(!box) return;
+  const radar=_tpCache.get(iso); if(!radar) return;
+  const n=_tpScore(radar,areaId);
+  const a=areaId==='general'?{ico:'🌟',rot:'General'}:AREAS_VIDA.find(x=>x.id===areaId);
+  box.innerHTML='<div style="font-weight:700">'+a.ico+' '+a.rot+' · '+_tpFechaLarga(iso)+'</div><div style="font-size:1.4rem;font-weight:800;color:'+_tpColor(n)+'">'+n+' <span style="font-size:.75rem">'+_tpEtiqueta(n)+'</span></div><div style="font-size:.75rem;color:var(--marfil-dim);margin-top:2px">'+_tpVeredicto(areaId,n)+'</div>';
+  box.style.display='block';
+  box.style.left=Math.min(ev.clientX+12, window.innerWidth-230)+'px';
+  box.style.top=(ev.clientY+12)+'px';
+}
+function tpHoverOut(){ const b=document.getElementById('tp-hovbox'); if(b) b.style.display='none'; }
 
-// mejores VENTANAS (rachas de días buenos) por área en todo el período
+// ═══ BUSCADOR DE OPORTUNIDADES (con estrellas + racha) ══════════════════════
 function _tpBuscadorVentanas(datos){
   const areas=[{id:'general',ico:'🌟',rot:'Visión general'}].concat(AREAS_VIDA);
-  let h='<h4 style="font-family:var(--font-display);color:var(--marfil);font-size:1.15rem;margin:22px 0 4px">🔍 Tus mejores ventanas del año</h4>';
-  h += '<p class="seccion-sub" style="margin-bottom:14px">La racha de días consecutivos con mejor clima para cada área — ideal para elegir cuándo lanzar algo, competir o cerrar un trato.</p>';
-  h += '<div style="display:flex;flex-direction:column;gap:8px">';
+  let h='<h4 style="font-family:var(--font-display);color:var(--marfil);font-size:1.15rem;margin:22px 0 4px">🔍 Tus mejores ventanas</h4>';
+  h+='<p class="seccion-sub" style="margin-bottom:14px">La mejor racha de días seguidos para cada área — para elegir cuándo lanzar, competir o cerrar algo.</p>';
+  h+='<div style="display:flex;flex-direction:column;gap:9px">';
   areas.forEach(a=>{
-    // ventana de 5 días con mayor promedio
     const win=5; let best=null;
     for(let i=0;i+win<=datos.length;i++){
       const seg=datos.slice(i,i+win);
       const prom=seg.reduce((s,d)=>s+_tpScore(d.radar,a.id),0)/win;
-      if(!best||prom>best.prom) best={prom:Math.round(prom), desde:seg[0].iso, hasta:seg[win-1].iso};
+      if(!best||prom>best.prom) best={prom:Math.round(prom), desde:seg[0].iso, hasta:seg[win-1].iso, dias:win};
     }
     if(!best) return;
-    h += '<div style="display:flex;align-items:center;gap:12px;background:var(--noche-2);border:1px solid var(--linea);border-left:3px solid '+_tpColor(best.prom)+';border-radius:8px;padding:9px 13px">'
-       + '<span style="font-size:1.1rem">'+a.ico+'</span>'
-       + '<span style="font-weight:600;color:var(--marfil);min-width:150px">'+a.rot+'</span>'
-       + '<span style="width:38px;height:24px;border-radius:5px;background:'+_tpColor(best.prom)+';color:#0b0e1a;font-weight:700;font-size:.8rem;display:flex;align-items:center;justify-content:center">'+best.prom+'</span>'
-       + '<span style="font-size:.86rem;color:var(--marfil)">'+_tpFechaCorta(best.desde)+' → '+_tpFechaCorta(best.hasta)+'</span></div>';
+    const estrellas=Math.max(1,Math.min(5,Math.round(best.prom/20)));
+    const etq=best.prom>=80?'Ventana excelente':best.prom>=66?'Ventana muy buena':best.prom>=50?'Ventana favorable':'Mejor ventana disponible';
+    h+='<div onclick="tpDetalle(\''+best.desde+'\',\''+a.id+'\')" style="display:flex;align-items:center;gap:14px;background:var(--noche-2);border:1px solid var(--linea);border-left:4px solid '+_tpColor(best.prom)+';border-radius:10px;padding:11px 15px;cursor:pointer">'
+      +'<span style="font-size:1.5rem">'+a.ico+'</span>'
+      +'<div style="flex:1;min-width:0"><div style="font-weight:700;color:var(--marfil)">'+a.rot+'</div>'
+        +'<div style="font-size:.85rem;color:var(--oro)">'+ '★'.repeat(estrellas)+'☆'.repeat(5-estrellas)+' <span style="color:var(--marfil-dim)">'+etq+'</span></div></div>'
+      +'<div style="text-align:right"><div style="font-size:.95rem;font-weight:700;color:var(--marfil)">'+_tpFechaCorta(best.desde)+' → '+_tpFechaCorta(best.hasta)+'</div>'
+        +'<div style="font-size:.72rem;color:var(--marfil-dim)">'+best.dias+' días consecutivos favorables</div></div>'
+      +'<span style="width:42px;height:28px;border-radius:6px;background:'+_tpColor(best.prom)+';color:#0b0e1a;font-weight:800;font-size:.85rem;display:flex;align-items:center;justify-content:center">'+best.prom+'</span></div>';
   });
-  h += '</div>';
+  h+='</div>';
   return h;
 }
-
-function _tpBindHeatmap(){ /* los <title> nativos del SVG ya dan tooltip; hook reservado para futuras mejoras */ }
 
 async function renderIndividual(carta, transitoHoy) {
   const internos = calcularAspectos(carta.planetas, carta.planetas, true);
