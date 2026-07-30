@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v248 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v250 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -7563,6 +7563,7 @@ function renderDashTopPubs(){
   // Se recalcula con cada carga de órdenes, así se actualiza solo cada día.
   const cutoff = Date.now() - (30*24*60*60*1000);
   const salesMap = {};
+  const infoMap = {};   // v249: title/thumbnail tomados de la propia orden (fallback)
   allOrders.filter(o =>
     ['paid','confirmed','delivered','shipped'].includes(o.status) &&
     new Date(o.date_created||0).getTime() >= cutoff
@@ -7570,6 +7571,8 @@ function renderDashTopPubs(){
     (o.order_items||[]).forEach(oi => {
       const id = oi.item?.id; if(!id) return;
       salesMap[id] = (salesMap[id]||0) + (oi.quantity||1);
+      if(oi.item && (oi.item.title || oi.item.thumbnail) && !infoMap[id])
+        infoMap[id] = { title: oi.item.title, thumbnail: oi.item.thumbnail };
     });
   });
 
@@ -7587,9 +7590,12 @@ function renderDashTopPubs(){
   el.style.maxHeight='480px'; el.style.overflowY='auto';
   el.innerHTML = ranked.map(([itemId,qty],idx)=>{
     const i       = allItems.find(x=>String(x.id)===String(itemId));
-    const title   = i?.title||'MLA '+itemId;
+    // v249: si el ítem no está en allItems (venta de publicación no cargada),
+    // usamos el title/thumbnail que vienen en la propia orden.
+    const info    = infoMap[itemId] || {};
+    const title   = i?.title || info.title || 'MLA '+itemId;
     const price   = i?.price||0;
-    const thumb   = i?.thumbnail||'';
+    const thumb   = i?.thumbnail || info.thumbnail || '';
     const sc      = itemHealthPct(i);
     const editUrl = i ? mlEditLink(i.id, i) : null;
     const medal   = idx===0?'🥇':idx===1?'🥈':idx===2?'🥉':(idx+1);
@@ -9660,6 +9666,26 @@ const SEO_SCENARIOS = {
       return i.status === 'active' && Array.isArray(i.tags) && i.tags.some(t => String(t).includes('incomplete_technical_specs'));
     },
   },
+  'ml_ajustar_medida': {
+    emoji: '📐', label: 'Ajustar Medida', color: '#0d9488',
+    description: 'Publicaciones activas con envío por Mercado Envíos donde las medidas/peso del paquete no están cargadas o parecen incompletas. Es el "Ahorro ajustando medidas y peso" del Gestor: si la medida declarada es más grande que la real, pagás de más en cada envío. Cargá las medidas correctas para pagar el costo justo.',
+    actionMain:      'Medí el paquete real (alto × ancho × largo + peso) y cargá esas medidas en cada publicación.',
+    actionSecondary: 'ML calcula el costo de envío por volumen: una caja declarada más grande que la real te cuesta plata en cada venta.',
+    filter: i => {
+      // server-first si ML expone el conteo oficial
+      const srv=_mlSrvGet('ml_ajustar_medida');
+      if(srv && srv.ids.length) return srv.ids.includes(i.id);
+      // heurística local: activa, con envío ME (no retiro), SIN dimensiones cargadas
+      if(i.status !== 'active') return false;
+      const sh = i.shipping || {};
+      const modo = String(sh.mode||'').toLowerCase();
+      const usaME = modo === 'me2' || modo === 'me1' || (Array.isArray(sh.tags) && sh.tags.some(t=>/self_service|cross_docking|drop_off|fulfillment/.test(String(t))));
+      if(!usaME) return false;
+      // dimensions viene como "alto x ancho x largo, peso" o null/vacío
+      const dim = sh.dimensions;
+      return !dim || String(dim).trim()==='' || !/\d/.test(String(dim));
+    },
+  },
   'ml_reputacion': {
     emoji: '🧯', label: 'Daña Reputación', color: '#b91c1c',
     description: 'Publicaciones que MercadoLibre marca como dañinas para tu reputación (reputation_health_gauge=unhealthy): cancelaciones, reclamos o demoras concentrados. Conteo oficial del servidor.',
@@ -9956,7 +9982,7 @@ const SEO_SCENARIO_ORDER = [
   'con_descuento', 'sin_descuento',
   // v240: espejo de Gestión de publicaciones de ML
   'ml_politicas', 'ml_pendientes', 'ml_volver_vender', 'ml_elegible_catalogo',
-  'ml_objetivo_calidad', 'ml_ficha_tecnica', 'ml_precio_mercado', 'ml_ganar_catalogo',
+  'ml_objetivo_calidad', 'ml_ficha_tecnica', 'ml_ajustar_medida', 'ml_precio_mercado', 'ml_ganar_catalogo',
   'ml_reputacion',
 ];
 
@@ -10498,6 +10524,7 @@ const ML_SRV_QUERIES = {
   ml_pendientes:        ['sub_status=warning', 'sub_status=waiting_for_patch'],
   ml_volver_vender:     ['sub_status=out_of_stock'],
   ml_ficha_tecnica:     ['tags=incomplete_technical_specs'],
+  ml_ajustar_medida:    ['tags=dimensions_to_check'],   // v249: si ML expone el tag; si no, cae a heurística local
 };
 let _mlSrv=null;   // { ts, data:{ key:{ total, ids:[...] } } }
 function _mlSrvLoad(){
@@ -25947,6 +25974,12 @@ function _ctaMarcarCanceladas(idsCancel) {
 }
 
 // WA: apenas ingresa el pedido aparece como operación (origen WA)
+// v250: mapea el estado del pedido de Personalizadas (guía) al de Cuenta Impala.
+// Si en la guía ya lo marcaron pagado/entregado, respetamos eso; si no, Diseñando.
+function _mapPersoEstado(e) {
+  const M = { disenando:'disenando', a_cobrar:'a_cobrar', pagada:'pagada', entregada:'entregada' };
+  return M[e] || 'disenando';
+}
 async function ctaSyncWA() {
   let peds = (typeof _persoState !== 'undefined' && _persoState.loaded) ? _persoState.pedidos : null;
   if (!peds) {
@@ -25975,18 +26008,25 @@ async function ctaSyncWA() {
         detalle: 'Personalizada ' + p.code + (p.producto ? ' · ' + p.producto : ''),
         cliente: p.comprador || '', telefono: p.telefono || '', provincia: p.provincia || '',
         items: p.producto ? [{ nombre: p.producto, cant: Number(p.cantidad) || 1, unit: Number(p.monto) || 0 }] : [],
-        envio: Number(p.envio) || 0, monto, src: 'wa'
+        envio: Number(p.envio) || 0, monto, src: 'wa',
+        // v250: las Personalizadas de WhatsApp entran como "Diseñando" (amarillo).
+        // El color de la fila lo pone CTA_ESTADOS['disenando'] (#ca8a04); al no
+        // ser 'pagada', el monto queda como pendiente de cobro.
+        estado: (p.estado && p.estado !== 'disenando') ? _mapPersoEstado(p.estado) : 'disenando'
       });
       if (_ctaAplicarStock(chunk[chunk.length - 1], 1)) _ctaPersistCatalogo();
       ctaMarkDirty(ym); nuevos++;
     } else if (!op.manualEdit) {
       // El pedido se editó en Personalizadas WA → reflejar acá
+      const nuevoEstado = (p.estado && p.estado !== 'disenando') ? _mapPersoEstado(p.estado) : (op.estado || 'disenando');
       const cambio = op.monto !== monto || op.envio !== (Number(p.envio) || 0) ||
-        op.cliente !== (p.comprador || '') || op.provincia !== (p.provincia || '');
+        op.cliente !== (p.comprador || '') || op.provincia !== (p.provincia || '') ||
+        (op.estado || '') !== nuevoEstado;
       if (cambio) {
         op.monto = monto; op.envio = Number(p.envio) || 0;
         op.cliente = p.comprador || ''; op.provincia = p.provincia || '';
         op.telefono = p.telefono || '';
+        op.estado = nuevoEstado;   // v250: refleja el estado de la guía (default Diseñando)
         if (op.items && op.items[0]) { op.items[0].cant = Number(p.cantidad) || 1; op.items[0].unit = Number(p.monto) || 0; }
         ctaMarkDirty(ym);
       }
@@ -40742,7 +40782,7 @@ function htmlTuPeriodo(carta){
   h+='<div class="ficha" data-noprint style="margin-bottom:16px"><div class="fila" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">'
     +'<div class="campo"><label>Área de tu vida</label><select id="tp-area" onchange="tpActualizar()">'+opAreas+'</select></div>'
     +'<div class="campo"><label>Período</label><select id="tp-periodo" onchange="tpPeriodoChange()">'
-      +'<option value="30">Próximos 30 días</option>'
+      +'<option value="hoy">Hoy</option>'\n      +'<option value="30">Próximos 30 días</option>'
       +'<option value="7">Próximos 7 días</option>'
       +'<option value="mes">Este mes</option>'
       +'<option value="mesant">Mes anterior</option>'
@@ -40791,7 +40831,8 @@ async function tpActualizar(){
   const prevDatos=await _tpRecorrer(prevDesde, prevHasta, null);
   if(prevDatos){ const prom=arr=>arr.reduce((a,x)=>a+_tpScore(x.radar,areaId),0)/arr.length; comp={actual:prom(datos), previo:prom(prevDatos)}; }
   _tpUlt={datos, areaId, rango};
-  salida.innerHTML = rango.anual ? _tpRenderAnual(datos, areaId, rango) : _tpRenderPeriodo(datos, areaId, rango, comp);
+  if(rango.hoy){ salida.innerHTML = _tpRenderHoy(datos[0], areaId); }
+  else salida.innerHTML = rango.anual ? _tpRenderAnual(datos, areaId, rango) : _tpRenderPeriodo(datos, areaId, rango, comp);
 }
 
 // ═══ estabilidad: 100 - dispersión relativa ════════════════════════════════
@@ -40904,7 +40945,22 @@ function _tpSparkline(vals, idxMejor){
     +'<path d="'+area+'" fill="var(--oro)" opacity="0.10"/>'
     +'<path d="'+path+'" fill="none" stroke="var(--oro)" stroke-width="1.6" vector-effect="non-scaling-stroke"/>'
     +hoyMark+mejorMark+'</svg>'
-    +'<div style="display:flex;justify-content:space-between;font-size:.66rem;color:var(--marfil-dim);margin-top:3px"><span>★ mejor día</span>'+(_tpUlt&&_tpUlt.datos.some(d=>d.iso===_tpHoyISO())?'<span style="color:var(--celeste)">● hoy</span>':'')+'</div></div>';
+    +_tpSparkLeyenda(vals, idxMejor)+'</div>';
+}
+
+// v249: leyenda del sparkline con las FECHAS concretas de cada marca
+function _tpSparkLeyenda(vals, idxMejor){
+  if(!_tpUlt) return '';
+  const datos=_tpUlt.datos;
+  const idxPeor=vals.indexOf(Math.min.apply(null,vals));
+  const hoyIdx=datos.findIndex(d=>d.iso===_tpHoyISO());
+  const chip=(color,simbolo,txt,idx)=> (idx>=0 && datos[idx])? '<span style="display:inline-flex;align-items:center;gap:4px;font-size:.66rem;color:var(--marfil-dim)"><span style="color:'+color+';font-weight:800">'+simbolo+'</span>'+txt+' <b style="color:var(--marfil)">'+_tpFechaCorta(datos[idx].iso)+'</b> ('+vals[idx]+')</span>' : '';
+  let h='<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-top:5px">';
+  h+=chip('#3fb562','★','Mejor:',idxMejor);
+  if(hoyIdx>=0 && hoyIdx!==idxMejor && hoyIdx!==idxPeor) h+=chip('var(--celeste)','●','Hoy:',hoyIdx);
+  h+=chip('#c14b4b','▼','Más flojo:',idxPeor);
+  h+='</div>';
+  return h;
 }
 
 function _tpCalendario(scores, areaId){
@@ -40938,6 +40994,39 @@ function _tpCalendario(scores, areaId){
 }
 
 // ═══ DETALLE del día (al clic) ══════════════════════════════════════════════
+// v249: escalera con TODAS las áreas de la vida para una fecha
+function _tpEscaleraAreas(radar, resaltarId){
+  const filas=AREAS_VIDA.map(a=>{ const r=radar.find(x=>x.area.id===a.id); return {id:a.id, ico:a.ico, rot:a.rot, n:r?r.nivel:0}; });
+  filas.sort((x,y)=>y.n-x.n);
+  let h='<div style="display:flex;flex-direction:column;gap:5px">';
+  filas.forEach(f=>{
+    const on = f.id===resaltarId;
+    h+='<div style="display:flex;align-items:center;gap:9px'+(on?';background:rgba(216,182,92,.10);border-radius:7px;padding:2px 6px;margin:0 -6px':'')+'">'
+      +'<span style="width:120px;font-size:.85rem;color:var(--marfil);white-space:nowrap;overflow:hidden;text-overflow:ellipsis'+(on?';font-weight:700':'')+'">'+f.ico+' '+f.rot+'</span>'
+      +'<div style="flex:1;height:9px;background:var(--noche-3);border-radius:5px;overflow:hidden"><div style="width:'+f.n+'%;height:100%;background:'+_tpColor(f.n)+';border-radius:5px"></div></div>'
+      +'<span style="width:30px;text-align:right;font-size:.9rem;font-weight:800;color:'+_tpColor(f.n)+'">'+f.n+'</span></div>';
+  });
+  h+='</div>';
+  return h;
+}
+
+function _tpRenderHoy(dato, areaId){
+  const radar=dato.radar, iso=dato.iso;
+  const gen=_tpScore(radar,'general');
+  const clima=_tpClima(gen,0);
+  let h='<div class="tp-hero" style="background:linear-gradient(135deg,'+_tpColorBg(gen)+',rgba(17,21,39,.4));border:1px solid '+_tpColor(gen)+';border-radius:16px;padding:22px;margin-bottom:16px;text-align:center">';
+  h+='<div style="font-size:.8rem;color:var(--marfil-dim);text-transform:uppercase;letter-spacing:.2em;margin-bottom:6px">'+clima.ico+' '+clima.txt+' · '+_tpFechaLarga(iso)+'</div>';
+  h+='<div style="font-size:5rem;font-weight:800;color:'+_tpColor(gen)+';line-height:.95;font-family:var(--font-display)">'+gen+'</div>';
+  h+='<div style="font-size:1.15rem;font-weight:700;letter-spacing:.15em;color:'+_tpColor(gen)+';margin:2px 0 12px">'+_tpEtiqueta(gen)+' · 🌟 Visión general</div>';
+  h+='<div style="font-size:1rem;color:var(--marfil);max-width:440px;margin:0 auto;line-height:1.5">'+_tpVeredicto('general',gen)+'</div>';
+  h+='</div>';
+  h+='<div style="background:var(--noche-2);border:1px solid var(--linea);border-radius:12px;padding:15px 17px">';
+  h+='<div style="font-size:.72rem;color:var(--marfil-dim);text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px">Todas las áreas hoy</div>';
+  h+=_tpEscaleraAreas(radar, areaId==='general'?null:areaId);
+  h+='</div>';
+  return h;
+}
+
 function tpDetalle(iso, areaId){
   const det=document.getElementById('tp-detalle'); if(!det) return;
   const radar=_tpCache.get(iso); if(!radar) return;
@@ -40958,6 +41047,9 @@ function tpDetalle(iso, areaId){
     });
     h+='</div>';
   }
+  h+='<div style="margin-top:12px;border-top:1px solid var(--linea);padding-top:10px"><div style="font-size:.72rem;color:var(--marfil-dim);text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px">Todas las áreas ese día</div>';
+  h+=_tpEscaleraAreas(radar, areaId==='general'?null:areaId);
+  h+='</div>';
   h+='<div style="margin-top:10px;text-align:right"><button class="btn-mini" style="padding:6px 12px;font-size:.78rem" onclick="document.getElementById(&#39;tp-detalle&#39;).innerHTML=&#39;&#39;">Cerrar</button></div>';
   h+='</div>';
   det.innerHTML=h;
