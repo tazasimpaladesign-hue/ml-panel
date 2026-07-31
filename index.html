@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v252 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v253 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -38393,6 +38393,41 @@ window.astroStore = {
   set: function(k, v){ try { localStorage.setItem('astro_' + k, v); return true; } catch(e){ return false; } }
 };
 
+/* v253 · Puente de VENTAS para Astrolabio → Tu Período.
+   Astrolabio (iframe) pide las ventas diarias de Cuenta Impala para cruzarlas
+   con el clima astrológico. Asegura que los meses del rango estén cargados y
+   devuelve un objeto { 'YYYY-MM-DD': montoTotalVendido }. Venta = operación de
+   tipo 'ingreso'; monto = monto + envío (mismo criterio que los KPIs de Caja). */
+window.ctaVentasPorDia = async function(desdeISO, hastaISO){
+  try{
+    if(typeof _ctaState === 'undefined') return {};
+    // meses YYYY-MM que abarca el rango
+    const meses = [];
+    let d = new Date(desdeISO + 'T12:00:00');
+    const fin = new Date(hastaISO + 'T12:00:00');
+    while(d <= fin){
+      meses.push(d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'));
+      d.setMonth(d.getMonth()+1);
+    }
+    // asegurar cada mes cargado (si no está, lo bajamos del worker)
+    for(const ym of meses){
+      if(!_ctaState.chunks[ym] && typeof _ctaFetchChunk === 'function'){
+        try { await _ctaFetchChunk(ym); } catch(e){ /* mes sin datos: sigue */ }
+      }
+    }
+    // sumar ingresos por día dentro del rango
+    const out = {};
+    Object.values(_ctaState.chunks).forEach(ch => (ch||[]).forEach(o => {
+      if(!o || o.tipo !== 'ingreso') return;
+      const f = o.fecha || '';
+      if(f >= desdeISO && f <= hastaISO){
+        out[f] = (out[f]||0) + (+o.monto||0) + (+o.envio||0);
+      }
+    }));
+    return out;
+  }catch(e){ return {}; }
+};
+
 /* HTML completo de Astrolabio embebido como srcdoc (aislado del panel). */
 const ASTRO_SRCDOC = `<!DOCTYPE html>
 <html lang="es">
@@ -40814,11 +40849,37 @@ function htmlTuPeriodo(carta){
     +'<div style="height:6px;background:var(--noche-3);border-radius:4px;overflow:hidden"><div id="tp-prog-bar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--oro-suave),var(--oro));transition:width .2s"></div></div></div>';
   h+='<div id="tp-salida"></div>';
   h+='<div id="tp-detalle"></div>';   // panel de detalle al clic en un día
+  // v253: exportador ventas × tránsitos
+  h+='<div class="ficha" data-noprint style="margin-top:18px;border-top:1px solid var(--linea);padding-top:14px">';
+  h+='<div style="font-size:.85rem;font-weight:700;color:var(--oro);margin-bottom:4px">📊 Cruzar con tus ventas (Cuenta Impala)</div>';
+  h+='<p class="seccion-sub" style="font-size:.8rem;margin-bottom:10px">Genera un Excel día por día (7 áreas × 2 cartas) con las ventas de cada fecha, más un reporte de qué área acompaña más tus ventas. Usa el período elegido arriba.</p>';
+  h+='<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">';
+  h+='<div class="campo"><label>Segunda carta (emprendimiento, opcional)</label><select id="tp-export-empr"><option value="">— solo carta actual —</option></select></div>';
+  h+='<button id="tp-export-btn" class="btn-mini" style="padding:9px 16px" onclick="tpExportar()">📊 Exportar Excel + análisis</button>';
+  h+='</div>';
+  h+='<div id="tp-export-prog" style="display:none;margin-top:10px"><div style="height:6px;background:var(--noche-3);border-radius:4px;overflow:hidden"><div style="height:100%;width:0%;background:linear-gradient(90deg,var(--oro-suave),var(--oro));transition:width .2s"></div></div></div>';
+  h+='<div id="tp-export-info" style="font-size:.78rem;color:var(--marfil-dim);margin-top:6px"></div>';
+  h+='<div id="tp-export-reporte"></div>';
+  h+='</div>';
   h+='</div></details>';
   return h;
 }
 
-function tpInit(){ if(document.getElementById('tp-area')) tpActualizar(); }
+function tpInit(){
+  if(document.getElementById('tp-area')) tpActualizar();
+  // poblar selector de segunda carta con la biblioteca
+  const sel=document.getElementById('tp-export-empr');
+  if(sel){
+    const bib=_tpCartasBiblio();
+    const actualSig=_tpFirmaCarta(_tpCarta);
+    bib.forEach(c=>{
+      if(_tpFirmaCarta(c)===actualSig) return;   // no ofrecer la misma carta
+      const o=document.createElement('option');
+      o.value=String(c.id||c.nombre); o.textContent=c.nombre||'(sin nombre)';
+      sel.appendChild(o);
+    });
+  }
+}
 function tpPeriodoChange(){
   const box=document.getElementById('tp-rango-box');
   if(box) box.style.display = document.getElementById('tp-periodo').value==='rango' ? 'block':'none';
@@ -41011,6 +41072,201 @@ function _tpCalendario(scores, areaId){
 
 // ═══ DETALLE del día (al clic) ══════════════════════════════════════════════
 // v249: escalera con TODAS las áreas de la vida para una fecha
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v253 · EXPORTADOR VENTAS × TRÁNSITOS — Excel de datos + reporte de correlación
+// Cruza el clima astrológico diario (7 áreas × carta personal + carta del
+// emprendimiento) con las ventas de Cuenta Impala, día por día, para un rango.
+// Cero IA: astronomía real (calcularRadarVida) + ventas reales (puente del panel).
+// ═══════════════════════════════════════════════════════════════════════════
+
+// carga SheetJS on-demand (no infla el srcdoc)
+function _tpLoadXLSX(){
+  return new Promise((resolve, reject)=>{
+    try{ if(window.parent && window.parent.XLSX) return resolve(window.parent.XLSX); }catch(e){}
+    if(window.XLSX) return resolve(window.XLSX);
+    const s=document.createElement('script');
+    s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    s.onload=()=>resolve(window.XLSX);
+    s.onerror=()=>reject(new Error('No se pudo cargar SheetJS'));
+    document.head.appendChild(s);
+  });
+}
+
+// pide las ventas diarias al panel (Cuenta Impala). Devuelve { 'YYYY-MM-DD': monto }.
+async function _tpVentas(desdeISO, hastaISO){
+  try{
+    if(window.parent && window.parent !== window && typeof window.parent.ctaVentasPorDia === 'function'){
+      return await window.parent.ctaVentasPorDia(desdeISO, hastaISO);
+    }
+  }catch(e){}
+  return {};   // sin panel (Astrolabio suelto): ventas en 0
+}
+
+// segunda carta (emprendimiento) desde la biblioteca — selector
+function _tpCartasBiblio(){
+  try{ return (biblioLeer()||[]).filter(c=>c && Array.isArray(c.planetas)); }catch(e){ return []; }
+}
+
+// correlación de Pearson
+function _tpPearson(xs, ys){
+  const n=xs.length; if(n<3) return 0;
+  const mx=xs.reduce((a,b)=>a+b,0)/n, my=ys.reduce((a,b)=>a+b,0)/n;
+  let num=0, dx=0, dy=0;
+  for(let i=0;i<n;i++){ const a=xs[i]-mx, b=ys[i]-my; num+=a*b; dx+=a*a; dy+=b*b; }
+  const den=Math.sqrt(dx*dy);
+  return den? num/den : 0;
+}
+
+// ── construir el dataset día por día ────────────────────────────────────────
+// Devuelve { dias:[{iso, ventas, C:{area:nivel...}, I:{...}}], areasC, areasI }
+async function _tpConstruirDataset(desdeISO, hastaISO, cartaPersonal, cartaEmpr, onProgress){
+  // fechas del rango
+  const fechas=[]; let cur=desdeISO;
+  while(cur<=hastaISO){ fechas.push(cur); cur=_tpAddDias(cur,1); }
+  const ventas = await _tpVentas(desdeISO, hastaISO);
+  const dias=[];
+  const total=fechas.length;
+  for(let i=0;i<total;i++){
+    const iso=fechas[i];
+    // radar de la carta personal (usa _tpCarta vía firma; acá calculamos directo)
+    const radarC = await calcularRadarVida(cartaPersonal, iso);
+    const C={}; radarC.forEach(r=>{ C[r.area.id]=r.nivel; });
+    let I=null;
+    if(cartaEmpr){
+      const radarI = await calcularRadarVida(cartaEmpr, iso);
+      I={}; radarI.forEach(r=>{ I[r.area.id]=r.nivel; });
+    }
+    dias.push({ iso, ventas: Math.round(ventas[iso]||0), C, I });
+    if(onProgress) onProgress(i+1, total);
+    if(i%6===5) await new Promise(r=>requestAnimationFrame(r));
+  }
+  return { dias, areas: AREAS_VIDA.map(a=>({id:a.id, rot:a.rot, ico:a.ico})), tieneEmpr: !!cartaEmpr };
+}
+
+// ── análisis de correlaciones ───────────────────────────────────────────────
+function _tpAnalizar(ds){
+  const ventas=ds.dias.map(d=>d.ventas);
+  const filas=[];
+  const push=(prefijo, cartaKey)=>{
+    ds.areas.forEach(a=>{
+      const serie=ds.dias.map(d=> d[cartaKey] ? (d[cartaKey][a.id]||0) : 0);
+      const r=_tpPearson(serie, ventas);
+      filas.push({ etq: prefijo+' '+a.rot, ico:a.ico, carta:prefijo, area:a.rot, r });
+    });
+  };
+  push('Personal','C');
+  if(ds.tieneEmpr) push('Emprendimiento','I');
+  filas.sort((x,y)=>Math.abs(y.r)-Math.abs(x.r));
+  return filas;
+}
+
+// ── EXPORTAR ────────────────────────────────────────────────────────────────
+async function tpExportar(){
+  const btn=document.getElementById('tp-export-btn');
+  const info=document.getElementById('tp-export-info');
+  if(!_tpCarta){ if(info) info.textContent='Primero trazá una carta.'; return; }
+  // segunda carta elegida
+  const sel=document.getElementById('tp-export-empr');
+  let cartaEmpr=null;
+  if(sel && sel.value){
+    const bib=_tpCartasBiblio();
+    cartaEmpr=bib.find(c=>String(c.id)===sel.value || c.nombre===sel.value) || null;
+  }
+  // rango: reusa el selector de período (o rango personalizado)
+  const tipo=document.getElementById('tp-periodo').value;
+  const rango=_tpRango(tipo);
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Procesando…'; }
+  const prog=document.getElementById('tp-export-prog');
+  if(prog) prog.style.display='block';
+  try{
+    const ds=await _tpConstruirDataset(rango.desde, rango.hasta, _tpCarta, cartaEmpr, (h,tot)=>{
+      if(prog) prog.querySelector('div>div').style.width=Math.round(h/tot*100)+'%';
+      if(info) info.textContent='Calculando día '+h+' de '+tot+'…';
+    });
+    const XLSX=await _tpLoadXLSX();
+    _tpArmarExcel(XLSX, ds, rango);
+    const analisis=_tpAnalizar(ds);
+    _tpMostrarReporte(analisis, ds, rango);
+    if(info) info.textContent='✅ Listo: '+ds.dias.length+' días exportados. Revisá el reporte abajo.';
+  }catch(e){
+    if(info) info.textContent='Error: '+e.message;
+  }finally{
+    if(btn){ btn.disabled=false; btn.textContent='📊 Exportar Excel + análisis'; }
+    if(prog) prog.style.display='none';
+  }
+}
+
+// arma el .xlsx (matriz día×área + ventas, formato similar al tuyo) y lo descarga
+function _tpArmarExcel(XLSX, ds, rango){
+  // Hoja 1 "Datos": filas = áreas (C.* e I.*) + VENTAS, columnas = días
+  const cab=['', ...ds.dias.map(d=>d.iso)];
+  const rows=[cab];
+  ds.areas.forEach(a=>{ rows.push(['C.'+a.rot.toUpperCase(), ...ds.dias.map(d=>d.C[a.id]||0)]); });
+  if(ds.tieneEmpr) ds.areas.forEach(a=>{ rows.push(['I.'+a.rot.toUpperCase(), ...ds.dias.map(d=>d.I[a.id]||0)]); });
+  rows.push(['VENTAS', ...ds.dias.map(d=>d.ventas)]);
+  const ws1=XLSX.utils.aoa_to_sheet(rows);
+
+  // Hoja 2 "PorDia": un registro por fila (día, ventas, cada área en columna)
+  const cols=['Fecha','Ventas'];
+  ds.areas.forEach(a=>cols.push('C_'+a.rot));
+  if(ds.tieneEmpr) ds.areas.forEach(a=>cols.push('I_'+a.rot));
+  const r2=[cols];
+  ds.dias.forEach(d=>{
+    const row=[d.iso, d.ventas];
+    ds.areas.forEach(a=>row.push(d.C[a.id]||0));
+    if(ds.tieneEmpr) ds.areas.forEach(a=>row.push(d.I[a.id]||0));
+    r2.push(row);
+  });
+  const ws2=XLSX.utils.aoa_to_sheet(r2);
+
+  // Hoja 3 "Correlaciones"
+  const an=_tpAnalizar(ds);
+  const r3=[['Area','Carta','Correlacion_con_Ventas']];
+  an.forEach(f=>r3.push([f.area, f.carta, Math.round(f.r*1000)/1000]));
+  const ws3=XLSX.utils.aoa_to_sheet(r3);
+
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws1, 'Datos');
+  XLSX.utils.book_append_sheet(wb, ws2, 'PorDia');
+  XLSX.utils.book_append_sheet(wb, ws3, 'Correlaciones');
+  const nombre='ventas-transitos_'+rango.desde+'_a_'+rango.hasta+'.xlsx';
+  XLSX.writeFile(wb, nombre);
+}
+
+// muestra el reporte de correlación en pantalla
+function _tpMostrarReporte(analisis, ds, rango){
+  const cont=document.getElementById('tp-export-reporte'); if(!cont) return;
+  const nDias=ds.dias.length;
+  const conVenta=ds.dias.filter(d=>d.ventas>0).length;
+  const totVenta=ds.dias.reduce((a,d)=>a+d.ventas,0);
+  const top=analisis[0];
+  const fuerza=r=>{ const a=Math.abs(r); return a>=0.5?'fuerte':a>=0.3?'moderada':a>=0.15?'débil':'muy débil/nula'; };
+  let h='<div style="background:var(--noche-2);border:1px solid var(--linea);border-radius:12px;padding:16px;margin-top:14px">';
+  h+='<h4 style="font-family:var(--font-display);color:var(--oro);font-size:1.15rem;margin:0 0 4px">📊 Reporte: ventas vs clima astrológico</h4>';
+  h+='<div style="font-size:.8rem;color:var(--marfil-dim);margin-bottom:12px">'+rango.lbl+' · '+nDias+' días · '+conVenta+' con ventas · total $'+totVenta.toLocaleString('es-AR')+'</div>';
+  if(top){
+    h+='<div style="background:'+_tpColorBg(70)+';border-radius:10px;padding:12px;margin-bottom:12px">'
+      +'<div style="font-size:.75rem;color:var(--marfil-dim);text-transform:uppercase;letter-spacing:.1em">Área más asociada a tus ventas</div>'
+      +'<div style="font-size:1.1rem;font-weight:700;color:var(--marfil);margin:3px 0">'+top.ico+' '+top.etq+'</div>'
+      +'<div style="font-size:.85rem;color:var(--marfil-dim)">Correlación '+(top.r>=0?'+':'')+top.r.toFixed(3)+' — señal '+fuerza(top.r)+'</div></div>';
+  }
+  h+='<div style="font-size:.72rem;color:var(--marfil-dim);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px">Ranking de correlaciones</div>';
+  analisis.forEach(f=>{
+    const a=Math.abs(f.r), col=f.r>=0?'#3fb562':'#c14b4b', w=Math.min(100,Math.round(a*100/0.5*100)/100);
+    h+='<div style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:.82rem">'
+      +'<span style="width:170px;color:var(--marfil);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+f.ico+' '+f.etq+'</span>'
+      +'<div style="flex:1;height:8px;background:var(--noche-3);border-radius:4px;overflow:hidden"><div style="width:'+Math.min(100,a*180)+'%;height:100%;background:'+col+';border-radius:4px"></div></div>'
+      +'<span style="width:52px;text-align:right;font-weight:700;color:'+col+'">'+(f.r>=0?'+':'')+f.r.toFixed(3)+'</span></div>';
+  });
+  h+='<div style="font-size:.72rem;color:var(--marfil-dim);margin-top:12px;line-height:1.5;border-top:1px solid var(--linea);padding-top:10px">'
+    +'⚠️ Con pocos meses de datos, estas correlaciones son orientativas (pueden ser ruido). Para una lógica confiable conviene juntar ~1 año. '
+    +'La astrología no tiene validación científica: tomá esto como un juego exploratorio, no como predicción.</div>';
+  h+='</div>';
+  cont.innerHTML=h;
+  cont.scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+
 function _tpEscaleraAreas(radar, resaltarId){
   const filas=AREAS_VIDA.map(a=>{ const r=radar.find(x=>x.area.id===a.id); return {id:a.id, ico:a.ico, rot:a.rot, n:r?r.nivel:0}; });
   filas.sort((x,y)=>y.n-x.n);
