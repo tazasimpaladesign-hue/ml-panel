@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v254 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v255 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -40869,15 +40869,17 @@ function tpInit(){
   if(document.getElementById('tp-area')) tpActualizar();
   // poblar selector de segunda carta con la biblioteca
   const sel=document.getElementById('tp-export-empr');
-  if(sel){
+  if(sel && sel.options.length<=1){
     const bib=_tpCartasBiblio();
-    const actualSig=_tpFirmaCarta(_tpCarta);
     bib.forEach(c=>{
-      if(_tpFirmaCarta(c)===actualSig) return;   // no ofrecer la misma carta
       const o=document.createElement('option');
-      o.value=String(c.id||c.nombre); o.textContent=c.nombre||'(sin nombre)';
+      o.value=String(c.id||c.nombre); o.textContent=(c.nombre||'(sin nombre)')+(c.fecha?' · '+c.fecha:'');
       sel.appendChild(o);
     });
+    if(bib.length===0){
+      const o=document.createElement('option'); o.value=''; o.textContent='(guardá cartas en la biblioteca primero)'; o.disabled=true;
+      sel.appendChild(o);
+    }
   }
 }
 function tpPeriodoChange(){
@@ -41004,38 +41006,59 @@ function _tpTopCard(titulo, dias, areaId){
 
 function _tpSparkline(vals, idxMejor){
   if(vals.length<2) return '';
-  const w=600,hh=60,pad=6;
-  const min=Math.min.apply(null,vals),max=Math.max.apply(null,vals),rng=(max-min)||1;
+  const w=600,hh=64,pad=6;
   const n=vals.length-1;
   const X=i=>(i/n*(w-2*pad)+pad);
-  const Y=v=>((hh-pad)-((v-min)/rng*(hh-2*pad)));
-  const path=vals.map((v,i)=>(i?'L':'M')+X(i).toFixed(1)+','+Y(v).toFixed(1)).join('');
-  const area='M'+X(0).toFixed(1)+','+(hh-1)+' '+vals.map((v,i)=>'L'+X(i).toFixed(1)+','+Y(v).toFixed(1)).join(' ')+' L'+X(n).toFixed(1)+','+(hh-1)+' Z';
-  // marcador HOY si está en el rango
+  // escala independiente para cada serie (ambas 0-100 conceptualmente, pero
+  // escalamos a su propio min-max para que ambas curvas se vean bien)
+  function mkY(arr){ const mn=Math.min.apply(null,arr),mx=Math.max.apply(null,arr),rg=(mx-mn)||1; return v=>((hh-pad)-((v-mn)/rg*(hh-2*pad))); }
+  const Yc=mkY(vals);
+  const pathC=vals.map((v,i)=>(i?'L':'M')+X(i).toFixed(1)+','+Yc(v).toFixed(1)).join('');
+  // serie de VENTAS (índice comercial por día), si hay datos con radar
+  let ventasIdx=null, pathV='', idxMejorV=-1;
+  if(_tpUlt && Array.isArray(_tpUlt.datos) && _tpUlt.datos.length===vals.length){
+    ventasIdx=_tpUlt.datos.map(d=>{ const iv=_tpIndiceVentas(d.radar); return iv?iv.idx:0; });
+    const Yv=mkY(ventasIdx);
+    pathV=ventasIdx.map((v,i)=>(i?'L':'M')+X(i).toFixed(1)+','+Yv(v).toFixed(1)).join('');
+    idxMejorV=ventasIdx.indexOf(Math.max.apply(null,ventasIdx));
+    var YvRef=Yv;
+  }
+  // marcador HOY (sobre la línea de clima)
   let hoyMark='';
-  if(_tpUlt){ const hoyIdx=_tpUlt.datos.findIndex(d=>d.iso===_tpHoyISO()); if(hoyIdx>=0){ const x=X(hoyIdx); hoyMark='<line x1="'+x.toFixed(1)+'" y1="2" x2="'+x.toFixed(1)+'" y2="'+(hh-1)+'" stroke="var(--celeste)" stroke-width="1" stroke-dasharray="2,2" opacity="0.7"/><circle cx="'+x.toFixed(1)+'" cy="'+Y(vals[hoyIdx]).toFixed(1)+'" r="3.5" fill="var(--celeste)"/>'; } }
-  // punto en el mejor día
+  if(_tpUlt){ const hoyIdx=_tpUlt.datos.findIndex(d=>d.iso===_tpHoyISO()); if(hoyIdx>=0){ const x=X(hoyIdx); hoyMark='<line x1="'+x.toFixed(1)+'" y1="2" x2="'+x.toFixed(1)+'" y2="'+(hh-1)+'" stroke="var(--celeste)" stroke-width="1" stroke-dasharray="2,2" opacity="0.7"/><circle cx="'+x.toFixed(1)+'" cy="'+Yc(vals[hoyIdx]).toFixed(1)+'" r="3.5" fill="var(--celeste)"/>'; } }
+  // mejor día de CLIMA (estrella oro)
   let mejorMark='';
-  if(idxMejor>=0){ const x=X(idxMejor), y=Y(vals[idxMejor]); mejorMark='<circle cx="'+x.toFixed(1)+'" cy="'+y.toFixed(1)+'" r="4" fill="#3fb562" stroke="#0b0e1a" stroke-width="1"/><text x="'+x.toFixed(1)+'" y="'+(y-7).toFixed(1)+'" fill="#3fb562" font-size="9" text-anchor="middle">★</text>'; }
+  if(idxMejor>=0){ const x=X(idxMejor), y=Yc(vals[idxMejor]); mejorMark='<circle cx="'+x.toFixed(1)+'" cy="'+y.toFixed(1)+'" r="4" fill="var(--oro)" stroke="#0b0e1a" stroke-width="1"/><text x="'+x.toFixed(1)+'" y="'+(y-7).toFixed(1)+'" fill="var(--oro)" font-size="9" text-anchor="middle">★</text>'; }
+  // mejor día de VENTAS (rombo verde)
+  let mejorMarkV='';
+  if(idxMejorV>=0 && ventasIdx){ const x=X(idxMejorV), y=YvRef(ventasIdx[idxMejorV]); mejorMarkV='<rect x="'+(x-3).toFixed(1)+'" y="'+(y-3).toFixed(1)+'" width="6" height="6" transform="rotate(45 '+x.toFixed(1)+' '+y.toFixed(1)+')" fill="#3fb562" stroke="#0b0e1a" stroke-width="1"/><text x="'+x.toFixed(1)+'" y="'+(y+13).toFixed(1)+'" fill="#3fb562" font-size="9" text-anchor="middle">$</text>'; }
+  const lineaV = pathV? '<path d="'+pathV+'" fill="none" stroke="#3fb562" stroke-width="1.6" stroke-dasharray="4,2" vector-effect="non-scaling-stroke"/>' : '';
   return '<div style="background:var(--noche-2);border:1px solid var(--linea);border-radius:12px;padding:12px 14px"><div style="font-size:.72rem;color:var(--marfil-dim);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px">Tendencia del período</div>'
-    +'<svg viewBox="0 0 '+w+' '+hh+'" preserveAspectRatio="none" style="width:100%;height:56px;display:block">'
-    +'<path d="'+area+'" fill="var(--oro)" opacity="0.10"/>'
-    +'<path d="'+path+'" fill="none" stroke="var(--oro)" stroke-width="1.6" vector-effect="non-scaling-stroke"/>'
-    +hoyMark+mejorMark+'</svg>'
-    +_tpSparkLeyenda(vals, idxMejor)+'</div>';
+    +'<svg viewBox="0 0 '+w+' '+hh+'" preserveAspectRatio="none" style="width:100%;height:60px;display:block">'
+    +'<path d="'+pathC+'" fill="none" stroke="var(--oro)" stroke-width="1.6" vector-effect="non-scaling-stroke"/>'
+    +lineaV+hoyMark+mejorMark+mejorMarkV+'</svg>'
+    +'<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:.66rem;color:var(--marfil-dim);margin:5px 0 3px">'
+      +'<span><span style="color:var(--oro)">━</span> Clima general ★ mejor</span>'
+      +(pathV?'<span><span style="color:#3fb562">╌</span> Clima de ventas ◆ mejor</span>':'')
+      +(_tpUlt&&_tpUlt.datos.some(d=>d.iso===_tpHoyISO())?'<span style="color:var(--celeste)">● hoy</span>':'')
+    +'</div>'
+    +_tpSparkLeyenda(vals, idxMejor, ventasIdx, idxMejorV)+'</div>';
 }
 
 // v249: leyenda del sparkline con las FECHAS concretas de cada marca
-function _tpSparkLeyenda(vals, idxMejor){
+function _tpSparkLeyenda(vals, idxMejor, ventasIdx, idxMejorV){
   if(!_tpUlt) return '';
   const datos=_tpUlt.datos;
   const idxPeor=vals.indexOf(Math.min.apply(null,vals));
   const hoyIdx=datos.findIndex(d=>d.iso===_tpHoyISO());
-  const chip=(color,simbolo,txt,idx)=> (idx>=0 && datos[idx])? '<span style="display:inline-flex;align-items:center;gap:4px;font-size:.66rem;color:var(--marfil-dim)"><span style="color:'+color+';font-weight:800">'+simbolo+'</span>'+txt+' <b style="color:var(--marfil)">'+_tpFechaCorta(datos[idx].iso)+'</b> ('+vals[idx]+')</span>' : '';
+  const chip=(color,simbolo,txt,idx,serie)=> (idx>=0 && datos[idx])? '<span style="display:inline-flex;align-items:center;gap:4px;font-size:.66rem;color:var(--marfil-dim)"><span style="color:'+color+';font-weight:800">'+simbolo+'</span>'+txt+' <b style="color:var(--marfil)">'+_tpFechaCorta(datos[idx].iso)+'</b> ('+(serie?serie[idx]:vals[idx])+')</span>' : '';
   let h='<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-top:5px">';
-  h+=chip('#3fb562','★','Mejor:',idxMejor);
-  if(hoyIdx>=0 && hoyIdx!==idxMejor && hoyIdx!==idxPeor) h+=chip('var(--celeste)','●','Hoy:',hoyIdx);
-  h+=chip('#c14b4b','▼','Más flojo:',idxPeor);
+  h+=chip('var(--oro)','★','Mejor clima:',idxMejor,vals);
+  // mejor día de VENTAS (con su fecha), si tenemos la serie
+  if(ventasIdx && idxMejorV>=0){
+    h+=chip('#3fb562','◆','Mejor p/ventas:',idxMejorV,ventasIdx);
+  }
+  if(hoyIdx>=0 && hoyIdx!==idxMejor) h+=chip('var(--celeste)','●','Hoy:',hoyIdx,vals);
   h+='</div>';
   return h;
 }
@@ -41105,7 +41128,16 @@ async function _tpVentas(desdeISO, hastaISO){
 
 // segunda carta (emprendimiento) desde la biblioteca — selector
 function _tpCartasBiblio(){
-  try{ return (biblioLeer()||[]).filter(c=>c && Array.isArray(c.planetas)); }catch(e){ return []; }
+  // Las cartas de la biblioteca guardan los DATOS de nacimiento (fecha/hora/tz),
+  // no los planetas (esos se calculan on-demand con calcularCarta). Filtramos las
+  // astrales que tengan al menos fecha.
+  try{ return (biblioLeer()||[]).filter(c=>c && c.clase==='astro' && c.fecha); }catch(e){ return []; }
+}
+// v255: obtiene una carta CON planetas a partir de una entrada de biblioteca.
+async function _tpCartaConPlanetas(entrada){
+  if(!entrada) return null;
+  if(Array.isArray(entrada.planetas)) return entrada;   // ya viene calculada
+  try{ return await calcularCarta(entrada); }catch(e){ return null; }
 }
 
 // correlación de Pearson
@@ -41171,7 +41203,12 @@ async function tpExportar(){
   let cartaEmpr=null;
   if(sel && sel.value){
     const bib=_tpCartasBiblio();
-    cartaEmpr=bib.find(c=>String(c.id)===sel.value || c.nombre===sel.value) || null;
+    const entrada=bib.find(c=>String(c.id)===sel.value || c.nombre===sel.value) || null;
+    if(entrada){
+      if(info) info.textContent='Calculando la carta del emprendimiento…';
+      cartaEmpr=await _tpCartaConPlanetas(entrada);   // v255: obtiene planetas
+      if(!cartaEmpr && info) info.textContent='No pude calcular la segunda carta (revisá sus datos). Sigo solo con la actual.';
+    }
   }
   // rango: reusa el selector de período (o rango personalizado)
   const tipo=document.getElementById('tp-periodo').value;
@@ -41304,20 +41341,35 @@ function _tpRenderHoy(dato, areaId){
 // señal fue promedio(Trabajo, Desarrollo personal) de la carta personal, con
 // correlación +0.22 (débil pero la más alta y estable). Umbrales por cuartiles
 // reales del índice. Es un JUEGO orientativo, no una predicción.
+function _tpFmtPeso(n){
+  // formato corto: 128500 -> $129k, 35000 -> $35k
+  if(n>=1000) return '$'+Math.round(n/1000)+'k';
+  return '$'+Math.round(n);
+}
 function _tpIndiceVentas(radar){
   const t=radar.find(x=>x.area.id==='trabajo');
   const d=radar.find(x=>x.area.id==='desarrollo');
   if(!t||!d) return null;
   const idx=Math.round((t.nivel+d.nivel)/2);
-  // banda + expectativa (mediana real de cada banda en el histórico)
-  let banda, color, ico, msg, medianaHist;
-  if(idx>51){ banda='Alta vibración comercial'; color='#3fb562'; ico='🚀'; medianaHist=61000;
-    msg='Día con más chances de ventas altas. Buen momento para lanzar ofertas, empujar stock o publicar novedades.'; }
-  else if(idx>=23){ banda='Fluidez normal'; color='#c8a53e'; ico='⚖️'; medianaHist=55000;
-    msg='Ventas estables, sin picos ni pozos marcados. Ideal para gestión, atención y mantener el ritmo.'; }
-  else { banda='Día de repliegue'; color='#cd7a3a'; ico='🛠️'; medianaHist=51000;
-    msg='Tendencia a ventas por debajo de lo habitual. Buen día para tareas de fondo, diseño o desarrollo interno.'; }
-  return { idx, banda, color, ico, msg, medianaHist };
+  // Bandas y rangos calibrados con 366 días reales de Tienda Impala
+  // (carta del emprendimiento; Trabajo+Desarrollo, r=+0.22). Rango = percentiles
+  // 25-75 de las ventas de los días de cada banda; chance = % que superó $100k.
+  let banda, color, ico, msg, rlo, rhi, med, chance100;
+  if(idx>51){
+    banda='Alta vibración comercial'; color='#3fb562'; ico='🚀';
+    rlo=35000; rhi=129000; med=62000; chance100=32;
+    msg='Día de más empuje comercial: 1 de cada 3 así superó los $100k. Buen momento para lanzar ofertas, empujar stock o publicar novedades.';
+  } else if(idx>=23){
+    banda='Fluidez normal'; color='#c8a53e'; ico='⚖️';
+    rlo=39000; rhi=91000; med=61000; chance100=18;
+    msg='Ventas estables, sin picos ni pozos marcados. Ideal para gestión, atención al cliente y mantener el ritmo.';
+  } else {
+    banda='Día de repliegue'; color='#cd7a3a'; ico='🛠️';
+    rlo=38000; rhi=91000; med=51000; chance100=23;
+    msg='Tendencia a ventas algo más bajas. Buen día para tareas de fondo, diseño o desarrollo interno.';
+  }
+  const rango='Ventas típicas entre '+_tpFmtPeso(rlo)+' y '+_tpFmtPeso(rhi)+' (mediana '+_tpFmtPeso(med)+').';
+  return { idx, banda, color, ico, msg, rango, rlo, rhi, med, chance100 };
 }
 
 function tpDetalle(iso, areaId){
@@ -41348,7 +41400,8 @@ function tpDetalle(iso, areaId){
     h+='<div style="display:flex;align-items:center;gap:12px;background:'+_tpColorBg(iv.idx)+';border:1px solid '+iv.color+';border-radius:10px;padding:11px 13px">';
     h+='<div style="text-align:center;min-width:54px"><div style="font-size:1.9rem;font-weight:800;color:'+iv.color+';line-height:1">'+iv.idx+'</div><div style="font-size:.6rem;color:var(--marfil-dim)">índice</div></div>';
     h+='<div style="flex:1;min-width:180px"><div style="font-weight:700;color:var(--marfil);font-size:.95rem">'+iv.ico+' '+iv.banda+'</div>';
-    h+='<div style="font-size:.82rem;color:var(--marfil-dim);line-height:1.45;margin-top:3px">'+iv.msg+'</div></div></div>';
+    h+='<div style="font-size:.82rem;color:var(--marfil-dim);line-height:1.45;margin-top:3px">'+iv.msg+'</div>';
+    h+='<div style="font-size:.85rem;font-weight:700;color:'+iv.color+';margin-top:6px">💵 '+iv.rango+'</div></div></div>';
     h+='<div style="font-size:.66rem;color:var(--marfil-dim);margin-top:6px;line-height:1.4">Basado en Trabajo + Desarrollo de tu carta, calibrado con tu último año de ventas. Señal débil (~5%): tomalo como orientación, no como certeza.</div>';
     h+='</div>';
   }
