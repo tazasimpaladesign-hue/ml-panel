@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v253 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v254 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -41299,6 +41299,27 @@ function _tpRenderHoy(dato, areaId){
   return h;
 }
 
+// v254: Índice de Ventas — vínculo empírico entre el clima astral y las ventas.
+// Calibrado con 366 días reales de Tienda Impala (jul-2025 a jul-2026). La mejor
+// señal fue promedio(Trabajo, Desarrollo personal) de la carta personal, con
+// correlación +0.22 (débil pero la más alta y estable). Umbrales por cuartiles
+// reales del índice. Es un JUEGO orientativo, no una predicción.
+function _tpIndiceVentas(radar){
+  const t=radar.find(x=>x.area.id==='trabajo');
+  const d=radar.find(x=>x.area.id==='desarrollo');
+  if(!t||!d) return null;
+  const idx=Math.round((t.nivel+d.nivel)/2);
+  // banda + expectativa (mediana real de cada banda en el histórico)
+  let banda, color, ico, msg, medianaHist;
+  if(idx>51){ banda='Alta vibración comercial'; color='#3fb562'; ico='🚀'; medianaHist=61000;
+    msg='Día con más chances de ventas altas. Buen momento para lanzar ofertas, empujar stock o publicar novedades.'; }
+  else if(idx>=23){ banda='Fluidez normal'; color='#c8a53e'; ico='⚖️'; medianaHist=55000;
+    msg='Ventas estables, sin picos ni pozos marcados. Ideal para gestión, atención y mantener el ritmo.'; }
+  else { banda='Día de repliegue'; color='#cd7a3a'; ico='🛠️'; medianaHist=51000;
+    msg='Tendencia a ventas por debajo de lo habitual. Buen día para tareas de fondo, diseño o desarrollo interno.'; }
+  return { idx, banda, color, ico, msg, medianaHist };
+}
+
 function tpDetalle(iso, areaId){
   const det=document.getElementById('tp-detalle'); if(!det) return;
   const radar=_tpCacheGet(iso); if(!radar) return;
@@ -41317,6 +41338,18 @@ function tpDetalle(iso, areaId){
       const c=f.signo>0?'#3fb562':f.signo<0?'#c14b4b':'var(--marfil-dim)';
       h+='<div style="display:flex;align-items:center;gap:8px;font-size:.85rem;color:var(--marfil);padding:2px 0"><span style="color:'+c+';font-weight:800">'+(f.signo>0?'▲':f.signo<0?'▼':'▬')+'</span>'+f.txt+'</div>';
     });
+    h+='</div>';
+  }
+  // v254: Índice de Ventas (clima comercial calibrado con datos reales)
+  const iv=_tpIndiceVentas(radar);
+  if(iv){
+    h+='<div style="margin-top:12px;border-top:1px solid var(--linea);padding-top:10px">';
+    h+='<div style="font-size:.72rem;color:var(--marfil-dim);text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px">📈 Clima de ventas (experimental)</div>';
+    h+='<div style="display:flex;align-items:center;gap:12px;background:'+_tpColorBg(iv.idx)+';border:1px solid '+iv.color+';border-radius:10px;padding:11px 13px">';
+    h+='<div style="text-align:center;min-width:54px"><div style="font-size:1.9rem;font-weight:800;color:'+iv.color+';line-height:1">'+iv.idx+'</div><div style="font-size:.6rem;color:var(--marfil-dim)">índice</div></div>';
+    h+='<div style="flex:1;min-width:180px"><div style="font-weight:700;color:var(--marfil);font-size:.95rem">'+iv.ico+' '+iv.banda+'</div>';
+    h+='<div style="font-size:.82rem;color:var(--marfil-dim);line-height:1.45;margin-top:3px">'+iv.msg+'</div></div></div>';
+    h+='<div style="font-size:.66rem;color:var(--marfil-dim);margin-top:6px;line-height:1.4">Basado en Trabajo + Desarrollo de tu carta, calibrado con tu último año de ventas. Señal débil (~5%): tomalo como orientación, no como certeza.</div>';
     h+='</div>';
   }
   h+='<div style="margin-top:12px;border-top:1px solid var(--linea);padding-top:10px"><div style="font-size:.72rem;color:var(--marfil-dim);text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px">Todas las áreas ese día</div>';
