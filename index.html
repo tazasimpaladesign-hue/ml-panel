@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v250 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v251 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -40673,6 +40673,7 @@ async function iaEnviar() {
 
 let _tpCache = new Map();
 let _tpCarta = null;
+let _tpCartaSig = '';   // v251: firma única de la carta activa (evita cache cruzado entre personas)
 let _tpAbort = 0;
 let _tpUlt = null;   // último dataset renderizado (para clic en día/heatmap)
 
@@ -40731,10 +40732,19 @@ function _tpFactores(radar, areaId){
   const r=radar.find(x=>x.area.id===areaId); return r?r.factores:[];
 }
 
+// v251: firma única de una carta a partir de sus planetas (longitud+casa).
+// Dos personas distintas => firmas distintas => nunca comparten cache.
+function _tpFirmaCarta(carta){
+  if(!carta || !Array.isArray(carta.planetas)) return 'x';
+  return (carta.nombre||'') + '|' + carta.planetas.map(p=>p.clave+':'+Math.round((p.lon||0)*100)/100+':'+(p.casa||0)).join(',');
+}
 async function _tpRadar(iso){
-  if(_tpCache.has(iso)) return _tpCache.get(iso);
+  // La clave incluye la firma de la carta: al cambiar de persona, la clave cambia
+  // y se recalcula con los datos correctos (antes se devolvía el radar de la 1ra carta).
+  const key = _tpCartaSig + '@' + iso;
+  if(_tpCache.has(key)) return _tpCache.get(key);
   const R=await calcularRadarVida(_tpCarta, iso);
-  _tpCache.set(iso,R); return R;
+  _tpCache.set(key,R); return R;
 }
 async function _tpRecorrer(desdeISO, hastaISO, onProgress){
   const miToken=++_tpAbort;
@@ -40773,6 +40783,9 @@ function _tpRango(tipo){
 
 function htmlTuPeriodo(carta){
   _tpCarta=carta;
+  const sig=_tpFirmaCarta(carta);
+  if(sig!==_tpCartaSig){ _tpCartaSig=sig; _tpCache.clear(); _tpUlt=null; }   // v251: carta nueva => cache limpio
+
   const opAreas=[{id:'general',ico:'🌟',rot:'Visión general'}].concat(AREAS_VIDA)
     .map(a=>'<option value="'+a.id+'">'+a.ico+' '+a.rot+'</option>').join('');
   let h='';
