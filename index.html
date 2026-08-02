@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v256 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v257 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -7555,21 +7555,26 @@ function dashRow(thumb, title, editUrl, metricHtml, statusActive){
 function renderDashTopPubs(){
   const el = document.getElementById('dash-top-pubs');
   if(!el) return;
-  if(!allItems.length){
-    el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:10px 0">Sin publicaciones cargadas</div>';
+  // v257: robustez total — replica la lógica de v148 (que funcionaba al instante)
+  // + mejoras (ventana 30 días real, fallback de title/thumb desde la orden,
+  // código MLA). Cada helper va protegido para que un ítem problemático no
+  // rompa toda la lista (era la causa de que no se mostrara nada).
+  const items  = Array.isArray(allItems)  ? allItems  : [];
+  const orders = Array.isArray(allOrders) ? allOrders : [];
+  if(!orders.length){
+    el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:10px 0">Sin ventas cargadas todavía…</div>';
     return;
   }
-  // v205: ventana REAL de 30 días (antes 90, mostraba ventas viejas).
-  // Se recalcula con cada carga de órdenes, así se actualiza solo cada día.
+  // Ventana REAL de 30 días corridos (no "mes calendario")
   const cutoff = Date.now() - (30*24*60*60*1000);
   const salesMap = {};
-  const infoMap = {};   // v249: title/thumbnail tomados de la propia orden (fallback)
-  allOrders.filter(o =>
-    ['paid','confirmed','delivered','shipped'].includes(o.status) &&
+  const infoMap  = {};   // title/thumbnail tomados de la propia orden (fallback)
+  orders.filter(o =>
+    o && ['paid','confirmed','delivered','shipped'].includes(o.status) &&
     new Date(o.date_created||0).getTime() >= cutoff
   ).forEach(o => {
     (o.order_items||[]).forEach(oi => {
-      const id = oi.item?.id; if(!id) return;
+      const id = oi && oi.item && oi.item.id; if(!id) return;
       salesMap[id] = (salesMap[id]||0) + (oi.quantity||1);
       if(oi.item && (oi.item.title || oi.item.thumbnail) && !infoMap[id])
         infoMap[id] = { title: oi.item.title, thumbnail: oi.item.thumbnail };
@@ -7582,31 +7587,45 @@ function renderDashTopPubs(){
     return;
   }
 
-  // Cargar snapshot del día ANTERIOR para calcular flechas de tendencia
-  const prevRanks = loadPrevRanks(_RANK_TOP_KEY);
-  // Confirmar snapshot de HOY (solo escribe si la fecha cambió)
-  commitRankSnapshot(_RANK_TOP_KEY, ranked.map(([id])=>id));
+  // Snapshot de tendencia (protegido)
+  let prevRanks = {};
+  try{ prevRanks = loadPrevRanks(_RANK_TOP_KEY) || {}; }catch(e){}
+  try{ commitRankSnapshot(_RANK_TOP_KEY, ranked.map(([id])=>id)); }catch(e){}
 
   el.style.maxHeight='480px'; el.style.overflowY='auto';
   el.innerHTML = ranked.map(([itemId,qty],idx)=>{
-    const i       = allItems.find(x=>String(x.id)===String(itemId));
-    // v249: si el ítem no está en allItems (venta de publicación no cargada),
-    // usamos el title/thumbnail que vienen en la propia orden.
-    const info    = infoMap[itemId] || {};
-    const title   = i?.title || info.title || 'MLA '+itemId;
-    const price   = i?.price||0;
-    const thumb   = i?.thumbnail || info.thumbnail || '';
-    const sc      = itemHealthPct(i);
-    const editUrl = i ? mlEditLink(i.id, i) : null;
-    const medal   = idx===0?'🥇':idx===1?'🥈':idx===2?'🥉':(idx+1);
-    const arrow   = trendArrow(prevRanks, itemId, idx);
-    const metric  =
+    // Buscar el ítem en allItems; si no está, usar datos de la orden
+    let i=null;
+    try{ i = items.find(x=>String(x.id)===String(itemId)); }catch(e){}
+    const info = infoMap[itemId] || {};
+    const title = (i && i.title) || info.title || ('MLA '+itemId);
+    const price = (i && i.price) || 0;
+    let thumb   = (i && i.thumbnail) || info.thumbnail || '';
+    if(thumb) thumb = String(thumb).replace('http://','https://');
+    // calidad — protegido (si falla, se omite)
+    let sc=null;
+    try{ sc = itemHealthPct(i); }catch(e){}
+    // link de edición — protegido
+    let editUrl=null;
+    try{ editUrl = i ? (typeof mlEditLink==='function' ? mlEditLink(i.id, i) : 'https://www.mercadolibre.com.ar/publicaciones/'+i.id+'/modificar') : null; }catch(e){ editUrl=null; }
+    // código MLA — protegido
+    let mlaHtml='';
+    try{ mlaHtml = (typeof _mlaTag==='function') ? _mlaTag(itemId) : ''; }catch(e){}
+    // flecha de tendencia — protegida
+    let arrow='';
+    try{ arrow = trendArrow(prevRanks, itemId, idx); }catch(e){}
+
+    const medal  = idx===0?'🥇':idx===1?'🥈':idx===2?'🥉':(idx+1);
+    const active = i && i.status==='active';
+    const metric =
       '<span style="'+DASH_C_METRIC+'">'+qty+' uds</span>'
-      +' · <span style="'+DASH_C_PRICE+'">$'+price.toLocaleString('es-AR')+'</span>'
+      +' · <span style="'+DASH_C_PRICE+'">$'+Number(price).toLocaleString('es-AR')+'</span>'
       +(sc!=null?' · <span style="'+DASH_C_QUAL+'">Calidad: '+sc+'%</span>':'')
-      +_mlaTag(itemId);
-    const onCl    = editUrl ? 'onclick="window.open(\''+editUrl+'\',\'_blank\')"' : '';
-    const imgEl   = thumb ? '<img loading="lazy" decoding="async" fetchpriority="low" src="'+String(thumb).replace('http://','https://')+'" onerror="this.parentElement.textContent=\'☕\'">':'☕';
+      +mlaHtml;
+    const onCl  = editUrl ? 'onclick="window.open(\''+editUrl+'\',\'_blank\')"' : '';
+    const imgEl = thumb
+      ? '<img loading="lazy" decoding="async" src="'+thumb+'" onerror="this.parentElement.textContent=\'☕\'">'
+      : '☕';
     return '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);'+(editUrl?'cursor:pointer;':'')+'" '+onCl+'>'
       +'<span style="font-size:'+(idx<3?'15':'12')+'px;font-weight:700;color:var(--text3);width:20px;text-align:center;flex-shrink:0">'+medal+'</span>'
       +(arrow?'<span style="width:14px;flex-shrink:0">'+arrow+'</span>':'<span style="width:14px;flex-shrink:0"></span>')
@@ -7615,7 +7634,7 @@ function renderDashTopPubs(){
         +'<div style="font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+title+'</div>'
         +'<div style="font-size:10px;margin-top:2px;display:flex;gap:5px;flex-wrap:wrap">'+metric+'</div>'
       +'</div>'
-      +'<span class="badge '+(i?.status==='active'?'bg-green':'bg-amber')+'" style="flex-shrink:0">'+(i?.status==='active'?'●':'⏸')+'</span>'
+      +'<span class="badge '+(active?'bg-green':'bg-amber')+'" style="flex-shrink:0">'+(active?'●':'⏸')+'</span>'
       +'</div>';
   }).join('');
 }
