@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v257 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v258 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4423,12 +4423,13 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <div class="card-hd">
       <div>
         <div class="card-title">Planilla de gastos <span id="eco-year-lbl"></span></div>
-        <div class="card-sub">Tocá una celda para cargar o cambiar el importe y su estado · los totales se calculan solos</div>
+        <div class="card-sub">Tocá una celda para cargar o cambiar el importe y su estado · los totales se calculan solos · 🟠 = pagado con tarjeta (suma en el total del gasto, no en el del mes)</div>
       </div>
       <div style="display:flex;gap:10px;align-items:center;font-size:10.5px;color:var(--text3);flex-wrap:wrap">
         <span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#16a34a;vertical-align:middle"></span> Pagado</span>
         <span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#dc2626;vertical-align:middle"></span> Por pagar</span>
         <span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#f59e0b;vertical-align:middle"></span> Estimado</span>
+        <span title="El gasto ya está incluido en el resumen de la tarjeta: suma en el total del gasto (fila) pero NO en el total del mes, para no contarlo dos veces."><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#fb923c;vertical-align:middle"></span> Pagado c/ tarjeta</span>
         <span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--bg2,#e2e8f0);vertical-align:middle"></span> No aplica</span>
       </div>
     </div>
@@ -29958,8 +29959,22 @@ const ECO_ESTADOS = {
   na:       { bg:'#e2e8f0', fg:'#64748b', lbl:'⬜ No aplica' },
   gris:     { bg:'#334155', fg:'#ffffff', lbl:'⬛ Gris' },
   proximos: { bg:'#dbeafe', fg:'#1e40af', lbl:'🔵 Próximos' },
+  tarjeta:  { bg:'#fed7aa', fg:'#9a3412', lbl:'🟠 Pagado c/ tarjeta' },
   blanco:   { bg:'',        fg:'#0f172a', lbl:'⬜ Sin color' },
 };
+
+// v258 ── Celdas 🟠 "Pagado con tarjeta" ─────────────────────────────────────
+// Estos gastos se pagan dentro del resumen de la tarjeta, que ya se carga como
+// su propio gasto en la planilla. Si además sumáramos la celda, el gasto queda
+// contado DOS veces y el total del mes sale inflado.
+// Regla: NO suman en totales verticales (mes, año, KPIs, categorías), pero SÍ
+// suman en el total horizontal de cada gasto (gasto real de ese impuesto).
+function _ecoEsTarjeta(g, y, m){ return _ecoEst(g, y, m) === 'tarjeta'; }
+// valor para sumas VERTICALES (mes/año): descarta las celdas 🟠
+function _ecoValMes(g, y, m){
+  if(_ecoEsTarjeta(g, y, m)) return null;
+  return _ecoVal(g, y, m);
+}
 const ECO_LS_KEY = 'mlp_economia_v1';
 let _ecoState = { gastos: [], year: new Date().getFullYear(), dirty:false, saveTimer:null };
 let _ecoSel = [];  // selección múltiple de celdas: [{gid, mes}]
@@ -30391,7 +30406,7 @@ function ecoRenderKPIsSafe(){
     const y=+_ecoState.year;
     const gastos=_ecoState.gastos.filter(g=>_ecoGastoEnAnio(g,y));
     const totMes=new Array(12).fill(0);
-    gastos.forEach(g=>{ for(let m=0;m<12;m++){ const v=_ecoVal(g,y,m); if(typeof v==='number') totMes[m]+=v; } });
+    gastos.forEach(g=>{ for(let m=0;m<12;m++){ const v=_ecoValMes(g,y,m); if(typeof v==='number') totMes[m]+=v; } });   // v258: sin 🟠 tarjeta
     ecoRenderKPIs(gastos,y,totMes);
   }catch(e){}
 }
@@ -30545,7 +30560,7 @@ function _ecoMetGastosPlanilla(ym){
   let s=0, hay=false;
   _ecoState.gastos.forEach(g=>{
     if(_ecoMetGastoExcluido(g.n)) return;
-    const v=_ecoVal(g,y,m);
+    const v=_ecoValMes(g,y,m);   // v258: sin 🟠 tarjeta (ya van en el resumen)
     if(typeof v==='number'){ s+=v; hay=true; }
   });
   return hay? s : null;
@@ -32144,7 +32159,14 @@ function ecoRender(){
       // color/estado. Antes las marcadas "🔵 Próximos" quedaban afuera y por eso
       // el total de la planilla no coincidía con el "Gastos $" de Métricas
       // (que siempre sumó todo). Ahora los dos usan el mismo criterio.
-      if(typeof v==='number'){ totG+=v; totMes[m]+=v; }
+      // v258: el total horizontal del gasto (totG) SIEMPRE suma —incluidas las
+      // 🟠 pagadas con tarjeta— porque es el gasto real de ese ítem. El total
+      // vertical del mes (totMes) excluye las 🟠 para no contarlas dos veces
+      // (ya vienen dentro del resumen de la tarjeta).
+      if(typeof v==='number'){
+        totG += v;
+        if(st !== 'tarjeta') totMes[m] += v;
+      }
       const bg=_ecoCellBg(v,st), fg=_ecoCellFg(v,st);
       const isSel = _ecoSel.some(s=>s.gid===g.id && s.mes===m);
       const selStyle = isSel ? 'outline:2px solid var(--accent);outline-offset:-2px;' : '';
@@ -32185,7 +32207,7 @@ function ecoRenderSelBar(){
   const colorBtn=(est)=>'<button onclick="ecoApplyColorSel(\''+est+'\')" title="'+ECO_ESTADOS[est].lbl+'" style="width:30px;height:30px;border-radius:7px;border:2px solid #fff5;background:'+(ECO_ESTADOS[est].bg||'#ffffff')+';cursor:pointer;font-size:14px">'+ECO_ESTADOS[est].lbl.split(' ')[0]+'</button>';
   bar.innerHTML = '<span style="font-size:12.5px;font-weight:600">'+_ecoSel.length+' celda(s) seleccionada(s)</span>'+
     '<span style="font-size:11px;opacity:.8">Aplicar estado:</span>'+
-    colorBtn('pagado')+colorBtn('porpagar')+colorBtn('estimado')+colorBtn('proximos')+colorBtn('gris')+colorBtn('na')+colorBtn('blanco')+
+    colorBtn('pagado')+colorBtn('porpagar')+colorBtn('estimado')+colorBtn('proximos')+colorBtn('tarjeta')+colorBtn('gris')+colorBtn('na')+colorBtn('blanco')+
     '<button onclick="ecoClearSel()" style="background:#475569;color:#fff;border:none;border-radius:7px;padding:6px 12px;font-size:12px;cursor:pointer;font-weight:600">Limpiar</button>';
 }
 function ecoClearSel(){ _ecoSel=[]; ecoRender(); }
@@ -32227,6 +32249,7 @@ function ecoRenderKPIs(gastos, y, totMes){
   // estimado del mes de referencia
   let estimado=0;
   gastos.forEach(g=>{
+    if(_ecoEsTarjeta(g,y,mesRef)) return;   // v258: ya va en el resumen de la tarjeta
     const v=_ecoVal(g,y,mesRef);
     if(typeof v==='number'){ estimado+=v; }
     else if(v!=='NA'){ const ult=_ecoUltimoValor(g,y,mesRef); if(ult>0) estimado+=ult; }
@@ -32432,6 +32455,7 @@ function _iaPagosMes(y,m){
     if(typeof v!=='number'||v<=0) return;
     const st=_ecoEst(g,y,m)||'';
     if(st==='gris'||st==='na') return;
+    if(st==='tarjeta') return;   // v258: ya sale por el resumen de la tarjeta
     if(st==='porpagar'||st==='estimado'||st==='proximos') pendiente+=v;
     else pagado+=v;                       // blanco o verde = ya pagado
   });
@@ -32499,6 +32523,7 @@ function _iaCtx(){
       const ymP=_ecoYmAdd(hoyYm,k); const y=+ymP.slice(0,4), m=+ymP.slice(5,7)-1;
       const v=_ecoVal(g,y,m), st=_ecoEst(g,y,m);
       if(typeof v!=='number'||v<=0) return;
+      if(st==='tarjeta') return;   // v258: ya está dentro del resumen de la tarjeta
       // v241: los 🟡 estimados también son plata que va a salir
       if(st==='porpagar'||st==='proximos'||st==='estimado'){
         const dV=new Date(y,m,10);
@@ -32841,7 +32866,7 @@ function _iaSecciones(c){
     const mes=(y,m)=>{
       const porCat={}; let tot=0;
       (_ecoState.gastos||[]).forEach(g=>{
-        const v=_ecoVal(g,y,m);
+        const v=_ecoValMes(g,y,m);   // v258: sin 🟠 tarjeta
         if(typeof v==='number'&&v>0){ const cat=g.cat||'Otros'; porCat[cat]=(porCat[cat]||0)+v; tot+=v; }
       });
       return {porCat,tot};
