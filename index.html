@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v258 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v259 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -8504,21 +8504,61 @@ function renderPubs(){
 // ML expone shipping.dimensions como "alto x ancho x largo, peso_g".
 // Solo editable en publicaciones con Mercado Envíos (me2). Catálogo/flex
 // no lo aceptan y se muestran deshabilitadas.
-function _pubParseDims(item){
-  const sh = item.shipping || {};
-  const raw = sh.dimensions || (sh.dimensions === 0 ? '' : '');
-  if(!raw || typeof raw !== 'string') return null;
-  // "15x15x15,600" → {h,w,l,p}
-  const m = raw.match(/^\s*(\d+)\s*x\s*(\d+)\s*x\s*(\d+)\s*,\s*(\d+)/i);
+// v259 ── CAUSA RAÍZ del "sin datos": ML tiene DOS lugares para el empaque.
+//   · ME1  → shipping.dimensions  ("alto x ancho x largo, peso_g")
+//   · ME2  → atributos del ítem: SELLER_PACKAGE_HEIGHT / _WIDTH / _LENGTH /
+//            _WEIGHT (ej. "6.2 cm", "2140 g")  ← el caso de Tienda Impala
+// Antes solo leíamos shipping.dimensions (ME1), por eso TODAS salían sin datos.
+function _pubAttrNum(attrs, id){
+  const a = (attrs||[]).find(x => x && x.id === id);
+  if(!a) return null;
+  // value_struct = {number, unit} cuando ML lo tiene normalizado
+  if(a.value_struct && typeof a.value_struct.number === 'number'){
+    return { n: a.value_struct.number, u: String(a.value_struct.unit||'').toLowerCase() };
+  }
+  const vn = a.value_name || a.values && a.values[0] && a.values[0].name || '';
+  const m = String(vn).match(/([\d]+[.,]?[\d]*)\s*([a-zA-Z]*)/);
   if(!m) return null;
-  return { h:+m[1], w:+m[2], l:+m[3], p:+m[4] };
+  return { n: parseFloat(m[1].replace(',','.')), u: String(m[2]||'').toLowerCase() };
+}
+function _pubToCm(v){
+  if(!v || !isFinite(v.n)) return null;
+  if(v.u==='mm') return v.n/10;
+  if(v.u==='m')  return v.n*100;
+  if(v.u==='in'||v.u==='pulgadas') return v.n*2.54;
+  return v.n;   // cm o sin unidad
+}
+function _pubToG(v){
+  if(!v || !isFinite(v.n)) return null;
+  if(v.u==='kg') return v.n*1000;
+  if(v.u==='mg') return v.n/1000;
+  if(v.u==='lb') return v.n*453.592;
+  if(v.u==='oz') return v.n*28.3495;
+  return v.n;   // g o sin unidad
+}
+function _pubParseDims(item){
+  const attrs = item.attributes || [];
+  // 1) ME2 — atributos del vendedor
+  const H = _pubToCm(_pubAttrNum(attrs,'SELLER_PACKAGE_HEIGHT'));
+  const W = _pubToCm(_pubAttrNum(attrs,'SELLER_PACKAGE_WIDTH'));
+  const L = _pubToCm(_pubAttrNum(attrs,'SELLER_PACKAGE_LENGTH'));
+  const P = _pubToG (_pubAttrNum(attrs,'SELLER_PACKAGE_WEIGHT'));
+  const r1 = x => Math.round(x*10)/10;
+  if(H && W && L && P) return { h:r1(H), w:r1(W), l:r1(L), p:Math.round(P), src:'me2' };
+  // 2) ME1 — shipping.dimensions
+  const sh = item.shipping || {};
+  const raw = typeof sh.dimensions === 'string' ? sh.dimensions : '';
+  const m = raw.match(/^\s*([\d.]+)\s*x\s*([\d.]+)\s*x\s*([\d.]+)\s*,\s*([\d.]+)/i);
+  if(m) return { h:+m[1], w:+m[2], l:+m[3], p:+m[4], src:'me1' };
+  return null;
 }
 function _pubEmpaqueEditable(item){
-  // me2 = Mercado Envíos. Catálogo no permite editar el ítem directamente.
+  // v259: ME2 y ME1 son editables. El catálogo también acepta los atributos
+  // SELLER_PACKAGE_* (son del vendedor, no del producto de catálogo), así que
+  // ya no lo bloqueamos; si ML rechaza, el error se muestra al guardar.
   const sh = item.shipping || {};
-  const mode = sh.mode || '';
-  const isCatalog = !!(item.catalog_listing || item.catalog_product_id);
-  return (mode === 'me2' || mode === 'me1') && !isCatalog;
+  const mode = String(sh.mode||'').toLowerCase();
+  return mode === 'me2' || mode === 'me1';
 }
 function _pubEmpaqueCell(item){
   const d = _pubParseDims(item);
@@ -8578,8 +8618,20 @@ async function saveEmpaque(itemId){
       throw new Error(m);
     }
     // actualizar el item en memoria
+    // v259: refrescar el ítem en memoria en AMBOS formatos, para que la celda
+    // muestre las medidas nuevas sin recargar todo.
     const item = allItems.find(i=>i.id===itemId);
-    if(item){ item.shipping = item.shipping||{}; item.shipping.dimensions = d.dimensions; }
+    if(item){
+      item.shipping = item.shipping||{};
+      item.shipping.dimensions = d.dimensions;
+      item.attributes = item.attributes || [];
+      const setA=(id,val)=>{ const a=item.attributes.find(x=>x&&x.id===id);
+        if(a){ a.value_name=val; a.value_struct=null; } else item.attributes.push({id:id, value_name:val}); };
+      setA('SELLER_PACKAGE_HEIGHT', h+' cm');
+      setA('SELLER_PACKAGE_WIDTH',  w+' cm');
+      setA('SELLER_PACKAGE_LENGTH', l+' cm');
+      setA('SELLER_PACKAGE_WEIGHT', Math.round(p)+' g');
+    }
     if(typeof showToast==='function') showToast('📦 Empaque actualizado en ML','success');
     renderPubs();
   }catch(e){
@@ -9692,18 +9744,14 @@ const SEO_SCENARIOS = {
     actionMain:      'Medí el paquete real (alto × ancho × largo + peso) y cargá esas medidas en cada publicación.',
     actionSecondary: 'ML calcula el costo de envío por volumen: una caja declarada más grande que la real te cuesta plata en cada venta.',
     filter: i => {
-      // server-first si ML expone el conteo oficial
-      const srv=_mlSrvGet('ml_ajustar_medida');
-      if(srv && srv.ids.length) return srv.ids.includes(i.id);
-      // heurística local: activa, con envío ME (no retiro), SIN dimensiones cargadas
+      // v259: usa el MISMO lector que la columna 📦 Empaque (ME2 por atributos
+      // SELLER_PACKAGE_* + ME1 por shipping.dimensions). Antes miraba solo
+      // shipping.dimensions y por eso marcaba TODAS las activas como faltantes.
       if(i.status !== 'active') return false;
       const sh = i.shipping || {};
       const modo = String(sh.mode||'').toLowerCase();
-      const usaME = modo === 'me2' || modo === 'me1' || (Array.isArray(sh.tags) && sh.tags.some(t=>/self_service|cross_docking|drop_off|fulfillment/.test(String(t))));
-      if(!usaME) return false;
-      // dimensions viene como "alto x ancho x largo, peso" o null/vacío
-      const dim = sh.dimensions;
-      return !dim || String(dim).trim()==='' || !/\d/.test(String(dim));
+      if(modo !== 'me2' && modo !== 'me1') return false;
+      return _pubParseDims(i) === null;   // sin medidas cargadas en ninguno de los dos formatos
     },
   },
   'ml_reputacion': {
@@ -10544,7 +10592,8 @@ const ML_SRV_QUERIES = {
   ml_pendientes:        ['sub_status=warning', 'sub_status=waiting_for_patch'],
   ml_volver_vender:     ['sub_status=out_of_stock'],
   ml_ficha_tecnica:     ['tags=incomplete_technical_specs'],
-  ml_ajustar_medida:    ['tags=dimensions_to_check'],   // v249: si ML expone el tag; si no, cae a heurística local
+  // v259: sin query server-side — el tag 'dimensions_to_check' no existe en la
+  // API pública y devolvía resultados incorrectos. Se calcula 100% local.
 };
 let _mlSrv=null;   // { ts, data:{ key:{ total, ids:[...] } } }
 function _mlSrvLoad(){
