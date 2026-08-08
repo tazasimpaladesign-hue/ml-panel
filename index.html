@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v259 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v260 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -12067,6 +12067,7 @@ function renderSEOTable(){
             <div style="font-size:10px;color:var(--text3);margin-top:2px;display:flex;gap:5px;flex-wrap:wrap">
               <span>${item.id}</span>
             </div>
+            ${_seoEmpaqueMini(item)}
           </div>
         </div>
       </td>
@@ -12280,6 +12281,94 @@ function _seoHasVideo(item){
 const _SEO_CLIP_CACHE_KEY = 'mlp_clips_v1';
 let _seoClipStatus = (()=>{ try{ return JSON.parse(localStorage.getItem(_SEO_CLIP_CACHE_KEY)||'{}'); }catch(e){ return {}; } })();
 
+
+// ─── v260 · Empaque de envío en el Analizador SEO ───────────────────────────
+// Muestra las medidas (alto/ancho/largo/peso) debajo del código MLA, con lápiz
+// para editarlas y guardarlas en ML sin salir de la tabla. Usa el mismo lector
+// (_pubParseDims: atributos SELLER_PACKAGE_* de ME2 + shipping.dimensions de ME1)
+// y el mismo endpoint del worker que la columna 📦 Empaque de Publicaciones.
+function _seoEmpaqueMini(item){
+  const id = item.id;
+  const editable = _pubEmpaqueEditable(item);
+  const d = _pubParseDims(item);
+  if(!editable){
+    return '<div id="seo-emp-'+id+'" style="margin-top:3px;font-size:9.5px;color:var(--text3)" title="Solo publicaciones con Mercado Envíos (ME1/ME2)">sin envío ME</div>';
+  }
+  return '<div id="seo-emp-'+id+'" style="margin-top:3px">'+_seoEmpaqueView(item,d)+'</div>';
+}
+function _seoEmpBox(v,t){
+  return '<span title="'+t+'" style="display:inline-block;min-width:24px;text-align:center;font-size:9.5px;font-weight:600;padding:1px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg4);color:var(--text)">'+v+'</span>';
+}
+function _seoEmpaqueView(item,d){
+  const id = item.id;
+  const lapiz = '<button onclick="seoEmpaqueEdit(\'' + id + '\')" title="Configurar medidas del paquete" '
+    + 'style="border:none;background:transparent;cursor:pointer;font-size:10px;opacity:.65;padding:0 2px">✏️</button>';
+  if(!d){
+    return '<div style="display:flex;align-items:center;gap:3px;flex-wrap:wrap">'
+      + '<span style="font-size:9.5px;color:#b45309;font-weight:600" title="Sin medidas de empaque cargadas en ML">📦 sin medidas</span>'
+      + lapiz + '</div>';
+  }
+  return '<div style="display:flex;align-items:center;gap:3px;flex-wrap:wrap">'
+    + _seoEmpBox(d.h,'Alto (cm)') + _seoEmpBox(d.w,'Ancho (cm)') + _seoEmpBox(d.l,'Largo (cm)')
+    + _seoEmpBox(Math.round(d.p)+'g','Peso') + lapiz + '</div>';
+}
+function seoEmpaqueEdit(itemId){
+  const cont = document.getElementById('seo-emp-'+itemId); if(!cont) return;
+  const item = (typeof allItems!=='undefined') ? allItems.find(x=>String(x.id)===String(itemId)) : null;
+  const d = item ? _pubParseDims(item) : null;
+  const inp = (k,ph,val) => '<input id="seoemp-'+k+'-'+itemId+'" type="number" step="0.1" min="0" placeholder="'+ph+'" value="'+(val!=null?val:'')+'" '
+    + 'style="width:34px;font-size:9.5px;padding:1px 3px;border:1px solid var(--border);border-radius:4px;text-align:center">';
+  cont.innerHTML = '<div style="display:flex;align-items:center;gap:2px;flex-wrap:wrap">'
+    + inp('h','Al', d?d.h:null) + inp('w','An', d?d.w:null) + inp('l','La', d?d.l:null)
+    + inp('p','g',  d?Math.round(d.p):null)
+    + '<button onclick="seoEmpaqueSave(\'' + itemId + '\')" title="Guardar en ML" style="border:none;background:var(--accent);color:#fff;border-radius:4px;cursor:pointer;font-size:9.5px;padding:2px 5px;font-weight:700">✓</button>'
+    + '<button onclick="seoEmpaqueCancel(\'' + itemId + '\')" title="Cancelar" style="border:none;background:var(--bg4);color:var(--text3);border-radius:4px;cursor:pointer;font-size:9.5px;padding:2px 5px">✕</button>'
+    + '</div><div id="seoemp-msg-'+itemId+'" style="font-size:9px;color:var(--text3);margin-top:1px"></div>';
+}
+function seoEmpaqueCancel(itemId){
+  const cont = document.getElementById('seo-emp-'+itemId); if(!cont) return;
+  const item = (typeof allItems!=='undefined') ? allItems.find(x=>String(x.id)===String(itemId)) : null;
+  cont.innerHTML = _seoEmpaqueView(item||{id:itemId}, item?_pubParseDims(item):null);
+}
+async function seoEmpaqueSave(itemId){
+  const g = k => document.getElementById('seoemp-'+k+'-'+itemId);
+  const msg = document.getElementById('seoemp-msg-'+itemId);
+  const h=parseFloat(g('h')&&g('h').value)||0, w=parseFloat(g('w')&&g('w').value)||0;
+  const l=parseFloat(g('l')&&g('l').value)||0, p=parseFloat(g('p')&&g('p').value)||0;
+  if(!h||!w||!l||!p){ if(msg){ msg.textContent='Completá las 4'; msg.style.color='var(--red)'; } return; }
+  if(typeof userId==='undefined'||!userId){ if(msg){ msg.textContent='Conectá ML'; msg.style.color='var(--red)'; } return; }
+  if(msg){ msg.textContent='Guardando…'; msg.style.color='var(--text3)'; }
+  try{
+    const r = await fetch(WORKER+'/api/ml-dimensions/'+itemId+'?user='+userId, {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ height:h, width:w, length:l, weight:p })
+    });
+    const dd = await r.json();
+    if(!dd.ok){
+      let m = dd.error || 'error';
+      if(/has_bids|Cannot update item/i.test(m)) m='ML no permite editarlo acá (ventas activas o catálogo)';
+      throw new Error(m);
+    }
+    // reflejar en memoria en ambos formatos (igual que en Publicaciones)
+    const item = (typeof allItems!=='undefined') ? allItems.find(x=>String(x.id)===String(itemId)) : null;
+    if(item){
+      item.shipping = item.shipping||{};
+      if(dd.dimensions) item.shipping.dimensions = dd.dimensions;
+      item.attributes = item.attributes || [];
+      const setA=(aid,val)=>{ const a=item.attributes.find(x=>x&&x.id===aid);
+        if(a){ a.value_name=val; a.value_struct=null; } else item.attributes.push({id:aid, value_name:val}); };
+      setA('SELLER_PACKAGE_HEIGHT', h+' cm');
+      setA('SELLER_PACKAGE_WIDTH',  w+' cm');
+      setA('SELLER_PACKAGE_LENGTH', l+' cm');
+      setA('SELLER_PACKAGE_WEIGHT', Math.round(p)+' g');
+    }
+    const cont = document.getElementById('seo-emp-'+itemId);
+    if(cont && item) cont.innerHTML = _seoEmpaqueView(item, _pubParseDims(item));
+    if(typeof showToast==='function') showToast('📦 Empaque actualizado en ML','success');
+  }catch(e){
+    if(msg){ msg.textContent='⚠ '+e.message; msg.style.color='var(--red)'; msg.style.whiteSpace='normal'; }
+  }
+}
 function _seoClipBadge(item){
   // YouTube tradicional → tiene video, no marcamos
   if(_seoHasVideo(item)) return '';
