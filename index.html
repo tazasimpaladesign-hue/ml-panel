@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v261 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v262 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -30285,25 +30285,30 @@ function _ecoMergePorId(locales, remotos, remoteGana){
 // pisa a la otra. Es la salida de emergencia cuando el merge automático no
 // alcanza (por ejemplo, si una PC estuvo días sin abrir el panel).
 function ecoSyncTools(){
+  // v262: usa el shell de modales de Economía (_ecoModalShell). Antes llamaba a
+  // openModal(titulo, html), pero esa función espera el ID de un modal ya
+  // existente en el HTML → tiraba error y el botón no hacía nada.
   const nG = (_ecoState.gastos||[]).length;
   const ts = (()=>{ try{ const d=JSON.parse(localStorage.getItem(ECO_LS_KEY)||'{}'); return d.savedAt? new Date(d.savedAt).toLocaleString('es-AR') : '—'; }catch(e){ return '—'; } })();
-  const html =
-    '<div style="max-width:520px">'+
-    '<p style="font-size:13px;line-height:1.55;color:var(--text2);margin:0 0 12px">'+
-      'Esta PC tiene <b>'+nG+' gastos</b> y su último guardado local es del <b>'+ts+'</b>.<br>'+
-      'Elegí qué hacer si los datos no coinciden entre computadoras:</p>'+
-    '<div style="display:flex;flex-direction:column;gap:9px">'+
-      '<button class="btn btn-sm" style="background:#16a34a;color:#fff;text-align:left;padding:10px 12px" onclick="ecoSyncForzar(\'subir\')">'+
-        '⬆️ <b>Usar los datos de ESTA PC</b><div style="font-size:11px;font-weight:400;opacity:.9;margin-top:2px">Sube esta planilla a la nube y reemplaza lo que haya. Usalo en la PC que tiene los datos correctos.</div></button>'+
-      '<button class="btn btn-sm" style="background:#2563eb;color:#fff;text-align:left;padding:10px 12px" onclick="ecoSyncForzar(\'bajar\')">'+
-        '⬇️ <b>Traer los datos de la nube</b><div style="font-size:11px;font-weight:400;opacity:.9;margin-top:2px">Descarta lo local y deja exactamente lo que está guardado. Usalo en la PC con los datos equivocados.</div></button>'+
-      '<button class="btn btn-ghost btn-sm" style="text-align:left;padding:10px 12px" onclick="ecoSyncBackup()">'+
-        '💾 <b>Descargar copia de seguridad</b><div style="font-size:11px;font-weight:400;opacity:.8;margin-top:2px">Guarda un archivo con la planilla de esta PC, por las dudas.</div></button>'+
+  const inner =
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'+
+      '<div style="font-size:16px;font-weight:800;color:'+_ECO_TXT+'">🔄 Sincronización de Economía</div>'+
+      '<button onclick="_ecoCellClose()" style="border:none;background:#eef2f7;width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:16px;color:'+_ECO_TXT2+'">✕</button>'+
     '</div>'+
-    '<p style="font-size:11px;color:var(--text3);margin:12px 0 0">Consejo: antes de forzar, descargá la copia de seguridad de cada PC.</p>'+
-    '</div>';
-  if(typeof openModal==='function') openModal('🔄 Sincronización de Economía', html);
-  else alert('Abrí Economía para usar esta herramienta.');
+    '<div style="font-size:12.5px;line-height:1.55;color:'+_ECO_TXT2+';margin-bottom:14px">'+
+      'Esta PC tiene <b>'+nG+' gastos</b> · último guardado local: <b>'+ts+'</b><br>'+
+      'Si los datos no coinciden entre computadoras, elegí cuál manda:</div>'+
+    '<div style="display:flex;flex-direction:column;gap:9px">'+
+      '<button onclick="ecoSyncBackup()" style="border:1px solid '+_ECO_BRD+';background:#f8fafc;color:'+_ECO_TXT+';border-radius:10px;cursor:pointer;text-align:left;padding:11px 13px;font-size:13px">'+
+        '💾 <b>Descargar copia de seguridad</b><div style="font-size:11px;color:'+_ECO_TXT3+';margin-top:3px">Guarda un archivo con la planilla de esta PC. Hacelo antes de forzar.</div></button>'+
+      '<button onclick="ecoSyncForzar(&#39;subir&#39;)" style="border:none;background:#16a34a;color:#fff;border-radius:10px;cursor:pointer;text-align:left;padding:11px 13px;font-size:13px">'+
+        '⬆️ <b>Usar los datos de ESTA PC</b><div style="font-size:11px;opacity:.92;margin-top:3px">Sube esta planilla y reemplaza la de la nube. Usalo en la PC que tiene los datos correctos.</div></button>'+
+      '<button onclick="ecoSyncForzar(&#39;bajar&#39;)" style="border:none;background:#2563eb;color:#fff;border-radius:10px;cursor:pointer;text-align:left;padding:11px 13px;font-size:13px">'+
+        '⬇️ <b>Traer los datos de la nube</b><div style="font-size:11px;opacity:.92;margin-top:3px">Descarta lo local y deja lo que está guardado. Usalo en la PC con los datos equivocados.</div></button>'+
+    '</div>'+
+    '<div style="font-size:11px;color:'+_ECO_TXT3+';margin-top:14px;border-top:1px solid '+_ECO_BRD+';padding-top:10px">'+
+      'Después de forzar en una PC, abrí la otra y usá la opción contraria para que queden iguales.</div>';
+  _ecoModalShell(inner, 460);
 }
 function ecoSyncBackup(){
   try{
@@ -30326,7 +30331,7 @@ async function ecoSyncForzar(modo){
       if(!r.ok) throw new Error('HTTP '+r.status);
       _ecoUltimaFirma=null; _ecoState.dirty=false;
       if(typeof showToast==='function') showToast('⬆️ Datos de esta PC subidos a la nube','success');
-      if(typeof closeModal==='function') closeModal();
+      try{ _ecoCellClose(); }catch(e){}
     }catch(e){ alert('No se pudo subir: '+e.message); }
     return;
   }
@@ -30344,7 +30349,7 @@ async function ecoSyncForzar(modo){
     _ecoState.ahorros      = e.ahorros||[];
     _ecoState.del          = e.del||{};
     _ecoState.dirty=false; _ecoSaveLS();
-    if(typeof closeModal==='function') closeModal();
+    try{ _ecoCellClose(); }catch(e){}
     ecoRender();
     if(typeof showToast==='function') showToast('⬇️ Datos de la nube aplicados','success');
   }catch(e){ alert('No se pudo traer: '+e.message); }
