@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v260 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v261 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4406,6 +4406,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <button class="btn btn-ghost btn-sm" onclick="ecoOpenIngresos()">💵 Ingresos</button>
       <button class="btn btn-ghost btn-sm" onclick="ecoOpenMetricas()">📊 Métricas</button>
       <button class="btn btn-ghost btn-sm" onclick="ecoOpenGraf()">📈 Evolución</button>
+      <button class="btn btn-ghost btn-sm" onclick="ecoSyncTools()" title="Resolver diferencias entre PCs">🔄 Sincronización</button>
     </div>
   </div>
 
@@ -25667,6 +25668,8 @@ function ctaRenderTable() {
       '<button style="' + (_ctaState.page >= pages ? bsd : bs) + '" ' + (_ctaState.page >= pages ? 'disabled' : '') + ' onclick="_ctaState.page++;ctaRenderTable()" title="Siguiente">›</button>' +
       '</div>';
   }
+  // v261: volver a desplegar los productos que el usuario tenía abiertos
+  try{ _ctaReopenItems(); }catch(e){}
 }
 
 function _ctaFind(id) {
@@ -25677,9 +25680,30 @@ function _ctaFind(id) {
   return null;
 }
 
+// v261 ── El panel de productos se cerraba solo: cada vez que cambiabas un
+// producto, cantidad o precio, ctaEditItem() llamaba a ctaRenderTable() y el
+// re-dibujado borraba la fila expandida. Ahora recordamos qué filas están
+// abiertas y se vuelven a abrir después de cada refresco (incluido el de
+// sincronización automática), así el panel queda visible hasta que vos lo cierres.
+let _ctaItemsOpen = new Set();
 function ctaToggleItems(id) {
   const ex = document.getElementById('cta-items-' + id);
-  if (ex) { ex.remove(); return; }
+  if (ex) { ex.remove(); _ctaItemsOpen.delete(id); return; }
+  _ctaItemsOpen.add(id);
+  _ctaRenderItemsRow(id);
+}
+// Reabre las filas de productos que estaban desplegadas (tras un re-render).
+function _ctaReopenItems(){
+  if(!_ctaItemsOpen || !_ctaItemsOpen.size) return;
+  [..._ctaItemsOpen].forEach(id => {
+    if(document.getElementById('cta-items-' + id)) return;      // ya está
+    if(!document.getElementById('cta-row-' + id)){               // la fila salió de la página
+      return;                                                    // (no la borramos: puede volver)
+    }
+    _ctaRenderItemsRow(id);
+  });
+}
+function _ctaRenderItemsRow(id) {
   const found = _ctaFind(id);
   const row = document.getElementById('cta-row-' + id);
   if (!found || !row) return;
@@ -30120,12 +30144,12 @@ let _ecoSel = [];  // selección múltiple de celdas: [{gid, mes}]
 function _ecoLoad(){
   try{
     const raw = localStorage.getItem(ECO_LS_KEY);
-    if(raw){ const d=JSON.parse(raw); if(d && Array.isArray(d.gastos)){ if(Array.isArray(d.ingresos)) _ecoState.ingresos=d.ingresos; if(d.metricas&&typeof d.metricas==='object') _ecoState.metricas=d.metricas; if(Array.isArray(d.metricasCols)) _ecoState.metricasCols=d.metricasCols; if(Array.isArray(d.acreditar)) _ecoState.acreditar=d.acreditar; if(Array.isArray(d.ahorros)) _ecoState.ahorros=d.ahorros; return d.gastos; } }
+    if(raw){ const d=JSON.parse(raw); if(d && Array.isArray(d.gastos)){ if(Array.isArray(d.ingresos)) _ecoState.ingresos=d.ingresos; if(d.metricas&&typeof d.metricas==='object') _ecoState.metricas=d.metricas; if(Array.isArray(d.metricasCols)) _ecoState.metricasCols=d.metricasCols; if(Array.isArray(d.acreditar)) _ecoState.acreditar=d.acreditar; if(Array.isArray(d.ahorros)) _ecoState.ahorros=d.ahorros; if(d.del&&typeof d.del==='object') _ecoState.del=d.del; return d.gastos; } }
   }catch(e){}
   try{ return JSON.parse(ECO_SEED_JSON); }catch(e){ return []; }
 }
 function _ecoSaveLS(){
-  try{ localStorage.setItem(ECO_LS_KEY, JSON.stringify({ gastos:_ecoState.gastos, ingresos:_ecoState.ingresos||[], metricas:_ecoState.metricas||{}, metricasCols:_ecoState.metricasCols||[], acreditar:_ecoState.acreditar||[], ahorros:_ecoState.ahorros||[], savedAt:Date.now() })); }catch(e){}
+  try{ localStorage.setItem(ECO_LS_KEY, JSON.stringify({ gastos:_ecoState.gastos, ingresos:_ecoState.ingresos||[], metricas:_ecoState.metricas||{}, metricasCols:_ecoState.metricasCols||[], acreditar:_ecoState.acreditar||[], ahorros:_ecoState.ahorros||[], del:_ecoState.del||{}, savedAt:Date.now() })); }catch(e){}
 }
 function _ecoMarkDirty(){
   _ecoState.dirty = true; _ecoSaveLS();
@@ -30143,7 +30167,7 @@ let _ecoUltimaFirma = null;   // v236: firma del último payload subido con éxi
 async function _ecoFlush(){
   if(!_ecoState.dirty) return;
   _ecoState.dirty = false;
-  const datos = { gastos:_ecoState.gastos, ingresos:_ecoState.ingresos||[], metricas:_ecoState.metricas||{}, metricasCols:_ecoState.metricasCols||[], acreditar:_ecoState.acreditar||[], ahorros:_ecoState.ahorros||[] };
+  const datos = { gastos:_ecoState.gastos, ingresos:_ecoState.ingresos||[], metricas:_ecoState.metricas||{}, metricasCols:_ecoState.metricasCols||[], acreditar:_ecoState.acreditar||[], ahorros:_ecoState.ahorros||[], del:_ecoState.del||{} };
   const firma = JSON.stringify(datos);
   // v236: si el contenido es idéntico a lo último subido, no gastamos la escritura
   if(firma === _ecoUltimaFirma) return;
@@ -30168,14 +30192,36 @@ async function _ecoFlush(){
 // Efecto: dos PCs pueden trabajar a la vez y cada una ve lo de la otra.
 // Nota: por seguridad de datos financieros, un borrado puede "revivir" si la
 // otra PC todavía tenía el dato; preferimos recuperar de más que perder.
+// v261 · MERGE ATÓMICO DE UN AÑO (importes + colores a la vez).
+// Antes se fusionaban por separado los importes (d) y los colores (st): una
+// celda podía quedarse con el color de una PC y el importe de la otra, o con
+// color y SIN valor. Ese era el "espacios en blanco o en otro color y sin
+// valor". Ahora cada celda se mueve como una unidad (valor+color juntos).
+function _ecoMergeAnio(ld, lst, rd, rst, remoteGana){
+  const vac = () => [null,null,null,null,null,null,null,null,null,null,null,null];
+  const od = Array.isArray(ld) ? ld.slice() : vac();
+  const os = Array.isArray(lst) ? lst.slice() : vac();
+  const rd2 = Array.isArray(rd) ? rd : [];
+  const rs2 = Array.isArray(rst) ? rst : [];
+  for(let i=0;i<12;i++){
+    const lv=od[i], rv=rd2[i];
+    const lVacio=(lv==null||lv===''), rVacio=(rv==null||rv==='');
+    if(lVacio && !rVacio){ od[i]=rv; os[i]=rs2[i]!=null?rs2[i]:null; }            // sólo en la nube
+    else if(!lVacio && !rVacio && (lv!==rv) && remoteGana){ od[i]=rv; os[i]=rs2[i]!=null?rs2[i]:null; }
+    else if(!lVacio && !rVacio && lv===rv && remoteGana && rs2[i]!==os[i]) os[i]=rs2[i]!=null?rs2[i]:null;
+    else if(lVacio && rVacio && remoteGana && rs2[i]!=null) os[i]=rs2[i];         // celda pintada sin importe
+  }
+  return { d:od, st:os };
+}
+// Se mantiene por compatibilidad con llamadas viejas (métricas/columnas).
 function _ecoMergeMeses(la, ra, remoteGana){
   const out = Array.isArray(la) ? la.slice() : [null,null,null,null,null,null,null,null,null,null,null,null];
   const rr  = Array.isArray(ra) ? ra : [];
   for(let i=0;i<12;i++){
     const lv=out[i], rv=rr[i];
     const lVacio=(lv==null||lv===''), rVacio=(rv==null||rv==='');
-    if(lVacio && !rVacio) out[i]=rv;                          // sólo en la nube → traer
-    else if(!lVacio && !rVacio && lv!==rv && remoteGana) out[i]=rv;  // conflicto → gana el más nuevo
+    if(lVacio && !rVacio) out[i]=rv;
+    else if(!lVacio && !rVacio && lv!==rv && remoteGana) out[i]=rv;
   }
   return out;
 }
@@ -30185,14 +30231,30 @@ function _ecoMergeGastos(locales, remotos, remoteGana){
     if(!rg||!rg.id) return;
     const lg=mapa.get(rg.id);
     if(!lg){ mapa.set(rg.id, rg); return; }                   // gasto que sólo está en la nube
-    // metadatos: gana el más nuevo
-    if(remoteGana){ lg.n=rg.n||lg.n; lg.cat=rg.cat||lg.cat; lg.e=rg.e||lg.e; lg.hidden=rg.hidden;
+    // v261: la decisión se toma POR GASTO con su propio sello (uAt), no con el
+    // savedAt global. Si este gasto se editó después del otro lado, manda el
+    // que se tocó último; si no hay sellos (datos viejos), cae al criterio global.
+    const lu = lg.uAt || 0, ru = rg.uAt || 0;
+    const gana = (lu || ru) ? (ru > lu) : remoteGana;
+    if(gana){ lg.n=rg.n||lg.n; lg.cat=rg.cat||lg.cat; lg.e=rg.e||lg.e; lg.hidden=rg.hidden;
       if(rg.res) lg.res=rg.res; if(rg.resCfg) lg.resCfg=rg.resCfg; if(rg.resAuto) lg.resAuto=rg.resAuto; }
     else { if(!lg.res && rg.res) lg.res=rg.res; if(!lg.resCfg && rg.resCfg) lg.resCfg=rg.resCfg; }
-    // importes y colores: mes por mes
     lg.d=lg.d||{}; lg.st=lg.st||{};
-    Object.keys(rg.d||{}).forEach(y=>{ lg.d[y]=_ecoMergeMeses(lg.d[y], rg.d[y], remoteGana); });
-    Object.keys(rg.st||{}).forEach(y=>{ lg.st[y]=_ecoMergeMeses(lg.st[y], rg.st[y], remoteGana); });
+    // Si el remoto es claramente más nuevo para ESTE gasto, su año reemplaza
+    // entero (así se propagan también los borrados de celdas y las fusiones).
+    const remotoMasNuevo = (ru > lu && ru > 0);
+    const anios = new Set([...Object.keys(rg.d||{}), ...Object.keys(rg.st||{})]);
+    anios.forEach(y=>{
+      if(remotoMasNuevo){
+        if(rg.d && rg.d[y]) lg.d[y] = rg.d[y].slice();
+        if(rg.st && rg.st[y]) lg.st[y] = rg.st[y].slice();
+        else if(rg.d && rg.d[y]) lg.st[y] = lg.st[y] || [];
+      } else {
+        const r = _ecoMergeAnio(lg.d[y], lg.st[y], rg.d&&rg.d[y], rg.st&&rg.st[y], gana);
+        lg.d[y]=r.d; lg.st[y]=r.st;
+      }
+    });
+    if(ru > lu) lg.uAt = ru;
   });
   return [...mapa.values()];
 }
@@ -30218,6 +30280,76 @@ function _ecoMergePorId(locales, remotos, remoteGana){
   return [...mapa.values()];
 }
 
+// v261 ── Herramienta manual para resolver diferencias entre PCs ───────────
+// Si dos PCs quedaron con datos distintos, acá elegís cuál es la buena y esa
+// pisa a la otra. Es la salida de emergencia cuando el merge automático no
+// alcanza (por ejemplo, si una PC estuvo días sin abrir el panel).
+function ecoSyncTools(){
+  const nG = (_ecoState.gastos||[]).length;
+  const ts = (()=>{ try{ const d=JSON.parse(localStorage.getItem(ECO_LS_KEY)||'{}'); return d.savedAt? new Date(d.savedAt).toLocaleString('es-AR') : '—'; }catch(e){ return '—'; } })();
+  const html =
+    '<div style="max-width:520px">'+
+    '<p style="font-size:13px;line-height:1.55;color:var(--text2);margin:0 0 12px">'+
+      'Esta PC tiene <b>'+nG+' gastos</b> y su último guardado local es del <b>'+ts+'</b>.<br>'+
+      'Elegí qué hacer si los datos no coinciden entre computadoras:</p>'+
+    '<div style="display:flex;flex-direction:column;gap:9px">'+
+      '<button class="btn btn-sm" style="background:#16a34a;color:#fff;text-align:left;padding:10px 12px" onclick="ecoSyncForzar(\'subir\')">'+
+        '⬆️ <b>Usar los datos de ESTA PC</b><div style="font-size:11px;font-weight:400;opacity:.9;margin-top:2px">Sube esta planilla a la nube y reemplaza lo que haya. Usalo en la PC que tiene los datos correctos.</div></button>'+
+      '<button class="btn btn-sm" style="background:#2563eb;color:#fff;text-align:left;padding:10px 12px" onclick="ecoSyncForzar(\'bajar\')">'+
+        '⬇️ <b>Traer los datos de la nube</b><div style="font-size:11px;font-weight:400;opacity:.9;margin-top:2px">Descarta lo local y deja exactamente lo que está guardado. Usalo en la PC con los datos equivocados.</div></button>'+
+      '<button class="btn btn-ghost btn-sm" style="text-align:left;padding:10px 12px" onclick="ecoSyncBackup()">'+
+        '💾 <b>Descargar copia de seguridad</b><div style="font-size:11px;font-weight:400;opacity:.8;margin-top:2px">Guarda un archivo con la planilla de esta PC, por las dudas.</div></button>'+
+    '</div>'+
+    '<p style="font-size:11px;color:var(--text3);margin:12px 0 0">Consejo: antes de forzar, descargá la copia de seguridad de cada PC.</p>'+
+    '</div>';
+  if(typeof openModal==='function') openModal('🔄 Sincronización de Economía', html);
+  else alert('Abrí Economía para usar esta herramienta.');
+}
+function ecoSyncBackup(){
+  try{
+    const datos={ gastos:_ecoState.gastos, ingresos:_ecoState.ingresos||[], metricas:_ecoState.metricas||{}, metricasCols:_ecoState.metricasCols||[], acreditar:_ecoState.acreditar||[], ahorros:_ecoState.ahorros||[], del:_ecoState.del||{}, savedAt:Date.now() };
+    const blob=new Blob([JSON.stringify(datos,null,2)],{type:'application/json'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='economia-backup-'+new Date().toISOString().slice(0,10)+'.json';
+    a.click();
+    if(typeof showToast==='function') showToast('💾 Copia descargada','success');
+  }catch(e){ alert('No se pudo generar la copia: '+e.message); }
+}
+async function ecoSyncForzar(modo){
+  if(modo==='subir'){
+    if(!confirm('Vas a REEMPLAZAR los datos de la nube con los de esta PC.\n\n¿Seguro? (conviene descargar antes la copia de seguridad)')) return;
+    try{
+      const datos={ gastos:_ecoState.gastos, ingresos:_ecoState.ingresos||[], metricas:_ecoState.metricas||{}, metricasCols:_ecoState.metricasCols||[], acreditar:_ecoState.acreditar||[], ahorros:_ecoState.ahorros||[], del:_ecoState.del||{} };
+      const r=await fetch(WORKER+'/api/backup',{ method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+        body: JSON.stringify({ economia: Object.assign({ savedAt:Date.now() }, datos) }) });
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      _ecoUltimaFirma=null; _ecoState.dirty=false;
+      if(typeof showToast==='function') showToast('⬆️ Datos de esta PC subidos a la nube','success');
+      if(typeof closeModal==='function') closeModal();
+    }catch(e){ alert('No se pudo subir: '+e.message); }
+    return;
+  }
+  if(!confirm('Vas a DESCARTAR los datos locales de esta PC y quedarte con los de la nube.\n\n¿Seguro?')) return;
+  try{
+    const r=await fetch(WORKER+'/api/backup?_='+Date.now(),{ cache:'no-store', headers:{'Authorization':'Bearer '+token} });
+    const d=await r.json();
+    if(!d || !d.economia || !Array.isArray(d.economia.gastos)) throw new Error('la nube no tiene datos de Economía');
+    const e=d.economia;
+    _ecoState.gastos       = e.gastos||[];
+    _ecoState.metricas     = e.metricas||{};
+    _ecoState.metricasCols = e.metricasCols||[];
+    _ecoState.ingresos     = e.ingresos||[];
+    _ecoState.acreditar    = e.acreditar||[];
+    _ecoState.ahorros      = e.ahorros||[];
+    _ecoState.del          = e.del||{};
+    _ecoState.dirty=false; _ecoSaveLS();
+    if(typeof closeModal==='function') closeModal();
+    ecoRender();
+    if(typeof showToast==='function') showToast('⬇️ Datos de la nube aplicados','success');
+  }catch(e){ alert('No se pudo traer: '+e.message); }
+}
+
 let _ecoSyncing=false, _ecoLastSync=0;
 async function _ecoSyncDown(force){
   if(_ecoSyncing) return;
@@ -30231,13 +30363,25 @@ async function _ecoSyncDown(force){
       const remoteTs = d.economia.savedAt||0;
       const remoteGana = remoteTs >= localTs;
       const e=d.economia;
+      // v261: unificar el registro de borrados de las dos PCs ANTES de fusionar
+      _ecoState.del = _ecoDelMerge(_ecoState.del, e.del);
       _ecoState.gastos       = _ecoMergeGastos(_ecoState.gastos, e.gastos, remoteGana);
       _ecoState.metricas     = _ecoMergeMetricas(_ecoState.metricas, e.metricas, remoteGana);
       _ecoState.metricasCols = _ecoMergePorId(_ecoState.metricasCols, e.metricasCols, remoteGana);
       _ecoState.ingresos     = _ecoMergePorId(_ecoState.ingresos, e.ingresos, remoteGana);
       _ecoState.acreditar    = _ecoMergePorId(_ecoState.acreditar, e.acreditar, remoteGana);
       _ecoState.ahorros      = _ecoMergePorId(_ecoState.ahorros, e.ahorros, remoteGana);
+      // aplicar los borrados (lo eliminado en cualquier PC no revive)
+      _ecoState.gastos       = _ecoAplicarDel(_ecoState.gastos, _ecoState.del);
+      _ecoState.ingresos     = _ecoAplicarDel(_ecoState.ingresos, _ecoState.del);
+      _ecoState.acreditar    = _ecoAplicarDel(_ecoState.acreditar, _ecoState.del);
+      _ecoState.ahorros      = _ecoAplicarDel(_ecoState.ahorros, _ecoState.del);
+      _ecoState.metricasCols = _ecoAplicarDel(_ecoState.metricasCols, _ecoState.del);
       _ecoSaveLS();
+      // v261: devolver a la nube el resultado ya fusionado, así ambas PCs
+      // convergen al mismo estado en vez de quedar cada una con su versión.
+      _ecoState.dirty = true; clearTimeout(_ecoState.saveTimer);
+      _ecoState.saveTimer = setTimeout(_ecoFlush, 2500);
       _ecoLastSync=Date.now();
       // repintar lo que esté a la vista
       if(document.getElementById('section-economia')?.classList.contains('active')) ecoRender();
@@ -30275,6 +30419,37 @@ function _ecoSet(g, y, m, val, estado){
   if(!g.st) g.st={};
   if(!g.st[y]) g.st[y]=[null,null,null,null,null,null,null,null,null,null,null,null];
   g.st[y][m] = estado || null;
+  _ecoTouch(g);   // v261: sella cuándo se tocó este gasto (clave para el merge)
+}
+
+// v261 ─────────────────────────────────────────────────────────────────────
+// SELLO POR GASTO: hasta v260 el merge usaba un único savedAt global, así que
+// no podía saber CUÁL de las dos PCs tenía razón sobre un gasto puntual.
+function _ecoTouch(g){ if(g) g.uAt = Date.now(); }
+
+// LÁPIDAS DE BORRADO: si borrás (o fusionás) un gasto en una PC, la otra PC
+// todavía lo tenía y en el merge lo "revivía" — por eso reaparecían filas de
+// años anteriores y las fusiones se deshacían solas. Ahora el borrado queda
+// registrado con su fecha y se propaga a las demás PCs.
+function _ecoDelReg(id){
+  if(!id) return;
+  _ecoState.del = _ecoState.del || {};
+  _ecoState.del[id] = Date.now();
+}
+function _ecoDelMerge(a, b){
+  const out = Object.assign({}, a||{});
+  Object.keys(b||{}).forEach(k => { if(!out[k] || b[k] > out[k]) out[k] = b[k]; });
+  return out;
+}
+// Saca de la lista lo que fue borrado, salvo que se haya vuelto a tocar DESPUÉS
+// del borrado (en ese caso el dato nuevo manda y la lápida se ignora).
+function _ecoAplicarDel(lista, del){
+  if(!del) return lista;
+  return (lista||[]).filter(x => {
+    const ts = del[x && x.id];
+    if(!ts) return true;
+    return (x.uAt || 0) > ts;
+  });
 }
 
 function _ecoYears(){
@@ -30531,6 +30706,7 @@ function _ecoIngUpdTotales(){
   if(d) d.textContent='US$'+Math.round(t.dolares).toLocaleString('es-AR');
 }
 function _ecoIngDel(id){
+  _ecoDelReg(id);   // v261
   _ecoState.ingresos=_ecoIngresos().filter(x=>x.id!==id);
   _ecoMarkDirty();
   const tr=document.querySelector('#eco-ing-tbody tr[data-iid="'+id+'"]');
@@ -32243,6 +32419,7 @@ function _ecoListaUpdTotales(tipo){
   if(d) d.textContent='US$'+Math.round(t.dolares).toLocaleString('es-AR');
 }
 function _ecoListaDel(tipo,id){
+  _ecoDelReg(id);   // v261
   _ecoState[tipo]=_ecoLista(tipo).filter(x=>x.id!==id);
   _ecoMarkDirty();
   const tr=document.querySelector('#eco-lista-tbody tr[data-iid="'+id+'"]');
@@ -33418,6 +33595,8 @@ function _ecoMergeGasto(gid){
     });
   });
   const quitar=new Set(ids);
+  quitar.forEach(id=>_ecoDelReg(id));   // v261: la fusión también deja lápida
+  _ecoTouch(g);
   _ecoState.gastos=_ecoState.gastos.filter(x=>!quitar.has(x.id));
   _ecoMergeSelSet=null;
   _ecoMarkDirty(); _ecoCellClose(); ecoRender();
@@ -33936,6 +34115,7 @@ function _ecoSaveGasto(gid){
 }
 function _ecoDelGasto(gid){
   if(!confirm('¿Eliminar este gasto y todos sus datos históricos? No se puede deshacer.')) return;
+  _ecoDelReg(gid);   // v261: queda registrado para que no revuelva desde otra PC
   _ecoState.gastos=_ecoState.gastos.filter(x=>x.id!==gid);
   _ecoMarkDirty(); _ecoCellClose(); ecoRender();
   showToast('Gasto eliminado','success');
