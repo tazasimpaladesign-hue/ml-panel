@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v265 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v266 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1631,6 +1631,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       </div>
       <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
         <button class="btn btn-ghost btn-xs" onclick="btRefreshQuota()">↻ Actualizar contador</button>
+        <button class="btn btn-ghost btn-xs" id="bt-unlock" onclick="btUnlock()" style="display:none">🔓 Destrabar</button>
       </div>
     </div>
     <div id="bt-quota-warn" style="display:none;margin-top:9px;font-size:11.5px"></div>
@@ -44785,7 +44786,15 @@ const BT_MENOR = /u1[5-9]\b|u2[0-3]\b|sub-?\d|youth|junior|juvenil|reserve|reser
 
 let BT_DAY = 0, BT_FIX = [], BT_SEL = {}, BT_ANA = [], BT_COMBO = {}, BT_MANUAL = {};
 let BT_RANK = 'conf', BT_BOOTED = false, BT_CANCEL = false, BT_RUNNING = false;
-let BT_FAV = {}, BT_CACHEHITS = 0, BT_CONFIRM = null;
+let BT_FAV = {}, BT_CACHEHITS = 0, BT_CONFIRM = null, BT_ULTIMO_MOTIVO = '';
+
+// Libera el freno del Worker cuando quedo puesto de mas.
+function btUnlock(){
+  btApi('/reset').then(j => {
+    btSetStatus(j && j.ok ? '🔓 ' + btEsc(j.msg) : '⚠️ No pude destrabarlo.');
+    btRefreshQuota();
+  }).catch(() => btSetStatus('⚠️ No pude contactar al Worker.'));
+}
 
 /* ── matematica (sin cambios: es el motor que ya funcionaba) ──────────── */
 function btFact(n){ let r=1; for(let i=2;i<=n;i++) r*=i; return r; }
@@ -44854,9 +44863,12 @@ function btRefreshQuota(){
     const warn = document.getElementById('bt-quota-warn');
     if(luz) luz.style.background = libres <= 0 ? 'var(--red)' : (libres < 20 ? 'var(--amber)' : 'var(--green)');
     if(warn){
+      const unlock = document.getElementById('bt-unlock');
+      if(unlock) unlock.style.display = rpm.cooldown ? '' : 'none';
       if(rpm.cooldown){
         warn.style.display=''; warn.style.color='var(--amber)';
-        warn.textContent = '⏸ La API cortó por límite de consultas por minuto. Se reanuda en ' + rpm.cooldown + ' s.';
+        warn.textContent = '⏸ El Worker está en pausa ' + rpm.cooldown + ' s porque la API cortó por límite. ' +
+          'Si el contador de arriba muestra consultas libres, podés destrabarlo con el botón 🔓.';
       } else if(libres <= 0){
         warn.style.display=''; warn.style.color='var(--red)';
         warn.textContent = '🔴 Se agotaron las 100 consultas del día. Vuelven a cero a las 21:00 de Argentina. Los partidos ya analizados siguen disponibles desde el caché.';
@@ -45115,13 +45127,15 @@ async function btRun(sel){
       if(out.res){ BT_ANA.push(out.res); listo = true; break; }
       if(out.wait){
         intento++;
+        BT_ULTIMO_MOTIVO = out.err || '';
         await btEspera(out.wait, i+1, sel.length);
         continue;
       }
       fallos.push({ n: f.home.name + ' vs ' + f.away.name, e: out.err });
       break;
     }
-    if(!listo && intento >= 3) fallos.push({ n: f.home.name + ' vs ' + f.away.name, e: 'la API sigue en su límite' });
+    if(!listo && intento >= 3) fallos.push({ n: f.home.name + ' vs ' + f.away.name,
+      e: (BT_ULTIMO_MOTIVO || 'la API sigue en su límite') });
     if(i < sel.length-1 && !BT_CANCEL) await btSleep(700);
   }
 
@@ -45132,9 +45146,14 @@ async function btRun(sel){
 
   if(!BT_ANA.length){
     btSetProgress('');
+    const porLimite = fallos.some(x => /límite|limite|pausa/i.test(x.e||''));
     btSetStatus('<span style="color:var(--red)">❌ No se pudo analizar ningún partido.</span> ' +
       (fallos.length ? btEsc(fallos[0].e || 'Sin estadísticas disponibles.') : '') +
-      '<br><span style="font-size:11.5px;color:var(--text3)">Las ligas femeninas, juveniles y de baja cobertura suelen no tener estadísticas en el plan gratuito. Probá con una liga marcada con ⭐.</span>');
+      '<br><span style="font-size:11.5px;color:var(--text3)">' +
+      (porLimite
+        ? 'Si el contador de arriba muestra consultas libres, el freno quedó puesto de más: tocá 🔓 Destrabar y volvé a intentar.'
+        : 'Las ligas femeninas, juveniles y de baja cobertura no tienen estadísticas en el plan gratuito. Probá con una liga marcada con ⭐.') +
+      '</span>');
     return;
   }
 
@@ -45173,8 +45192,10 @@ function btAnalyzeOne(f, conOdds){
              '&home=' + f.home.id + '&away=' + f.away.id + '&odds=' + (conOdds ? '1' : '0');
   return btApi(qs).then(r => {
     if(!r) return { err:'el Worker no respondió' };
-    if(r.retryAfter && (!r.home || !r.away)) return { wait: r.retryAfter };
-    if(!r.home || !r.away) return { err:'esta competición no tiene estadísticas de equipo en el plan gratuito' };
+    // Solo esperamos si el Worker dice explicitamente cuanto. Si no hay datos
+    // por otra razon (liga sin estadisticas) devolvemos el motivo tal cual.
+    if(r.retryAfter > 0 && (!r.home || !r.away)) return { wait: r.retryAfter, err: r.error };
+    if(!r.home || !r.away) return { err: r.error || 'esta competición no tiene estadísticas de equipo en el plan gratuito' };
 
     if(r.cached){ if(r.cached.home) BT_CACHEHITS++; if(r.cached.away) BT_CACHEHITS++; if(r.cached.odds) BT_CACHEHITS++; }
 
