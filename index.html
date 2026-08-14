@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v263 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v264 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1624,7 +1624,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
       <div>
         <div class="card-title" style="margin:0">📅 Partidos</div>
-        <div class="card-sub">Nada se consulta solo: cada llamada la disparás vos.</div>
+        <div class="card-sub">Nada se consulta solo: cada llamada la disparás vos. El plan gratuito permite 10 consultas por minuto y 100 por día, así que los partidos se procesan de a uno.</div>
       </div>
       <div style="display:flex;gap:6px;margin-left:auto;flex-wrap:wrap;align-items:center">
         <button class="btn btn-ghost btn-sm bt-day on" data-btday="0" onclick="btSetDay(0)">Hoy</button>
@@ -1648,6 +1648,10 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
         <button class="btn btn-ghost btn-sm" onclick="btPickTop()">⭐ Marcar principales</button>
         <button class="btn btn-ghost btn-sm" onclick="btPickNone()">✕ Limpiar ligas</button>
+        <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text2);cursor:pointer;margin:0">
+          <input type="checkbox" id="bt-odds" checked onchange="btUpdCost()" style="width:14px;height:14px;cursor:pointer">
+          Traer cuotas <span style="color:var(--text4)">(+1 consulta por partido)</span>
+        </label>
         <span id="bt-cost" style="font-size:11px;color:var(--text3);margin-left:auto"></span>
         <button class="btn btn-primary btn-sm" id="bt-run" onclick="btAnalyze()" disabled>⚡ Analizar seleccionados</button>
       </div>
@@ -44737,7 +44741,12 @@ function btRefreshQuota(){
       el.style.color = 'var(--text3)';
       return;
     }
-    el.innerHTML = 'Cuota de la API: <strong>' + q.remaining + '</strong> de ' + (q.limit || 100) + ' disponibles hoy';
+    let extra = '';
+    if(j.rpm){
+      extra = ' · este minuto: ' + j.rpm.usadas + '/' + j.rpm.max;
+      if(j.rpm.cooldown) extra += ' <span style="color:var(--amber)">(en pausa ' + j.rpm.cooldown + ' s)</span>';
+    }
+    el.innerHTML = 'Cuota de la API: <strong>' + q.remaining + '</strong> de ' + (q.limit || 100) + ' disponibles hoy' + extra;
     el.style.color = q.remaining <= 0 ? 'var(--red)' : (q.remaining < 20 ? 'var(--amber)' : 'var(--text3)');
   }).catch(()=>{});
 }
@@ -44849,63 +44858,114 @@ function btToggleFx(id, on){ if(on) BT_SEL[id]=true; else delete BT_SEL[id]; btU
 function btSelected(){ return BT_FIX.filter(f => BT_SEL[f.id]); }
 function btUpdCost(){
   const n = btSelected().length;
-  document.getElementById('bt-run').disabled = n===0;
-  document.getElementById('bt-cost').textContent = n
-    ? (n + ' partido' + (n>1?'s':'') + ' · hasta ' + (n*3) + ' requests')
-    : 'Marcá los partidos que querés analizar';
+  const run = document.getElementById('bt-run');
+  if(run) run.disabled = n===0;
+  const el = document.getElementById('bt-cost');
+  if(!el) return;
+  if(!n){ el.textContent = 'Marcá los partidos que querés analizar'; el.style.color='var(--text3)'; return; }
+  const porPartido = ((document.getElementById('bt-odds')||{}).checked !== false) ? 3 : 2;
+  const reqs = n * porPartido;
+  // La API deja 10 por minuto: el Worker usa 8 para tener margen.
+  const seg = Math.max(4, Math.round(reqs / 8 * 60));
+  el.innerHTML = n + ' partido' + (n>1?'s':'') + ' · hasta ' + reqs + ' consultas · ~' +
+    (seg < 60 ? seg + ' s' : Math.ceil(seg/60) + ' min') +
+    (reqs > 8 ? ' <span style="color:var(--amber)">(la API sólo permite 10 por minuto, así que va por tandas)</span>' : '');
+  el.style.color = 'var(--text3)';
 }
 
 /* ── 2. analizar (3 requests por partido) ─────────────────────────────── */
+function btSleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+
+// Cuenta regresiva visible mientras se espera que se libere el limite.
+function btWaitVisible(seg, hechos, total){
+  return new Promise(resolve => {
+    let resta = seg;
+    const tick = () => {
+      if(resta <= 0){ resolve(); return; }
+      btSetStatus('<span style="color:var(--amber)">⏳ Límite de la API alcanzado (10 consultas por minuto). ' +
+        'Reanudo en ' + resta + ' s… · ' + hechos + ' de ' + total + ' listos</span>');
+      resta--;
+      setTimeout(tick, 1000);
+    };
+    tick();
+  });
+}
+
+// Los partidos se procesan de a uno, nunca en paralelo. Si la API corta por
+// limite, se espera lo que indica el Worker y se reintenta ese mismo partido.
 function btAnalyze(){
   const sel = btSelected();
   if(!sel.length) return;
   const btn = document.getElementById('bt-run');
   btn.disabled = true;
   BT_ANA = []; BT_COMBO = {};
-  let done = 0;
-  btSetStatus('<span class="spin"></span> Analizando 0 de ' + sel.length + '…');
+  const fallos = [];
 
-  let chain = Promise.resolve();
-  sel.forEach(f => {
-    chain = chain.then(() => btAnalyzeOne(f).then(res => {
-      if(res) BT_ANA.push(res);
-      done++;
-      btSetStatus('<span class="spin"></span> Analizando ' + done + ' de ' + sel.length + '…');
-    }));
-  });
-  chain.then(() => {
+  (async function(){
+    for(let i=0; i<sel.length; i++){
+      const f = sel[i];
+      let intento = 0, ok = false;
+      while(intento < 3 && !ok){
+        btSetStatus('<span class="spin"></span> Analizando ' + (i+1) + ' de ' + sel.length +
+                    ' · ' + btEsc(f.home.name) + ' vs ' + btEsc(f.away.name) +
+                    (intento ? ' (reintento ' + intento + ')' : ''));
+        const out = await btAnalyzeOne(f);
+        if(out && out.res){ BT_ANA.push(out.res); ok = true; break; }
+        if(out && out.wait){
+          intento++;
+          await btWaitVisible(out.wait, BT_ANA.length, sel.length);
+          continue;
+        }
+        fallos.push(f.home.name + ' vs ' + f.away.name + (out && out.err ? ' (' + out.err + ')' : ''));
+        break;
+      }
+      if(!ok && intento >= 3) fallos.push(f.home.name + ' vs ' + f.away.name + ' (límite de la API)');
+      // Respiro entre partidos: evita las ráfagas que hacen saltar el límite.
+      if(i < sel.length-1) await btSleep(900);
+    }
+
     btn.disabled = false;
     btRefreshQuota();
-    if(!BT_ANA.length){ btSetStatus('<span style="color:var(--amber)">No pude armar el modelo: la API no devolvió estadísticas para esos equipos (suele pasar al arrancar la temporada).</span>'); return; }
-    btSetStatus(BT_ANA.length + ' partido' + (BT_ANA.length>1?'s':'') + ' analizado' + (BT_ANA.length>1?'s':'') + '.');
+
+    if(!BT_ANA.length){
+      btSetStatus('<span style="color:var(--amber)">No pude analizar ninguno. ' +
+        (fallos.length ? btEsc(fallos[0]) : 'La API no devolvió estadísticas.') + '</span>');
+      return;
+    }
+    let msg = BT_ANA.length + ' partido' + (BT_ANA.length>1?'s':'') + ' analizado' + (BT_ANA.length>1?'s':'') + '.';
+    if(fallos.length) msg += ' <span style="color:var(--amber)">Quedaron afuera ' + fallos.length + ': ' + btEsc(fallos.slice(0,2).join(' · ')) + '</span>';
+    btSetStatus(msg);
     document.getElementById('bt-res').style.display = '';
     btRenderTop(); btRenderMatches(); btCombo();
-  });
+  })();
 }
 
+// Una sola llamada al Worker por partido. El Worker adentro hace las consultas
+// en orden y espaciadas, respetando el limite de 10 por minuto de la API.
 function btAnalyzeOne(f){
   const L = f.league;
-  return Promise.all([
-    btApi('/stats?league=' + L.id + '&season=' + L.season + '&team=' + f.home.id),
-    btApi('/stats?league=' + L.id + '&season=' + L.season + '&team=' + f.away.id),
-    btApi('/odds?fixture=' + f.id)
-  ]).then(r => {
-    const sh = (r[0] && r[0].ok) ? r[0].stats : null;
-    const sa = (r[1] && r[1].ok) ? r[1].stats : null;
-    const books = (r[2] && r[2].ok) ? (r[2].bookmakers||[]) : [];
-    if(!sh || !sa) return null;
-    const D = btBuildModel(f, sh, sa);
-    if(!D) return null;
+  const wantOdds = (document.getElementById('bt-odds')||{}).checked !== false;
+  const qs = '/match?fixture=' + f.id + '&league=' + L.id + '&season=' + L.season +
+             '&home=' + f.home.id + '&away=' + f.away.id + '&odds=' + (wantOdds ? '1' : '0');
+  return btApi(qs).then(r => {
+    if(!r) return { err:'sin respuesta' };
+    // El Worker avisa cuando la API corto por limite: devolvemos la espera
+    // para que btAnalyze reintente este mismo partido mas tarde.
+    if(r.retryAfter && (!r.home || !r.away)) return { wait: r.retryAfter };
+    if(!r.ok || !r.home || !r.away) return { err: r.error || 'la API no devolvió estadísticas' };
+
+    const D = btBuildModel(f, r.home, r.away);
+    if(!D) return { err:'faltan promedios de goles' };
     const A = btSimulate(D);
     const MK = btCatalog(D, A);
-    const od = btParseOdds(books);
+    const od = btParseOdds(r.odds || []);
     MK.forEach(m => {
       const o = btLookupOdd(od.map, m.oid);
       m.odd = o;
       m.ev = (o && m.p>0) ? (m.p*o - 1) : null;
     });
-    return { f:f, D:D, MK:MK, od:od };
-  }).catch(() => null);
+    return { res: { f:f, D:D, MK:MK, od:od } };
+  }).catch(e => ({ err: e.message }));
 }
 
 function btBuildModel(f, sh, sa){
