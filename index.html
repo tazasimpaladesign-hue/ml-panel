@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v267 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v268 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1621,7 +1621,10 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center">
       <div style="display:flex;align-items:center;gap:8px">
         <span id="bt-light" style="width:9px;height:9px;border-radius:50%;background:var(--green);display:inline-block"></span>
-        <strong style="font-size:12.5px">API-Football</strong>
+        <select id="bt-src" onchange="btSetSrc()" style="width:auto;font-size:12px;padding:5px 8px;font-weight:600">
+          <option value="fd">football-data.org · temporada actual</option>
+          <option value="af">API-Football · sólo 2022-2024</option>
+        </select>
       </div>
       <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:11.5px;color:var(--text3)">
         <span>Hoy <strong id="bt-q-day" style="color:var(--text)">—</strong></span>
@@ -1635,6 +1638,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       </div>
     </div>
     <div id="bt-quota-warn" style="display:none;margin-top:9px;font-size:11.5px"></div>
+    <div id="bt-src-info" style="margin-top:9px;font-size:11.5px;color:var(--text3);line-height:1.55"></div>
   </div>
 
   <!-- ── Buscador y filtros ─────────────────────────────────────── -->
@@ -44788,13 +44792,55 @@ let BT_DAY = 0, BT_FIX = [], BT_SEL = {}, BT_ANA = [], BT_COMBO = {}, BT_MANUAL 
 let BT_RANK = 'conf', BT_BOOTED = false, BT_CANCEL = false, BT_RUNNING = false;
 let BT_FAV = {}, BT_CACHEHITS = 0, BT_CONFIRM = null, BT_ULTIMO_MOTIVO = '';
 let BT_LIGAS = {};   // v267 · promedios ya traidos, por liga+temporada
+let BT_SRC = 'fd';   // v268 · fuente de datos activa
+
+// v268 · Dos fuentes posibles. El plan gratuito de API-Football solo tiene
+// temporadas 2022-2024, asi que para partidos de hoy hay que usar la otra.
+const BT_FUENTES = {
+  fd: {
+    nombre: 'football-data.org',
+    info: 'Temporada actual · 10 consultas por minuto · <strong>sin tope diario</strong>. ' +
+          'Cubre Champions, Premier, LaLiga, Bundesliga, Serie A, Ligue 1, Eredivisie, Primeira, ' +
+          'Championship, Brasileirão, Mundial y Eurocopa. <strong>No trae cuotas</strong>: cargalas a mano ' +
+          'en cada mercado, que además es más exacto porque es el precio real que te ofrece Betano.',
+    odds: false
+  },
+  af: {
+    nombre: 'API-Football',
+    info: '<span style="color:var(--amber)">⚠️ El plan gratuito sólo tiene temporadas 2022 a 2024</span>, ' +
+          'así que no puede analizar partidos de la temporada actual: va a fallar con “Free plans do not have ' +
+          'access to this season”. Sirve para traer cuotas y para probar con temporadas viejas. ' +
+          '100 consultas por día y 10 por minuto.',
+    odds: true
+  }
+};
+function btSetSrc(){
+  BT_SRC = (document.getElementById('bt-src')||{}).value || 'fd';
+  const f = BT_FUENTES[BT_SRC];
+  const info = document.getElementById('bt-src-info');
+  if(info) info.innerHTML = f.info;
+  const od = document.getElementById('bt-odds');
+  if(od){
+    od.disabled = !f.odds;
+    if(!f.odds) od.checked = false;
+    od.parentNode.style.opacity = f.odds ? '1' : '.45';
+    od.parentNode.title = f.odds ? '' : 'Esta fuente no entrega cuotas: cargalas a mano en cada mercado';
+  }
+  // Cambiar de fuente invalida lo ya traido: los ids de equipo no coinciden.
+  BT_FIX = []; BT_LIGAS = {}; BT_ANA = []; BT_SEL = {}; BT_COMBO = {};
+  const w = document.getElementById('bt-fxwrap'); if(w) w.style.display = 'none';
+  const r = document.getElementById('bt-res'); if(r) r.style.display = 'none';
+  const b = document.getElementById('bt-bar'); if(b) b.style.display = 'none';
+  btSetStatus('Fuente cambiada a <strong>' + f.nombre + '</strong>. Tocá “Buscar partidos”.');
+  btUpdCost();
+}
 
 // v267 · Trae de una sola vez los promedios de TODOS los equipos de una liga.
 // Antes se pedian 2 consultas por partido; ahora 1 por liga, y queda cacheada.
 function btCargarLiga(league, season){
   const k = league + ':' + season;
   if(BT_LIGAS[k]) return Promise.resolve({ liga: BT_LIGAS[k] });
-  return btApi('/league?league=' + league + '&season=' + season).then(r => {
+  return btApi('/league?league=' + league + '&season=' + season + '&src=' + BT_SRC).then(r => {
     if(!r) return { err:'el Worker no respondió' };
     if(r.rateLimited && r.retryAfter > 0) return { wait: r.retryAfter, err: r.error };
     if(!r.ok) return { err: r.error || 'no pude traer los promedios de la liga' };
@@ -44869,7 +44915,7 @@ function btRefreshQuota(){
     const dia = (q.remaining !== null && q.remaining !== undefined)
       ? (q.limit || 100) - q.remaining : (q.used || 0);
     const set = (id,v) => { const e=document.getElementById(id); if(e) e.textContent=v; };
-    set('bt-q-day', dia + ' / ' + (q.limit || 100));
+    set('bt-q-day', BT_SRC === 'fd' ? 'sin tope' : (dia + ' / ' + (q.limit || 100)));
     set('bt-q-min', (rpm.usadas||0) + ' / ' + (rpm.max||8));
     set('bt-q-cache', BT_CACHEHITS);
     set('bt-q-when', 'Actualizado ' + btHHMM(Math.floor(Date.now()/1000)));
@@ -44885,6 +44931,8 @@ function btRefreshQuota(){
         warn.style.display=''; warn.style.color='var(--amber)';
         warn.textContent = '⏸ El Worker está en pausa ' + rpm.cooldown + ' s porque la API cortó por límite. ' +
           'Si el contador de arriba muestra consultas libres, podés destrabarlo con el botón 🔓.';
+      } else if(BT_SRC === 'fd'){
+        warn.style.display='none';
       } else if(libres <= 0){
         warn.style.display=''; warn.style.color='var(--red)';
         warn.textContent = '🔴 Se agotaron las 100 consultas del día. Vuelven a cero a las 21:00 de Argentina. Los partidos ya analizados siguen disponibles desde el caché.';
@@ -44903,6 +44951,8 @@ function btInit(){
   try{ BT_FAV = JSON.parse(localStorage.getItem('bt_fav')||'{}'); }catch(e){ BT_FAV = {}; }
   const d = document.getElementById('bt-date');
   if(d) d.value = btIsoDay(0);
+  btSetSrc();
+  btSetStatus('');
   btRefreshQuota();
 }
 function btSetDay(n){
@@ -44924,7 +44974,7 @@ function btScan(){
   btn.disabled = true;
   btSetStatus('<span class="spin"></span> Buscando partidos del ' + date + '…');
 
-  btApi('/fixtures?date=' + date).then(j => {
+  btApi('/fixtures?date=' + date + '&src=' + BT_SRC).then(j => {
     btn.disabled = false;
     if(!j || !j.ok){
       btSetStatus('<span style="color:var(--red)">❌ ' + btEsc((j&&j.error)||'No pude traer los partidos.') + '</span>');
