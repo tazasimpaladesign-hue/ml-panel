@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v269 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v270 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1622,7 +1622,8 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <div style="display:flex;align-items:center;gap:8px">
         <span id="bt-light" style="width:9px;height:9px;border-radius:50%;background:var(--green);display:inline-block"></span>
         <select id="bt-src" onchange="btSetSrc()" style="width:auto;font-size:12px;padding:5px 8px;font-weight:600">
-          <option value="fd">football-data.org · temporada actual</option>
+          <option value="fd">football-data.org · 12 ligas top</option>
+          <option value="tsdb">TheSportsDB · incluye Argentina</option>
           <option value="af">API-Football · sólo 2022-2024</option>
         </select>
       </div>
@@ -1635,6 +1636,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
         <button class="btn btn-ghost btn-xs" onclick="btRefreshQuota()">↻ Actualizar contador</button>
         <button class="btn btn-ghost btn-xs" onclick="btVerComps()">📋 Ver competiciones incluidas</button>
+        <button class="btn btn-ghost btn-xs" onclick="btDiag()">🔬 Comparar fuentes</button>
         <button class="btn btn-ghost btn-xs" id="bt-unlock" onclick="btUnlock()" style="display:none">🔓 Destrabar</button>
       </div>
     </div>
@@ -1650,7 +1652,13 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <button class="btn btn-ghost btn-sm bt-day on" data-btday="0" onclick="btSetDay(0)">Hoy</button>
       <button class="btn btn-ghost btn-sm bt-day" data-btday="1" onclick="btSetDay(1)">Mañana</button>
       <button class="btn btn-ghost btn-sm bt-day" data-btday="2" onclick="btSetDay(2)">Pasado</button>
-      <input type="date" id="bt-date" style="width:auto;font-size:12px;padding:7px 9px" aria-label="Otra fecha">
+      <input type="date" id="bt-date" style="width:auto;font-size:12px;padding:7px 9px" aria-label="Desde">
+      <select id="bt-dias" style="width:auto;font-size:12px;padding:7px 9px" title="Cuántos días traer de una sola vez">
+        <option value="1">1 día</option>
+        <option value="3" selected>3 días</option>
+        <option value="5">5 días</option>
+        <option value="7">7 días</option>
+      </select>
       <button class="btn btn-primary btn-sm" id="bt-scan" onclick="btScan()">Buscar partidos</button>
     </div>
 
@@ -44806,6 +44814,14 @@ const BT_FUENTES = {
           'en cada mercado, que además es más exacto porque es el precio real que te ofrece Betano.',
     odds: false
   },
+  tsdb: {
+    nombre: 'TheSportsDB',
+    info: 'Base comunitaria, gratuita y sin registro. <strong>Cubre cientos de ligas, incluida la Liga Profesional Argentina</strong>, ' +
+          'que ninguna de las otras dos entrega gratis. <span style="color:var(--amber)">⚠️ Los datos los carga la comunidad</span>, ' +
+          'así que la exactitud es menor y algunos torneos vienen incompletos: mirá siempre la calidad del análisis. ' +
+          'No trae cuotas: cargalas a mano.',
+    odds: false
+  },
   af: {
     nombre: 'API-Football',
     info: '<span style="color:var(--amber)">⚠️ El plan gratuito sólo tiene temporadas 2022 a 2024</span>, ' +
@@ -44851,9 +44867,36 @@ function btCargarLiga(league, season){
   }).catch(e => { console.error('[betano] league', e); return { err:'error de conexión con el Worker' }; });
 }
 
+// v270 · Consulta las dos fuentes con la misma fecha y muestra que trae cada
+// una. Sirve para decidir cual usar sin adivinar.
+function btDiag(){
+  const date = (document.getElementById('bt-date')||{}).value || btIsoDay(0);
+  btSetStatus('<span class="spin"></span> Comparando fuentes para el ' + date + '…');
+  btApi('/diagnostico?date=' + date).then(j => {
+    if(!j || !j.ok){ btSetStatus('⚠️ No pude hacer el diagnóstico.'); return; }
+    const f = j.fuentes || {};
+    let s = '<strong>Qué trae cada fuente el ' + btEsc(date) + ':</strong><br><span style="font-size:11.5px;line-height:1.8">';
+    if(f.footballdata){
+      s += f.footballdata.ok
+        ? '🟢 <strong>football-data.org</strong>: ' + f.footballdata.partidos + ' partidos · ' + btEsc((f.footballdata.competiciones||[]).join(', ') || 'ninguna competición')
+        : '🔴 <strong>football-data.org</strong>: ' + btEsc(f.footballdata.error||'');
+    }
+    s += '<br>';
+    if(f.thesportsdb){
+      s += f.thesportsdb.ok
+        ? '🟢 <strong>TheSportsDB</strong>: ' + f.thesportsdb.partidos + ' partidos · ' + btEsc((f.thesportsdb.ligas||[]).slice(0,10).join(', '))
+          + ((f.thesportsdb.argentina||[]).length ? '<br><span style="color:var(--green)">🇦🇷 Argentina: ' + btEsc(f.thesportsdb.argentina.join(' · ')) + '</span>' : '')
+        : '🔴 <strong>TheSportsDB</strong>: ' + btEsc(f.thesportsdb.error||'');
+    }
+    s += '</span>';
+    btSetStatus(s);
+    btRefreshQuota();
+  }).catch(() => btSetStatus('⚠️ No pude contactar al Worker.'));
+}
+
 // v269 · Que competiciones ve realmente la clave gratuita.
 function btVerComps(){
-  if(BT_SRC !== 'fd'){ btSetStatus('Esta lista sólo aplica a football-data.org.'); return; }
+  if(BT_SRC !== 'fd'){ btSetStatus('Esta lista sólo aplica a football-data.org. Para las otras fuentes usá 🔬 Comparar fuentes.'); return; }
   btSetStatus('<span class="spin"></span> Consultando el catálogo…');
   btApi('/competiciones?src=fd').then(j => {
     if(!j || !j.ok){ btSetStatus('⚠️ ' + btEsc((j&&j.error)||'No pude traer el catálogo.')); return; }
@@ -44931,7 +44974,7 @@ function btRefreshQuota(){
     const dia = (q.remaining !== null && q.remaining !== undefined)
       ? (q.limit || 100) - q.remaining : (q.used || 0);
     const set = (id,v) => { const e=document.getElementById(id); if(e) e.textContent=v; };
-    set('bt-q-day', BT_SRC === 'fd' ? ('~' + dia + ' usadas') : (dia + ' / ' + (q.limit || 100)));
+    set('bt-q-day', BT_SRC === 'af' ? (dia + ' / ' + (q.limit || 100)) : ('~' + dia + ' usadas'));
     set('bt-q-min', (rpm.usadas||0) + ' / ' + (rpm.max||8));
     set('bt-q-cache', BT_CACHEHITS);
     set('bt-q-when', 'Actualizado ' + btHHMM(Math.floor(Date.now()/1000)));
@@ -44947,7 +44990,7 @@ function btRefreshQuota(){
         warn.style.display=''; warn.style.color='var(--amber)';
         warn.textContent = '⏸ El Worker está en pausa ' + rpm.cooldown + ' s porque la API cortó por límite. ' +
           'Si el contador de arriba muestra consultas libres, podés destrabarlo con el botón 🔓.';
-      } else if(BT_SRC === 'fd'){
+      } else if(BT_SRC !== 'af'){
         warn.style.display='none';
       } else if(libres <= 0){
         warn.style.display=''; warn.style.color='var(--red)';
@@ -44990,7 +45033,8 @@ function btScan(){
   btn.disabled = true;
   btSetStatus('<span class="spin"></span> Buscando partidos del ' + date + '…');
 
-  btApi('/fixtures?date=' + date + '&src=' + BT_SRC).then(j => {
+  const dias = (document.getElementById('bt-dias')||{}).value || '1';
+  btApi('/fixtures?date=' + date + '&src=' + BT_SRC + '&dias=' + dias).then(j => {
     btn.disabled = false;
     if(!j || !j.ok){
       btSetStatus('<span style="color:var(--red)">❌ ' + btEsc((j&&j.error)||'No pude traer los partidos.') + '</span>');
@@ -45004,8 +45048,9 @@ function btScan(){
     document.getElementById('bt-filters').style.display = 'flex';
     document.getElementById('bt-fxwrap').style.display = '';
     document.getElementById('bt-bar').style.display = '';
-    btSetStatus('✅ ' + BT_FIX.length + ' partidos por jugarse' +
-      (j.cached ? ' · datos guardados hace ' + Math.round((j.age||0)/60) + ' min, no gastó consulta' : ' · 1 consulta usada'));
+    const rango = (j.dias > 1) ? (' entre el ' + j.date.slice(8) + '/' + j.date.slice(5,7) + ' y el ' + j.dateTo.slice(8) + '/' + j.dateTo.slice(5,7)) : '';
+    btSetStatus('✅ ' + BT_FIX.length + ' partidos por jugarse' + rango +
+      (j.cached ? ' · datos guardados, no gastó consulta' : ''));
     btRenderCards(); btRefreshQuota();
   }).catch(e => {
     btn.disabled = false;
