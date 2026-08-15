@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v266 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v267 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -44787,6 +44787,22 @@ const BT_MENOR = /u1[5-9]\b|u2[0-3]\b|sub-?\d|youth|junior|juvenil|reserve|reser
 let BT_DAY = 0, BT_FIX = [], BT_SEL = {}, BT_ANA = [], BT_COMBO = {}, BT_MANUAL = {};
 let BT_RANK = 'conf', BT_BOOTED = false, BT_CANCEL = false, BT_RUNNING = false;
 let BT_FAV = {}, BT_CACHEHITS = 0, BT_CONFIRM = null, BT_ULTIMO_MOTIVO = '';
+let BT_LIGAS = {};   // v267 · promedios ya traidos, por liga+temporada
+
+// v267 · Trae de una sola vez los promedios de TODOS los equipos de una liga.
+// Antes se pedian 2 consultas por partido; ahora 1 por liga, y queda cacheada.
+function btCargarLiga(league, season){
+  const k = league + ':' + season;
+  if(BT_LIGAS[k]) return Promise.resolve({ liga: BT_LIGAS[k] });
+  return btApi('/league?league=' + league + '&season=' + season).then(r => {
+    if(!r) return { err:'el Worker no respondió' };
+    if(r.rateLimited && r.retryAfter > 0) return { wait: r.retryAfter, err: r.error };
+    if(!r.ok) return { err: r.error || 'no pude traer los promedios de la liga' };
+    if(r.cached) BT_CACHEHITS++;
+    BT_LIGAS[k] = r;
+    return { liga: r };
+  }).catch(e => { console.error('[betano] league', e); return { err:'error de conexión con el Worker' }; });
+}
 
 // Libera el freno del Worker cuando quedo puesto de mas.
 function btUnlock(){
@@ -45061,10 +45077,23 @@ function btUpdCost(){
   if(c1) c1.textContent = n + ' partido' + (n===1?'':'s') + ' seleccionado' + (n===1?'':'s');
   if(!c2) return;
   if(!n){ c2.textContent = 'Elegí partidos de la lista o usá 🔎 en una tarjeta'; return; }
-  const porPartido = ((document.getElementById('bt-odds')||{}).checked) ? 3 : 2;
-  const reqs = n * porPartido;
-  const seg = Math.max(4, Math.round(reqs / 8 * 60));
-  c2.textContent = 'Hasta ' + reqs + ' consultas · ~' + (seg<60 ? seg+' s' : Math.ceil(seg/60)+' min');
+  // v267 · 1 consulta por liga distinta (si no está ya en memoria) + 1 por
+  // partido sólo si se piden cuotas.
+  const ligas = {};
+  const sel = btSelected();
+  sel.forEach(f => { const k=f.league.id+':'+f.league.season; if(!BT_LIGAS[k]) ligas[k]=1; });
+  const nuevas = Object.keys(ligas).length;
+  const conOdds = (document.getElementById('bt-odds')||{}).checked;
+  // Sólo cuestan cuotas los partidos que todavía no las tienen.
+  const faltanOdds = conOdds ? sel.filter(f => {
+    const a = BT_ANA.find(x => x.f.id === f.id);
+    return !a || !a.od || !a.od.n;
+  }).length : 0;
+  const reqs = nuevas + faltanOdds;
+  const seg = Math.max(3, Math.round(reqs * 1.6));
+  c2.textContent = reqs === 0
+    ? 'Sin consultas: ya tengo estos datos guardados · instantáneo'
+    : (reqs + ' consulta' + (reqs===1?'':'s') + ' · ~' + (seg<60 ? seg+' s' : Math.ceil(seg/60)+' min'));
 }
 
 /* ── confirmacion antes de gastar cupo ────────────────────────────────── */
@@ -45093,18 +45122,29 @@ async function btRun(sel){
   if(!sel.length || BT_RUNNING) return;
 
   const conOdds = (document.getElementById('bt-odds')||{}).checked;
-  const reqs = sel.length * (conOdds ? 3 : 2);
+  const ligasNuevas = {};
+  sel.forEach(f => { const k=f.league.id+':'+f.league.season; if(!BT_LIGAS[k]) ligasNuevas[k]=1; });
+  const nLigas = Object.keys(ligasNuevas).length;
+  const faltanOdds = conOdds ? sel.filter(f => {
+    const a = BT_ANA.find(x => x.f.id === f.id);
+    return !a || !a.od || !a.od.n;
+  }).length : 0;
+  const reqs = nLigas + faltanOdds;
   const libres = await btRefreshQuota();
 
   // Nunca se gasta una consulta sin que el usuario confirme.
-  let aviso = 'Este análisis necesita hasta <strong>' + reqs + ' consultas</strong> de la API' +
-              (sel.length>1 ? ' (' + sel.length + ' partidos)' : '') + '.';
+  let aviso = reqs === 0
+    ? 'Este análisis <strong>no consume ninguna consulta</strong>: ya tengo guardados los promedios de esas ligas.'
+    : ('Este análisis necesita <strong>' + reqs + ' consulta' + (reqs===1?'':'s') + '</strong> de la API: ' +
+       nLigas + ' para los promedios de ' + (nLigas===1?'la liga':'las ligas') +
+       (faltanOdds ? ' y ' + faltanOdds + ' para las cuotas' : '') +
+       ' (' + sel.length + ' partido' + (sel.length===1?'':'s') + ').');
   if(libres !== null && libres !== undefined){
     aviso += ' Disponibles hoy: <strong>' + libres + '</strong>.';
     if(libres < reqs) aviso += '<br><span style="color:#b45309">⚠️ No alcanzan para todos. Se van a analizar los que se pueda y el resto quedará pendiente.</span>';
   }
-  aviso += '<br><br><span style="color:#64748b">Lo que ya esté guardado en caché no consume nada. ' +
-           'La API sólo permite 10 consultas por minuto, así que los partidos van de a uno.</span>';
+  aviso += '<br><br><span style="color:#64748b">Los promedios se piden una sola vez por liga y sirven para todos ' +
+           'sus partidos del día. Quedan guardados 12 horas, así que volver a analizar no cuesta nada.</span>';
   const ok = await btConfirmOpen(aviso);
   if(!ok) return;
 
@@ -45113,30 +45153,50 @@ async function btRun(sel){
   document.getElementById('bt-cancel').style.display = '';
   const fallos = [];
 
+  // PASO 1 · Traer los promedios de cada liga distinta. Una consulta por liga,
+  // no por partido: acá está el ahorro grande.
+  const ligas = {};
+  sel.forEach(f => { ligas[f.league.id + ':' + f.league.season] = f.league; });
+  const claves = Object.keys(ligas);
+  for(let c=0; c<claves.length; c++){
+    if(BT_CANCEL) break;
+    const L = ligas[claves[c]];
+    if(BT_LIGAS[claves[c]]) continue;
+    let intento = 0, ok = false;
+    while(intento < 3 && !ok && !BT_CANCEL){
+      btSetProgress('<span class="spin"></span> Trayendo promedios de ' + btEsc(L.name) +
+        ' (' + (c+1) + ' de ' + claves.length + ' ligas)' + (intento ? ' · reintento ' + intento : ''));
+      const out = await btCargarLiga(L.id, L.season);
+      if(out.liga){ ok = true; break; }
+      if(out.wait){ intento++; BT_ULTIMO_MOTIVO = out.err || ''; await btEspera(out.wait, c+1, claves.length); continue; }
+      BT_ULTIMO_MOTIVO = out.err || '';
+      break;
+    }
+    if(!ok) sel.filter(f => (f.league.id + ':' + f.league.season) === claves[c])
+              .forEach(f => fallos.push({ n: f.home.name + ' vs ' + f.away.name,
+                                          e: BT_ULTIMO_MOTIVO || 'no pude traer los promedios de la liga' }));
+    if(c < claves.length-1 && !BT_CANCEL) await btSleep(700);
+  }
+
+  // PASO 2 · Armar cada partido. Sin cuotas no cuesta ni una consulta más.
   for(let i=0; i<sel.length; i++){
     if(BT_CANCEL) break;
     const f = sel[i];
-    // Si ya lo analizamos en esta sesion, no lo repetimos.
-    if(BT_ANA.some(a => a.f.id === f.id)) continue;
-
-    let intento = 0, listo = false;
-    while(intento < 3 && !listo && !BT_CANCEL){
-      btSetProgress('<span class="spin"></span> Analizando ' + (i+1) + ' de ' + sel.length + ' · ' +
-        btEsc(f.home.name) + ' vs ' + btEsc(f.away.name) + (intento ? ' (reintento ' + intento + ')' : ''));
-      const out = await btAnalyzeOne(f, conOdds);
-      if(out.res){ BT_ANA.push(out.res); listo = true; break; }
-      if(out.wait){
-        intento++;
-        BT_ULTIMO_MOTIVO = out.err || '';
-        await btEspera(out.wait, i+1, sel.length);
-        continue;
-      }
-      fallos.push({ n: f.home.name + ' vs ' + f.away.name, e: out.err });
-      break;
+    // Si ya lo analizamos no lo repetimos, salvo que ahora pidan cuotas y
+    // aquella vez no se hayan traido.
+    const previo = BT_ANA.findIndex(a => a.f.id === f.id);
+    if(previo >= 0){
+      if(!conOdds || (BT_ANA[previo].od && BT_ANA[previo].od.n > 0)) continue;
+      BT_ANA.splice(previo, 1);
     }
-    if(!listo && intento >= 3) fallos.push({ n: f.home.name + ' vs ' + f.away.name,
-      e: (BT_ULTIMO_MOTIVO || 'la API sigue en su límite') });
-    if(i < sel.length-1 && !BT_CANCEL) await btSleep(700);
+
+    if(!BT_LIGAS[f.league.id + ':' + f.league.season]) continue;  // su liga falló arriba
+    btSetProgress('<span class="spin"></span> Analizando ' + (i+1) + ' de ' + sel.length + ' · ' +
+      btEsc(f.home.name) + ' vs ' + btEsc(f.away.name));
+    const out = await btAnalyzeOne(f, conOdds);
+    if(out.res) BT_ANA.push(out.res);
+    else fallos.push({ n: f.home.name + ' vs ' + f.away.name, e: out.err });
+    if(conOdds && i < sel.length-1 && !BT_CANCEL) await btSleep(700);
   }
 
   BT_RUNNING = false;
@@ -45185,21 +45245,27 @@ function btEspera(seg, hechos, total){
   });
 }
 
-// Una sola llamada al Worker por partido: adentro consulta en orden y espaciado.
+// v267 · El partido se arma con los promedios de la liga que ya estan en memoria.
+// Solo las cuotas siguen necesitando una consulta propia (son por partido).
 function btAnalyzeOne(f, conOdds){
   const L = f.league;
-  const qs = '/match?fixture=' + f.id + '&league=' + L.id + '&season=' + L.season +
-             '&home=' + f.home.id + '&away=' + f.away.id + '&odds=' + (conOdds ? '1' : '0');
-  return btApi(qs).then(r => {
-    if(!r) return { err:'el Worker no respondió' };
-    // Solo esperamos si el Worker dice explicitamente cuanto. Si no hay datos
-    // por otra razon (liga sin estadisticas) devolvemos el motivo tal cual.
-    if(r.retryAfter > 0 && (!r.home || !r.away)) return { wait: r.retryAfter, err: r.error };
-    if(!r.home || !r.away) return { err: r.error || 'esta competición no tiene estadísticas de equipo en el plan gratuito' };
+  const liga = BT_LIGAS[L.id + ':' + L.season];
+  if(!liga) return Promise.resolve({ err:'no tengo los promedios de esta liga' });
 
-    if(r.cached){ if(r.cached.home) BT_CACHEHITS++; if(r.cached.away) BT_CACHEHITS++; if(r.cached.odds) BT_CACHEHITS++; }
+  const tH = liga.teams[f.home.id], tA = liga.teams[f.away.id];
+  if(!tH || !tA){
+    return Promise.resolve({ err:'alguno de los dos equipos todavía no jugó partidos en esta temporada' });
+  }
 
-    const D = btBuildModel(f, r.home, r.away);
+  const pedirOdds = conOdds
+    ? btApi('/odds?fixture=' + f.id).catch(() => null)
+    : Promise.resolve(null);
+
+  return pedirOdds.then(ro => {
+    if(ro && ro.cached) BT_CACHEHITS++;
+    const r = { home: btDesdeLiga(tH,'home'), away: btDesdeLiga(tA,'away'),
+                odds: (ro && ro.ok) ? (ro.bookmakers||[]) : [], missing: [] };
+    const D = btBuildModel(f, r.home, r.away, liga.lg);
     if(!D) return { err:'faltan los promedios de gol de la temporada' };
     const A = btSimulate(D);
     const MK = btCatalog(D, A);
@@ -45209,11 +45275,22 @@ function btAnalyzeOne(f, conOdds){
       m.odd = o; m.oddSrc = o ? od.src : null;
       m.ev = (o && m.p>0) ? (m.p*o - 1) : null;
     });
-    return { res: { f:f, D:D, MK:MK, od:od, faltantes:(r.missing||[]) } };
-  }).catch(e => { console.error('[betano] match', e); return { err:'error de conexión con el Worker' }; });
+    return { res: { f:f, D:D, MK:MK, od:od, faltantes:[] } };
+  }).catch(e => { console.error('[betano] match', e); return { err:'error al armar el análisis' }; });
 }
 
-function btBuildModel(f, sh, sa){
+// Adapta los totales de la liga al formato que espera el modelo.
+function btDesdeLiga(t, lado){
+  return {
+    form: t.form || '',
+    played: { home: t.hp||0, away: t.ap||0, total: (t.hp||0)+(t.ap||0) },
+    gf: { home: t.hp ? (t.hgf/t.hp) : null, away: t.ap ? (t.agf/t.ap) : null },
+    ga: { home: t.hp ? (t.hga/t.hp) : null, away: t.ap ? (t.aga/t.ap) : null },
+    yellow: 0, red: 0
+  };
+}
+
+function btBuildModel(f, sh, sa, lgReal){
   let gfH = sh.gf && btNum(sh.gf.home), gaH = sh.ga && btNum(sh.ga.home);
   let gfA = sa.gf && btNum(sa.gf.away), gaA = sa.ga && btNum(sa.ga.away);
   const pH = sh.played ? (sh.played.home||0) : 0, pA = sa.played ? (sa.played.away||0) : 0;
@@ -45223,17 +45300,27 @@ function btBuildModel(f, sh, sa){
   if(gaA===null) gaA = sa.ga ? btNum(sa.ga.total) : null;
   if(gfH===null||gaH===null||gfA===null||gaA===null) return null;
 
-  let lgTotal = ((gfH+gaH) + (gfA+gaA)) / 2;
-  if(!isFinite(lgTotal) || lgTotal<=0.4) lgTotal = 2.6;
-  lgTotal = btClamp(lgTotal, 1.6, 4.2);
-  const lgH = lgTotal*0.545, lgA = lgTotal*0.455;
+  // Con el promedio real de la liga el modelo queda mucho mejor anclado que
+  // estimandolo a partir de los dos equipos.
+  let lgTotal, lgH, lgA;
+  if(lgReal && isFinite(lgReal.total) && lgReal.total > 0.4){
+    lgTotal = btClamp(lgReal.total, 1.6, 4.2);
+    lgH = btClamp(lgReal.home, 0.6, 2.6);
+    lgA = btClamp(lgReal.away, 0.5, 2.4);
+  } else {
+    lgTotal = ((gfH+gaH) + (gfA+gaA)) / 2;
+    if(!isFinite(lgTotal) || lgTotal<=0.4) lgTotal = 2.6;
+    lgTotal = btClamp(lgTotal, 1.6, 4.2);
+    lgH = lgTotal*0.545; lgA = lgTotal*0.455;
+  }
   const shr = (v, base, n) => { const w = n/(n+4); return base + (v-base)*w; };
   const lh = btClamp(shr(gfH,lgH,pH) * shr(gaA,lgH,pA) / lgH, 0.15, 5);
   const la = btClamp(shr(gfA,lgA,pA) * shr(gaH,lgA,pH) / lgA, 0.15, 5);
 
   const pre = BT_LG[f.league.country] || BT_LG._;
   const plH = sh.played ? (sh.played.total||0) : 0, plA = sa.played ? (sa.played.total||0) : 0;
-  const kRaw = (plH>0 ? (sh.yellow||0)/plH : pre.k/2) + (plA>0 ? (sa.yellow||0)/plA : pre.k/2);
+  // Los resultados de liga no traen tarjetas: se estiman con el promedio del país.
+  const kRaw = (plH>0 ? (sh.yellow||0)/plH : 0) + (plA>0 ? (sa.yellow||0)/plA : 0);
   let kTot = (isFinite(kRaw) && kRaw>0.5) ? (kRaw*0.6 + pre.k*0.4) : pre.k;
   kTot = btClamp(kTot, pre.k*0.65, pre.k*1.45);
 
@@ -45244,7 +45331,7 @@ function btBuildModel(f, sh, sa){
     cTot: pre.c*(1 + .05*(lh+la-lgTotal)/Math.max(lgTotal,1)),
     kTot:kTot, fTot:pre.f, oTot:pre.o, sTot:pre.s, tTot:pre.t, pPen:pre.p, pRed:pre.r,
     obs: Math.min(pH,pA), formH: sh.form||'', formA: sa.form||'',
-    datos: { goles:true, tarjetas:(plH>0&&plA>0), corners:false, remates:false }
+    datos: { goles:true, tarjetas:false, corners:false, remates:false }
   };
 }
 
@@ -45334,8 +45421,11 @@ function btCatalog(D,A){
   mk('Resultado',H+' gana por 2 o más',5,i=>gh[i]-ga[i]>=2);
   mk('Resultado',Aq+' gana por 2 o más',5,i=>ga[i]-gh[i]>=2);
 
-  [0.5,1.5,2.5,3.5,4.5,5.5].forEach(L=>{
+  [0.5,1.5,2.5,3.5,4.5].forEach(L=>{
     mk('Goles','Más de '+L.toFixed(1)+' goles',5,i=>gh[i]+ga[i]>L,'Goals Over/Under|Over '+L);
+  });
+  // Sólo las líneas de "menos de" que las casas ofrecen de verdad.
+  [1.5,2.5,3.5].forEach(L=>{
     mk('Goles','Menos de '+L.toFixed(1)+' goles',5,i=>gh[i]+ga[i]<L,'Goals Over/Under|Under '+L);
   });
   mk('Goles','Cantidad de goles par',4,i=>(gh[i]+ga[i])%2===0,'Odd/Even|Even');
@@ -45379,15 +45469,15 @@ function btCatalog(D,A){
 
   // Tarjetas: amarillas reales del equipo mezcladas con el promedio de la liga.
   [1.5,2.5,3.5,4.5,5.5,6.5].forEach(L=>{
-    mk('Tarjetas','Más de '+L.toFixed(1)+' tarjetas',3,i=>kh[i]+ka[i]>L,'Cards Over/Under|Over '+L,'mixto');
-    mk('Tarjetas','Menos de '+L.toFixed(1)+' tarjetas',3,i=>kh[i]+ka[i]<L,'Cards Over/Under|Under '+L,'mixto');
+    mk('Tarjetas','Más de '+L.toFixed(1)+' tarjetas',2,i=>kh[i]+ka[i]>L,'Cards Over/Under|Over '+L,'liga');
+    mk('Tarjetas','Menos de '+L.toFixed(1)+' tarjetas',2,i=>kh[i]+ka[i]<L,'Cards Over/Under|Under '+L,'liga');
   });
-  mk('Tarjetas','Los dos reciben tarjeta',3,i=>kh[i]>0&&ka[i]>0,null,'mixto');
+  mk('Tarjetas','Los dos reciben tarjeta',2,i=>kh[i]>0&&ka[i]>0,null,'liga');
   [0.5,1.5,2.5].forEach(L=>{
-    mk('Tarjetas',H+' +'+L.toFixed(1)+' tarjetas',2,i=>kh[i]>L,null,'mixto');
-    mk('Tarjetas',Aq+' +'+L.toFixed(1)+' tarjetas',2,i=>ka[i]>L,null,'mixto');
+    mk('Tarjetas',H+' +'+L.toFixed(1)+' tarjetas',2,i=>kh[i]>L,null,'liga');
+    mk('Tarjetas',Aq+' +'+L.toFixed(1)+' tarjetas',2,i=>ka[i]>L,null,'liga');
   });
-  mk('Tarjetas','Hay tarjeta roja',2,i=>A.red[i]>0,null,'mixto');
+  mk('Tarjetas','Hay tarjeta roja',2,i=>A.red[i]>0,null,'liga');
 
   // Estimados con promedios de liga: el plan gratuito no da estos datos por equipo.
   [4.5,5.5,6.5,7.5,8.5,9.5,10.5,11.5].forEach(L=>{
