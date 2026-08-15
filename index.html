@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v268 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v269 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1634,6 +1634,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       </div>
       <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
         <button class="btn btn-ghost btn-xs" onclick="btRefreshQuota()">↻ Actualizar contador</button>
+        <button class="btn btn-ghost btn-xs" onclick="btVerComps()">📋 Ver competiciones incluidas</button>
         <button class="btn btn-ghost btn-xs" id="bt-unlock" onclick="btUnlock()" style="display:none">🔓 Destrabar</button>
       </div>
     </div>
@@ -44799,7 +44800,7 @@ let BT_SRC = 'fd';   // v268 · fuente de datos activa
 const BT_FUENTES = {
   fd: {
     nombre: 'football-data.org',
-    info: 'Temporada actual · 10 consultas por minuto · <strong>sin tope diario</strong>. ' +
+    info: 'Temporada actual · 10 consultas por minuto (la documentación no menciona tope diario, pero no lo damos por garantizado). ' +
           'Cubre Champions, Premier, LaLiga, Bundesliga, Serie A, Ligue 1, Eredivisie, Primeira, ' +
           'Championship, Brasileirão, Mundial y Eurocopa. <strong>No trae cuotas</strong>: cargalas a mano ' +
           'en cada mercado, que además es más exacto porque es el precio real que te ofrece Betano.',
@@ -44848,6 +44849,21 @@ function btCargarLiga(league, season){
     BT_LIGAS[k] = r;
     return { liga: r };
   }).catch(e => { console.error('[betano] league', e); return { err:'error de conexión con el Worker' }; });
+}
+
+// v269 · Que competiciones ve realmente la clave gratuita.
+function btVerComps(){
+  if(BT_SRC !== 'fd'){ btSetStatus('Esta lista sólo aplica a football-data.org.'); return; }
+  btSetStatus('<span class="spin"></span> Consultando el catálogo…');
+  btApi('/competiciones?src=fd').then(j => {
+    if(!j || !j.ok){ btSetStatus('⚠️ ' + btEsc((j&&j.error)||'No pude traer el catálogo.')); return; }
+    const l = (j.competiciones||[]).map(c => btEsc(c.pais) + ' · <strong>' + btEsc(c.name) + '</strong>' +
+              (c.code ? ' <span style="color:var(--text4)">('+btEsc(c.code)+')</span>' : ''));
+    btSetStatus('<strong>' + j.gratuitas + ' competiciones incluidas</strong> en tu plan gratuito, de ' + j.total + ' que tiene la API:<br>' +
+      '<span style="font-size:11.5px;color:var(--text3);line-height:1.8">' + l.join(' · ') + '</span>' +
+      '<br><span style="font-size:11.5px;color:var(--amber)">Si un partido no aparece en la lista, es porque su competición no está incluida.</span>');
+    btRefreshQuota();
+  }).catch(() => btSetStatus('⚠️ No pude contactar al Worker.'));
 }
 
 // Libera el freno del Worker cuando quedo puesto de mas.
@@ -44915,7 +44931,7 @@ function btRefreshQuota(){
     const dia = (q.remaining !== null && q.remaining !== undefined)
       ? (q.limit || 100) - q.remaining : (q.used || 0);
     const set = (id,v) => { const e=document.getElementById(id); if(e) e.textContent=v; };
-    set('bt-q-day', BT_SRC === 'fd' ? 'sin tope' : (dia + ' / ' + (q.limit || 100)));
+    set('bt-q-day', BT_SRC === 'fd' ? ('~' + dia + ' usadas') : (dia + ' / ' + (q.limit || 100)));
     set('bt-q-min', (rpm.usadas||0) + ' / ' + (rpm.max||8));
     set('bt-q-cache', BT_CACHEHITS);
     set('bt-q-when', 'Actualizado ' + btHHMM(Math.floor(Date.now()/1000)));
@@ -45262,7 +45278,9 @@ async function btRun(sel){
       '<br><span style="font-size:11.5px;color:var(--text3)">' +
       (porLimite
         ? 'Si el contador de arriba muestra consultas libres, el freno quedó puesto de más: tocá 🔓 Destrabar y volvé a intentar.'
-        : 'Las ligas femeninas, juveniles y de baja cobertura no tienen estadísticas en el plan gratuito. Probá con una liga marcada con ⭐.') +
+        : (BT_SRC === 'fd'
+            ? 'El plan gratuito de football-data.org sólo cubre 12 competiciones. Tocá “Ver competiciones incluidas” para saber cuáles son.'
+            : 'Recordá que el plan gratuito de API-Football sólo tiene temporadas 2022 a 2024.')) +
       '</span>');
     return;
   }
@@ -45317,6 +45335,9 @@ function btAnalyzeOne(f, conOdds){
                 odds: (ro && ro.ok) ? (ro.bookmakers||[]) : [], missing: [] };
     const D = btBuildModel(f, r.home, r.away, liga.lg);
     if(!D) return { err:'faltan los promedios de gol de la temporada' };
+    D.calidadLiga = liga.calidad || 'alta';
+    D.splitReal = (liga.split !== false);
+    D.origen = (liga.intentos && liga.intentos.length) ? liga.intentos[liga.intentos.length-1] : 'tabla';
     const A = btSimulate(D);
     const MK = btCatalog(D, A);
     const od = btParseOdds(r.odds || []);
@@ -45736,15 +45757,57 @@ function btToggleMatch(mi){
   else b.style.display = 'none';
 }
 
+// v269 · Ficha honesta de que hay y que se esta estimando. El analisis nunca
+// se bloquea por datos faltantes: baja la calidad y se avisa.
+function btDisponibilidad(r){
+  const D = r.D;
+  const hayCuotas = !!(r.od && r.od.n);
+  const filas = [
+    ['Partido y horario', 2, 'ok', ''],
+    ['Goles marcados y recibidos', 3, 'ok', D.splitReal ? 'local y visitante reales' : 'reparto local/visitante estimado'],
+    ['Separación local / visitante', 2, D.splitReal ? 'ok' : 'medio', D.splitReal ? '' : 'la competición sólo publica la tabla general'],
+    ['Forma reciente', 1, (D.formH || D.formA) ? 'ok' : 'no', ''],
+    ['Promedio de gol de la liga', 2, D.calidadLiga === 'alta' ? 'ok' : 'medio', ''],
+    ['Córners', 0, 'no', 'estimado con promedios del país'],
+    ['Tarjetas', 0, 'no', 'estimado con promedios del país'],
+    ['Remates y remates al arco', 0, 'no', 'estimado con promedios del país'],
+    ['Cuotas', 2, hayCuotas ? 'ok' : 'medio', hayCuotas ? btEsc(r.od.src) : 'cargalas a mano en cada mercado'],
+  ];
+  let pts = 0, max = 0;
+  filas.forEach(f => { max += f[1]; pts += f[2]==='ok' ? f[1] : (f[2]==='medio' ? f[1]*0.5 : 0); });
+  const obs = Math.min(D.obs || 0, 10);
+  const factor = 0.55 + 0.45 * (obs / 10);
+  return { filas: filas, score: Math.round((pts/max) * 100 * factor) };
+}
+
 function btRenderMatchBody(mi){
   const r = BT_ANA[mi], D = r.D, mc = btMarketCheck(r);
-  const dispon = 3 + (D.datos.tarjetas ? 1 : 0);
-  let h = '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin:12px 0;font-size:11.5px;color:var(--text3);line-height:1.65">' +
+  const disp = btDisponibilidad(r), sem = btSemaforo(disp.score);
+
+  let h = '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:11px 13px;margin:12px 0">' +
+    '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:9px">' +
+      '<strong style="font-size:12px">📊 Disponibilidad de datos</strong>' +
+      '<span style="margin-left:auto;font-size:12px;color:'+sem[2]+'"><strong>'+sem[0]+' Calidad del análisis: '+disp.score+'/100</strong></span>' +
+    '</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:2px 14px;font-size:11.5px;color:var(--text3)">';
+  disp.filas.forEach(f => {
+    const ico = f[2]==='ok' ? '<span style="color:var(--green)">✅</span>'
+              : (f[2]==='medio' ? '<span style="color:var(--amber)">⚠️</span>' : '<span style="color:var(--red)">❌</span>');
+    h += '<div style="display:flex;gap:6px;align-items:baseline;padding:2px 0">' + ico +
+         '<span style="flex:1">' + btEsc(f[0]) + (f[3] ? ' <span style="color:var(--text4)">· '+btEsc(f[3])+'</span>' : '') + '</span></div>';
+  });
+  h += '</div>';
+  if(disp.score < 50){
+    h += '<div style="margin-top:9px;padding-top:8px;border-top:1px solid var(--border);font-size:11.5px;color:var(--amber)">' +
+      '⚠️ Con estos datos no conviene armar una apuesta. Los goles siguen sirviendo como referencia, pero córners, ' +
+      'tarjetas y remates son estimaciones de liga, no datos de estos equipos.</div>';
+  }
+  h += '</div>';
+
+  h += '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin:10px 0;font-size:11.5px;color:var(--text3);line-height:1.65">' +
     'Goles esperados: <strong style="color:var(--text)">'+btEsc(D.nH)+' '+D.lh.toFixed(2)+'</strong> · <strong style="color:var(--text)">'+btEsc(D.nA)+' '+D.la.toFixed(2)+'</strong>. ' +
-    'Tarjetas '+D.kTot.toFixed(1)+' · córners '+D.cTot.toFixed(1)+' (estimado de liga). ' +
-    'Forma: '+btEsc(D.nH)+' '+btEsc(D.formH.slice(-6)||'?')+' · '+btEsc(D.nA)+' '+btEsc(D.formA.slice(-6)||'?')+'.<br>' +
-    'Datos usados: <strong>'+dispon+'/6</strong> (goles local y visitante ✓, forma ✓, tarjetas ' + (D.datos.tarjetas?'✓':'✗') +
-    ', córners y remates estimados de la liga ✗). Cuotas: <strong>'+btEsc(r.od.src||'no traídas')+'</strong>.</div>';
+    'Tarjetas '+D.kTot.toFixed(1)+' · córners '+D.cTot.toFixed(1)+'. ' +
+    'Forma: '+btEsc(D.nH)+' '+btEsc(D.formH.slice(-6)||'?')+' · '+btEsc(D.nA)+' '+btEsc(D.formA.slice(-6)||'?')+'. ' +
+    'Origen: <strong>'+btEsc(D.origen||'tabla')+'</strong>.</div>';
 
   if(D.obs < 4) h += '<div class="alert a-warn" style="font-size:11.5px;margin:10px 0">⚠️ Estos equipos llevan pocos partidos en la temporada ('+D.obs+'). El modelo tira casi al promedio de la liga: tomá los números con pinzas.</div>';
 
