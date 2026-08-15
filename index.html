@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v270 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v271 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1655,9 +1655,10 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <input type="date" id="bt-date" style="width:auto;font-size:12px;padding:7px 9px" aria-label="Desde">
       <select id="bt-dias" style="width:auto;font-size:12px;padding:7px 9px" title="Cuántos días traer de una sola vez">
         <option value="1">1 día</option>
-        <option value="3" selected>3 días</option>
+        <option value="3">3 días</option>
         <option value="5">5 días</option>
-        <option value="7">7 días</option>
+        <option value="7" selected>7 días</option>
+        <option value="10">10 días</option>
       </select>
       <button class="btn btn-primary btn-sm" id="bt-scan" onclick="btScan()">Buscar partidos</button>
     </div>
@@ -45049,8 +45050,13 @@ function btScan(){
     document.getElementById('bt-fxwrap').style.display = '';
     document.getElementById('bt-bar').style.display = '';
     const rango = (j.dias > 1) ? (' entre el ' + j.date.slice(8) + '/' + j.date.slice(5,7) + ' y el ' + j.dateTo.slice(8) + '/' + j.dateTo.slice(5,7)) : '';
-    btSetStatus('✅ ' + BT_FIX.length + ' partidos por jugarse' + rango +
-      (j.cached ? ' · datos guardados, no gastó consulta' : ''));
+    let msg = '✅ ' + BT_FIX.length + ' partidos por jugarse' + rango +
+      (j.cached ? ' · datos guardados, no gastó consulta' : '');
+    if(BT_FIX.length < 5){
+      msg += '<br><span style="font-size:11.5px;color:var(--amber)">Salieron pocos. Probá ampliando la ventana de días' +
+             (BT_SRC === 'fd' ? ', o cambiá a TheSportsDB que cubre muchísimas más ligas.' : '.') + '</span>';
+    }
+    btSetStatus(msg);
     btRenderCards(); btRefreshQuota();
   }).catch(e => {
     btn.disabled = false;
@@ -45379,7 +45385,7 @@ function btAnalyzeOne(f, conOdds){
     const r = { home: btDesdeLiga(tH,'home'), away: btDesdeLiga(tA,'away'),
                 odds: (ro && ro.ok) ? (ro.bookmakers||[]) : [], missing: [] };
     const D = btBuildModel(f, r.home, r.away, liga.lg);
-    if(!D) return { err:'faltan los promedios de gol de la temporada' };
+    if(!D) return { err:'estos equipos no tienen ningún partido jugado cargado en la temporada' };
     D.calidadLiga = liga.calidad || 'alta';
     D.splitReal = (liga.split !== false);
     D.origen = (liga.intentos && liga.intentos.length) ? liga.intentos[liga.intentos.length-1] : 'tabla';
@@ -45396,24 +45402,41 @@ function btAnalyzeOne(f, conOdds){
 }
 
 // Adapta los totales de la liga al formato que espera el modelo.
+// v271 · Adapta los totales de la liga al formato del modelo.
+// BUG CORREGIDO: si un equipo todavia no jugo de local (o de visitante) su
+// promedio de ese lado era null y el modelo se caia con "faltan los promedios
+// de gol". En arranque de temporada eso pasa todo el tiempo. Ahora siempre se
+// calcula el promedio GENERAL, que sirve de respaldo para el lado que falte.
 function btDesdeLiga(t, lado){
+  const hp = t.hp||0, ap = t.ap||0, pj = hp + ap;
+  const gfTot = (t.hgf||0) + (t.agf||0), gaTot = (t.hga||0) + (t.aga||0);
   return {
     form: t.form || '',
-    played: { home: t.hp||0, away: t.ap||0, total: (t.hp||0)+(t.ap||0) },
-    gf: { home: t.hp ? (t.hgf/t.hp) : null, away: t.ap ? (t.agf/t.ap) : null },
-    ga: { home: t.hp ? (t.hga/t.hp) : null, away: t.ap ? (t.aga/t.ap) : null },
-    yellow: 0, red: 0
+    played: { home: hp, away: ap, total: pj },
+    gf: { home: hp ? (t.hgf/hp) : null, away: ap ? (t.agf/ap) : null, total: pj ? (gfTot/pj) : null },
+    ga: { home: hp ? (t.hga/hp) : null, away: ap ? (t.aga/ap) : null, total: pj ? (gaTot/pj) : null },
+    yellow: 0, red: 0,
+    parcial: (hp === 0 || ap === 0)
   };
 }
 
 function btBuildModel(f, sh, sa, lgReal){
   let gfH = sh.gf && btNum(sh.gf.home), gaH = sh.ga && btNum(sh.ga.home);
   let gfA = sa.gf && btNum(sa.gf.away), gaA = sa.ga && btNum(sa.ga.away);
-  const pH = sh.played ? (sh.played.home||0) : 0, pA = sa.played ? (sa.played.away||0) : 0;
+  // Cuantos partidos respaldan cada promedio. Si un equipo no jugo de local,
+  // el promedio que usamos es el general: entonces el peso son TODOS sus
+  // partidos, no cero. Sin esto el suavizado aplastaba el dato contra el
+  // promedio de la liga y todos los equipos daban lo mismo.
+  const pjH = sh.played ? (sh.played.total||0) : 0, pjA = sa.played ? (sa.played.total||0) : 0;
+  const pH = (sh.played && sh.played.home) ? sh.played.home : pjH;
+  const pA = (sa.played && sa.played.away) ? sa.played.away : pjA;
   if(gfH===null) gfH = sh.gf ? btNum(sh.gf.total) : null;
   if(gaH===null) gaH = sh.ga ? btNum(sh.ga.total) : null;
   if(gfA===null) gfA = sa.gf ? btNum(sa.gf.total) : null;
   if(gaA===null) gaA = sa.ga ? btNum(sa.ga.total) : null;
+  // Si algun lado vino vacio se uso el promedio general: lo anotamos para que
+  // la ficha de calidad lo muestre en vez de mentir.
+  const usoRespaldo = !!(sh.parcial || sa.parcial);
   if(gfH===null||gaH===null||gfA===null||gaA===null) return null;
 
   // Con el promedio real de la liga el modelo queda mucho mejor anclado que
@@ -45447,7 +45470,8 @@ function btBuildModel(f, sh, sa, lgReal){
     cTot: pre.c*(1 + .05*(lh+la-lgTotal)/Math.max(lgTotal,1)),
     kTot:kTot, fTot:pre.f, oTot:pre.o, sTot:pre.s, tTot:pre.t, pPen:pre.p, pRed:pre.r,
     obs: Math.min(pH,pA), formH: sh.form||'', formA: sa.form||'',
-    datos: { goles:true, tarjetas:false, corners:false, remates:false }
+    datos: { goles:true, tarjetas:false, corners:false, remates:false },
+    respaldo: usoRespaldo
   };
 }
 
@@ -45810,7 +45834,10 @@ function btDisponibilidad(r){
   const filas = [
     ['Partido y horario', 2, 'ok', ''],
     ['Goles marcados y recibidos', 3, 'ok', D.splitReal ? 'local y visitante reales' : 'reparto local/visitante estimado'],
-    ['Separación local / visitante', 2, D.splitReal ? 'ok' : 'medio', D.splitReal ? '' : 'la competición sólo publica la tabla general'],
+    ['Separación local / visitante', 2,
+      (D.splitReal && !D.respaldo) ? 'ok' : 'medio',
+      D.respaldo ? 'algún equipo aún no jugó de local o visitante: se usó su promedio general'
+                 : (D.splitReal ? '' : 'la competición sólo publica la tabla general')],
     ['Forma reciente', 1, (D.formH || D.formA) ? 'ok' : 'no', ''],
     ['Promedio de gol de la liga', 2, D.calidadLiga === 'alta' ? 'ok' : 'medio', ''],
     ['Córners', 0, 'no', 'estimado con promedios del país'],
