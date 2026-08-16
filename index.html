@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v271 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v273 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1720,7 +1720,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
             <option value="arri">🔴 Arriesgada</option>
           </select>
           <select id="bt-cb-n" onchange="btGenCombo()" style="width:auto;font-size:12px;padding:6px 9px">
-            <option>2</option><option selected>3</option><option>4</option><option>5</option><option>6</option>
+            <option selected>3</option>
           </select>
           <button class="btn btn-ghost btn-sm" onclick="btGenCombo()">Generar</button>
         </div>
@@ -44803,6 +44803,47 @@ let BT_RANK = 'conf', BT_BOOTED = false, BT_CANCEL = false, BT_RUNNING = false;
 let BT_FAV = {}, BT_CACHEHITS = 0, BT_CONFIRM = null, BT_ULTIMO_MOTIVO = '';
 let BT_LIGAS = {};   // v267 · promedios ya traidos, por liga+temporada
 let BT_SRC = 'fd';   // v268 · fuente de datos activa
+let BT_SORT = { col: null, dir: 0 };  // v272 · orden de la tabla (0 = original)
+
+// v272 · Tres estados por columna: mayor→menor, menor→mayor, orden original.
+function btOrdenar(col){
+  if(BT_SORT.col !== col){ BT_SORT = { col: col, dir: -1 }; }
+  else if(BT_SORT.dir === -1){ BT_SORT.dir = 1; }
+  else if(BT_SORT.dir === 1){ BT_SORT = { col: null, dir: 0 }; }
+  else { BT_SORT = { col: col, dir: -1 }; }
+  btRenderTop();
+}
+function btFlecha(col){
+  if(BT_SORT.col !== col) return '<span style="color:var(--text4);font-size:9px"> ⇅</span>';
+  return '<span style="color:var(--accent);font-size:10px"> ' + (BT_SORT.dir === -1 ? '↓' : '↑') + '</span>';
+}
+// Los valores nulos van SIEMPRE al final, no se convierten en cero: una cuota
+// que no existe no es peor ni mejor que una de 1.01, simplemente no está.
+function btAplicarOrden(list){
+  if(!BT_SORT.col || !BT_SORT.dir) return list;
+  const val = o => {
+    switch(BT_SORT.col){
+      case 'mercado':   return o.m.lab.toLowerCase();
+      case 'partido':   return (o.r.f.home.name + ' ' + o.r.f.away.name).toLowerCase();
+      case 'prob':      return o.m.p;
+      case 'justa':     return o.m.p > 0 ? 1/o.m.p : null;
+      case 'cuota':     return o.odd;
+      case 'valor':     return o.ev;
+      case 'confianza': return o.conf;
+    }
+    return null;
+  };
+  const txt = (BT_SORT.col === 'mercado' || BT_SORT.col === 'partido');
+  return list.slice().sort((a,b) => {
+    const x = val(a), y = val(b);
+    const nx = (x === null || x === undefined), ny = (y === null || y === undefined);
+    if(nx && ny) return 0;
+    if(nx) return 1;
+    if(ny) return -1;
+    if(txt) return BT_SORT.dir * -1 * String(x).localeCompare(String(y));
+    return BT_SORT.dir === -1 ? (y - x) : (x - y);
+  });
+}
 
 // v268 · Dos fuentes posibles. El plan gratuito de API-Football solo tiene
 // temporadas 2022-2024, asi que para partidos de hoy hay que usar la otra.
@@ -44955,6 +44996,67 @@ function btNorm(s){ return String(s||'').toLowerCase()
   .replace(/[áàä]/g,'a').replace(/[éèë]/g,'e').replace(/[íìï]/g,'i')
   .replace(/[óòö]/g,'o').replace(/[úùü]/g,'u').replace(/ñ/g,'n'); }
 
+/* ── v272 · tema visual por país ──────────────────────────────────────────
+   Una sola tabla central: agregar un país nuevo es sumar una línea acá y no
+   tocar nada más. Los colores son suaves a propósito: sirven para distinguir
+   de un vistazo, no para saturar la pantalla. */
+const BT_TEMA = {
+  'Argentina':   { c:'#4A9FD8', f:'🇦🇷' },
+  'Brazil':      { c:'#2FA36B', f:'🇧🇷' },
+  'Spain':       { c:'#D4574E', f:'🇪🇸' },
+  'England':     { c:'#5B6BBF', f:'🏴󠁧󠁢󠁥󠁮󠁧󠁿' },
+  'Italy':       { c:'#3E8FA8', f:'🇮🇹' },
+  'Germany':     { c:'#8A8F98', f:'🇩🇪' },
+  'France':      { c:'#5578C4', f:'🇫🇷' },
+  'Netherlands': { c:'#E08A4B', f:'🇳🇱' },
+  'Portugal':    { c:'#4FA37A', f:'🇵🇹' },
+  'Mexico':      { c:'#3F9E7C', f:'🇲🇽' },
+  'USA':         { c:'#5B6BBF', f:'🇺🇸' },
+  'Uruguay':     { c:'#5AA5D8', f:'🇺🇾' },
+  'Chile':       { c:'#C9605C', f:'🇨🇱' },
+  'Colombia':    { c:'#D6A94E', f:'🇨🇴' },
+  'Paraguay':    { c:'#C96B6B', f:'🇵🇾' },
+  'Ecuador':     { c:'#D8A24E', f:'🇪🇨' },
+  'Peru':        { c:'#CC5F5F', f:'🇵🇪' },
+  'Bolivia':     { c:'#5FA36B', f:'🇧🇴' },
+  'Europe':      { c:'#7A6BC4', f:'🇪🇺' },
+  'World':       { c:'#7A6BC4', f:'🌍' },
+  '_':           { c:'#8B96A5', f:'🌎' }
+};
+function btTema(pais){ return BT_TEMA[pais] || BT_TEMA._; }
+
+/* Escudo real si la API lo trae, bandera del país si no, y punto de color
+   como último recurso. Nunca se inventa un escudo. */
+function btTeamVisual(team, pais){
+  const t = btTema(pais);
+  if(team && team.logo){
+    return '<img src="' + btEsc(team.logo) + '" alt="" loading="lazy" ' +
+           'onerror="this.replaceWith(document.createRange().createContextualFragment(\'<span style=&quot;font-size:13px&quot;>' + t.f + '</span>\'))" ' +
+           'style="width:18px;height:18px;object-fit:contain;flex:none">';
+  }
+  if(t.f !== BT_TEMA._.f) return '<span style="font-size:13px;flex:none">' + t.f + '</span>';
+  return '<span style="width:9px;height:9px;border-radius:50%;background:' + t.c + ';display:inline-block;flex:none"></span>';
+}
+
+/* Fecha y hora reales del fixture. Nunca se asume "hoy". */
+function btFechaHora(ts){
+  if(!ts) return '—';
+  const d = new Date(ts * 1000);
+  const p = x => String(x).padStart(2,'0');
+  return p(d.getDate()) + '/' + p(d.getMonth()+1) + '/' + d.getFullYear() + ' · ' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+function btSoloFecha(ts){
+  if(!ts) return '';
+  const d = new Date(ts * 1000), p = x => String(x).padStart(2,'0');
+  return p(d.getDate()) + '/' + p(d.getMonth()+1) + '/' + d.getFullYear();
+}
+
+/* Barra horizontal simple, reutilizable. */
+function btBarra(pct, color, alto){
+  return '<span style="display:block;height:' + (alto||5) + 'px;background:var(--border);border-radius:3px;overflow:hidden">' +
+         '<span style="display:block;height:100%;width:' + Math.max(0, Math.min(100, pct)).toFixed(1) + '%;background:' + color + '"></span></span>';
+}
+
 /* ── clasificacion de competencias ────────────────────────────────────── */
 function btTier(lg){
   const n = (lg.name||'') + ' ' + (lg.country||'');
@@ -45049,7 +45151,10 @@ function btScan(){
     document.getElementById('bt-filters').style.display = 'flex';
     document.getElementById('bt-fxwrap').style.display = '';
     document.getElementById('bt-bar').style.display = '';
-    const rango = (j.dias > 1) ? (' entre el ' + j.date.slice(8) + '/' + j.date.slice(5,7) + ' y el ' + j.dateTo.slice(8) + '/' + j.dateTo.slice(5,7)) : '';
+    // Blindado: si la respuesta no trae el rango, no rompemos el escaneo.
+    const rango = (j.dias > 1 && j.date && j.dateTo)
+      ? (' entre el ' + j.date.slice(8) + '/' + j.date.slice(5,7) + ' y el ' + j.dateTo.slice(8) + '/' + j.dateTo.slice(5,7))
+      : '';
     let msg = '✅ ' + BT_FIX.length + ' partidos por jugarse' + rango +
       (j.cached ? ' · datos guardados, no gastó consulta' : '');
     if(BT_FIX.length < 5){
@@ -45144,33 +45249,54 @@ function btRenderCards(){
     btUpdCost(); return;
   }
 
-  let h = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(268px,1fr));gap:9px">';
+  // v272 · Agrupadas por competición, con franja de color, fecha real y escudos.
+  const grupos = {};
   list.forEach(f => {
-    const t = btTier(f.league);
-    const yaAnalizado = BT_ANA.some(a => a.f.id === f.id);
-    const marca = t==='top' ? '<span style="color:var(--amber)">⭐</span>'
-                : (t==='menor' ? '<span style="color:var(--red)" title="Cobertura estadística baja">⚠️</span>' : '');
-    const fav = BT_FAV[f.league.id] ? '★' : '☆';
-    h += '<div style="border:1px solid ' + (BT_SEL[f.id]?'var(--accent)':'var(--border)') +
-         ';border-radius:10px;padding:11px 12px;background:' + (BT_SEL[f.id]?'var(--accent-g)':'transparent') + '">' +
-      '<div style="display:flex;align-items:center;gap:6px;margin-bottom:7px">' +
-        '<span style="font-size:9.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--text4);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' +
-          marca + ' ' + btEsc(f.league.country) + ' · ' + btEsc(f.league.name) + '</span>' +
-        '<span onclick="btFav(' + f.league.id + ')" title="Marcar competición favorita" style="cursor:pointer;color:var(--amber);font-size:13px">' + fav + '</span>' +
-      '</div>' +
-      '<div style="font-size:13.5px;font-weight:600;line-height:1.35;margin-bottom:3px">' + btEsc(f.home.name) + '</div>' +
-      '<div style="font-size:10px;color:var(--text4);margin:1px 0">vs</div>' +
-      '<div style="font-size:13.5px;font-weight:600;line-height:1.35">' + btEsc(f.away.name) + '</div>' +
-      '<div style="display:flex;align-items:center;gap:8px;margin-top:9px;padding-top:8px;border-top:1px solid var(--border)">' +
-        '<span style="font-size:11.5px;color:var(--text3)">🕘 ' + btHHMM(f.ts) + '</span>' +
-        (yaAnalizado ? '<span style="font-size:10px;color:var(--green);font-weight:600">✓ analizado</span>' : '') +
-        '<label style="display:flex;align-items:center;gap:5px;margin:0 0 0 auto;font-size:11.5px;cursor:pointer;color:var(--text2)">' +
-          '<input type="checkbox" data-btfx="' + f.id + '"' + (BT_SEL[f.id]?' checked':'') +
-          ' onchange="btToggleFx(' + f.id + ',this.checked)" style="width:14px;height:14px;cursor:pointer"> Elegir</label>' +
-        '<button class="btn btn-ghost btn-xs" onclick="btAnalyzeOnly(' + f.id + ')" title="Analizar sólo este partido">🔎</button>' +
-      '</div></div>';
+    const k = f.league.country + '||' + f.league.name + '||' + f.league.id;
+    (grupos[k] = grupos[k] || []).push(f);
   });
-  document.getElementById('bt-cards').innerHTML = h + '</div>';
+
+  let h = '';
+  Object.keys(grupos).forEach(k => {
+    const partes = k.split('||'), pais = partes[0], liga = partes[1], lid = partes[2];
+    const t = btTema(pais), tier = btTier(grupos[k][0].league);
+    const marca = tier==='top' ? ' <span style="color:var(--amber)">⭐</span>'
+                : (tier==='menor' ? ' <span style="color:var(--red)" title="Cobertura estadística baja">⚠️</span>' : '');
+    const fav = BT_FAV[lid] ? '★' : '☆';
+    h += '<div style="display:flex;align-items:center;gap:8px;margin:16px 0 8px;padding:6px 10px;border-radius:7px;' +
+         'background:' + t.c + '14;border-left:3px solid ' + t.c + '">' +
+         '<span style="font-size:14px">' + t.f + '</span>' +
+         '<span style="font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:' + t.c + '">' +
+           btEsc(pais) + ' · ' + btEsc(liga) + '</span>' + marca +
+         '<span style="font-size:10.5px;color:var(--text4)">' + grupos[k].length + ' partido' + (grupos[k].length===1?'':'s') + '</span>' +
+         '<span onclick="btFav(\'' + lid + '\')" title="Marcar competición favorita" style="cursor:pointer;color:var(--amber);font-size:13px;margin-left:auto">' + fav + '</span>' +
+         '</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px">';
+
+    grupos[k].forEach(f => {
+      const sel = !!BT_SEL[f.id];
+      const yaA = BT_ANA.some(a => a.f.id === f.id);
+      h += '<div style="border:1px solid ' + (sel ? t.c : 'var(--border)') + ';border-left:3px solid ' + t.c +
+           ';border-radius:9px;padding:10px 12px;background:' + (sel ? t.c + '10' : 'transparent') + '">' +
+        '<div style="display:flex;align-items:center;gap:7px;margin-bottom:5px">' +
+          btTeamVisual(f.home, f.league.country) +
+          '<span style="font-size:13.5px;font-weight:600;line-height:1.3;flex:1">' + btEsc(f.home.name) + '</span></div>' +
+        '<div style="font-size:9.5px;color:var(--text4);margin:2px 0 2px 25px">vs</div>' +
+        '<div style="display:flex;align-items:center;gap:7px">' +
+          btTeamVisual(f.away, f.league.country) +
+          '<span style="font-size:13.5px;font-weight:600;line-height:1.3;flex:1">' + btEsc(f.away.name) + '</span></div>' +
+        '<div style="font-size:11.5px;color:var(--text3);margin-top:8px">📅 ' + btFechaHora(f.ts) + '</div>' +
+        '<div style="display:flex;align-items:center;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">' +
+          (yaA ? '<span style="font-size:9.5px;color:var(--green);font-weight:700;letter-spacing:.05em">🟢 ANALIZADO</span>'
+               : '<span style="font-size:9.5px;color:var(--text4);font-weight:600;letter-spacing:.05em">⚪ SIN ANALIZAR</span>') +
+          '<label style="display:flex;align-items:center;gap:5px;margin:0 0 0 auto;font-size:11.5px;cursor:pointer;color:var(--text2)">' +
+            '<input type="checkbox" data-btfx="' + f.id + '"' + (sel?' checked':'') +
+            ' onchange="btToggleFx(\'' + f.id + '\',this.checked)" style="width:14px;height:14px;cursor:pointer"> Elegir</label>' +
+          '<button class="btn btn-ghost btn-xs" onclick="btAnalyzeOnly(\'' + f.id + '\')" title="Analizar sólo este partido">🔎</button>' +
+        '</div></div>';
+    });
+    h += '</div>';
+  });
+  document.getElementById('bt-cards').innerHTML = h;
   btUpdCost();
 }
 
@@ -45181,6 +45307,7 @@ function btFav(id){
   btRenderCards();
 }
 function btToggleFx(id, on){ if(on) BT_SEL[id]=true; else delete BT_SEL[id]; btRenderCards(); }
+function btFxPorId(id){ return BT_FIX.filter(x => String(x.id) === String(id)); }
 function btSelVisible(){ btVisible().forEach(f => { BT_SEL[f.id]=true; }); btRenderCards(); }
 function btSelNone(){ BT_SEL={}; btRenderCards(); }
 function btSelected(){ return BT_FIX.filter(f => BT_SEL[f.id]); }
@@ -45229,7 +45356,7 @@ function btConfirmClose(ok){
 
 /* ── 2. analisis ──────────────────────────────────────────────────────── */
 function btAnalyzeOnly(id){
-  const f = BT_FIX.filter(x => x.id === id);
+  const f = btFxPorId(id);
   if(f.length) btRun(f);
 }
 function btAnalyze(){ btRun(btSelected()); }
@@ -45700,8 +45827,12 @@ function btOddOf(mi, idx){
 function btSetManual(mi, idx, val){
   const v = parseFloat(val);
   const k = mi+':'+idx;
+  // Sólo se toca la cuota real. Probabilidad y cuota justa quedan intactas.
   if(isFinite(v) && v > 1) BT_MANUAL[k] = v; else delete BT_MANUAL[k];
-  btRenderTop(); btRenderMatchBody(mi); btCombo();
+  btRenderTop();
+  const cuerpo = document.getElementById('bt-mb'+mi);
+  if(cuerpo && cuerpo.style.display !== 'none') btRenderMatchBody(mi);
+  btCombo();
 }
 
 /* ── confianza: no es sólo probabilidad ───────────────────────────────── */
@@ -45730,6 +45861,66 @@ function btSrcDot(src){
   return '<span title="'+t+'" style="color:'+c+';font-size:9px">●</span>';
 }
 
+/* ── v273 · carga rápida de cuotas ────────────────────────────────────────
+   En Betano el 1/X/2 y los mercados populares están a la vista en la misma
+   fila del partido. Cargarlos de a uno en la tabla es tedioso, así que acá se
+   agrupan los que Betano muestra en sus pestañas: resultado, doble oportunidad,
+   más/menos y ambos anotan. Escribís, sale del campo y se recalcula todo. */
+const BT_RAPIDOS = [
+  { g:'Resultado',        items:[['Match Winner|Home','1'],['Match Winner|Draw','X'],['Match Winner|Away','2']] },
+  { g:'Doble oportunidad',items:[['Double Chance|Home/Draw','1X'],['Double Chance|Home/Away','12'],['Double Chance|Draw/Away','X2']] },
+  { g:'Más / Menos',      items:[['Goals Over/Under|Over 1.5','+1.5'],['Goals Over/Under|Over 2.5','+2.5'],['Goals Over/Under|Under 2.5','-2.5'],['Goals Over/Under|Under 3.5','-3.5']] },
+  { g:'Ambos anotan',     items:[['Both Teams Score|Yes','Sí'],['Both Teams Score|No','No']] }
+];
+
+function btIdxPorOid(r, oid){
+  for(let i=0;i<r.MK.length;i++){ if(r.MK[i].oid === oid) return i; }
+  return -1;
+}
+
+function btCargaRapida(mi){
+  const r = BT_ANA[mi];
+  let h = '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:11px 13px;margin:12px 0">' +
+    '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:10px">' +
+      '<strong style="font-size:12px">⚡ Carga rápida de cuotas</strong>' +
+      '<span style="font-size:10.5px;color:var(--text4)">Copiá los números de Betano · se recalcula solo</span>' +
+      '<button class="btn btn-ghost btn-xs" style="margin-left:auto" onclick="btBorrarCuotas(' + mi + ',event)">Borrar cuotas</button>' +
+    '</div>';
+
+  BT_RAPIDOS.forEach(bloque => {
+    const campos = bloque.items.map(it => {
+      const idx = btIdxPorOid(r, it[0]);
+      if(idx < 0) return '';
+      const m = r.MK[idx], eff = btOddOf(mi, idx);
+      const ev = (eff.odd && m.p>0) ? (m.p*eff.odd - 1) : null;
+      const col = ev===null ? 'var(--text4)' : (ev>.005?'var(--green)':(ev<-.005?'var(--red)':'var(--text3)'));
+      return '<div style="text-align:center">' +
+        '<div style="font-size:10px;color:var(--text3);font-weight:600;margin-bottom:2px">' + it[1] + '</div>' +
+        '<div style="font-size:9.5px;color:var(--text4);margin-bottom:3px">' + btPct(m.p) + '%</div>' +
+        '<input type="number" step="0.01" min="1" value="' + (eff.odd ? eff.odd.toFixed(2) : '') + '" placeholder="—" ' +
+        'onchange="btSetManual(' + mi + ',' + idx + ',this.value)" ' +
+        'style="width:58px;padding:3px 5px;font-size:12px;text-align:center;font-weight:600" ' +
+        'title="Cuota justa ' + btFair(m.p) + '">' +
+        '<div style="font-size:9.5px;font-weight:700;color:' + col + ';margin-top:2px;height:12px">' +
+          (ev===null ? '' : ((ev>=0?'+':'') + (ev*100).toFixed(1) + '%')) + '</div></div>';
+    }).filter(Boolean).join('');
+    if(!campos) return;
+    h += '<div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:9px;flex-wrap:wrap">' +
+      '<span style="font-size:10.5px;color:var(--text3);min-width:110px;padding-top:14px">' + bloque.g + '</span>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">' + campos + '</div></div>';
+  });
+
+  return h + '<div style="font-size:10.5px;color:var(--text4);border-top:1px solid var(--border);padding-top:8px;margin-top:2px">' +
+    'Debajo de cada campo aparece el valor: verde si esa cuota paga más de lo que estima el modelo.</div></div>';
+}
+
+function btBorrarCuotas(mi, ev){
+  if(ev) ev.stopPropagation();
+  const r = BT_ANA[mi];
+  for(let i=0;i<r.MK.length;i++) delete BT_MANUAL[mi+':'+i];
+  btRenderTop(); btRenderMatchBody(mi); btCombo();
+}
+
 /* ── ranking global ───────────────────────────────────────────────────── */
 function btAllRows(){
   const rows = [];
@@ -45753,17 +45944,26 @@ function btRenderTop(){
   const pod = document.getElementById('bt-podium');
   const medallas = ['🥇','🥈','🥉'];
   pod.innerHTML = list.slice(0,3).map((o,i) => {
-    const sem = btSemaforo(o.conf);
-    return '<div style="border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--bg2)">' +
-      '<div style="font-size:11px;color:var(--text4);margin-bottom:5px">' + medallas[i] + ' Oportunidad #' + (i+1) + '</div>' +
-      '<div style="font-size:13.5px;font-weight:700;margin-bottom:3px">' + btEsc(o.m.lab) + ' ' + btSrcDot(o.m.src) + '</div>' +
-      '<div style="font-size:11px;color:var(--text3);margin-bottom:7px">' + btEsc(o.r.f.home.name) + ' vs ' + btEsc(o.r.f.away.name) + '</div>' +
-      '<div style="display:flex;gap:12px;align-items:baseline">' +
-        '<span style="font-size:21px;font-weight:800">' + btPct(o.m.p) + '%</span>' +
-        '<span style="font-size:11px;color:' + sem[2] + '">' + sem[0] + ' ' + sem[1] + ' · ' + o.conf + '/100</span>' +
-      '</div>' +
-      '<div style="font-size:11px;color:var(--text3);margin-top:5px">Cuota justa ' + btFair(o.m.p) +
-        (o.odd ? ' · disponible ' + o.odd.toFixed(2) + (o.ev!==null ? ' · <strong style="color:' + (o.ev>0?'var(--green)':'var(--red)') + '">' + (o.ev>=0?'+':'') + (o.ev*100).toFixed(1) + '%</strong>' : '') : ' · sin cuota') +
+    const sem = btSemaforo(o.conf), t = btTema(o.r.f.league.country);
+    const evTxt = o.ev===null ? '—' : ((o.ev>=0?'+':'')+(o.ev*100).toFixed(1)+'%');
+    const evCol = o.ev===null ? 'var(--text4)' : (o.ev>.005?'var(--green)':(o.ev<-.005?'var(--red)':'var(--text3)'));
+    return '<div style="border:1px solid var(--border);border-left:3px solid '+t.c+';border-radius:10px;padding:13px;background:var(--bg2)">' +
+      '<div style="font-size:10.5px;color:var(--text4);margin-bottom:6px">' + medallas[i] + ' Oportunidad #' + (i+1) + '</div>' +
+      '<div style="font-size:14px;font-weight:700;margin-bottom:3px;line-height:1.3">' + btEsc(o.m.lab) + ' ' + btSrcDot(o.m.src) + '</div>' +
+      '<div style="font-size:11px;color:var(--text3);margin-bottom:8px">' + t.f + ' ' + btEsc(o.r.f.home.name) + ' vs ' + btEsc(o.r.f.away.name) +
+        '<br><span style="color:var(--text4);font-size:10px">📅 ' + btFechaHora(o.r.f.ts) + '</span></div>' +
+      '<div style="font-size:24px;font-weight:800;line-height:1">' + btPct(o.m.p) + '%</div>' +
+      btBarra(o.m.p*100, sem[2], 6) +
+      '<div style="font-size:11px;color:' + sem[2] + ';margin-top:6px">' + sem[0] + ' ' + sem[1] + ' · confianza ' + o.conf + '/100</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:9px;padding-top:9px;border-top:1px solid var(--border)">' +
+        '<div><div style="font-size:9px;color:var(--text4);text-transform:uppercase;letter-spacing:.06em">Justa</div>' +
+          '<div style="font-size:13px;font-weight:700">' + btFair(o.m.p) + '</div></div>' +
+        '<div><div style="font-size:9px;color:var(--text4);text-transform:uppercase;letter-spacing:.06em">Cuota real</div>' +
+          '<input type="number" step="0.01" min="1" value="'+(o.odd?o.odd.toFixed(2):'')+'" placeholder="—" ' +
+          'onchange="btSetManual('+o.mi+','+o.idx+',this.value)" ' +
+          'style="width:100%;padding:2px 5px;font-size:12.5px;font-weight:700" title="Cuota de Betano"></div>' +
+        '<div><div style="font-size:9px;color:var(--text4);text-transform:uppercase;letter-spacing:.06em">Valor</div>' +
+          '<div style="font-size:13px;font-weight:700;color:'+evCol+'">' + evTxt + '</div></div>' +
       '</div></div>';
   }).join('');
 
@@ -45772,23 +45972,39 @@ function btRenderTop(){
     document.getElementById('bt-topnote').textContent=''; return;
   }
 
-  let h = '<div class="tbl-wrap"><table><thead><tr><th style="width:26px"></th><th>Mercado</th><th>Partido</th>' +
-    '<th style="text-align:right">Prob.</th><th style="text-align:right">Justa</th><th style="text-align:right">Cuota</th>' +
-    '<th style="text-align:right">Valor</th><th style="text-align:center">Confianza</th></tr></thead><tbody>';
+  list = btAplicarOrden(list);
+  const th = (id, txt, al) => '<th onclick="btOrdenar(\''+id+'\')" title="Ordenar por '+txt+'" ' +
+    'style="cursor:pointer;user-select:none;text-align:'+(al||'left')+';position:sticky;top:0;z-index:2;background:var(--bg2)">' +
+    txt + btFlecha(id) + '</th>';
+
+  let h = '<div class="tbl-wrap" style="max-height:640px;overflow:auto"><table><thead><tr>' +
+    '<th style="width:26px;position:sticky;top:0;z-index:2;background:var(--bg2)"></th>' +
+    th('mercado','Mercado') + th('partido','Partido') + th('prob','Prob.','right') +
+    th('justa','Justa','right') + th('cuota','Cuota real','right') +
+    th('valor','Valor','right') + th('confianza','Confianza','center') +
+    '</tr></thead><tbody>';
+
   list.forEach(o => {
     const key = o.mi+':'+o.idx, sem = btSemaforo(o.conf);
     const evTxt = o.ev===null ? '—' : ((o.ev>=0?'+':'')+(o.ev*100).toFixed(1)+'%');
     const evCol = o.ev===null ? 'var(--text4)' : (o.ev>.005?'var(--green)':(o.ev<-.005?'var(--red)':'var(--text3)'));
     const susp = (o.ev!==null && o.ev>0.20) ? ' <span title="Diferencia demasiado grande con la casa: lo más probable es que se equivoque el modelo" style="color:var(--red)">⚠</span>' : '';
-    h += '<tr><td><input type="checkbox" data-btc="'+key+'"'+(BT_COMBO[key]?' checked':'')+
+    const marcada = !!BT_COMBO[key];
+    const tema = btTema(o.r.f.league.country);
+    h += '<tr style="'+(marcada ? 'background:var(--accent-g)' : '')+'">' +
+      '<td><input type="checkbox" data-btc="'+key+'"'+(marcada?' checked':'')+
       ' onchange="btPick(\''+key+'\',this.checked)" style="width:14px;height:14px;cursor:pointer"></td>' +
       '<td>'+btEsc(o.m.lab)+' '+btSrcDot(o.m.src)+susp+'</td>' +
-      '<td style="font-size:11px;color:var(--text3)">'+btEsc(o.r.f.home.name)+' v '+btEsc(o.r.f.away.name)+'</td>' +
-      '<td style="text-align:right;font-weight:700">'+btPct(o.m.p)+'%</td>' +
+      '<td style="font-size:11px;color:var(--text3);white-space:nowrap">' +
+        '<span style="color:'+tema.c+'">'+tema.f+'</span> '+btEsc(o.r.f.home.name)+' v '+btEsc(o.r.f.away.name)+
+        '<br><span style="color:var(--text4);font-size:10px">'+btSoloFecha(o.r.f.ts)+'</span></td>' +
+      '<td style="text-align:right;font-weight:700">'+btPct(o.m.p)+'%'+btBarra(o.m.p*100, sem[2], 3)+'</td>' +
       '<td style="text-align:right;color:var(--text3)">'+btFair(o.m.p)+'</td>' +
-      '<td style="text-align:right">'+(o.odd?o.odd.toFixed(2):'—')+(o.manual?' ✎':'')+'</td>' +
+      '<td style="text-align:right"><input type="number" step="0.01" min="1" value="'+(o.odd?o.odd.toFixed(2):'')+
+        '" placeholder="—" onchange="btSetManual('+o.mi+','+o.idx+',this.value)" ' +
+        'style="width:66px;padding:3px 6px;font-size:11.5px;text-align:right" title="Cuota de Betano: escribila y el valor se recalcula"></td>' +
       '<td style="text-align:right;font-weight:700;color:'+evCol+'">'+evTxt+'</td>' +
-      '<td style="text-align:center;font-size:11px;color:'+sem[2]+'">'+sem[0]+' '+o.conf+'</td></tr>';
+      '<td style="text-align:center;font-size:11px;color:'+sem[2]+'">'+sem[0]+' '+o.conf+btBarra(o.conf, sem[2], 3)+'</td></tr>';
   });
   document.getElementById('bt-top').innerHTML = h + '</tbody></table></div>';
 
@@ -45811,11 +46027,14 @@ function btRenderMatches(){
     const mc = btMarketCheck(r);
     const flag = (mc && mc.gap > 0.30) ? ' <span style="color:var(--red)" title="El modelo discrepa fuerte con el mercado">◆</span>' : '';
     h += '<div style="border:1px solid var(--border);border-radius:9px;margin-bottom:8px;overflow:hidden">' +
-      '<div onclick="btToggleMatch('+mi+')" style="display:flex;gap:10px;align-items:center;padding:11px 13px;cursor:pointer;flex-wrap:wrap">' +
-      '<span style="font-weight:600;font-size:13.5px;flex:1;min-width:170px">'+btEsc(r.f.home.name)+' vs '+btEsc(r.f.away.name)+flag+'</span>' +
-      '<span style="font-size:11px;color:var(--text3)">'+btHHMM(r.f.ts)+' · '+btEsc(r.f.league.name)+'</span>' +
-      '<span style="font-size:11.5px;color:var(--text3)"><strong style="color:var(--text)">'+btPct(r.MK[0].p)+'%</strong> / '+
-      btPct(r.MK[1].p)+'% / <strong style="color:var(--text)">'+btPct(r.MK[2].p)+'%</strong></span></div>' +
+      '<div onclick="btToggleMatch('+mi+')" style="display:flex;gap:10px;align-items:center;padding:11px 13px;cursor:pointer;flex-wrap:wrap;border-left:3px solid '+btTema(r.f.league.country).c+'">' +
+      '<span style="font-size:14px">'+btTema(r.f.league.country).f+'</span>' +
+      '<span style="font-weight:600;font-size:13.5px;flex:1;min-width:170px">'+btEsc(r.f.home.name)+' vs '+btEsc(r.f.away.name)+flag+
+        '<br><span style="font-size:10.5px;color:var(--text4);font-weight:400">📅 '+btFechaHora(r.f.ts)+' · '+btEsc(r.f.league.name)+'</span></span>' +
+      '<span style="font-size:10.5px;color:var(--text3);white-space:nowrap">' +
+        '<span style="color:var(--text4)">🏠</span> <strong style="color:var(--text)">'+btPct(r.MK[0].p)+'%</strong> · ' +
+        '<span style="color:var(--text4)">🤝</span> '+btPct(r.MK[1].p)+'% · ' +
+        '<span style="color:var(--text4)">✈️</span> <strong style="color:var(--text)">'+btPct(r.MK[2].p)+'%</strong></span></div>' +
       '<div id="bt-mb'+mi+'" style="display:none;padding:0 13px 13px;border-top:1px solid var(--border)"></div></div>';
   });
   document.getElementById('bt-matches').innerHTML = h;
@@ -45856,7 +46075,30 @@ function btRenderMatchBody(mi){
   const r = BT_ANA[mi], D = r.D, mc = btMarketCheck(r);
   const disp = btDisponibilidad(r), sem = btSemaforo(disp.score);
 
-  let h = '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:11px 13px;margin:12px 0">' +
+  // v272 · El 1X2 con nombre y propio: antes eran tres números sin etiqueta.
+  const p1 = r.MK[0].p, pX = r.MK[1].p, p2 = r.MK[2].p;
+  const filas1x2 = [
+    ['🏠 Gana ' + btEsc(D.nH), p1, 'var(--accent)'],
+    ['🤝 Empate',              pX, 'var(--text3)'],
+    ['✈️ Gana ' + btEsc(D.nA), p2, '#7A6BC4']
+  ];
+  let h = '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin:12px 0">' +
+    '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:10px">' +
+      '<strong style="font-size:12px">⚽ Resultado del partido</strong>' +
+      '<span style="font-size:11px;color:var(--text4)">📅 ' + btFechaHora(r.f.ts) + '</span></div>';
+  filas1x2.forEach(x => {
+    h += '<div style="display:flex;gap:10px;align-items:center;margin-bottom:7px">' +
+      '<span style="font-size:12.5px;flex:1;min-width:130px">' + x[0] + '</span>' +
+      '<span style="flex:2;min-width:110px">' + btBarra(x[1]*100, x[2], 9) + '</span>' +
+      '<span style="font-size:13.5px;font-weight:700;min-width:52px;text-align:right">' + btPct(x[1]) + '%</span>' +
+      '<span style="font-size:10.5px;color:var(--text4);min-width:64px;text-align:right">justa ' + btFair(x[1]) + '</span>' +
+      '</div>';
+  });
+  h += '</div>';
+
+  h += btCargaRapida(mi);
+
+  h += '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:11px 13px;margin:12px 0">' +
     '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:9px">' +
       '<strong style="font-size:12px">📊 Disponibilidad de datos</strong>' +
       '<span style="margin-left:auto;font-size:12px;color:'+sem[2]+'"><strong>'+sem[0]+' Calidad del análisis: '+disp.score+'/100</strong></span>' +
@@ -46006,7 +46248,19 @@ function btCombo(){
     return '<strong>'+btEsc(m.lab)+'</strong> <span style="color:var(--text4)">('+btEsc(BT_ANA[mi].f.home.name)+')</span>';
   });
   const J = btJoint(keys);
-  document.getElementById('bt-legs').innerHTML = labels.join(' + ');
+  // Cada pata con su cuota editable: cambiarla recalcula todo al instante.
+  document.getElementById('bt-legs').innerHTML =
+    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:6px">' +
+    keys.map(k => {
+      const pa = k.split(':'), mi = +pa[0], idx = +pa[1];
+      const m = BT_ANA[mi].MK[idx], eff = btOddOf(mi,idx), t = btTema(BT_ANA[mi].f.league.country);
+      return '<div style="display:flex;gap:7px;align-items:center;border:1px solid var(--border);border-left:2px solid '+t.c+';border-radius:6px;padding:6px 8px">' +
+        '<span style="flex:1;font-size:11.5px;line-height:1.3"><strong>'+btEsc(m.lab)+'</strong>' +
+        '<br><span style="color:var(--text4);font-size:10px">'+t.f+' '+btEsc(BT_ANA[mi].f.home.name)+' · '+btPct(m.p)+'%</span></span>' +
+        '<input type="number" step="0.01" min="1" value="'+(eff.odd?eff.odd.toFixed(2):'')+'" placeholder="—" ' +
+        'onchange="btSetManual('+mi+','+idx+',this.value)" style="width:60px;padding:2px 5px;font-size:11.5px;text-align:right">' +
+        '</div>';
+    }).join('') + '</div>';
   set('bt-cbp', btPct(J.p)+'%');
   set('bt-cbo', btFair(J.p));
   set('bt-cbr', todas ? real.toFixed(2) : '—');
@@ -46033,15 +46287,35 @@ function btCombo(){
 }
 
 const BT_PROF = { muy:{lo:.82,hi:.98}, cons:{lo:.68,hi:.94}, equi:{lo:.50,hi:.86}, arri:{lo:.30,hi:.70} };
+
+// v272 · El selector se arma con las selecciones que realmente hay. Sin tope
+// fijo: si hay 25 candidatas válidas, se puede pedir una combinada de 25.
+function btCandidatas(prof){
+  return btAllRows().filter(o => o.m.src === 'real' && o.m.cf >= 4 && o.m.p >= prof.lo && o.m.p <= prof.hi);
+}
+function btArmarSelectorN(){
+  const sel = document.getElementById('bt-cb-n');
+  if(!sel || !BT_ANA.length) return;
+  const prof = BT_PROF[(document.getElementById('bt-cb-prof')||{}).value || 'cons'];
+  // El techo real es una categoría por partido: más que eso son selecciones
+  // que se pisan entre sí dentro del mismo encuentro.
+  const grupos = {};
+  btCandidatas(prof).forEach(o => { grupos[o.mi + '|' + o.m.g] = 1; });
+  const techo = Math.max(2, Object.keys(grupos).length);
+  const previo = parseInt(sel.value, 10) || 3;
+  let opciones = '';
+  for(let i = 2; i <= techo; i++) opciones += '<option value="'+i+'">'+i+' selecciones</option>';
+  sel.innerHTML = opciones || '<option value="2">2 selecciones</option>';
+  sel.value = String(Math.min(Math.max(previo, 2), techo));
+}
 function btGenCombo(){
   if(!BT_ANA.length) return;
+  btArmarSelectorN();
   const prof = BT_PROF[(document.getElementById('bt-cb-prof')||{}).value || 'cons'];
   const n = parseInt((document.getElementById('bt-cb-n')||{}).value || '3', 10);
 
   // Sólo mercados con datos reales del equipo: no armamos combinadas sobre estimaciones.
-  const cand = btAllRows()
-    .filter(o => o.m.src === 'real' && o.m.cf >= 4 && o.m.p >= prof.lo && o.m.p <= prof.hi)
-    .sort((a,b) => b.conf - a.conf || b.m.p - a.m.p);
+  const cand = btCandidatas(prof).sort((a,b) => b.conf - a.conf || b.m.p - a.m.p);
 
   if(cand.length < 2){
     document.getElementById('bt-cbtxt').textContent =
@@ -46055,12 +46329,19 @@ function btGenCombo(){
     if(usado[claveGrupo]) continue;
     const prueba = elegidas.map(x => x.mi+':'+x.idx).concat([o.mi+':'+o.idx]);
     const J = btJoint(prueba);
-    if(elegidas.length >= 1 && J.p < prof.lo * 0.45) continue;  // no derrumbar la combinada
+    // El piso se afloja a medida que crece la combinada: con 10 patas es
+    // matemáticamente imposible mantener la probabilidad de 2.
+    const piso = Math.pow(prof.lo, Math.max(1, elegidas.length + 1)) * 0.55;
+    if(elegidas.length >= 1 && J.p < piso) continue;
     elegidas.push(o); usado[claveGrupo] = true;
   }
   if(elegidas.length < 2){
-    document.getElementById('bt-cbtxt').textContent = 'No pude armar una combinada con ese perfil. Probá con menos selecciones.';
+    document.getElementById('bt-cbtxt').textContent = 'No pude armar una combinada con ese perfil. Probá con menos selecciones o con otro perfil.';
     return;
+  }
+  if(elegidas.length < n){
+    document.getElementById('bt-cbtxt').textContent =
+      'Sólo encontré ' + elegidas.length + ' selecciones compatibles: analizá más partidos para llegar a ' + n + '.';
   }
   BT_COMBO = {};
   elegidas.forEach(o => { BT_COMBO[o.mi+':'+o.idx] = true; });
