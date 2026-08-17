@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v276 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v277 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -44851,6 +44851,23 @@ let BT_DAY = 0, BT_FIX = [], BT_SEL = {}, BT_ANA = [], BT_COMBO = {}, BT_MANUAL 
 let BT_RANK = 'conf', BT_BOOTED = false, BT_CANCEL = false, BT_RUNNING = false;
 let BT_FAV = {}, BT_CACHEHITS = 0, BT_CONFIRM = null, BT_ULTIMO_MOTIVO = '';
 let BT_LIGAS = {};   // v267 · promedios ya traidos, por liga+temporada
+let BT_TSTATS = {};  // v277 · estadisticas cargadas a mano, por fuente|equipo
+
+// v277 · Trae de una sola vez todas las estadísticas propias guardadas.
+// No consume cuota de ninguna API: son datos tuyos en KV.
+function btCargarTStats(){
+  const fuentes = ['fd','tsdb'];
+  return Promise.all(fuentes.map(s =>
+    btApi('/teamstats?src=' + s).then(j => {
+      if(j && j.ok) Object.keys(j.todos || {}).forEach(id => { BT_TSTATS[s + '|' + id] = j.todos[id]; });
+    }).catch(() => {})
+  ));
+}
+function btTS(f, lado){
+  const fu = f.src || (BT_SRC === 'all' ? 'fd' : BT_SRC);
+  const eq = lado === 'h' ? f.home : f.away;
+  return BT_TSTATS[fu + '|' + eq.id] || null;
+}
 let BT_SRC = 'all';  // v274 · por defecto se buscan todas las fuentes juntas
 let BT_SORT = { col: null, dir: 0 };  // v272 · orden de la tabla (0 = original)
 
@@ -45226,6 +45243,7 @@ function btInit(){
   if(BT_BOOTED) return;
   BT_BOOTED = true;
   try{ BT_FAV = JSON.parse(localStorage.getItem('bt_fav')||'{}'); }catch(e){ BT_FAV = {}; }
+  btCargarTStats();
   const d = document.getElementById('bt-date');
   if(d) d.value = btIsoDay(0);
   btSetSrc();
@@ -45713,7 +45731,7 @@ function btAnalyzeOne(f, conOdds){
     if(ro && ro.cached) BT_CACHEHITS++;
     const r = { home: btDesdeLiga(tH,'home'), away: btDesdeLiga(tA,'away'),
                 odds: (ro && ro.ok) ? (ro.bookmakers||[]) : [], missing: [] };
-    const D = btBuildModel(f, r.home, r.away, liga.lg);
+    const D = btBuildModel(f, r.home, r.away, liga.lg, btTS(f,'h'), btTS(f,'a'));
     if(!D) return { err:'estos equipos no tienen ningún partido jugado cargado en la temporada' };
     // Datos crudos de cada equipo, para poder compararlos en el análisis.
     D.datosH = tH; D.datosA = tA;
@@ -45751,7 +45769,7 @@ function btDesdeLiga(t, lado){
   };
 }
 
-function btBuildModel(f, sh, sa, lgReal){
+function btBuildModel(f, sh, sa, lgReal, tsH, tsA){
   let gfH = sh.gf && btNum(sh.gf.home), gaH = sh.ga && btNum(sh.ga.home);
   let gfA = sa.gf && btNum(sa.gf.away), gaA = sa.ga && btNum(sa.ga.away);
   // Cuantos partidos respaldan cada promedio. Si un equipo no jugo de local,
@@ -45789,17 +45807,38 @@ function btBuildModel(f, sh, sa, lgReal){
 
   const pre = BT_LG[f.league.country] || BT_LG._;
   const plH = sh.played ? (sh.played.total||0) : 0, plA = sa.played ? (sa.played.total||0) : 0;
+
+  // v277 · Si cargaste a mano los números de los dos equipos, se usan ESOS en
+  // vez de los promedios de la liga. Ahí los mercados dejan de ser estimación.
+  const propio = {};
+  const dos = (a, b) => (a !== undefined && a !== null && b !== undefined && b !== null);
+  if(tsH && tsA){
+    if(dos(tsH.corF, tsA.corC) && dos(tsA.corF, tsH.corC))
+      propio.c = (tsH.corF + tsA.corC)/2 + (tsA.corF + tsH.corC)/2;
+    else if(dos(tsH.corF, tsA.corF)) propio.c = tsH.corF + tsA.corF;
+    if(dos(tsH.tarj, tsA.tarj)) propio.k = tsH.tarj + tsA.tarj;
+    if(dos(tsH.falt, tsA.falt)) propio.f = tsH.falt + tsA.falt;
+    if(dos(tsH.remF, tsA.remF)) propio.s = tsH.remF + tsA.remF;
+    if(dos(tsH.arcF, tsA.arcF)) propio.t = tsH.arcF + tsA.arcF;
+  }
   // Los resultados de liga no traen tarjetas: se estiman con el promedio del país.
   const kRaw = (plH>0 ? (sh.yellow||0)/plH : 0) + (plA>0 ? (sa.yellow||0)/plA : 0);
   let kTot = (isFinite(kRaw) && kRaw>0.5) ? (kRaw*0.6 + pre.k*0.4) : pre.k;
   kTot = btClamp(kTot, pre.k*0.65, pre.k*1.45);
 
+  // Los remates al arco nunca pueden superar a los remates totales.
+  const sFinal = propio.s || pre.s;
+  const tFinal = Math.min(propio.t || pre.t, sFinal * 0.85);
+
   return {
     nH:f.home.name, nA:f.away.name, lh:lh, la:la,
     dom: btClamp(.5 + .42*((lh-la)/(lh+la+1e-4)), .28, .72),
     m: btMatrix(lh,la),
-    cTot: pre.c*(1 + .05*(lh+la-lgTotal)/Math.max(lgTotal,1)),
-    kTot:kTot, fTot:pre.f, oTot:pre.o, sTot:pre.s, tTot:pre.t, pPen:pre.p, pRed:pre.r,
+    cTot: propio.c || pre.c*(1 + .05*(lh+la-lgTotal)/Math.max(lgTotal,1)),
+    kTot: propio.k || kTot,
+    fTot: propio.f || pre.f,
+    oTot: pre.o, sTot: sFinal, tTot: tFinal, pPen:pre.p, pRed:pre.r,
+    propio: propio,
     obs: Math.min(pH,pA), formH: sh.form||'', formA: sa.form||'', lgTotal: lgTotal,
     datos: { goles:true, tarjetas:false, corners:false, remates:false },
     respaldo: usoRespaldo
@@ -45876,6 +45915,14 @@ function btSimulate(D){
 /* ── catalogo de mercados ─────────────────────────────────────────────
    src: real = datos del equipo · mixto = equipo + liga · liga = estimado */
 function btCatalog(D,A){
+  // v277 · Con datos propios cargados, estos mercados pasan de estimación a
+  // dato real y suben de confianza. Sin ellos, siguen siendo promedio de liga.
+  const P = D.propio || {};
+  const oC = P.c ? 'real' : 'liga', cfC = P.c ? 4 : 2;
+  const oK = P.k ? 'real' : 'liga', cfK = P.k ? 4 : 2;
+  const oF = P.f ? 'real' : 'liga', cfF = P.f ? 3 : 2;
+  const oS = P.s ? 'real' : 'liga', cfS = P.s ? 3 : 2;
+  const oT = P.t ? 'real' : 'liga', cfT = P.t ? 4 : 2;
   const MK=[], H=D.nH, Aq=D.nA;
   const gh=A.gh, ga=A.ga, gh1=A.gh1, ga1=A.ga1, ch=A.ch, ca=A.ca, kh=A.kh, ka=A.ka;
   const fh=A.fh, fa=A.fa, sh=A.sh, sa=A.sa, th=A.th, ta=A.ta, fs=A.first, ls=A.last, fm=A.fmin;
@@ -45940,10 +45987,10 @@ function btCatalog(D,A){
 
   // Tarjetas: amarillas reales del equipo mezcladas con el promedio de la liga.
   [1.5,2.5,3.5,4.5,5.5,6.5].forEach(L=>{
-    mk('Tarjetas','Más de '+L.toFixed(1)+' tarjetas',2,i=>kh[i]+ka[i]>L,'Cards Over/Under|Over '+L,'liga');
-    mk('Tarjetas','Menos de '+L.toFixed(1)+' tarjetas',2,i=>kh[i]+ka[i]<L,'Cards Over/Under|Under '+L,'liga');
+    mk('Tarjetas','Más de '+L.toFixed(1)+' tarjetas',cfK,i=>kh[i]+ka[i]>L,'Cards Over/Under|Over '+L,oK);
+    mk('Tarjetas','Menos de '+L.toFixed(1)+' tarjetas',cfK,i=>kh[i]+ka[i]<L,'Cards Over/Under|Under '+L,oK);
   });
-  mk('Tarjetas','Los dos reciben tarjeta',2,i=>kh[i]>0&&ka[i]>0,null,'liga');
+  mk('Tarjetas','Los dos reciben tarjeta',cfK,i=>kh[i]>0&&ka[i]>0,null,oK);
   [0.5,1.5,2.5].forEach(L=>{
     mk('Tarjetas',H+' +'+L.toFixed(1)+' tarjetas',2,i=>kh[i]>L,null,'liga');
     mk('Tarjetas',Aq+' +'+L.toFixed(1)+' tarjetas',2,i=>ka[i]>L,null,'liga');
@@ -45952,16 +45999,16 @@ function btCatalog(D,A){
 
   // Estimados con promedios de liga: el plan gratuito no da estos datos por equipo.
   [4.5,5.5,6.5,7.5,8.5,9.5,10.5,11.5].forEach(L=>{
-    mk('Córners','Más de '+L.toFixed(1)+' córners',2,i=>ch[i]+ca[i]>L,'Corners Over Under|Over '+L,'liga');
-    mk('Córners','Menos de '+L.toFixed(1)+' córners',2,i=>ch[i]+ca[i]<L,'Corners Over Under|Under '+L,'liga');
+    mk('Córners','Más de '+L.toFixed(1)+' córners',cfC,i=>ch[i]+ca[i]>L,'Corners Over Under|Over '+L,oC);
+    mk('Córners','Menos de '+L.toFixed(1)+' córners',cfC,i=>ch[i]+ca[i]<L,'Corners Over Under|Under '+L,oC);
   });
   [2.5,3.5,4.5].forEach(L=>{
     mk('Córners',H+' +'+L.toFixed(1)+' córners',2,i=>ch[i]>L,null,'liga');
     mk('Córners',Aq+' +'+L.toFixed(1)+' córners',2,i=>ca[i]>L,null,'liga');
   });
-  [18.5,20.5,22.5,24.5].forEach(L=>{ mk('Faltas','Más de '+L.toFixed(1)+' faltas',2,i=>fh[i]+fa[i]>L,null,'liga'); });
-  [17.5,19.5,21.5,23.5].forEach(L=>{ mk('Remates','Más de '+L.toFixed(1)+' remates',2,i=>sh[i]+sa[i]>L,null,'liga'); });
-  [3.5,4.5,5.5,6.5,7.5,8.5].forEach(L=>{ mk('Remates al arco','Más de '+L.toFixed(1)+' al arco',2,i=>th[i]+ta[i]>L,null,'liga'); });
+  [18.5,20.5,22.5,24.5].forEach(L=>{ mk('Faltas','Más de '+L.toFixed(1)+' faltas',cfF,i=>fh[i]+fa[i]>L,null,oF); });
+  [17.5,19.5,21.5,23.5].forEach(L=>{ mk('Remates','Más de '+L.toFixed(1)+' remates',cfS,i=>sh[i]+sa[i]>L,null,oS); });
+  [3.5,4.5,5.5,6.5,7.5,8.5].forEach(L=>{ mk('Remates al arco','Más de '+L.toFixed(1)+' al arco',cfT,i=>th[i]+ta[i]>L,null,oT); });
   [1.5,2.5,3.5,4.5].forEach(L=>{
     mk('Remates al arco',H+' +'+L.toFixed(1)+' al arco',2,i=>th[i]>L,null,'liga');
     mk('Remates al arco',Aq+' +'+L.toFixed(1)+' al arco',2,i=>ta[i]>L,null,'liga');
@@ -46235,15 +46282,34 @@ function btComparativa(mi){
   });
   out += '</table>';
 
-  out += '<div style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--border)">' +
-    '<div style="font-size:10.5px;color:var(--text4);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">Sin datos por equipo</div>' +
-    '<div style="display:flex;gap:7px;flex-wrap:wrap">' +
-    ['Tiros al arco','Faltas','Atajadas','Posesion','Corners','Tarjetas','xG','Offsides'].map(x =>
-      '<span style="font-size:11px;color:var(--text4);border:1px dashed var(--border);border-radius:14px;padding:3px 10px">' +
-      x + ' \u2014</span>').join('') + '</div>' +
-    '<div style="font-size:11px;color:var(--text4);margin-top:9px;line-height:1.6">' +
-    'Ninguna de las fuentes gratuitas conectadas entrega estos datos por equipo. Los mercados de corners, ' +
-    'tarjetas y remates se calculan con promedios de la liga y estan marcados en rojo.</div></div></div>';
+  // Si cargaste los números a mano, se muestran como filas adicionales.
+  const tsH = btTS(r.f,'h'), tsA = btTS(r.f,'a');
+  if(tsH || tsA){
+    out += '<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">' +
+      '<div style="font-size:10.5px;color:var(--green);text-transform:uppercase;letter-spacing:.07em;margin-bottom:9px">' +
+      '\u270F\uFE0F Cargados por vos</div><table style="width:100%;border-collapse:collapse">';
+    BT_CAMPOS.forEach(function(c){
+      const a = tsH ? tsH[c[0]] : undefined, b = tsA ? tsA[c[0]] : undefined;
+      if((a === undefined || a === null) && (b === undefined || b === null)) return;
+      const fm = v => (v === undefined || v === null)
+        ? '<span style="color:var(--text4);font-size:12px">\u2014</span>'
+        : '<span style="font-size:16px;font-weight:700">' + v.toFixed(1) + '</span>';
+      out += '<tr style="border-top:1px solid var(--border)">' +
+        '<td style="padding:8px 0;font-size:12.5px;color:var(--text2)">' + c[1] + '</td>' +
+        '<td style="text-align:center;padding:8px 0">' + fm(a) + '</td>' +
+        '<td style="text-align:center;padding:8px 0">' + fm(b) + '</td></tr>';
+    });
+    out += '</table></div>';
+  }
+
+  out += '<div style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--border);display:flex;gap:9px;flex-wrap:wrap;align-items:center">' +
+    '<span style="font-size:10.5px;color:var(--text4);text-transform:uppercase;letter-spacing:.07em">Sin datos</span>' +
+    ['Atajadas','Posesi\u00F3n','xG','Offsides'].map(function(x){
+      return '<span style="font-size:11px;color:var(--text4);border:1px dashed var(--border);border-radius:14px;padding:3px 10px">' +
+             x + ' \u2014</span>'; }).join('') +
+    '<button class="btn btn-ghost btn-xs" style="margin-left:auto" ' +
+      'onclick="document.getElementById(\'bt-form-' + mi + '\').style.display=\'block\'">\u270F\uFE0F Cargar estad\u00EDsticas</button>' +
+    '</div></div>';
   return out;
 }
 
@@ -46301,6 +46367,138 @@ function btVerPorQue(mi, idx, ev){
       'onclick="document.getElementById(\'bt-porque-' + mi + '\').innerHTML=\'\'">Cerrar</button></div>' +
     '<ul style="margin:0;padding-left:19px;font-size:12.5px;line-height:1.9;color:var(--text2)">' +
     btPorQue(mi, idx).map(x => '<li>' + x + '</li>').join('') + '</ul></div>';
+}
+
+
+// v277 · Los seis numeros que ninguna fuente gratuita entrega por equipo.
+// Se cargan una vez por temporada mirando la web que uses, y quedan guardados
+// en KV: sirven para todos los partidos de ese equipo y desde cualquier PC.
+const BT_CAMPOS = [
+  ['corF','Córners a favor',   'Promedio de córners que saca por partido'],
+  ['corC','Córners en contra', 'Promedio de córners que le sacan'],
+  ['remF','Remates totales',   'Promedio de remates por partido'],
+  ['arcF','Remates al arco',   'De esos remates, cuántos van al arco'],
+  ['tarj','Tarjetas',          'Amarillas propias por partido'],
+  ['falt','Faltas',            'Faltas cometidas por partido']
+];
+
+function btFormStats(mi){
+  const r = BT_ANA[mi];
+  const fu = r.f.src || (BT_SRC === 'all' ? 'fd' : BT_SRC);
+  const lados = [['h', r.f.home], ['a', r.f.away]];
+
+  let out = '<div style="background:var(--bg2);border:1px solid var(--accent);border-radius:10px;padding:16px 18px;margin:14px 0">' +
+    '<div style="display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;margin-bottom:6px">' +
+      '<strong style="font-size:14px">\u270F\uFE0F Cargar estadísticas de estos equipos</strong>' +
+      '<button class="btn btn-ghost btn-xs" style="margin-left:auto" ' +
+        'onclick="document.getElementById(\'bt-form-' + mi + '\').style.display=\'none\'">Ocultar</button></div>' +
+    '<div style="font-size:11.5px;color:var(--text3);line-height:1.6;margin-bottom:14px">' +
+      'Miralos en la web que uses y escribilos acá. Se guardan una vez por equipo y por temporada, y desde ese ' +
+      'momento <strong>los mercados de córners, tarjetas, faltas y remates dejan de ser estimación de liga y se ' +
+      'calculan con estos números</strong>. Un campo vacío no se guarda como cero: sigue usándose el promedio de la liga.</div>' +
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px">';
+
+  lados.forEach(function (L) {
+    const eq = L[1], ts = BT_TSTATS[fu + '|' + eq.id] || {};
+    out += '<div style="border:1px solid var(--border);border-radius:9px;padding:13px">' +
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:11px">' +
+        btTeamVisual(eq, r.f.league.country, 22) +
+        '<strong style="font-size:13.5px">' + btEsc(eq.name) + '</strong>' +
+        '<span style="font-size:10px;color:var(--text4);margin-left:auto">' + (L[0] === 'h' ? 'LOCAL' : 'VISITANTE') + '</span></div>';
+    BT_CAMPOS.forEach(function (c) {
+      const v = (ts[c[0]] !== undefined && ts[c[0]] !== null) ? ts[c[0]] : '';
+      out += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">' +
+        '<label style="flex:1;font-size:12px;color:var(--text2);margin:0" title="' + btEsc(c[2]) + '">' + c[1] + '</label>' +
+        '<input type="number" step="0.1" min="0" value="' + v + '" placeholder="—" ' +
+        'id="bt-ts-' + mi + '-' + L[0] + '-' + c[0] + '" ' +
+        'style="width:74px;padding:4px 7px;font-size:13px;text-align:right;font-weight:600"></div>';
+    });
+    out += '<div style="font-size:10.5px;color:var(--text4);margin-top:8px">' +
+      (ts.t ? 'Guardado el ' + btSoloFecha(Math.floor(ts.t / 1000)) : 'Sin datos cargados') + '</div></div>';
+  });
+
+  return out + '</div><div style="display:flex;gap:8px;align-items:center;margin-top:14px;flex-wrap:wrap">' +
+    '<button class="btn btn-primary btn-sm" onclick="btGuardarStats(' + mi + ',event)">Guardar y recalcular</button>' +
+    '<button class="btn btn-ghost btn-sm" onclick="btBorrarStats(' + mi + ',event)">Borrar</button>' +
+    '<span id="bt-ts-msg-' + mi + '" style="font-size:12px;color:var(--text3)"></span></div></div>';
+}
+
+function btGuardarStats(mi, ev){
+  if(ev) ev.stopPropagation();
+  const r = BT_ANA[mi];
+  const fu = r.f.src || (BT_SRC === 'all' ? 'fd' : BT_SRC);
+  const msg = document.getElementById('bt-ts-msg-' + mi);
+  if(msg) msg.innerHTML = '<span class="spin"></span> Guardando…';
+
+  const envios = [['h', r.f.home], ['a', r.f.away]].map(function (L) {
+    const cuerpo = { nombre: L[1].name };
+    BT_CAMPOS.forEach(function (c) {
+      const el = document.getElementById('bt-ts-' + mi + '-' + L[0] + '-' + c[0]);
+      const v = el ? parseFloat(el.value) : NaN;
+      if(isFinite(v) && v >= 0) cuerpo[c[0]] = v;
+    });
+    return fetch(WORKER + '/api/betano/teamstats?src=' + fu + '&team=' + encodeURIComponent(L[1].id), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo)
+    }).then(function (x) { return x.json(); }).then(function (j) {
+      if(j && j.ok){
+        if(j.stats) BT_TSTATS[fu + '|' + L[1].id] = j.stats;
+        else delete BT_TSTATS[fu + '|' + L[1].id];
+      }
+      return j;
+    });
+  });
+
+  Promise.all(envios).then(function (res) {
+    if(!res.every(function (x) { return x && x.ok; })){
+      if(msg) msg.innerHTML = '<span style="color:var(--red)">No se pudo guardar.</span>';
+      return;
+    }
+    // Se rehace el análisis con los números nuevos. No cuesta ninguna consulta:
+    // los promedios de la liga ya están en memoria.
+    btRehacer(mi);
+    const m2 = document.getElementById('bt-ts-msg-' + mi);
+    if(m2) m2.innerHTML = '<span style="color:var(--green)">\u2705 Guardado. Mercados recalculados.</span>';
+  }).catch(function () {
+    if(msg) msg.innerHTML = '<span style="color:var(--red)">Error de conexión.</span>';
+  });
+}
+
+function btBorrarStats(mi, ev){
+  if(ev) ev.stopPropagation();
+  BT_CAMPOS.forEach(function (c) {
+    ['h','a'].forEach(function (l) {
+      const el = document.getElementById('bt-ts-' + mi + '-' + l + '-' + c[0]);
+      if(el) el.value = '';
+    });
+  });
+  btGuardarStats(mi, null);
+}
+
+// Reconstruye el modelo de un partido ya analizado, sin pedir nada a la API.
+function btRehacer(mi){
+  const r = BT_ANA[mi], f = r.f;
+  const fu = f.src || (BT_SRC === 'all' ? 'fd' : BT_SRC);
+  const liga = BT_LIGAS[fu + '|' + f.league.id + ':' + f.league.season];
+  if(!liga) return;
+  const tH = liga.teams[f.home.id], tA = liga.teams[f.away.id];
+  if(!tH || !tA) return;
+
+  const D = btBuildModel(f, btDesdeLiga(tH,'home'), btDesdeLiga(tA,'away'), liga.lg, btTS(f,'h'), btTS(f,'a'));
+  if(!D) return;
+  D.datosH = tH; D.datosA = tA;
+  D.calidadLiga = liga.calidad || 'alta';
+  D.splitReal = (liga.split !== false);
+  D.origen = (liga.intentos && liga.intentos.length) ? liga.intentos[liga.intentos.length - 1] : 'tabla';
+
+  const A = btSimulate(D);
+  const MK = btCatalog(D, A);
+  MK.forEach(function (m) {
+    const o = btLookupOdd(r.od.map, m.oid);
+    m.odd = o; m.oddSrc = o ? r.od.src : null;
+    m.ev = (o && m.p > 0) ? (m.p * o - 1) : null;
+  });
+  r.D = D; r.MK = MK;
+  btRenderTop(); btRenderMatchBody(mi); btCombo();
 }
 
 /* ── ranking global ───────────────────────────────────────────────────── */
@@ -46502,6 +46700,8 @@ function btRenderMatchBody(mi){
     '<span>🏠 local</span><span>🤝 empate</span><span>✈️ visitante</span></div></div>';
 
   h += btComparativa(mi);
+  h += '<div id="bt-form-' + mi + '" style="display:' +
+       ((btTS(r.f,'h') && btTS(r.f,'a')) ? 'none' : 'block') + '">' + btFormStats(mi) + '</div>';
   h += '<div id="bt-porque-' + mi + '"></div>';
   h += btCargaRapida(mi);
 
