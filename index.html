@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v273 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v274 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1613,6 +1613,27 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 </div>
 
 <!-- ═══════════════════════ BETANO ═══════════════════════ -->
+<style>
+/* v274 · Punto 26: los filtros con aspecto de plataforma deportiva.
+   Sólo estética: no se tocó ninguna lógica de filtrado. */
+.bt-filtros-pro select, .bt-filtros-pro input[type=time]{
+  border-radius:20px; border:1px solid var(--border); background:var(--bg2);
+  font-size:12px; padding:7px 12px; transition:border-color .15s, box-shadow .15s;
+}
+.bt-filtros-pro select:hover, .bt-filtros-pro input[type=time]:hover{ border-color:var(--accent) }
+.bt-filtros-pro select:focus, .bt-filtros-pro input[type=time]:focus{
+  border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-g); outline:none;
+}
+.bt-filtros-pro label{ background:var(--bg2); border:1px solid var(--border); border-radius:20px; padding:6px 12px }
+#bt-q{ border-radius:22px; padding-left:14px }
+#bt-q:focus{ box-shadow:0 0 0 3px var(--accent-g) }
+#bt-cards img{ border-radius:3px }
+@media (max-width:900px){
+  .bt-filtros-pro{ gap:6px }
+  .bt-filtros-pro select{ max-width:150px }
+}
+</style>
+
 <!-- ═══════════════════════ BETANO ANALYZER ═══════════════════════ -->
 <div id="section-betano" class="section fade-in">
 
@@ -1622,9 +1643,10 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <div style="display:flex;align-items:center;gap:8px">
         <span id="bt-light" style="width:9px;height:9px;border-radius:50%;background:var(--green);display:inline-block"></span>
         <select id="bt-src" onchange="btSetSrc()" style="width:auto;font-size:12px;padding:5px 8px;font-weight:600">
-          <option value="fd">football-data.org · 12 ligas top</option>
-          <option value="tsdb">TheSportsDB · incluye Argentina</option>
-          <option value="af">API-Football · sólo 2022-2024</option>
+          <option value="all">🔎 Todas las fuentes juntas</option>
+          <option value="fd">Sólo football-data.org · 12 ligas top</option>
+          <option value="tsdb">Sólo TheSportsDB · incluye Argentina</option>
+          <option value="af">Sólo API-Football · 2022-2024</option>
         </select>
       </div>
       <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:11.5px;color:var(--text3)">
@@ -1663,7 +1685,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <button class="btn btn-primary btn-sm" id="bt-scan" onclick="btScan()">Buscar partidos</button>
     </div>
 
-    <div id="bt-filters" style="display:none;gap:8px;flex-wrap:wrap;align-items:center;padding-top:10px;border-top:1px solid var(--border)">
+    <div id="bt-filters" class="bt-filtros-pro" style="display:none;gap:8px;flex-wrap:wrap;align-items:center;padding-top:10px;border-top:1px solid var(--border)">
       <select id="bt-f-country" onchange="btRenderCards()" style="width:auto;font-size:12px;padding:6px 9px"><option value="">Todos los países</option></select>
       <select id="bt-f-league"  onchange="btRenderCards()" style="width:auto;font-size:12px;padding:6px 9px;max-width:230px"><option value="">Todas las competiciones</option></select>
       <select id="bt-f-tier" onchange="btRenderCards()" style="width:auto;font-size:12px;padding:6px 9px">
@@ -44802,7 +44824,7 @@ let BT_DAY = 0, BT_FIX = [], BT_SEL = {}, BT_ANA = [], BT_COMBO = {}, BT_MANUAL 
 let BT_RANK = 'conf', BT_BOOTED = false, BT_CANCEL = false, BT_RUNNING = false;
 let BT_FAV = {}, BT_CACHEHITS = 0, BT_CONFIRM = null, BT_ULTIMO_MOTIVO = '';
 let BT_LIGAS = {};   // v267 · promedios ya traidos, por liga+temporada
-let BT_SRC = 'fd';   // v268 · fuente de datos activa
+let BT_SRC = 'all';  // v274 · por defecto se buscan todas las fuentes juntas
 let BT_SORT = { col: null, dir: 0 };  // v272 · orden de la tabla (0 = original)
 
 // v272 · Tres estados por columna: mayor→menor, menor→mayor, orden original.
@@ -44848,6 +44870,15 @@ function btAplicarOrden(list){
 // v268 · Dos fuentes posibles. El plan gratuito de API-Football solo tiene
 // temporadas 2022-2024, asi que para partidos de hoy hay que usar la otra.
 const BT_FUENTES = {
+  all: {
+    nombre: 'todas las fuentes',
+    info: 'Una sola búsqueda contra <strong>football-data.org y TheSportsDB a la vez</strong>. Los partidos repetidos se ' +
+          'fusionan automáticamente y cada uno queda marcado con la fuente de la que salió. ' +
+          'Así ves las 12 ligas top con datos oficiales <em>y</em> la Liga Profesional Argentina en la misma lista. ' +
+          'API-Football queda afuera a propósito: su plan gratuito sólo tiene temporadas 2022-2024 y ensuciaría la lista ' +
+          'con partidos que no se pueden analizar. No trae cuotas: cargalas a mano.',
+    odds: false
+  },
   fd: {
     nombre: 'football-data.org',
     info: 'Temporada actual · 10 consultas por minuto (la documentación no menciona tope diario, pero no lo damos por garantizado). ' +
@@ -44896,10 +44927,13 @@ function btSetSrc(){
 
 // v267 · Trae de una sola vez los promedios de TODOS los equipos de una liga.
 // Antes se pedian 2 consultas por partido; ahora 1 por liga, y queda cacheada.
-function btCargarLiga(league, season){
-  const k = league + ':' + season;
+// v274 · Con la búsqueda unificada cada partido puede venir de una fuente
+// distinta, así que los promedios hay que pedírselos a la que corresponde.
+function btCargarLiga(league, season, fuente){
+  fuente = fuente || (BT_SRC === 'all' ? 'fd' : BT_SRC);
+  const k = fuente + '|' + league + ':' + season;
   if(BT_LIGAS[k]) return Promise.resolve({ liga: BT_LIGAS[k] });
-  return btApi('/league?league=' + league + '&season=' + season + '&src=' + BT_SRC).then(r => {
+  return btApi('/league?league=' + league + '&season=' + season + '&src=' + fuente).then(r => {
     if(!r) return { err:'el Worker no respondió' };
     if(r.rateLimited && r.retryAfter > 0) return { wait: r.retryAfter, err: r.error };
     if(!r.ok) return { err: r.error || 'no pude traer los promedios de la liga' };
@@ -45157,9 +45191,19 @@ function btScan(){
       : '';
     let msg = '✅ ' + BT_FIX.length + ' partidos por jugarse' + rango +
       (j.cached ? ' · datos guardados, no gastó consulta' : '');
+    if(j.porFuente){
+      const det = [];
+      if(j.porFuente.fd) det.push(j.porFuente.fd + ' de football-data');
+      if(j.porFuente.tsdb) det.push(j.porFuente.tsdb + ' de TheSportsDB');
+      msg += '<br><span style="font-size:11.5px;color:var(--text3)">' + det.join(' · ') +
+             (j.duplicados ? ' · ' + j.duplicados + ' repetido' + (j.duplicados===1?'':'s') + ' fusionado' + (j.duplicados===1?'':'s') : '') + '</span>';
+    }
+    if(j.notas && j.notas.length){
+      msg += '<br><span style="font-size:11px;color:var(--amber)">⚠️ ' + btEsc(j.notas.join(' · ')) + '</span>';
+    }
     if(BT_FIX.length < 5){
       msg += '<br><span style="font-size:11.5px;color:var(--amber)">Salieron pocos. Probá ampliando la ventana de días' +
-             (BT_SRC === 'fd' ? ', o cambiá a TheSportsDB que cubre muchísimas más ligas.' : '.') + '</span>';
+             (BT_SRC === 'all' ? '.' : ', o pasá a “Todas las fuentes juntas”.') + '</span>';
     }
     btSetStatus(msg);
     btRenderCards(); btRefreshQuota();
@@ -45325,7 +45369,7 @@ function btUpdCost(){
   // partido sólo si se piden cuotas.
   const ligas = {};
   const sel = btSelected();
-  sel.forEach(f => { const k=f.league.id+':'+f.league.season; if(!BT_LIGAS[k]) ligas[k]=1; });
+  sel.forEach(f => { const k=(f.src||(BT_SRC==='all'?'fd':BT_SRC))+'|'+f.league.id+':'+f.league.season; if(!BT_LIGAS[k]) ligas[k]=1; });
   const nuevas = Object.keys(ligas).length;
   const conOdds = (document.getElementById('bt-odds')||{}).checked;
   // Sólo cuestan cuotas los partidos que todavía no las tienen.
@@ -45367,7 +45411,7 @@ async function btRun(sel){
 
   const conOdds = (document.getElementById('bt-odds')||{}).checked;
   const ligasNuevas = {};
-  sel.forEach(f => { const k=f.league.id+':'+f.league.season; if(!BT_LIGAS[k]) ligasNuevas[k]=1; });
+  sel.forEach(f => { const k=(f.src||(BT_SRC==='all'?'fd':BT_SRC))+'|'+f.league.id+':'+f.league.season; if(!BT_LIGAS[k]) ligasNuevas[k]=1; });
   const nLigas = Object.keys(ligasNuevas).length;
   const faltanOdds = conOdds ? sel.filter(f => {
     const a = BT_ANA.find(x => x.f.id === f.id);
@@ -45400,23 +45444,26 @@ async function btRun(sel){
   // PASO 1 · Traer los promedios de cada liga distinta. Una consulta por liga,
   // no por partido: acá está el ahorro grande.
   const ligas = {};
-  sel.forEach(f => { ligas[f.league.id + ':' + f.league.season] = f.league; });
+  sel.forEach(f => {
+    const fu = f.src || (BT_SRC === 'all' ? 'fd' : BT_SRC);
+    ligas[fu + '|' + f.league.id + ':' + f.league.season] = { L: f.league, fuente: fu };
+  });
   const claves = Object.keys(ligas);
   for(let c=0; c<claves.length; c++){
     if(BT_CANCEL) break;
-    const L = ligas[claves[c]];
+    const L = ligas[claves[c]].L, fu = ligas[claves[c]].fuente;
     if(BT_LIGAS[claves[c]]) continue;
     let intento = 0, ok = false;
     while(intento < 3 && !ok && !BT_CANCEL){
       btSetProgress('<span class="spin"></span> Trayendo promedios de ' + btEsc(L.name) +
         ' (' + (c+1) + ' de ' + claves.length + ' ligas)' + (intento ? ' · reintento ' + intento : ''));
-      const out = await btCargarLiga(L.id, L.season);
+      const out = await btCargarLiga(L.id, L.season, fu);
       if(out.liga){ ok = true; break; }
       if(out.wait){ intento++; BT_ULTIMO_MOTIVO = out.err || ''; await btEspera(out.wait, c+1, claves.length); continue; }
       BT_ULTIMO_MOTIVO = out.err || '';
       break;
     }
-    if(!ok) sel.filter(f => (f.league.id + ':' + f.league.season) === claves[c])
+    if(!ok) sel.filter(f => ((f.src || (BT_SRC === 'all' ? 'fd' : BT_SRC)) + '|' + f.league.id + ':' + f.league.season) === claves[c])
               .forEach(f => fallos.push({ n: f.home.name + ' vs ' + f.away.name,
                                           e: BT_ULTIMO_MOTIVO || 'no pude traer los promedios de la liga' }));
     if(c < claves.length-1 && !BT_CANCEL) await btSleep(700);
@@ -45434,7 +45481,7 @@ async function btRun(sel){
       BT_ANA.splice(previo, 1);
     }
 
-    if(!BT_LIGAS[f.league.id + ':' + f.league.season]) continue;  // su liga falló arriba
+    if(!BT_LIGAS[(f.src || (BT_SRC === 'all' ? 'fd' : BT_SRC)) + '|' + f.league.id + ':' + f.league.season]) continue;
     btSetProgress('<span class="spin"></span> Analizando ' + (i+1) + ' de ' + sel.length + ' · ' +
       btEsc(f.home.name) + ' vs ' + btEsc(f.away.name));
     const out = await btAnalyzeOne(f, conOdds);
@@ -45495,7 +45542,7 @@ function btEspera(seg, hechos, total){
 // Solo las cuotas siguen necesitando una consulta propia (son por partido).
 function btAnalyzeOne(f, conOdds){
   const L = f.league;
-  const liga = BT_LIGAS[L.id + ':' + L.season];
+  const liga = BT_LIGAS[(f.src || (BT_SRC === 'all' ? 'fd' : BT_SRC)) + '|' + L.id + ':' + L.season];
   if(!liga) return Promise.resolve({ err:'no tengo los promedios de esta liga' });
 
   const tH = liga.teams[f.home.id], tA = liga.teams[f.away.id];
@@ -45846,6 +45893,13 @@ function btConf(r, m){
   if(mc) s += (mc.gap < 0.15 ? 8 : (mc.gap < 0.30 ? 5 : 0));      // acuerdo con el mercado
   return Math.round(btClamp(s, 0, 100));
 }
+// v274 · Punto 18: etiqueta explícita del nivel de datos, además del puntaje.
+function btNivelDatos(score, D){
+  if(score >= 75 && D.splitReal && !D.respaldo) return ['🟢','DATOS REALES SUFICIENTES','var(--green)'];
+  if(score >= 55) return ['🟡','DATOS PARCIALES','var(--amber)'];
+  if(score >= 38) return ['🟠','ESTIMACIÓN','#e8853a'];
+  return ['🔴','DATOS INSUFICIENTES','var(--red)'];
+}
 function btSemaforo(c){
   if(c >= 82) return ['🟢','Muy alta','var(--green)'];
   if(c >= 70) return ['🟢','Alta','var(--green)'];
@@ -46073,7 +46127,7 @@ function btDisponibilidad(r){
 
 function btRenderMatchBody(mi){
   const r = BT_ANA[mi], D = r.D, mc = btMarketCheck(r);
-  const disp = btDisponibilidad(r), sem = btSemaforo(disp.score);
+  const disp = btDisponibilidad(r), sem = btSemaforo(disp.score), niv = btNivelDatos(disp.score, D);
 
   // v272 · El 1X2 con nombre y propio: antes eran tres números sin etiqueta.
   const p1 = r.MK[0].p, pX = r.MK[1].p, p2 = r.MK[2].p;
@@ -46101,8 +46155,14 @@ function btRenderMatchBody(mi){
   h += '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:11px 13px;margin:12px 0">' +
     '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:9px">' +
       '<strong style="font-size:12px">📊 Disponibilidad de datos</strong>' +
-      '<span style="margin-left:auto;font-size:12px;color:'+sem[2]+'"><strong>'+sem[0]+' Calidad del análisis: '+disp.score+'/100</strong></span>' +
-    '</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:2px 14px;font-size:11.5px;color:var(--text3)">';
+      '<span style="margin-left:auto;display:flex;gap:9px;align-items:center;flex-wrap:wrap">' +
+        '<span style="font-size:10px;font-weight:700;letter-spacing:.06em;padding:3px 9px;border-radius:20px;' +
+          'border:1px solid '+niv[2]+';color:'+niv[2]+'">'+niv[0]+' '+niv[1]+'</span>' +
+        '<span style="font-size:12px;color:'+sem[2]+'"><strong>'+disp.score+'/100</strong></span>' +
+      '</span>' +
+    '</div>' +
+    '<div style="margin-bottom:10px">'+btBarra(disp.score, niv[2], 6)+'</div>' +
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:2px 14px;font-size:11.5px;color:var(--text3)">';
   disp.filas.forEach(f => {
     const ico = f[2]==='ok' ? '<span style="color:var(--green)">✅</span>'
               : (f[2]==='medio' ? '<span style="color:var(--amber)">⚠️</span>' : '<span style="color:var(--red)">❌</span>');
@@ -46142,10 +46202,14 @@ function btRenderMatchBody(mi){
   Object.keys(grupos).forEach(g => {
     grupos[g].sort((a,b)=>b.m.p-a.m.p);
     h += '<div style="font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);margin:16px 0 6px">'+btEsc(g)+'</div>' +
-      '<div class="tbl-wrap"><table><thead><tr><th style="width:26px"></th><th>Mercado</th>' +
-      '<th style="text-align:right">Prob.</th><th style="text-align:right">Justa</th>' +
-      '<th style="text-align:right;width:90px">Cuota</th><th style="text-align:right">Valor</th>' +
-      '<th style="text-align:center">Confianza</th></tr></thead><tbody>';
+      '<div class="tbl-wrap" style="max-height:420px;overflow:auto"><table><thead><tr>' +
+      '<th style="width:26px;position:sticky;top:0;z-index:2;background:var(--bg2)"></th>' +
+      '<th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Mercado</th>' +
+      '<th style="text-align:right;position:sticky;top:0;z-index:2;background:var(--bg2)">Prob.</th>' +
+      '<th style="text-align:right;position:sticky;top:0;z-index:2;background:var(--bg2)">Justa</th>' +
+      '<th style="text-align:right;width:90px;position:sticky;top:0;z-index:2;background:var(--bg2)">Cuota real</th>' +
+      '<th style="text-align:right;position:sticky;top:0;z-index:2;background:var(--bg2)">Valor</th>' +
+      '<th style="text-align:center;position:sticky;top:0;z-index:2;background:var(--bg2)">Confianza</th></tr></thead><tbody>';
     grupos[g].forEach(o => {
       const m=o.m, idx=o.idx, key=mi+':'+idx;
       const eff = btOddOf(mi,idx);
@@ -46153,16 +46217,19 @@ function btRenderMatchBody(mi){
       const evTxt = ev===null?'—':((ev>=0?'+':'')+(ev*100).toFixed(1)+'%');
       const evCol = ev===null?'var(--text4)':(ev>.005?'var(--green)':(ev<-.005?'var(--red)':'var(--text3)'));
       const conf = btConf(r,m), sem = btSemaforo(conf);
-      h += '<tr><td><input type="checkbox" data-btc="'+key+'"'+(BT_COMBO[key]?' checked':'')+
+      const marcada = !!BT_COMBO[key];
+      h += '<tr style="'+(marcada ? 'background:var(--accent-g);box-shadow:inset 2px 0 0 var(--accent)' : '')+'">' +
+        '<td><input type="checkbox" data-btc="'+key+'"'+(marcada?' checked':'')+
         ' onchange="btPick(\''+key+'\',this.checked)" style="width:14px;height:14px;cursor:pointer"></td>' +
         '<td>'+btEsc(m.lab)+' '+btSrcDot(m.src)+'</td>' +
-        '<td style="text-align:right;font-weight:700">'+btPct(m.p)+'%</td>' +
+        '<td style="text-align:right;font-weight:700">'+btPct(m.p)+'%'+btBarra(m.p*100, sem[2], 3)+'</td>' +
         '<td style="text-align:right;color:var(--text3)">'+btFair(m.p)+'</td>' +
         '<td style="text-align:right"><input type="number" step="0.01" min="1" value="'+(eff.odd?eff.odd.toFixed(2):'')+
           '" placeholder="—" onchange="btSetManual('+mi+','+idx+',this.value)" ' +
           'style="width:70px;padding:3px 6px;font-size:11.5px;text-align:right" title="Cargá acá la cuota de Betano"></td>' +
         '<td style="text-align:right;font-weight:700;color:'+evCol+'">'+evTxt+'</td>' +
-        '<td style="text-align:center;font-size:11px;color:'+sem[2]+'">'+sem[0]+' '+conf+'</td></tr>';
+        '<td style="text-align:center;font-size:11px;color:'+sem[2]+'">'+sem[0]+' '+conf+
+          '<span style="display:block;font-size:9px;color:var(--text4)">'+sem[1]+'</span>'+btBarra(conf, sem[2], 3)+'</td></tr>';
     });
     h += '</tbody></table></div>';
   });
@@ -46204,7 +46271,16 @@ function btMoves(mi, ev){
 /* ── combinada ────────────────────────────────────────────────────────── */
 function btPick(key, on){
   if(on) BT_COMBO[key]=true; else delete BT_COMBO[key];
-  document.querySelectorAll('[data-btc="'+key+'"]').forEach(x => { x.checked = on; });
+  // Se repinta sólo la fila afectada: redibujar la tabla entera perdería el
+  // scroll y el foco del campo de cuota que el usuario esté editando.
+  document.querySelectorAll('[data-btc="'+key+'"]').forEach(x => {
+    x.checked = on;
+    const fila = x.closest('tr');
+    if(fila){
+      fila.style.background = on ? 'var(--accent-g)' : '';
+      fila.style.boxShadow = on ? 'inset 2px 0 0 var(--accent)' : '';
+    }
+  });
   btCombo();
 }
 function btComboClear(){
