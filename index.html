@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v275 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v276 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1710,10 +1710,16 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text2);margin:0;cursor:pointer">
         <input type="checkbox" id="bt-f-fav" onchange="btRenderCards()" style="width:14px;height:14px;cursor:pointer"> Sólo favoritas ⭐
       </label>
+      <select id="bt-orden-fx" onchange="btRenderCards()" style="width:auto;font-size:12px;padding:6px 9px" title="Ordenar la lista">
+        <option value="hora">Por horario</option>
+        <option value="liga">Por competición</option>
+        <option value="pais">Por país</option>
+      </select>
       <button class="btn btn-ghost btn-xs" onclick="btClearFilters()">Limpiar filtros</button>
       <span id="bt-count" style="font-size:11.5px;color:var(--text3);margin-left:auto"></span>
     </div>
-    <div id="bt-status" style="font-size:12px;color:var(--text3);margin-top:9px"></div>
+    <div id="bt-status" style="font-size:12.5px;color:var(--text3);margin-top:9px"></div>
+    <div id="bt-resumen" style="display:none;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:8px;margin-top:12px"></div>
   </div>
 
   <!-- ── RESULTADOS (arriba de la lista, para que se vean siempre) ─ -->
@@ -1729,6 +1735,19 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <button class="btn btn-ghost btn-sm bt-rank on" data-btrank="conf" onclick="btSetRank('conf')">Por confianza</button>
           <button class="btn btn-ghost btn-sm bt-rank" data-btrank="prob" onclick="btSetRank('prob')">Por probabilidad</button>
           <button class="btn btn-ghost btn-sm bt-rank" data-btrank="ev" onclick="btSetRank('ev')">Por valor</button>
+          <select id="bt-filtro-mk" onchange="btRenderTop()" style="width:auto;font-size:12px;padding:6px 9px" title="Filtrar por tipo de mercado">
+            <option value="">Todos los mercados</option>
+            <option value="solidos">Sólo datos reales ●</option>
+            <option value="valor">Sólo con valor positivo</option>
+            <option value="Resultado">Resultado</option>
+            <option value="Goles">Goles</option>
+            <option value="Anotan">Ambos anotan</option>
+            <option value="Tiempos">Primer / segundo tiempo</option>
+            <option value="Momento">Momento del gol</option>
+            <option value="Córners">Córners</option>
+            <option value="Tarjetas">Tarjetas</option>
+            <option value="Remates">Remates</option>
+          </select>
         </div>
       </div>
       <div id="bt-podium" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;margin-bottom:14px"></div>
@@ -45373,12 +45392,18 @@ function btVisible(){
       if(blob.indexOf(q) < 0) return false;
     }
     return true;
-  }).sort((a,b) => a.ts-b.ts || a.league.name.localeCompare(b.league.name));
+  }).sort((a,b) => {
+    const o = (document.getElementById('bt-orden-fx')||{}).value || 'hora';
+    if(o === 'liga') return a.league.name.localeCompare(b.league.name) || a.ts-b.ts;
+    if(o === 'pais') return a.league.country.localeCompare(b.league.country) || a.ts-b.ts;
+    return a.ts-b.ts || a.league.name.localeCompare(b.league.name);
+  });
 }
 
 function btRenderCards(){
   btBuildLeagueSelect();
   const list = btVisible();
+  btResumen(list);
   const cnt = document.getElementById('bt-count');
   if(cnt){
     const fuera = BT_FIX.length - list.length;
@@ -45441,6 +45466,37 @@ function btRenderCards(){
   });
   document.getElementById('bt-cards').innerHTML = h;
   btUpdCost();
+}
+
+// v276 · Punto 45: qué salió de la búsqueda, en números.
+function btResumen(list){
+  const box = document.getElementById('bt-resumen');
+  if(!box) return;
+  if(!list.length){ box.style.display = 'none'; return; }
+  const ligas = {}, paises = {}, fuentes = {};
+  let analizados = 0, conCuota = 0;
+  list.forEach(f => {
+    ligas[f.league.id] = 1;
+    paises[f.league.country] = 1;
+    if(f.src) fuentes[f.src] = (fuentes[f.src] || 0) + 1;
+    const a = BT_ANA.find(x => String(x.f.id) === String(f.id));
+    if(a){ analizados++; if(a.od && a.od.n) conCuota++; }
+  });
+  let valor = 0;
+  BT_ANA.forEach((r,mi) => r.MK.forEach((m,idx) => {
+    const o = btOddOf(mi,idx);
+    if(o.odd && m.p*o.odd - 1 > 0.02) valor++;
+  }));
+  const kpi = (t, v, c) => '<div style="border:1px solid var(--border);border-radius:9px;padding:10px 12px;background:var(--bg2)">' +
+    '<div style="font-size:9.5px;color:var(--text4);text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px">' + t + '</div>' +
+    '<div style="font-size:20px;font-weight:800;line-height:1;color:' + (c||'var(--text)') + '">' + v + '</div></div>';
+  box.style.display = 'grid';
+  box.innerHTML = kpi('Partidos', list.length) +
+    kpi('Competiciones', Object.keys(ligas).length) +
+    kpi('Países', Object.keys(paises).length) +
+    kpi('Analizados', analizados, analizados ? 'var(--green)' : 'var(--text4)') +
+    kpi('Con cuotas', conCuota, conCuota ? 'var(--green)' : 'var(--text4)') +
+    kpi('Con valor +2%', valor, valor ? 'var(--green)' : 'var(--text4)');
 }
 
 function btFav(id){
@@ -45659,6 +45715,8 @@ function btAnalyzeOne(f, conOdds){
                 odds: (ro && ro.ok) ? (ro.bookmakers||[]) : [], missing: [] };
     const D = btBuildModel(f, r.home, r.away, liga.lg);
     if(!D) return { err:'estos equipos no tienen ningún partido jugado cargado en la temporada' };
+    // Datos crudos de cada equipo, para poder compararlos en el análisis.
+    D.datosH = tH; D.datosA = tA;
     D.calidadLiga = liga.calidad || 'alta';
     D.splitReal = (liga.split !== false);
     D.origen = (liga.intentos && liga.intentos.length) ? liga.intentos[liga.intentos.length-1] : 'tabla';
@@ -45742,7 +45800,7 @@ function btBuildModel(f, sh, sa, lgReal){
     m: btMatrix(lh,la),
     cTot: pre.c*(1 + .05*(lh+la-lgTotal)/Math.max(lgTotal,1)),
     kTot:kTot, fTot:pre.f, oTot:pre.o, sTot:pre.s, tTot:pre.t, pPen:pre.p, pRed:pre.r,
-    obs: Math.min(pH,pA), formH: sh.form||'', formA: sa.form||'',
+    obs: Math.min(pH,pA), formH: sh.form||'', formA: sa.form||'', lgTotal: lgTotal,
     datos: { goles:true, tarjetas:false, corners:false, remates:false },
     respaldo: usoRespaldo
   };
@@ -46037,8 +46095,19 @@ function btCargaRapida(mi){
     '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:10px">' +
       '<strong style="font-size:12px">⚡ Carga rápida de cuotas</strong>' +
       '<span style="font-size:10.5px;color:var(--text4)">Copiá los números de Betano · se recalcula solo</span>' +
-      '<button class="btn btn-ghost btn-xs" style="margin-left:auto" onclick="btBorrarCuotas(' + mi + ',event)">Borrar cuotas</button>' +
-    '</div>';
+      '<button class="btn btn-ghost btn-xs" onclick="btPegarCuotas(' + mi + ',event)" style="margin-left:auto">📋 Pegar varias</button>' +
+      '<button class="btn btn-ghost btn-xs" onclick="btBorrarCuotas(' + mi + ',event)">Borrar cuotas</button>' +
+    '</div>' +
+    '<div id="bt-pegar-' + mi + '" style="display:none;margin-bottom:12px">' +
+      '<div style="font-size:11.5px;color:var(--text3);margin-bottom:6px">' +
+        'Pegá las cuotas de Betano en orden, una por línea o separadas por espacios. ' +
+        'Se asignan a: ' + BT_RAPIDOS.map(b => b.items.map(i => i[1]).join('/')).join(' · ') + '</div>' +
+      '<textarea id="bt-pegar-txt-' + mi + '" rows="3" placeholder="2.42 2.82 3.50&#10;1.32 1.30 1.66" ' +
+        'style="width:100%;font-size:13px;padding:8px 10px;font-family:ui-monospace,monospace"></textarea>' +
+      '<div style="display:flex;gap:8px;margin-top:7px">' +
+        '<button class="btn btn-primary btn-xs" onclick="btAplicarPegado(' + mi + ',event)">Asignar en orden</button>' +
+        '<button class="btn btn-ghost btn-xs" onclick="btPegarCuotas(' + mi + ',event)">Cancelar</button>' +
+      '</div></div>';
 
   BT_RAPIDOS.forEach(bloque => {
     const campos = bloque.items.map(it => {
@@ -46067,11 +46136,171 @@ function btCargaRapida(mi){
     'Debajo de cada campo aparece el valor: verde si esa cuota paga más de lo que estima el modelo.</div></div>';
 }
 
+// v276 · Puntos 68 y 69: cargar varias cuotas de una sola vez.
+function btPegarCuotas(mi, ev){
+  if(ev) ev.stopPropagation();
+  const c = document.getElementById('bt-pegar-' + mi);
+  if(c) c.style.display = (c.style.display === 'none' ? 'block' : 'none');
+}
+function btAplicarPegado(mi, ev){
+  if(ev) ev.stopPropagation();
+  const ta = document.getElementById('bt-pegar-txt-' + mi);
+  if(!ta) return;
+  // Se acepta cualquier separador: saltos de línea, espacios, tabulaciones o
+  // comas. Sólo se toman los números que puedan ser una cuota (mayores a 1).
+  const nums = (ta.value.match(/\d+[.,]\d+|\d+/g) || [])
+    .map(x => parseFloat(String(x).replace(',', '.')))
+    .filter(x => isFinite(x) && x > 1 && x < 1000);
+  if(!nums.length){ ta.value = ''; return; }
+
+  const r = BT_ANA[mi];
+  const destinos = [];
+  BT_RAPIDOS.forEach(b => b.items.forEach(it => {
+    const idx = btIdxPorOid(r, it[0]);
+    if(idx >= 0) destinos.push(idx);
+  }));
+
+  let puestas = 0;
+  nums.forEach((v, i) => { if(i < destinos.length){ BT_MANUAL[mi + ':' + destinos[i]] = v; puestas++; } });
+  ta.value = '';
+  document.getElementById('bt-pegar-' + mi).style.display = 'none';
+  btRenderTop(); btRenderMatchBody(mi); btCombo();
+  btSetStatus('✅ Se asignaron ' + puestas + ' cuota' + (puestas === 1 ? '' : 's') +
+    (nums.length > destinos.length ? ' · sobraron ' + (nums.length - destinos.length) : ''));
+}
+
 function btBorrarCuotas(mi, ev){
   if(ev) ev.stopPropagation();
   const r = BT_ANA[mi];
   for(let i=0;i<r.MK.length;i++) delete BT_MANUAL[mi+':'+i];
   btRenderTop(); btRenderMatchBody(mi); btCombo();
+}
+
+/* ── v276 · comparativa de los dos equipos ────────────────────────────────
+   Muestra lado a lado lo que realmente tenemos de cada uno. Lo que las fuentes
+   gratuitas no entregan (tiros al arco, faltas, atajadas, posesión, xG) figura
+   como "sin datos" en vez de inventarse. */
+function btComparativa(mi){
+  const r = BT_ANA[mi], D = r.D;
+  const H = D.datosH, A = D.datosA;
+  if(!H || !A) return '';
+
+  const prom = (tot, pj) => pj > 0 ? (tot / pj) : null;
+  const num  = v => v === null ? '<span style="color:var(--text4);font-size:12px">sin datos</span>' : v.toFixed(2);
+
+  // dir: 1 = mejor el mas alto · -1 = mejor el mas bajo · 0 = sin comparacion
+  const filas = [
+    ['Partidos jugados',           H.hp + H.ap,                      A.hp + A.ap,                      0],
+    ['Goles a favor por partido',  prom(H.hgf + H.agf, H.hp + H.ap), prom(A.hgf + A.agf, A.hp + A.ap), 1],
+    ['Goles en contra por partido',prom(H.hga + H.aga, H.hp + H.ap), prom(A.hga + A.aga, A.hp + A.ap), -1],
+    ['Goles a favor de LOCAL',     prom(H.hgf, H.hp),                prom(A.hgf, A.hp),                1],
+    ['Goles en contra de LOCAL',   prom(H.hga, H.hp),                prom(A.hga, A.hp),                -1],
+    ['Goles a favor de VISITA',    prom(H.agf, H.ap),                prom(A.agf, A.ap),                1],
+    ['Goles en contra de VISITA',  prom(H.aga, H.ap),                prom(A.aga, A.ap),                -1],
+    ['Goles esperados en ESTE partido', D.lh,                        D.la,                             1]
+  ];
+
+  let out = '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px 18px;margin:14px 0">' +
+    '<div style="display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;margin-bottom:14px">' +
+      '<strong style="font-size:14px">\u{1F4CA} Comparativa de los equipos</strong>' +
+      '<span style="font-size:11.5px;color:var(--text4);margin-left:auto">En verde, el mejor de cada fila</span></div>' +
+    '<table style="width:100%;border-collapse:collapse">' +
+    '<tr><th></th>' +
+      '<th style="padding:0 0 12px">' +
+        '<div style="display:flex;align-items:center;justify-content:center;gap:7px">' +
+        btTeamVisual(r.f.home, r.f.league.country, 24) +
+        '<span style="font-size:14px;font-weight:700">' + btEsc(D.nH) + '</span></div>' +
+        '<div style="font-size:10px;color:var(--text4);font-weight:400;margin-top:3px">LOCAL</div></th>' +
+      '<th style="padding:0 0 12px">' +
+        '<div style="display:flex;align-items:center;justify-content:center;gap:7px">' +
+        btTeamVisual(r.f.away, r.f.league.country, 24) +
+        '<span style="font-size:14px;font-weight:700">' + btEsc(D.nA) + '</span></div>' +
+        '<div style="font-size:10px;color:var(--text4);font-weight:400;margin-top:3px">VISITANTE</div></th></tr>';
+
+  filas.forEach(f => {
+    const a = f[1], b = f[2], dir = f[3];
+    let ca = 'var(--text)', cb = 'var(--text)';
+    if(dir !== 0 && a !== null && b !== null && Math.abs(a - b) > 0.01){
+      const mejorA = dir > 0 ? (a > b) : (a < b);
+      ca = mejorA ? 'var(--green)' : 'var(--text3)';
+      cb = mejorA ? 'var(--text3)' : 'var(--green)';
+    }
+    const celda = (v, c) => dir === 0
+      ? '<span style="font-size:17px;font-weight:700">' + v + '</span>'
+      : '<span style="font-size:17px;font-weight:700;color:' + c + '">' + num(v) + '</span>';
+    out += '<tr style="border-top:1px solid var(--border)">' +
+      '<td style="padding:10px 0;font-size:12.5px;color:var(--text2)">' + f[0] + '</td>' +
+      '<td style="text-align:center;padding:10px 0">' + celda(a, ca) + '</td>' +
+      '<td style="text-align:center;padding:10px 0">' + celda(b, cb) + '</td></tr>';
+  });
+  out += '</table>';
+
+  out += '<div style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--border)">' +
+    '<div style="font-size:10.5px;color:var(--text4);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">Sin datos por equipo</div>' +
+    '<div style="display:flex;gap:7px;flex-wrap:wrap">' +
+    ['Tiros al arco','Faltas','Atajadas','Posesion','Corners','Tarjetas','xG','Offsides'].map(x =>
+      '<span style="font-size:11px;color:var(--text4);border:1px dashed var(--border);border-radius:14px;padding:3px 10px">' +
+      x + ' \u2014</span>').join('') + '</div>' +
+    '<div style="font-size:11px;color:var(--text4);margin-top:9px;line-height:1.6">' +
+    'Ninguna de las fuentes gratuitas conectadas entrega estos datos por equipo. Los mercados de corners, ' +
+    'tarjetas y remates se calculan con promedios de la liga y estan marcados en rojo.</div></div></div>';
+  return out;
+}
+
+/* v276 · Punto 57: por que el modelo dice lo que dice. Cada linea sale de un
+   numero real del dataset; si el dato no existe, la linea no aparece. */
+function btPorQue(mi, idx){
+  const r = BT_ANA[mi], D = r.D, m = r.MK[idx];
+  const razones = [];
+  const tot = D.lh + D.la;
+
+  razones.push('Goles esperados: <strong>' + btEsc(D.nH) + ' ' + D.lh.toFixed(2) +
+               '</strong> y <strong>' + btEsc(D.nA) + ' ' + D.la.toFixed(2) +
+               '</strong>, total <strong>' + tot.toFixed(2) + '</strong>.');
+
+  if(D.lgTotal) razones.push('El promedio de la competicion es <strong>' + D.lgTotal.toFixed(2) +
+    '</strong> goles por partido: este cruce se proyecta ' +
+    (tot > D.lgTotal ? 'por encima' : 'por debajo') + ' de lo normal en su liga.');
+
+  if(D.formH){
+    const g = (D.formH.slice(-5).match(/W/g) || []).length;
+    razones.push(btEsc(D.nH) + ' ganó <strong>' + g + ' de sus últimos ' + D.formH.slice(-5).length + '</strong>.');
+  }
+  if(D.formA){
+    const g = (D.formA.slice(-5).match(/W/g) || []).length;
+    razones.push(btEsc(D.nA) + ' ganó <strong>' + g + ' de sus últimos ' + D.formA.slice(-5).length + '</strong>.');
+  }
+
+  razones.push('Se simuló el partido <strong>40.000 veces</strong> y este mercado se cumplió en el <strong>' +
+    btPct(m.p) + '%</strong> de ellas. De ahí sale la cuota justa <strong>' + btFair(m.p) + '</strong>.');
+
+  if(m.src === 'liga') razones.push('<span style="color:var(--red)">Ojo: este mercado se estima con promedios de la liga, ' +
+    'no con datos de estos dos equipos.</span>');
+  else if(m.src === 'mixto') razones.push('<span style="color:var(--amber)">Mezcla datos del equipo con promedios de liga.</span>');
+
+  if(D.obs < 5) razones.push('<span style="color:var(--amber)">Los equipos llevan pocos partidos (' + D.obs +
+    '), así que los promedios todavía son inestables.</span>');
+
+  const mc = btMarketCheck(r);
+  if(mc) razones.push('Las casas dan ' + btPct(mc.m1) + '% / ' + btPct(mc.mx) + '% / ' + btPct(mc.m2) +
+    '% en el 1X2 y el modelo ' + btPct(mc.p1) + '% / ' + btPct(mc.px) + '% / ' + btPct(mc.p2) + '%: ' +
+    (mc.gap < 0.15 ? 'coinciden bastante.' : (mc.gap < 0.30 ? 'hay alguna diferencia.' : 'discrepan fuerte.')));
+
+  return razones;
+}
+
+function btVerPorQue(mi, idx, ev){
+  if(ev) ev.stopPropagation();
+  const cont = document.getElementById('bt-porque-' + mi);
+  if(!cont) return;
+  const m = BT_ANA[mi].MK[idx];
+  cont.innerHTML = '<div style="background:var(--bg2);border:1px solid var(--accent);border-radius:9px;padding:14px 16px;margin:12px 0">' +
+    '<div style="display:flex;gap:10px;align-items:baseline;margin-bottom:10px;flex-wrap:wrap">' +
+      '<strong style="font-size:13.5px">\u00BFPor qu\u00E9 ' + btEsc(m.lab) + ' da ' + btPct(m.p) + '%?</strong>' +
+      '<button class="btn btn-ghost btn-xs" style="margin-left:auto" ' +
+      'onclick="document.getElementById(\'bt-porque-' + mi + '\').innerHTML=\'\'">Cerrar</button></div>' +
+    '<ul style="margin:0;padding-left:19px;font-size:12.5px;line-height:1.9;color:var(--text2)">' +
+    btPorQue(mi, idx).map(x => '<li>' + x + '</li>').join('') + '</ul></div>';
 }
 
 /* ── ranking global ───────────────────────────────────────────────────── */
@@ -46088,7 +46317,13 @@ function btAllRows(){
   return rows;
 }
 function btRenderTop(){
-  const rows = btAllRows();
+  let rows = btAllRows();
+  // v276 · Punto 35: filtro por tipo de mercado, antes de ordenar.
+  const fmk = (document.getElementById('bt-filtro-mk')||{}).value || '';
+  if(fmk === 'solidos')      rows = rows.filter(o => o.m.src === 'real');
+  else if(fmk === 'valor')   rows = rows.filter(o => o.ev !== null && o.ev > 0.02);
+  else if(fmk)               rows = rows.filter(o => o.m.g.indexOf(fmk) === 0);
+
   let list;
   if(BT_RANK === 'ev')       list = rows.filter(o => o.ev !== null && o.m.src === 'real').sort((a,b)=>b.ev-a.ev).slice(0,25);
   else if(BT_RANK === 'prob')list = rows.slice().sort((a,b)=>b.m.p-a.m.p).slice(0,25);
@@ -46266,6 +46501,8 @@ function btRenderMatchBody(mi){
     '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text4)">' +
     '<span>🏠 local</span><span>🤝 empate</span><span>✈️ visitante</span></div></div>';
 
+  h += btComparativa(mi);
+  h += '<div id="bt-porque-' + mi + '"></div>';
   h += btCargaRapida(mi);
 
   h += '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:11px 13px;margin:12px 0">' +
@@ -46348,7 +46585,8 @@ function btRenderMatchBody(mi){
       '<th style="text-align:right;position:sticky;top:0;z-index:2;background:var(--bg2)">Justa</th>' +
       '<th style="text-align:right;width:90px;position:sticky;top:0;z-index:2;background:var(--bg2)">Cuota real</th>' +
       '<th style="text-align:right;position:sticky;top:0;z-index:2;background:var(--bg2)">Valor</th>' +
-      '<th style="text-align:center;position:sticky;top:0;z-index:2;background:var(--bg2)">Confianza</th></tr></thead><tbody>';
+      '<th style="text-align:center;position:sticky;top:0;z-index:2;background:var(--bg2)">Confianza</th>' +
+      '<th style="width:32px;position:sticky;top:0;z-index:2;background:var(--bg2)"></th></tr></thead><tbody>';
     grupos[g].forEach(o => {
       const m=o.m, idx=o.idx, key=mi+':'+idx;
       const eff = btOddOf(mi,idx);
@@ -46368,7 +46606,9 @@ function btRenderMatchBody(mi){
           'style="width:74px;padding:4px 7px;font-size:13px;text-align:right;font-weight:600" title="Cargá acá la cuota de Betano"></td>' +
         '<td style="text-align:right;font-weight:700;font-size:13.5px;color:'+evCol+'">'+evTxt+'</td>' +
         '<td style="text-align:center;font-size:11px;color:'+sem[2]+'">'+sem[0]+' '+conf+
-          '<span style="display:block;font-size:9px;color:var(--text4)">'+sem[1]+'</span>'+btBarra(conf, sem[2], 3)+'</td></tr>';
+          '<span style="display:block;font-size:9px;color:var(--text4)">'+sem[1]+'</span>'+btBarra(conf, sem[2], 3)+'</td>' +
+        '<td style="text-align:center;width:32px"><button class="btn btn-ghost btn-xs" style="padding:2px 8px" ' +
+          'onclick="btVerPorQue('+mi+','+idx+',event)" title="Por qué este porcentaje">?</button></td></tr>';
     });
     h += '</tbody></table></div>';
   });
