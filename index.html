@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v274 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v275 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1674,8 +1674,10 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <button class="btn btn-ghost btn-sm bt-day on" data-btday="0" onclick="btSetDay(0)">Hoy</button>
       <button class="btn btn-ghost btn-sm bt-day" data-btday="1" onclick="btSetDay(1)">Mañana</button>
       <button class="btn btn-ghost btn-sm bt-day" data-btday="2" onclick="btSetDay(2)">Pasado</button>
-      <input type="date" id="bt-date" style="width:auto;font-size:12px;padding:7px 9px" aria-label="Desde">
-      <select id="bt-dias" style="width:auto;font-size:12px;padding:7px 9px" title="Cuántos días traer de una sola vez">
+      <input type="date" id="bt-date" onchange="btSyncHasta()" style="width:auto;font-size:13px;padding:7px 9px" aria-label="Desde">
+      <span style="font-size:12px;color:var(--text3)">a</span>
+      <input type="date" id="bt-date-to" onchange="btRenderCards()" style="width:auto;font-size:13px;padding:7px 9px" aria-label="Hasta">
+      <select id="bt-dias" onchange="btSyncHasta()" style="width:auto;font-size:13px;padding:7px 9px" title="Cuántos días traer de una sola vez">
         <option value="1">1 día</option>
         <option value="3">3 días</option>
         <option value="5">5 días</option>
@@ -1693,12 +1695,18 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <option value="top">Sólo principales</option>
         <option value="all">Todas (incluye juveniles y menores)</option>
       </select>
-      <label style="display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--text2);margin:0;cursor:pointer">
-        Desde <input type="time" id="bt-f-from" onchange="btRenderCards()" style="width:auto;font-size:11.5px;padding:5px 7px">
+      <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text2);margin:0;cursor:pointer">
+        Desde <input type="time" id="bt-f-from" onchange="btRenderCards()" style="width:auto;font-size:12px;padding:5px 7px">
       </label>
-      <label style="display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--text2);margin:0;cursor:pointer">
-        Hasta <input type="time" id="bt-f-to" onchange="btRenderCards()" style="width:auto;font-size:11.5px;padding:5px 7px">
+      <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text2);margin:0;cursor:pointer">
+        Hasta <input type="time" id="bt-f-to" onchange="btRenderCards()" style="width:auto;font-size:12px;padding:5px 7px">
       </label>
+      <span style="display:flex;gap:4px">
+        <button class="btn btn-ghost btn-xs" onclick="btHorario('12:00','15:00')" title="12:00 a 15:00">🌅 Mañana</button>
+        <button class="btn btn-ghost btn-xs" onclick="btHorario('15:00','19:00')" title="15:00 a 19:00">🌇 Tarde</button>
+        <button class="btn btn-ghost btn-xs" onclick="btHorario('19:00','23:59')" title="19:00 a 23:59">🌙 Noche</button>
+        <button class="btn btn-ghost btn-xs" onclick="btHorario('','')">⚽ Todo</button>
+      </span>
       <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text2);margin:0;cursor:pointer">
         <input type="checkbox" id="bt-f-fav" onchange="btRenderCards()" style="width:14px;height:14px;cursor:pointer"> Sólo favoritas ⭐
       </label>
@@ -45021,10 +45029,16 @@ function btPct(p){ return (p*100).toFixed(1); }
 function btFair(p){ return p>0.0004?(1/p).toFixed(2):'—'; }
 function btNum(v){ const x=parseFloat(v); return isFinite(x)?x:null; }
 function btSleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
-function btIsoDay(off){ const d=new Date(); d.setDate(d.getDate()+off);
-  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
-function btHHMM(ts){ const d=new Date(ts*1000);
-  return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+function btIsoDay(off){
+  const d = new Date(); d.setDate(d.getDate() + off);
+  try {
+    const f = new Intl.DateTimeFormat('en-CA', { timeZone: BT_TZ, year:'numeric', month:'2-digit', day:'2-digit' });
+    return f.format(d);   // en-CA da directamente AAAA-MM-DD
+  } catch(e){
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  }
+}
+function btHHMM(ts){ return btHoraLocal(ts) || '—'; }
 function btEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function btNorm(s){ return String(s||'').toLowerCase()
   .replace(/[áàä]/g,'a').replace(/[éèë]/g,'e').replace(/[íìï]/g,'i')
@@ -45061,28 +45075,76 @@ function btTema(pais){ return BT_TEMA[pais] || BT_TEMA._; }
 
 /* Escudo real si la API lo trae, bandera del país si no, y punto de color
    como último recurso. Nunca se inventa un escudo. */
-function btTeamVisual(team, pais){
+function btTeamVisual(team, pais, px){
   const t = btTema(pais);
+  const s = px || 18;
   if(team && team.logo){
     return '<img src="' + btEsc(team.logo) + '" alt="" loading="lazy" ' +
            'onerror="this.replaceWith(document.createRange().createContextualFragment(\'<span style=&quot;font-size:13px&quot;>' + t.f + '</span>\'))" ' +
-           'style="width:18px;height:18px;object-fit:contain;flex:none">';
+           'style="width:'+s+'px;height:'+s+'px;object-fit:contain;flex:none;vertical-align:middle">';
   }
-  if(t.f !== BT_TEMA._.f) return '<span style="font-size:13px;flex:none">' + t.f + '</span>';
-  return '<span style="width:9px;height:9px;border-radius:50%;background:' + t.c + ';display:inline-block;flex:none"></span>';
+  if(t.f !== BT_TEMA._.f) return '<span style="font-size:'+Math.round(s*0.8)+'px;flex:none;line-height:1">' + t.f + '</span>';
+  return '<span style="width:'+Math.round(s*0.5)+'px;height:'+Math.round(s*0.5)+'px;border-radius:50%;background:' + t.c + ';display:inline-block;flex:none"></span>';
 }
 
-/* Fecha y hora reales del fixture. Nunca se asume "hoy". */
+/* v275 · Escudo + nombre en una sola pieza, para que el equipo se reconozca
+   igual en la ficha, en la tabla, en el análisis y en la combinada. */
+function btEquipo(team, pais, px, tam){
+  return '<span style="display:inline-flex;align-items:center;gap:5px;vertical-align:middle">' +
+         btTeamVisual(team, pais, px || 16) +
+         '<span style="font-size:' + (tam || 13) + 'px">' + btEsc(team ? team.name : '') + '</span></span>';
+}
+function btVersus(f, px, tam){
+  return btEquipo(f.home, f.league.country, px, tam) +
+         '<span style="color:var(--text4);font-size:' + ((tam||13) - 2) + 'px;margin:0 6px">vs</span>' +
+         btEquipo(f.away, f.league.country, px, tam);
+}
+
+/* v275 · Punto 9: TODO se muestra y se filtra en hora de Argentina, sin
+   depender de la zona horaria del navegador. El orden importa: primero se
+   convierte el timestamp a Argentina y RECIÉN AHÍ se compara la fecha. Hacerlo
+   al revés (filtrar en UTC y después convertir) es lo que hace que aparezcan
+   partidos del día siguiente. */
+const BT_TZ = 'America/Argentina/Buenos_Aires';
+const BT_FMT = (function(){
+  try {
+    return new Intl.DateTimeFormat('es-AR', { timeZone: BT_TZ, year:'numeric', month:'2-digit',
+      day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false });
+  } catch(e){ return null; }
+})();
+
+function btPartes(ts){
+  const d = new Date(ts * 1000);
+  if(!BT_FMT){
+    const p = x => String(x).padStart(2,'0');
+    return { d:p(d.getDate()), m:p(d.getMonth()+1), y:String(d.getFullYear()), H:p(d.getHours()), M:p(d.getMinutes()) };
+  }
+  const o = {};
+  BT_FMT.formatToParts(d).forEach(x => { o[x.type] = x.value; });
+  return { d:o.day, m:o.month, y:o.year, H:(o.hour === '24' ? '00' : o.hour), M:o.minute };
+}
+// Día del partido en Argentina, en formato AAAA-MM-DD. Es la base del filtro.
+function btDiaLocal(ts){
+  if(!ts) return '';
+  const p = btPartes(ts);
+  return p.y + '-' + p.m + '-' + p.d;
+}
+function btHoraLocal(ts){
+  if(!ts) return '';
+  const p = btPartes(ts);
+  return p.H + ':' + p.M;
+}
 function btFechaHora(ts){
   if(!ts) return '—';
-  const d = new Date(ts * 1000);
-  const p = x => String(x).padStart(2,'0');
-  return p(d.getDate()) + '/' + p(d.getMonth()+1) + '/' + d.getFullYear() + ' · ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  const p = btPartes(ts);
+  const hoy = btIsoDay(0), dia = p.y + '-' + p.m + '-' + p.d;
+  const etiqueta = dia === hoy ? 'HOY · ' : (dia === btIsoDay(1) ? 'MAÑANA · ' : '');
+  return etiqueta + p.d + '/' + p.m + '/' + p.y + ' · ' + p.H + ':' + p.M;
 }
 function btSoloFecha(ts){
   if(!ts) return '';
-  const d = new Date(ts * 1000), p = x => String(x).padStart(2,'0');
-  return p(d.getDate()) + '/' + p(d.getMonth()+1) + '/' + d.getFullYear();
+  const p = btPartes(ts);
+  return p.d + '/' + p.m + '/' + p.y;
 }
 
 /* Barra horizontal simple, reutilizable. */
@@ -45156,6 +45218,25 @@ function btSetDay(n){
   document.querySelectorAll('.bt-day').forEach(b => b.classList.toggle('on', +b.dataset.btday === n));
   const d = document.getElementById('bt-date');
   if(d) d.value = btIsoDay(n);
+  btSyncHasta();
+}
+// v275 · "Hasta" se calcula desde el día elegido y la ventana, pero el usuario
+// puede pisarlo a mano para armar un rango propio.
+function btSyncHasta(){
+  const desde = (document.getElementById('bt-date')||{}).value;
+  const dias = parseInt((document.getElementById('bt-dias')||{}).value || '1', 10);
+  const hasta = document.getElementById('bt-date-to');
+  if(!desde || !hasta) return;
+  const d = new Date(desde + 'T12:00:00');
+  d.setDate(d.getDate() + (dias - 1));
+  hasta.value = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  btRenderCards();
+}
+function btHorario(a, b){
+  const f = document.getElementById('bt-f-from'), t = document.getElementById('bt-f-to');
+  if(f) f.value = a;
+  if(t) t.value = b;
+  btRenderCards();
 }
 function btSetRank(m){
   BT_RANK = m;
@@ -45170,7 +45251,13 @@ function btScan(){
   btn.disabled = true;
   btSetStatus('<span class="spin"></span> Buscando partidos del ' + date + '…');
 
-  const dias = (document.getElementById('bt-dias')||{}).value || '1';
+  // La ventana que se le pide al Worker sale del rango real elegido.
+  const hastaVal = (document.getElementById('bt-date-to')||{}).value;
+  let dias = parseInt((document.getElementById('bt-dias')||{}).value || '1', 10);
+  if(hastaVal && date){
+    const dif = Math.round((new Date(hastaVal+'T12:00:00') - new Date(date+'T12:00:00')) / 86400000) + 1;
+    if(dif > 0) dias = Math.min(dif, 10);
+  }
   btApi('/fixtures?date=' + date + '&src=' + BT_SRC + '&dias=' + dias).then(j => {
     btn.disabled = false;
     if(!j || !j.ok){
@@ -45260,6 +45347,8 @@ function btVisible(){
   const desde = (document.getElementById('bt-f-from')||{}).value || '';
   const hasta = (document.getElementById('bt-f-to')||{}).value || '';
   const soloFav = (document.getElementById('bt-f-fav')||{}).checked;
+  const diaDesde = (document.getElementById('bt-date')||{}).value || '';
+  const diaHasta = (document.getElementById('bt-date-to')||{}).value || '';
 
   return BT_FIX.filter(f => {
     const t = btTier(f.league);
@@ -45268,8 +45357,14 @@ function btVisible(){
     if(pais && f.league.country !== pais) return false;
     if(liga && String(f.league.id) !== String(liga)) return false;
     if(soloFav && !BT_FAV[f.league.id]) return false;
+    // v275 · Puntos 8, 52 y 99: el filtro del usuario manda por encima del de
+    // la API. Aunque la fuente devuelva días de más, acá se recortan. Todo se
+    // compara con la fecha y hora YA convertidas a Argentina.
+    const diaFx = btDiaLocal(f.ts);
+    if(diaDesde && diaFx && diaFx < diaDesde) return false;
+    if(diaHasta && diaFx && diaFx > diaHasta) return false;
     if(desde || hasta){
-      const h = btHHMM(f.ts);
+      const h = btHoraLocal(f.ts);
       if(desde && h < desde) return false;
       if(hasta && h > hasta) return false;
     }
@@ -45285,7 +45380,11 @@ function btRenderCards(){
   btBuildLeagueSelect();
   const list = btVisible();
   const cnt = document.getElementById('bt-count');
-  if(cnt) cnt.textContent = list.length + ' de ' + BT_FIX.length + ' partidos';
+  if(cnt){
+    const fuera = BT_FIX.length - list.length;
+    cnt.innerHTML = '<strong>' + list.length + '</strong> de ' + BT_FIX.length + ' partidos' +
+      (fuera ? ' <span style="color:var(--text4)">· ' + fuera + ' fuera del filtro</span>' : '');
+  }
 
   if(!list.length){
     document.getElementById('bt-cards').innerHTML =
@@ -46003,10 +46102,10 @@ function btRenderTop(){
     const evCol = o.ev===null ? 'var(--text4)' : (o.ev>.005?'var(--green)':(o.ev<-.005?'var(--red)':'var(--text3)'));
     return '<div style="border:1px solid var(--border);border-left:3px solid '+t.c+';border-radius:10px;padding:13px;background:var(--bg2)">' +
       '<div style="font-size:10.5px;color:var(--text4);margin-bottom:6px">' + medallas[i] + ' Oportunidad #' + (i+1) + '</div>' +
-      '<div style="font-size:14px;font-weight:700;margin-bottom:3px;line-height:1.3">' + btEsc(o.m.lab) + ' ' + btSrcDot(o.m.src) + '</div>' +
-      '<div style="font-size:11px;color:var(--text3);margin-bottom:8px">' + t.f + ' ' + btEsc(o.r.f.home.name) + ' vs ' + btEsc(o.r.f.away.name) +
-        '<br><span style="color:var(--text4);font-size:10px">📅 ' + btFechaHora(o.r.f.ts) + '</span></div>' +
-      '<div style="font-size:24px;font-weight:800;line-height:1">' + btPct(o.m.p) + '%</div>' +
+      '<div style="font-size:15.5px;font-weight:700;margin-bottom:4px;line-height:1.3">' + btEsc(o.m.lab) + ' ' + btSrcDot(o.m.src) + '</div>' +
+      '<div style="font-size:12.5px;color:var(--text2);margin-bottom:9px">' + btVersus(o.r.f, 16, 12.5) +
+        '<br><span style="color:var(--text4);font-size:11px">📅 ' + btFechaHora(o.r.f.ts) + '</span></div>' +
+      '<div style="font-size:30px;font-weight:800;line-height:1">' + btPct(o.m.p) + '%</div>' +
       btBarra(o.m.p*100, sem[2], 6) +
       '<div style="font-size:11px;color:' + sem[2] + ';margin-top:6px">' + sem[0] + ' ' + sem[1] + ' · confianza ' + o.conf + '/100</div>' +
       '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:9px;padding-top:9px;border-top:1px solid var(--border)">' +
@@ -46048,16 +46147,16 @@ function btRenderTop(){
     h += '<tr style="'+(marcada ? 'background:var(--accent-g)' : '')+'">' +
       '<td><input type="checkbox" data-btc="'+key+'"'+(marcada?' checked':'')+
       ' onchange="btPick(\''+key+'\',this.checked)" style="width:14px;height:14px;cursor:pointer"></td>' +
-      '<td>'+btEsc(o.m.lab)+' '+btSrcDot(o.m.src)+susp+'</td>' +
-      '<td style="font-size:11px;color:var(--text3);white-space:nowrap">' +
-        '<span style="color:'+tema.c+'">'+tema.f+'</span> '+btEsc(o.r.f.home.name)+' v '+btEsc(o.r.f.away.name)+
-        '<br><span style="color:var(--text4);font-size:10px">'+btSoloFecha(o.r.f.ts)+'</span></td>' +
-      '<td style="text-align:right;font-weight:700">'+btPct(o.m.p)+'%'+btBarra(o.m.p*100, sem[2], 3)+'</td>' +
-      '<td style="text-align:right;color:var(--text3)">'+btFair(o.m.p)+'</td>' +
+      '<td style="font-size:13.5px">'+btEsc(o.m.lab)+' '+btSrcDot(o.m.src)+susp+'</td>' +
+      '<td style="font-size:12.5px;color:var(--text2);white-space:nowrap">' +
+        btVersus(o.r.f, 15, 12.5) +
+        '<br><span style="color:var(--text4);font-size:11px">'+btSoloFecha(o.r.f.ts)+' · '+btHoraLocal(o.r.f.ts)+'</span></td>' +
+      '<td style="text-align:right;font-weight:700;font-size:14.5px">'+btPct(o.m.p)+'%'+btBarra(o.m.p*100, sem[2], 3)+'</td>' +
+      '<td style="text-align:right;color:var(--text3);font-size:13px">'+btFair(o.m.p)+'</td>' +
       '<td style="text-align:right"><input type="number" step="0.01" min="1" value="'+(o.odd?o.odd.toFixed(2):'')+
         '" placeholder="—" onchange="btSetManual('+o.mi+','+o.idx+',this.value)" ' +
-        'style="width:66px;padding:3px 6px;font-size:11.5px;text-align:right" title="Cuota de Betano: escribila y el valor se recalcula"></td>' +
-      '<td style="text-align:right;font-weight:700;color:'+evCol+'">'+evTxt+'</td>' +
+        'style="width:72px;padding:4px 7px;font-size:13px;text-align:right;font-weight:600" title="Cuota de Betano: escribila y el valor se recalcula"></td>' +
+      '<td style="text-align:right;font-weight:700;font-size:14px;color:'+evCol+'">'+evTxt+'</td>' +
       '<td style="text-align:center;font-size:11px;color:'+sem[2]+'">'+sem[0]+' '+o.conf+btBarra(o.conf, sem[2], 3)+'</td></tr>';
   });
   document.getElementById('bt-top').innerHTML = h + '</tbody></table></div>';
@@ -46082,13 +46181,13 @@ function btRenderMatches(){
     const flag = (mc && mc.gap > 0.30) ? ' <span style="color:var(--red)" title="El modelo discrepa fuerte con el mercado">◆</span>' : '';
     h += '<div style="border:1px solid var(--border);border-radius:9px;margin-bottom:8px;overflow:hidden">' +
       '<div onclick="btToggleMatch('+mi+')" style="display:flex;gap:10px;align-items:center;padding:11px 13px;cursor:pointer;flex-wrap:wrap;border-left:3px solid '+btTema(r.f.league.country).c+'">' +
-      '<span style="font-size:14px">'+btTema(r.f.league.country).f+'</span>' +
-      '<span style="font-weight:600;font-size:13.5px;flex:1;min-width:170px">'+btEsc(r.f.home.name)+' vs '+btEsc(r.f.away.name)+flag+
-        '<br><span style="font-size:10.5px;color:var(--text4);font-weight:400">📅 '+btFechaHora(r.f.ts)+' · '+btEsc(r.f.league.name)+'</span></span>' +
-      '<span style="font-size:10.5px;color:var(--text3);white-space:nowrap">' +
-        '<span style="color:var(--text4)">🏠</span> <strong style="color:var(--text)">'+btPct(r.MK[0].p)+'%</strong> · ' +
-        '<span style="color:var(--text4)">🤝</span> '+btPct(r.MK[1].p)+'% · ' +
-        '<span style="color:var(--text4)">✈️</span> <strong style="color:var(--text)">'+btPct(r.MK[2].p)+'%</strong></span></div>' +
+      '<span style="font-size:16px">'+btTema(r.f.league.country).f+'</span>' +
+      '<span style="font-weight:600;flex:1;min-width:200px">' + btVersus(r.f, 20, 15) + flag +
+        '<br><span style="font-size:11.5px;color:var(--text4);font-weight:400">📅 '+btFechaHora(r.f.ts)+' · '+btEsc(r.f.league.name)+'</span></span>' +
+      '<span style="font-size:12px;color:var(--text3);white-space:nowrap">' +
+        '🏠 <strong style="color:var(--text);font-size:14px">'+btPct(r.MK[0].p)+'%</strong> · ' +
+        '🤝 <strong style="font-size:13px">'+btPct(r.MK[1].p)+'%</strong> · ' +
+        '✈️ <strong style="color:var(--text);font-size:14px">'+btPct(r.MK[2].p)+'%</strong></span></div>' +
       '<div id="bt-mb'+mi+'" style="display:none;padding:0 13px 13px;border-top:1px solid var(--border)"></div></div>';
   });
   document.getElementById('bt-matches').innerHTML = h;
@@ -46136,19 +46235,36 @@ function btRenderMatchBody(mi){
     ['🤝 Empate',              pX, 'var(--text3)'],
     ['✈️ Gana ' + btEsc(D.nA), p2, '#7A6BC4']
   ];
-  let h = '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin:12px 0">' +
-    '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:10px">' +
-      '<strong style="font-size:12px">⚽ Resultado del partido</strong>' +
-      '<span style="font-size:11px;color:var(--text4)">📅 ' + btFechaHora(r.f.ts) + '</span></div>';
-  filas1x2.forEach(x => {
-    h += '<div style="display:flex;gap:10px;align-items:center;margin-bottom:7px">' +
-      '<span style="font-size:12.5px;flex:1;min-width:130px">' + x[0] + '</span>' +
-      '<span style="flex:2;min-width:110px">' + btBarra(x[1]*100, x[2], 9) + '</span>' +
-      '<span style="font-size:13.5px;font-weight:700;min-width:52px;text-align:right">' + btPct(x[1]) + '%</span>' +
-      '<span style="font-size:10.5px;color:var(--text4);min-width:64px;text-align:right">justa ' + btFair(x[1]) + '</span>' +
+  // v275 · Ocupa todo el ancho de la ficha y con números grandes: es el dato
+  // que más se mira, no tenía sentido dejarlo chico en una esquina.
+  const tri = [
+    [btEsc(D.nH), p1, 'var(--accent)', r.f.home],
+    ['Empate',    pX, 'var(--text3)',  null],
+    [btEsc(D.nA), p2, '#7A6BC4',       r.f.away]
+  ];
+  let h = '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px 18px;margin:14px 0">' +
+    '<div style="display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;margin-bottom:14px">' +
+      '<strong style="font-size:14px">⚽ Resultado del partido</strong>' +
+      '<span style="font-size:12px;color:var(--text3)">📅 ' + btFechaHora(r.f.ts) + '</span>' +
+      '<span style="font-size:11.5px;color:var(--text4);margin-left:auto">Probabilidad 1X2 · cuota justa debajo</span></div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px">';
+  tri.forEach(x => {
+    h += '<div style="text-align:center;padding:14px 10px;border:1px solid var(--border);border-radius:9px;background:var(--bg)">' +
+      '<div style="display:flex;align-items:center;justify-content:center;gap:6px;font-size:13px;color:var(--text2);margin-bottom:8px;min-height:24px">' +
+        (x[3] ? btTeamVisual(x[3], r.f.league.country, 22) : '<span style="font-size:18px">🤝</span>') +
+        '<span style="font-weight:600">' + x[0] + '</span></div>' +
+      '<div style="font-size:32px;font-weight:800;line-height:1;color:' + x[2] + '">' + btPct(x[1]) + '%</div>' +
+      '<div style="margin:9px 0 7px">' + btBarra(x[1]*100, x[2], 8) + '</div>' +
+      '<div style="font-size:12px;color:var(--text3)">Cuota justa <strong style="color:var(--text);font-size:14px">' + btFair(x[1]) + '</strong></div>' +
       '</div>';
   });
-  h += '</div>';
+  h += '</div>' +
+    '<div style="display:flex;height:12px;border-radius:6px;overflow:hidden;margin-bottom:6px">' +
+    '<span style="width:'+(p1*100).toFixed(1)+'%;background:var(--accent)"></span>' +
+    '<span style="width:'+(pX*100).toFixed(1)+'%;background:var(--text3)"></span>' +
+    '<span style="width:'+(p2*100).toFixed(1)+'%;background:#7A6BC4"></span></div>' +
+    '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text4)">' +
+    '<span>🏠 local</span><span>🤝 empate</span><span>✈️ visitante</span></div></div>';
 
   h += btCargaRapida(mi);
 
@@ -46177,11 +46293,34 @@ function btRenderMatchBody(mi){
   }
   h += '</div>';
 
-  h += '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin:10px 0;font-size:11.5px;color:var(--text3);line-height:1.65">' +
-    'Goles esperados: <strong style="color:var(--text)">'+btEsc(D.nH)+' '+D.lh.toFixed(2)+'</strong> · <strong style="color:var(--text)">'+btEsc(D.nA)+' '+D.la.toFixed(2)+'</strong>. ' +
-    'Tarjetas '+D.kTot.toFixed(1)+' · córners '+D.cTot.toFixed(1)+'. ' +
-    'Forma: '+btEsc(D.nH)+' '+btEsc(D.formH.slice(-6)||'?')+' · '+btEsc(D.nA)+' '+btEsc(D.formA.slice(-6)||'?')+'. ' +
-    'Origen: <strong>'+btEsc(D.origen||'tabla')+'</strong>.</div>';
+  // Los números clave en tarjetas grandes, usando todo el ancho disponible.
+  const forma = s => ((s||'').slice(-5).split('').map(c =>
+    '<span style="display:inline-block;width:18px;height:18px;line-height:18px;text-align:center;border-radius:4px;' +
+    'font-size:10px;font-weight:700;color:#fff;margin-right:3px;background:' +
+    (c==='W'?'var(--green)':(c==='D'?'var(--amber)':'var(--red)')) + '">' +
+    (c==='W'?'G':(c==='D'?'E':'P')) + '</span>').join('')) || '<span style="color:var(--text4);font-size:11px">sin datos</span>';
+
+  h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:10px;margin:12px 0">' +
+    '<div style="border:1px solid var(--border);border-radius:9px;padding:13px">' +
+      '<div style="font-size:10px;color:var(--text4);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">Goles esperados</div>' +
+      '<div style="display:flex;align-items:center;gap:7px;margin-bottom:5px">' + btTeamVisual(r.f.home, r.f.league.country, 18) +
+        '<span style="font-size:20px;font-weight:800">'+D.lh.toFixed(2)+'</span></div>' +
+      '<div style="display:flex;align-items:center;gap:7px">' + btTeamVisual(r.f.away, r.f.league.country, 18) +
+        '<span style="font-size:20px;font-weight:800">'+D.la.toFixed(2)+'</span></div></div>' +
+    '<div style="border:1px solid var(--border);border-radius:9px;padding:13px">' +
+      '<div style="font-size:10px;color:var(--text4);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">Total esperado</div>' +
+      '<div style="font-size:28px;font-weight:800;line-height:1.05">'+(D.lh+D.la).toFixed(2)+'</div>' +
+      '<div style="font-size:12px;color:var(--text3);margin-top:5px">goles en el partido</div></div>' +
+    '<div style="border:1px solid var(--border);border-radius:9px;padding:13px">' +
+      '<div style="font-size:10px;color:var(--text4);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">Forma reciente</div>' +
+      '<div style="display:flex;align-items:center;gap:7px;margin-bottom:6px">' + btTeamVisual(r.f.home, r.f.league.country, 16) + forma(D.formH) + '</div>' +
+      '<div style="display:flex;align-items:center;gap:7px">' + btTeamVisual(r.f.away, r.f.league.country, 16) + forma(D.formA) + '</div></div>' +
+    '<div style="border:1px solid var(--border);border-radius:9px;padding:13px">' +
+      '<div style="font-size:10px;color:var(--text4);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">Estimados de liga</div>' +
+      '<div style="font-size:14px;line-height:1.75">🟨 <strong>'+D.kTot.toFixed(1)+'</strong> tarjetas<br>🚩 <strong>'+D.cTot.toFixed(1)+'</strong> córners</div>' +
+      '<div style="font-size:10.5px;color:var(--text4);margin-top:5px">no son datos de estos equipos</div></div>' +
+    '</div>' +
+    '<div style="font-size:11.5px;color:var(--text4);margin:0 0 12px">Origen de los promedios: <strong>'+btEsc(D.origen||'tabla')+'</strong></div>';
 
   if(D.obs < 4) h += '<div class="alert a-warn" style="font-size:11.5px;margin:10px 0">⚠️ Estos equipos llevan pocos partidos en la temporada ('+D.obs+'). El modelo tira casi al promedio de la liga: tomá los números con pinzas.</div>';
 
@@ -46201,7 +46340,7 @@ function btRenderMatchBody(mi){
   r.MK.forEach((m,idx) => { if(m.p>=.015 && m.p<=.985) (grupos[m.g] = grupos[m.g]||[]).push({m:m,idx:idx}); });
   Object.keys(grupos).forEach(g => {
     grupos[g].sort((a,b)=>b.m.p-a.m.p);
-    h += '<div style="font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);margin:16px 0 6px">'+btEsc(g)+'</div>' +
+    h += '<div style="font-size:12px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--text2);margin:18px 0 8px;padding-bottom:5px;border-bottom:1px solid var(--border)">'+btEsc(g)+'</div>' +
       '<div class="tbl-wrap" style="max-height:420px;overflow:auto"><table><thead><tr>' +
       '<th style="width:26px;position:sticky;top:0;z-index:2;background:var(--bg2)"></th>' +
       '<th style="position:sticky;top:0;z-index:2;background:var(--bg2)">Mercado</th>' +
@@ -46221,13 +46360,13 @@ function btRenderMatchBody(mi){
       h += '<tr style="'+(marcada ? 'background:var(--accent-g);box-shadow:inset 2px 0 0 var(--accent)' : '')+'">' +
         '<td><input type="checkbox" data-btc="'+key+'"'+(marcada?' checked':'')+
         ' onchange="btPick(\''+key+'\',this.checked)" style="width:14px;height:14px;cursor:pointer"></td>' +
-        '<td>'+btEsc(m.lab)+' '+btSrcDot(m.src)+'</td>' +
-        '<td style="text-align:right;font-weight:700">'+btPct(m.p)+'%'+btBarra(m.p*100, sem[2], 3)+'</td>' +
-        '<td style="text-align:right;color:var(--text3)">'+btFair(m.p)+'</td>' +
+        '<td style="font-size:13.5px">'+btEsc(m.lab)+' '+btSrcDot(m.src)+'</td>' +
+        '<td style="text-align:right;font-weight:700;font-size:14px">'+btPct(m.p)+'%'+btBarra(m.p*100, sem[2], 3)+'</td>' +
+        '<td style="text-align:right;color:var(--text3);font-size:13px">'+btFair(m.p)+'</td>' +
         '<td style="text-align:right"><input type="number" step="0.01" min="1" value="'+(eff.odd?eff.odd.toFixed(2):'')+
           '" placeholder="—" onchange="btSetManual('+mi+','+idx+',this.value)" ' +
-          'style="width:70px;padding:3px 6px;font-size:11.5px;text-align:right" title="Cargá acá la cuota de Betano"></td>' +
-        '<td style="text-align:right;font-weight:700;color:'+evCol+'">'+evTxt+'</td>' +
+          'style="width:74px;padding:4px 7px;font-size:13px;text-align:right;font-weight:600" title="Cargá acá la cuota de Betano"></td>' +
+        '<td style="text-align:right;font-weight:700;font-size:13.5px;color:'+evCol+'">'+evTxt+'</td>' +
         '<td style="text-align:center;font-size:11px;color:'+sem[2]+'">'+sem[0]+' '+conf+
           '<span style="display:block;font-size:9px;color:var(--text4)">'+sem[1]+'</span>'+btBarra(conf, sem[2], 3)+'</td></tr>';
     });
@@ -46330,11 +46469,11 @@ function btCombo(){
     keys.map(k => {
       const pa = k.split(':'), mi = +pa[0], idx = +pa[1];
       const m = BT_ANA[mi].MK[idx], eff = btOddOf(mi,idx), t = btTema(BT_ANA[mi].f.league.country);
-      return '<div style="display:flex;gap:7px;align-items:center;border:1px solid var(--border);border-left:2px solid '+t.c+';border-radius:6px;padding:6px 8px">' +
-        '<span style="flex:1;font-size:11.5px;line-height:1.3"><strong>'+btEsc(m.lab)+'</strong>' +
-        '<br><span style="color:var(--text4);font-size:10px">'+t.f+' '+btEsc(BT_ANA[mi].f.home.name)+' · '+btPct(m.p)+'%</span></span>' +
+      return '<div style="display:flex;gap:8px;align-items:center;border:1px solid var(--border);border-left:3px solid '+t.c+';border-radius:7px;padding:8px 10px">' +
+        '<span style="flex:1;font-size:12.5px;line-height:1.4"><strong>'+btEsc(m.lab)+'</strong>' +
+        '<br><span style="color:var(--text4);font-size:11px">'+btVersus(BT_ANA[mi].f, 14, 11)+' · '+btPct(m.p)+'%</span></span>' +
         '<input type="number" step="0.01" min="1" value="'+(eff.odd?eff.odd.toFixed(2):'')+'" placeholder="—" ' +
-        'onchange="btSetManual('+mi+','+idx+',this.value)" style="width:60px;padding:2px 5px;font-size:11.5px;text-align:right">' +
+        'onchange="btSetManual('+mi+','+idx+',this.value)" style="width:66px;padding:4px 6px;font-size:13px;text-align:right;font-weight:600">' +
         '</div>';
     }).join('') + '</div>';
   set('bt-cbp', btPct(J.p)+'%');
