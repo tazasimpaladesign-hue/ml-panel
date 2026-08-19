@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v277 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v281 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1735,6 +1735,8 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <button class="btn btn-ghost btn-sm bt-rank on" data-btrank="conf" onclick="btSetRank('conf')">Por confianza</button>
           <button class="btn btn-ghost btn-sm bt-rank" data-btrank="prob" onclick="btSetRank('prob')">Por probabilidad</button>
           <button class="btn btn-ghost btn-sm bt-rank" data-btrank="ev" onclick="btSetRank('ev')">Por valor</button>
+          <button class="btn btn-ghost btn-sm" onclick="btIATodos()" title="Pasa todos los partidos analizados por la IA, de a uno">🤖 IA a todos</button>
+          <button class="btn btn-ghost btn-sm" onclick="btLimpiarAnalisis()" title="Borra el análisis y deja los partidos de la búsqueda">🧹 Limpiar análisis</button>
           <select id="bt-filtro-mk" onchange="btRenderTop()" style="width:auto;font-size:12px;padding:6px 9px" title="Filtrar por tipo de mercado">
             <option value="">Todos los mercados</option>
             <option value="solidos">Sólo datos reales ●</option>
@@ -44852,6 +44854,50 @@ let BT_RANK = 'conf', BT_BOOTED = false, BT_CANCEL = false, BT_RUNNING = false;
 let BT_FAV = {}, BT_CACHEHITS = 0, BT_CONFIRM = null, BT_ULTIMO_MOTIVO = '';
 let BT_LIGAS = {};   // v267 · promedios ya traidos, por liga+temporada
 let BT_TSTATS = {};  // v277 · estadisticas cargadas a mano, por fuente|equipo
+let BT_CUOTAS = null;   // v281 · cuotas automaticas del dia, ya cruzadas
+
+// v281 · Trae las cuotas del dia en UNA consulta y las cruza con los partidos
+// por nombre de equipo, reusando el mismo comparador tolerante que usa la
+// fusion de fuentes ("Man City" contra "Manchester City").
+function btCargarCuotas(fecha){
+  return btApi('/cuotas?date=' + fecha).then(function (j) {
+    if(!j || !j.ok){ BT_CUOTAS = { error: (j && j.error) || 'sin cuotas', eventos: [] }; return BT_CUOTAS; }
+    BT_CUOTAS = { eventos: j.eventos || [], cached: !!j.cached, fecha: fecha };
+    return BT_CUOTAS;
+  }).catch(function (e) {
+    BT_CUOTAS = { error: e.message, eventos: [] };
+    return BT_CUOTAS;
+  });
+}
+
+// Compara nombres de equipo entre proveedores distintos, palabra por palabra.
+function btMismoEquipo(a, b){
+  const lim = function (s) {
+    return String(s || '').toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9 ]/g, ' ').split(/\s+/)
+      .filter(function (w) { return w && !/^(fc|ca|cf|ac|sc|afc|cd|ec|se|club|atletico|deportivo|de|del|la|el|the|los)$/.test(w); });
+  };
+  const x = lim(a), y = lim(b);
+  if(!x.length || !y.length) return false;
+  const corto = x.length <= y.length ? x : y, largo = x.length <= y.length ? y : x;
+  return corto.every(function (w) {
+    return largo.some(function (z) {
+      if(w === z) return true;
+      if(Math.min(w.length, z.length) < 3) return false;
+      return z.indexOf(w) === 0 || w.indexOf(z) === 0;
+    });
+  });
+}
+
+// Devuelve el mapa de cuotas del partido, o null si esa casa no lo tiene.
+function btCuotasDe(f){
+  if(!BT_CUOTAS || !BT_CUOTAS.eventos || !BT_CUOTAS.eventos.length) return null;
+  const e = BT_CUOTAS.eventos.find(function (x) {
+    return btMismoEquipo(x.local, f.home.name) && btMismoEquipo(x.visitante, f.away.name);
+  });
+  return e ? e.cuotas : null;
+}
 
 // v277 · Trae de una sola vez todas las estadísticas propias guardadas.
 // No consume cuota de ninguna API: son datos tuyos en KV.
@@ -45305,6 +45351,8 @@ function btScan(){
     BT_FIX = (j.fixtures||[]).filter(f => f.status==='NS' || f.status==='TBD');
     if(!BT_FIX.length){ btSetStatus('⚠️ No hay partidos sin empezar para esa fecha.'); return; }
     BT_SEL = {};
+    // Una sola consulta trae las cuotas de todo el día para todos los partidos.
+    btCargarCuotas(date);
     btBuildFilters();
     document.getElementById('bt-filters').style.display = 'flex';
     document.getElementById('bt-fxwrap').style.display = '';
@@ -45478,6 +45526,7 @@ function btRenderCards(){
             '<input type="checkbox" data-btfx="' + f.id + '"' + (sel?' checked':'') +
             ' onchange="btToggleFx(\'' + f.id + '\',this.checked)" style="width:14px;height:14px;cursor:pointer"> Elegir</label>' +
           '<button class="btn btn-ghost btn-xs" onclick="btAnalyzeOnly(\'' + f.id + '\')" title="Analizar sólo este partido">🔎</button>' +
+          (yaA ? '<button class="btn btn-ghost btn-xs" onclick="btIADesdeFicha(\'' + f.id + '\',event)" title="Analizar con IA">🤖</button>' : '') +
         '</div></div>';
     });
     h += '</div>';
@@ -45572,6 +45621,18 @@ function btConfirmClose(ok){
 }
 
 /* ── 2. analisis ──────────────────────────────────────────────────────── */
+// Desde la ficha: abre el detalle del partido y dispara la IA.
+function btIADesdeFicha(id, ev){
+  if(ev) ev.stopPropagation();
+  const mi = BT_ANA.findIndex(function (a) { return String(a.f.id) === String(id); });
+  if(mi < 0) return;
+  const body = document.getElementById('bt-mb' + mi);
+  if(body && body.style.display === 'none'){ body.style.display = ''; btRenderMatchBody(mi); }
+  const res = document.getElementById('bt-res');
+  if(res) res.scrollIntoView({ behavior:'smooth', block:'start' });
+  setTimeout(function(){ btAnalizarIA(mi, null); }, 200);
+}
+
 function btAnalyzeOnly(id){
   const f = btFxPorId(id);
   if(f.length) btRun(f);
@@ -45723,7 +45784,10 @@ function btAnalyzeOne(f, conOdds){
     return Promise.resolve({ err:'alguno de los dos equipos todavía no jugó partidos en esta temporada' });
   }
 
-  const pedirOdds = conOdds
+  // v281 · Las cuotas ya vienen cargadas del día: no cuesta una consulta por
+  // partido. Sólo se pide a API-Football si esa fuente está activa.
+  const autoCuotas = btCuotasDe(f);
+  const pedirOdds = (conOdds && !autoCuotas)
     ? btApi('/odds?fixture=' + f.id).catch(() => null)
     : Promise.resolve(null);
 
@@ -45740,7 +45804,11 @@ function btAnalyzeOne(f, conOdds){
     D.origen = (liga.intentos && liga.intentos.length) ? liga.intentos[liga.intentos.length-1] : 'tabla';
     const A = btSimulate(D);
     const MK = btCatalog(D, A);
-    const od = btParseOdds(r.odds || []);
+    let od = btParseOdds(r.odds || []);
+    if(autoCuotas){
+      // Las automáticas mandan: son de una casa real y actual.
+      od = { map: Object.assign({}, autoCuotas, od.map), src: 'Odds-API.io', n: 1, esBetano: false };
+    }
     MK.forEach(m => {
       const o = btLookupOdd(od.map, m.oid);
       m.odd = o; m.oddSrc = o ? od.src : null;
@@ -46308,7 +46376,8 @@ function btComparativa(mi){
       return '<span style="font-size:11px;color:var(--text4);border:1px dashed var(--border);border-radius:14px;padding:3px 10px">' +
              x + ' \u2014</span>'; }).join('') +
     '<button class="btn btn-ghost btn-xs" style="margin-left:auto" ' +
-      'onclick="document.getElementById(\'bt-form-' + mi + '\').style.display=\'block\'">\u270F\uFE0F Cargar estad\u00EDsticas</button>' +
+      'onclick="document.getElementById(\'bt-form-' + mi + '\').style.display=\'block\'" ' +
+      'title="Opcional. El panel funciona sin esto.">\u270F\uFE0F Cargar a mano (opcional)</button>' +
     '</div></div>';
   return out;
 }
@@ -46413,8 +46482,13 @@ function btFormStats(mi){
         'id="bt-ts-' + mi + '-' + L[0] + '-' + c[0] + '" ' +
         'style="width:74px;padding:4px 7px;font-size:13px;text-align:right;font-weight:600"></div>';
     });
-    out += '<div style="font-size:10.5px;color:var(--text4);margin-top:8px">' +
-      (ts.t ? 'Guardado el ' + btSoloFecha(Math.floor(ts.t / 1000)) : 'Sin datos cargados') + '</div></div>';
+    const vieja = btEdadStats(ts);
+    out += '<div style="font-size:10.5px;margin-top:8px;color:' + (vieja ? 'var(--amber)' : 'var(--text4)') + '">' +
+      (ts.t
+        ? (vieja
+            ? '⚠️ Cargado hace ' + vieja + ' días: los promedios ya cambiaron, conviene actualizarlos'
+            : 'Guardado el ' + btSoloFecha(Math.floor(ts.t / 1000)))
+        : 'Sin datos cargados') + '</div></div>';
   });
 
   return out + '</div><div style="display:flex;gap:8px;align-items:center;margin-top:14px;flex-wrap:wrap">' +
@@ -46501,6 +46575,487 @@ function btRehacer(mi){
   btRenderTop(); btRenderMatchBody(mi); btCombo();
 }
 
+
+/* ── v278 · ANALISIS CON IA ───────────────────────────────────────────────
+   REGLA CENTRAL: la IA NO tiene acceso a internet. Si le pidieramos
+   alineaciones, lesiones, arbitro o xG, se los inventaria — y el propio
+   prompt del usuario prohibe inventar. Entonces le mandamos SOLO los numeros
+   reales que el panel ya calculo, y le pedimos interpretacion, no datos.
+   Todo lo que no tenemos viaja marcado como "no disponible" para que lo
+   devuelva asi y no lo complete de memoria. */
+
+let BT_IA = {};        // analisis por indice de partido
+let BT_IA_CARGANDO = {};
+
+// Arma el paquete de datos REALES que se le pasa a la IA.
+function btIADatos(mi){
+  const r = BT_ANA[mi], D = r.D;
+  const top = r.MK
+    .filter(function (m) { return m.p >= 0.05 && m.p <= 0.96; })
+    .slice()
+    .sort(function (a, b) { return b.p - a.p; })
+    .slice(0, 40)
+    .map(function (m) {
+      const idx = r.MK.indexOf(m), eff = btOddOf(mi, idx);
+      return {
+        mercado: m.lab,
+        categoria: m.g,
+        probabilidad: +(m.p * 100).toFixed(1),
+        cuota_justa: +(1 / m.p).toFixed(2),
+        cuota_real: eff.odd || null,
+        origen_dato: m.src === 'real' ? 'datos del equipo'
+                   : (m.src === 'mixto' ? 'equipo + promedio de liga' : 'promedio de liga (estimado)')
+      };
+    });
+
+  const mc = btMarketCheck(r);
+  const tsH = btTS(r.f, 'h'), tsA = btTS(r.f, 'a');
+  const stat = function (t) {
+    if (!t) return null;
+    return { corners_favor: t.corF, corners_contra: t.corC, remates: t.remF,
+             remates_al_arco: t.arcF, tarjetas: t.tarj, faltas: t.falt };
+  };
+
+  return {
+    partido: { local: D.nH, visitante: D.nA, competicion: r.f.league.name,
+               pais: r.f.league.country, fecha_hora: btFechaHora(r.f.ts) },
+    modelo: {
+      metodo: 'Poisson bivariado con correccion Dixon-Coles y 40.000 simulaciones Monte Carlo',
+      goles_esperados_local: +D.lh.toFixed(2),
+      goles_esperados_visitante: +D.la.toFixed(2),
+      promedio_goles_liga: D.lgTotal ? +D.lgTotal.toFixed(2) : null,
+      partidos_jugados_menor: D.obs,
+      forma_local: D.formH ? D.formH.slice(-5) : null,
+      forma_visitante: D.formA ? D.formA.slice(-5) : null,
+      corners_esperados: +D.cTot.toFixed(1),
+      tarjetas_esperadas: +D.kTot.toFixed(1)
+    },
+    resultado_1x2: { local: +(r.MK[0].p * 100).toFixed(1),
+                     empate: +(r.MK[1].p * 100).toFixed(1),
+                     visitante: +(r.MK[2].p * 100).toFixed(1) },
+    mercado_casas: mc ? { local: +(mc.m1 * 100).toFixed(1), empate: +(mc.mx * 100).toFixed(1),
+                          visitante: +(mc.m2 * 100).toFixed(1),
+                          comision: +(mc.over * 100).toFixed(1) } : null,
+    estadisticas_cargadas: { local: stat(tsH), visitante: stat(tsA) },
+    mercados: top,
+    // v279 · Si ya se buscó el contexto en vivo, se lo pasamos a la IA y sale
+    // de la lista de faltantes. Si no, sigue marcado como no disponible.
+    contexto_en_vivo: BT_CTX[mi] ? {
+      estado_alineaciones: BT_CTX[mi].estado_alineaciones || null,
+      formacion_local: BT_CTX[mi].formacion_local || null,
+      formacion_visitante: BT_CTX[mi].formacion_visitante || null,
+      bajas_local: BT_CTX[mi].bajas_local || [],
+      bajas_visitante: BT_CTX[mi].bajas_visitante || [],
+      arbitro: BT_CTX[mi].arbitro || null,
+      contexto: BT_CTX[mi].contexto || null,
+      noticias: BT_CTX[mi].noticias || []
+    } : null,
+    NO_DISPONIBLE: BT_CTX[mi]
+      ? ['xG', 'posesion', 'estadisticas de jugadores', 'H2H']
+      : ['alineaciones', 'lesiones', 'suspensiones', 'arbitro', 'xG',
+         'posesion', 'clima', 'estadisticas de jugadores', 'H2H']
+  };
+}
+
+const BT_IA_SYSTEM =
+  'Sos un analista cuantitativo de futbol. Te paso el resultado de un modelo estadistico ya ejecutado. ' +
+  'REGLAS ABSOLUTAS: (1) NO tenes acceso a internet. (2) NO inventes alineaciones, lesiones, arbitros, xG, ' +
+  'posesion, clima ni estadisticas de jugadores: todo lo que figure en NO_DISPONIBLE lo devolves como null. ' +
+  '(3) NO inventes probabilidades ni cuotas: usa exactamente las que te paso. (4) Tu trabajo es INTERPRETAR ' +
+  'esos numeros, no generar datos nuevos. ' +
+  'Respondes UNICAMENTE con un objeto JSON valido, sin markdown ni texto alrededor, con esta forma exacta: ' +
+  '{"lectura":"2 o 3 frases sobre como se proyecta el partido",' +
+  '"confianza":"ALTA|MEDIA|BAJA","motivo_confianza":"una frase",' +
+  '"parejo":true|false,' +
+  '"top_mercados":[{"mercado":"","probabilidad":0,"cuota_justa":0,"por_que":"una frase","riesgo":"BAJO|MEDIO|ALTO"}],' +
+  '"combinaciones":[{"selecciones":["",""],"probabilidad_estimada":0,"razon":"una frase","correlacion":"BAJA|MEDIA|ALTA"}],' +
+  '"vs_mercado":"una frase comparando el modelo con las casas, o null si no hay cuotas",' +
+  '"advertencias":["maximo 4, sobre datos faltantes o incertidumbre"],' +
+  '"evitar":[{"mercado":"","motivo":""}]}. ' +
+  'En top_mercados incluis entre 6 y 10, ordenados por calidad de oportunidad (no solo por probabilidad: ' +
+  'penaliza los que tengan origen_dato "promedio de liga (estimado)"). ' +
+  'En combinaciones proponé hasta 3, y aclara en razon si las selecciones son del mismo partido y por lo tanto ' +
+  'NO son independientes. Escribi en castellano rioplatense, en frases cortas.';
+
+function btAnalizarIA(mi, ev){
+  if(ev) ev.stopPropagation();
+  if(BT_IA_CARGANDO[mi]) return;
+  BT_IA_CARGANDO[mi] = true;
+
+  const cont = document.getElementById('bt-ia-' + mi);
+  if(cont) cont.innerHTML = '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:9px;' +
+    'padding:14px 16px;margin:12px 0;font-size:12.5px;color:var(--text3)">' +
+    '<span class="spin"></span> La IA está leyendo los números del modelo… puede tardar hasta un minuto.</div>';
+
+  const datos = btIADatos(mi);
+  fetch(WORKER + '/ai', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (typeof mlToken !== 'undefined' ? mlToken : '') },
+    body: JSON.stringify({
+      system: BT_IA_SYSTEM,
+      messages: [{ role: 'user', content: JSON.stringify(datos) }],
+      max_tokens: 2200
+    })
+  }).then(function (x) { return x.json(); }).then(function (j) {
+    BT_IA_CARGANDO[mi] = false;
+    const txt = (j && j.content && j.content[0] && j.content[0].text) || '';
+    if(!txt){
+      if(cont) cont.innerHTML = btIAError(mi, (j && j.error) || 'La IA no devolvió nada.');
+      return;
+    }
+    let out;
+    try { out = _aiParseJSON(txt); }
+    catch(e){ if(cont) cont.innerHTML = btIAError(mi, 'La IA respondió en un formato que no pude leer. Probá de nuevo.'); return; }
+    out._modelo = j.model || '';
+    BT_IA[mi] = out;
+    btRenderIA(mi);
+  }).catch(function (e) {
+    BT_IA_CARGANDO[mi] = false;
+    if(cont) cont.innerHTML = btIAError(mi, 'No pude contactar al Worker: ' + e.message);
+  });
+}
+
+function btIAError(mi, msg){
+  return '<div style="background:rgba(226,112,95,.08);border:1px solid var(--red);border-radius:9px;padding:13px 15px;margin:12px 0">' +
+    '<div style="font-size:12.5px;color:var(--text2);margin-bottom:8px">❌ ' + btEsc(msg) + '</div>' +
+    '<button class="btn btn-ghost btn-xs" onclick="btAnalizarIA(' + mi + ',event)">Reintentar</button></div>';
+}
+
+function btRenderIA(mi){
+  const o = BT_IA[mi], cont = document.getElementById('bt-ia-' + mi);
+  if(!o || !cont) return;
+  const conf = { ALTA:['🟢','var(--green)'], MEDIA:['🟡','var(--amber)'], BAJA:['🔴','var(--red)'] }[o.confianza] || ['⚪','var(--text3)'];
+  const riesgoCol = { BAJO:'var(--green)', MEDIO:'var(--amber)', ALTO:'var(--red)' };
+
+  let h = '<div style="background:var(--bg2);border:1px solid var(--accent);border-radius:10px;padding:16px 18px;margin:12px 0">' +
+    '<div style="display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;margin-bottom:12px">' +
+      '<strong style="font-size:14px">🤖 Lectura de la IA</strong>' +
+      '<span style="font-size:12px;color:' + conf[1] + '">' + conf[0] + ' Confianza ' + btEsc(o.confianza || '—') + '</span>' +
+      (o._modelo ? '<span style="font-size:10.5px;color:var(--text4)">' + btEsc(o._modelo) + '</span>' : '') +
+      '<button class="btn btn-ghost btn-xs" style="margin-left:auto" onclick="btAnalizarIA(' + mi + ',event)">↻ Rehacer</button>' +
+    '</div>';
+
+  if(o.parejo === true){
+    h += '<div class="alert a-warn" style="font-size:12.5px;margin:0 0 12px">⚖️ <strong>Partido muy parejo.</strong> ' +
+         'El modelo no tiene una lectura fuerte de quién gana.</div>';
+  }
+  if(o.lectura) h += '<div style="font-size:13px;line-height:1.7;color:var(--text2);margin-bottom:6px">' + btEsc(o.lectura) + '</div>';
+  if(o.motivo_confianza) h += '<div style="font-size:11.5px;color:var(--text4);margin-bottom:14px">' + btEsc(o.motivo_confianza) + '</div>';
+
+  // Tabla principal, al estilo de las estadísticas de un partido.
+  if(Array.isArray(o.top_mercados) && o.top_mercados.length){
+    h += '<div style="font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--text3);margin:14px 0 8px">Mejores mercados según la IA</div>' +
+      '<div class="tbl-wrap"><table><thead><tr>' +
+      '<th>Mercado</th><th style="text-align:right">Prob.</th><th style="text-align:right">Justa</th>' +
+      '<th style="text-align:center">Riesgo</th><th>Por qué</th></tr></thead><tbody>';
+    o.top_mercados.slice(0, 12).forEach(function (m) {
+      const pr = Number(m.probabilidad) || 0;
+      const col = pr >= 75 ? 'var(--green)' : (pr >= 55 ? '#7cb342' : (pr >= 35 ? 'var(--amber)' : 'var(--red)'));
+      h += '<tr>' +
+        '<td style="font-size:13px;font-weight:600">' + btEsc(m.mercado) + '</td>' +
+        '<td style="text-align:right;font-weight:700;font-size:14px;color:' + col + '">' + pr.toFixed(1) + '%' +
+          btBarra(pr, col, 3) + '</td>' +
+        '<td style="text-align:right;font-size:13px;color:var(--text3)">' + (m.cuota_justa ? Number(m.cuota_justa).toFixed(2) : '—') + '</td>' +
+        '<td style="text-align:center;font-size:11px;color:' + (riesgoCol[m.riesgo] || 'var(--text3)') + '">' + btEsc(m.riesgo || '—') + '</td>' +
+        '<td style="font-size:11.5px;color:var(--text3);line-height:1.5">' + btEsc(m.por_que || '') + '</td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+
+  if(Array.isArray(o.combinaciones) && o.combinaciones.length){
+    h += '<div style="font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--text3);margin:16px 0 8px">Combinaciones sugeridas</div>' +
+      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:9px">';
+    o.combinaciones.slice(0, 4).forEach(function (c) {
+      const cc = { BAJA:'var(--green)', MEDIA:'var(--amber)', ALTA:'var(--red)' }[c.correlacion] || 'var(--text3)';
+      h += '<div style="border:1px solid var(--border);border-radius:9px;padding:12px">' +
+        '<div style="font-size:12.5px;font-weight:600;line-height:1.5;margin-bottom:7px">' +
+          (c.selecciones || []).map(function (s) { return btEsc(s); }).join('<br><span style="color:var(--text4)">+</span> ') + '</div>' +
+        '<div style="display:flex;gap:10px;align-items:baseline">' +
+          '<span style="font-size:19px;font-weight:800">' + (Number(c.probabilidad_estimada) || 0).toFixed(1) + '%</span>' +
+          '<span style="font-size:10.5px;color:' + cc + '">Correlación ' + btEsc(c.correlacion || '—') + '</span></div>' +
+        '<div style="font-size:11px;color:var(--text4);margin-top:6px;line-height:1.5">' + btEsc(c.razon || '') + '</div></div>';
+    });
+    h += '</div>';
+  }
+
+  if(o.vs_mercado){
+    h += '<div style="margin-top:14px;padding:11px 13px;border:1px solid var(--border);border-radius:8px;font-size:12.5px;color:var(--text2);line-height:1.6">' +
+      '📊 <strong>Contra el mercado:</strong> ' + btEsc(o.vs_mercado) + '</div>';
+  }
+
+  if(Array.isArray(o.evitar) && o.evitar.length){
+    h += '<div style="font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--red);margin:16px 0 7px">Mejor evitar</div>' +
+      '<div style="display:flex;gap:7px;flex-wrap:wrap">';
+    o.evitar.slice(0, 6).forEach(function (x) {
+      h += '<span style="font-size:11.5px;border:1px solid var(--border);border-radius:14px;padding:4px 11px;color:var(--text3)" ' +
+           'title="' + btEsc(x.motivo || '') + '">' + btEsc(x.mercado || '') + '</span>';
+    });
+    h += '</div>';
+  }
+
+  if(Array.isArray(o.advertencias) && o.advertencias.length){
+    h += '<div style="margin-top:14px;padding-top:11px;border-top:1px dashed var(--border)">' +
+      '<div style="font-size:10.5px;color:var(--text4);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px">Incertidumbres</div>' +
+      '<ul style="margin:0;padding-left:18px;font-size:11.5px;color:var(--text3);line-height:1.8">' +
+      o.advertencias.slice(0, 5).map(function (a) { return '<li>' + btEsc(a) + '</li>'; }).join('') + '</ul></div>';
+  }
+
+  h += '<div style="margin-top:13px;padding-top:10px;border-top:1px solid var(--border);font-size:10.5px;color:var(--text4);line-height:1.6">' +
+    'La IA sólo interpretó los números del modelo: no buscó en internet ni agregó datos. ' +
+    'Alineaciones, lesiones, árbitro, xG y posesión no estaban disponibles y por eso no figuran.</div></div>';
+
+  cont.innerHTML = h;
+}
+
+// Analiza con IA todos los partidos ya analizados, de a uno para no saturar.
+async function btIATodos(){
+  if(!BT_ANA.length) return;
+  for(let i = 0; i < BT_ANA.length; i++){
+    if(BT_IA[i]) continue;
+    const body = document.getElementById('bt-mb' + i);
+    if(body && body.style.display === 'none'){ body.style.display = ''; btRenderMatchBody(i); }
+    btAnalizarIA(i, null);
+    // Espera a que termine antes del siguiente: el tier gratuito tiene tope
+    // por minuto y disparar todo junto es la forma segura de que falle.
+    let esperas = 0;
+    while(BT_IA_CARGANDO[i] && esperas < 90){ await btSleep(1000); esperas++; }
+    await btSleep(1500);
+  }
+}
+
+/* ── v278 · limpiar el análisis ───────────────────────────────────────────
+   Borra lo analizado y lo que dijo la IA, pero deja los partidos y los
+   filtros donde estaban. Los promedios de liga quedan en memoria: volver a
+   analizar no cuesta ninguna consulta. */
+function btLimpiarAnalisis(){
+  if(!BT_ANA.length){ btSetStatus('No hay nada analizado.'); return; }
+  const cuantos = BT_ANA.length;
+  BT_ANA = [];
+  BT_IA = {};
+  BT_IA_CARGANDO = {};
+  BT_CTX = {};
+  BT_CTX_CARGANDO = {};
+  BT_COMBO = {};
+  BT_MANUAL = {};
+  BT_SORT = { col: null, dir: 0 };
+  const res = document.getElementById('bt-res');
+  if(res) res.style.display = 'none';
+  ['bt-top','bt-podium','bt-matches','bt-topnote'].forEach(function (id) {
+    const e = document.getElementById(id); if(e) e.innerHTML = '';
+  });
+  btCombo();
+  btRenderCards();
+  btSetStatus('🧹 Análisis borrado. Quedaron los ' + BT_FIX.length + ' partidos de la búsqueda. ' +
+    'Volver a analizar esos ' + cuantos + ' no cuesta consultas: los promedios siguen en memoria.');
+}
+
+
+/* ── v279 · CONTEXTO EN VIVO ──────────────────────────────────────────────
+   Esto cierra el hueco que quedaba: alineaciones, lesiones, arbitro y noticias.
+   Va por Gemini con busqueda de Google activada, que es la unica via legitima
+   que tenemos (API oficial de Google, sin scrapear a nadie). La familia 3.x
+   incluye 5.000 consultas con busqueda por mes sin cargo.
+
+   Sigue valiendo la regla de siempre: si la busqueda no encuentra algo, se
+   devuelve null. Nada se completa de memoria. */
+
+let BT_CTX = {};          // contexto en vivo por partido
+let BT_CTX_CARGANDO = {};
+
+const BT_CTX_SYSTEM =
+  'Sos un asistente que BUSCA EN GOOGLE informacion de un partido de futbol que todavia no se jugo. ' +
+  'REGLAS: (1) Usa la busqueda para cada dato: no respondas de memoria. ' +
+  '(2) Si un dato NO lo encontras en los resultados de busqueda, devolvelo como null. NUNCA lo inventes. ' +
+  '(3) Si encontras informacion contradictoria entre fuentes, elegí la mas reciente y aclaralo en "notas". ' +
+  '(4) Si las alineaciones todavia no salieron, marcá "estado_alineaciones":"no publicadas" y dejá los XI en null. ' +
+  'Respondes UNICAMENTE con JSON valido, sin markdown, con esta forma: ' +
+  '{"estado_alineaciones":"oficiales|probables|no publicadas",' +
+  '"formacion_local":null,"formacion_visitante":null,' +
+  '"xi_local":[],"xi_visitante":[],' +
+  '"bajas_local":[{"jugador":"","motivo":""}],"bajas_visitante":[{"jugador":"","motivo":""}],' +
+  '"arbitro":{"nombre":null,"amarillas_promedio":null,"nota":null},' +
+  '"contexto":"que se juega cada equipo, en 1 o 2 frases, o null",' +
+  '"noticias":["hasta 3 novedades relevantes de los ultimos dias"],' +
+  '"impacto":"como afecta lo encontrado a las probabilidades del partido, 1 o 2 frases, o null",' +
+  '"notas":["contradicciones o dudas, o vacio"]}. ' +
+  'Escribi en castellano rioplatense.';
+
+function btBuscarContexto(mi, ev){
+  if(ev) ev.stopPropagation();
+  if(BT_CTX_CARGANDO[mi]) return;
+  BT_CTX_CARGANDO[mi] = true;
+
+  const r = BT_ANA[mi];
+  const cont = document.getElementById('bt-ctx-' + mi);
+  if(cont) cont.innerHTML = '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:9px;' +
+    'padding:14px 16px;margin:12px 0;font-size:12.5px;color:var(--text3)">' +
+    '<span class="spin"></span> Buscando en Google alineaciones, bajas y árbitro… puede tardar un minuto.</div>';
+
+  const pedido = 'Partido: ' + r.D.nH + ' vs ' + r.D.nA +
+    '. Competicion: ' + r.f.league.name + ' (' + r.f.league.country + ')' +
+    '. Fecha y hora: ' + btFechaHora(r.f.ts) + ' (hora de Argentina)' +
+    '. Buscá alineaciones probables u oficiales, lesionados, suspendidos, arbitro designado, ' +
+    'que se juega cada equipo y novedades de los ultimos dias.';
+
+  fetch(WORKER + '/ai', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json',
+               'Authorization': 'Bearer ' + (typeof mlToken !== 'undefined' ? mlToken : '') },
+    body: JSON.stringify({ system: BT_CTX_SYSTEM, messages: [{ role:'user', content: pedido }],
+                           max_tokens: 2000, buscar: true })
+  }).then(function (x) { return x.json(); }).then(function (j) {
+    BT_CTX_CARGANDO[mi] = false;
+    const txt = (j && j.content && j.content[0] && j.content[0].text) || '';
+    if(!txt){
+      if(cont) cont.innerHTML = btCtxError(mi, (j && j.error) || 'La búsqueda no devolvió nada.');
+      return;
+    }
+    let out;
+    try { out = _aiParseJSON(txt); }
+    catch(e){ if(cont) cont.innerHTML = btCtxError(mi, 'La respuesta vino en un formato que no pude leer.'); return; }
+    out._fuentes = j.fuentes || [];
+    out._buscado = !!j.buscado;
+    out._modelo = j.model || '';
+    out._t = Date.now();
+    BT_CTX[mi] = out;
+    btRenderCtx(mi);
+  }).catch(function (e) {
+    BT_CTX_CARGANDO[mi] = false;
+    if(cont) cont.innerHTML = btCtxError(mi, 'No pude contactar al Worker: ' + e.message);
+  });
+}
+
+function btCtxError(mi, msg){
+  return '<div style="background:rgba(226,112,95,.08);border:1px solid var(--red);border-radius:9px;padding:13px 15px;margin:12px 0">' +
+    '<div style="font-size:12.5px;color:var(--text2);margin-bottom:8px">❌ ' + btEsc(msg) + '</div>' +
+    '<div style="font-size:11px;color:var(--text4);margin-bottom:9px">Si se repite, puede que la clave de Gemini no tenga ' +
+    'habilitada la búsqueda de Google. El resto del panel sigue funcionando igual.</div>' +
+    '<button class="btn btn-ghost btn-xs" onclick="btBuscarContexto(' + mi + ',event)">Reintentar</button></div>';
+}
+
+function btRenderCtx(mi){
+  const o = BT_CTX[mi], cont = document.getElementById('bt-ctx-' + mi);
+  if(!o || !cont) return;
+  const r = BT_ANA[mi];
+  const dato = function (v) { return (v === null || v === undefined || v === '') ? null : v; };
+
+  const estadoCol = { 'oficiales':'var(--green)', 'probables':'var(--amber)', 'no publicadas':'var(--text4)' };
+  const est = o.estado_alineaciones || 'no publicadas';
+
+  let h = '<div style="background:var(--bg2);border:1px solid var(--green);border-radius:10px;padding:16px 18px;margin:12px 0">' +
+    '<div style="display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;margin-bottom:12px">' +
+      '<strong style="font-size:14px">🌐 Contexto en vivo</strong>' +
+      '<span style="font-size:11.5px;padding:3px 9px;border-radius:14px;border:1px solid ' + (estadoCol[est]||'var(--border)') +
+        ';color:' + (estadoCol[est]||'var(--text3)') + '">Alineaciones: ' + btEsc(est) + '</span>' +
+      '<span style="font-size:10.5px;color:var(--text4)">' + btHoraLocal(Math.floor(o._t/1000)) + '</span>' +
+      '<button class="btn btn-ghost btn-xs" style="margin-left:auto" onclick="btBuscarContexto(' + mi + ',event)">↻ Actualizar</button>' +
+    '</div>';
+
+  if(!o._buscado){
+    h += '<div class="alert a-warn" style="font-size:12px;margin:0 0 12px">⚠️ Esta respuesta se generó ' +
+      '<strong>sin búsqueda de Google</strong>: el modelo no pudo acceder a internet. Tomala con mucha reserva.</div>';
+  }
+
+  // Alineaciones
+  const xiH = Array.isArray(o.xi_local) ? o.xi_local : [];
+  const xiA = Array.isArray(o.xi_visitante) ? o.xi_visitante : [];
+  if(xiH.length || xiA.length || dato(o.formacion_local) || dato(o.formacion_visitante)){
+    h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin-bottom:14px">';
+    [[r.f.home, o.formacion_local, xiH], [r.f.away, o.formacion_visitante, xiA]].forEach(function (L) {
+      h += '<div style="border:1px solid var(--border);border-radius:9px;padding:12px">' +
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:9px">' +
+          btTeamVisual(L[0], r.f.league.country, 20) +
+          '<strong style="font-size:13px">' + btEsc(L[0].name) + '</strong>' +
+          (dato(L[1]) ? '<span style="margin-left:auto;font-size:12px;color:var(--accent);font-weight:700">' + btEsc(L[1]) + '</span>' : '') +
+        '</div>' +
+        (L[2].length
+          ? '<div style="font-size:11.5px;color:var(--text2);line-height:1.75">' + L[2].map(function (x) { return btEsc(x); }).join(' · ') + '</div>'
+          : '<div style="font-size:11.5px;color:var(--text4)">XI no disponible</div>') +
+        '</div>';
+    });
+    h += '</div>';
+  }
+
+  // Bajas
+  const bH = Array.isArray(o.bajas_local) ? o.bajas_local : [];
+  const bA = Array.isArray(o.bajas_visitante) ? o.bajas_visitante : [];
+  if(bH.length || bA.length){
+    h += '<div style="font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--text3);margin:0 0 8px">🚑 Bajas</div>' +
+      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-bottom:14px">';
+    [[r.f.home, bH], [r.f.away, bA]].forEach(function (L) {
+      h += '<div style="border:1px solid var(--border);border-radius:9px;padding:11px">' +
+        '<div style="display:flex;align-items:center;gap:7px;margin-bottom:7px">' +
+          btTeamVisual(L[0], r.f.league.country, 16) +
+          '<span style="font-size:12px;font-weight:600">' + btEsc(L[0].name) + '</span></div>' +
+        (L[1].length
+          ? L[1].slice(0,6).map(function (x) {
+              return '<div style="font-size:12px;color:var(--text2);line-height:1.7">• <strong>' + btEsc(x.jugador || '') +
+                     '</strong>' + (x.motivo ? ' <span style="color:var(--text4)">— ' + btEsc(x.motivo) + '</span>' : '') + '</div>';
+            }).join('')
+          : '<div style="font-size:11.5px;color:var(--text4)">Sin bajas reportadas</div>') +
+        '</div>';
+    });
+    h += '</div>';
+  }
+
+  // Árbitro
+  const arb = o.arbitro || {};
+  if(dato(arb.nombre)){
+    h += '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border:1px solid var(--border);' +
+      'border-radius:9px;padding:11px 13px;margin-bottom:14px">' +
+      '<span style="font-size:12px;color:var(--text3)">🧑‍⚖️ Árbitro</span>' +
+      '<strong style="font-size:13px">' + btEsc(arb.nombre) + '</strong>' +
+      (dato(arb.amarillas_promedio) ? '<span style="font-size:12px;color:var(--text2)">🟨 ' +
+        btEsc(String(arb.amarillas_promedio)) + ' amarillas por partido</span>' : '') +
+      (dato(arb.nota) ? '<span style="font-size:11.5px;color:var(--text4);flex:1;min-width:160px">' + btEsc(arb.nota) + '</span>' : '') +
+      '</div>';
+  }
+
+  if(dato(o.contexto)){
+    h += '<div style="font-size:12.5px;color:var(--text2);line-height:1.7;margin-bottom:10px">🎯 ' + btEsc(o.contexto) + '</div>';
+  }
+  if(Array.isArray(o.noticias) && o.noticias.length){
+    h += '<div style="font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--text3);margin:12px 0 6px">Novedades</div>' +
+      '<ul style="margin:0;padding-left:18px;font-size:12px;color:var(--text2);line-height:1.8">' +
+      o.noticias.slice(0,4).map(function (x) { return '<li>' + btEsc(x) + '</li>'; }).join('') + '</ul>';
+  }
+  if(dato(o.impacto)){
+    h += '<div style="margin-top:12px;padding:11px 13px;border:1px solid var(--accent);border-radius:8px;' +
+      'font-size:12.5px;color:var(--text2);line-height:1.65">⚡ <strong>Impacto:</strong> ' + btEsc(o.impacto) + '</div>';
+  }
+  if(Array.isArray(o.notas) && o.notas.length){
+    h += '<div style="margin-top:10px;font-size:11.5px;color:var(--amber);line-height:1.6">⚠️ ' +
+      o.notas.slice(0,3).map(function (x) { return btEsc(x); }).join(' · ') + '</div>';
+  }
+
+  // Fuentes: de dónde salió cada cosa.
+  if(o._fuentes && o._fuentes.length){
+    h += '<div style="margin-top:14px;padding-top:11px;border-top:1px dashed var(--border)">' +
+      '<div style="font-size:10.5px;color:var(--text4);text-transform:uppercase;letter-spacing:.07em;margin-bottom:7px">Fuentes consultadas</div>' +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+      o._fuentes.map(function (f) {
+        return '<a href="' + btEsc(f.url) + '" target="_blank" rel="noopener" ' +
+          'style="font-size:11px;color:var(--accent);border:1px solid var(--border);border-radius:14px;padding:3px 10px;text-decoration:none">' +
+          btEsc((f.titulo || f.url).slice(0, 42)) + '</a>';
+      }).join('') + '</div></div>';
+  }
+
+  h += '<div style="margin-top:12px;font-size:10.5px;color:var(--text4);line-height:1.6">' +
+    'Buscado con Google a través de la API oficial de Gemini. Lo que no aparece es porque la búsqueda no lo encontró, ' +
+    'no porque se haya omitido. Verificá siempre las alineaciones antes de apostar.</div></div>';
+
+  cont.innerHTML = h;
+}
+
+/* v279 · Aviso de estadisticas viejas. Las que cargas a mano son una foto: no
+   se actualizan solas. Pasado un mes conviene revisarlas. */
+function btEdadStats(ts){
+  if(!ts || !ts.t) return null;
+  const dias = Math.floor((Date.now() - ts.t) / 86400000);
+  if(dias < 21) return null;
+  return dias;
+}
+
 /* ── ranking global ───────────────────────────────────────────────────── */
 function btAllRows(){
   const rows = [];
@@ -46516,6 +47071,9 @@ function btAllRows(){
 }
 function btRenderTop(){
   let rows = btAllRows();
+  // v280 · ¿Hay alguna cuota? De eso depende que tenga sentido mostrar las
+  // columnas de cuota y valor, en vez de dos columnas vacías.
+  const HAY_CUOTAS = rows.some(function (o) { return o.odd !== null && o.odd !== undefined; });
   // v276 · Punto 35: filtro por tipo de mercado, antes de ordenar.
   const fmk = (document.getElementById('bt-filtro-mk')||{}).value || '';
   if(fmk === 'solidos')      rows = rows.filter(o => o.m.src === 'real');
@@ -46523,6 +47081,17 @@ function btRenderTop(){
   else if(fmk)               rows = rows.filter(o => o.m.g.indexOf(fmk) === 0);
 
   let list;
+  if(BT_RANK === 'ev' && !HAY_CUOTAS){
+    document.getElementById('bt-top').innerHTML =
+      '<div style="border:1px solid var(--amber);border-radius:9px;padding:14px 16px;font-size:12.5px;color:var(--text2);line-height:1.7">' +
+      '⚠️ <strong>No hay cuotas conectadas</strong>, así que no se puede calcular el valor. ' +
+      'El valor compara lo que paga la casa contra la probabilidad del modelo: sin una de las dos, no existe.<br>' +
+      'Usá <strong>Por confianza</strong> o <strong>Por probabilidad</strong>, que no dependen de la cuota. ' +
+      'La <strong>cuota justa</strong> te sirve igual: es el precio mínimo al que esa apuesta vale la pena.</div>';
+    document.getElementById('bt-podium').innerHTML = '';
+    document.getElementById('bt-topnote').textContent = '';
+    return;
+  }
   if(BT_RANK === 'ev')       list = rows.filter(o => o.ev !== null && o.m.src === 'real').sort((a,b)=>b.ev-a.ev).slice(0,25);
   else if(BT_RANK === 'prob')list = rows.slice().sort((a,b)=>b.m.p-a.m.p).slice(0,25);
   else                       list = rows.slice().sort((a,b)=>b.conf-a.conf || b.m.p-a.m.p).slice(0,25);
@@ -46566,8 +47135,9 @@ function btRenderTop(){
   let h = '<div class="tbl-wrap" style="max-height:640px;overflow:auto"><table><thead><tr>' +
     '<th style="width:26px;position:sticky;top:0;z-index:2;background:var(--bg2)"></th>' +
     th('mercado','Mercado') + th('partido','Partido') + th('prob','Prob.','right') +
-    th('justa','Justa','right') + th('cuota','Cuota real','right') +
-    th('valor','Valor','right') + th('confianza','Confianza','center') +
+    th('justa','Justa','right') +
+    (HAY_CUOTAS ? th('cuota','Cuota','right') + th('valor','Valor','right') : '') +
+    th('confianza','Confianza','center') +
     '</tr></thead><tbody>';
 
   list.forEach(o => {
@@ -46586,10 +47156,12 @@ function btRenderTop(){
         '<br><span style="color:var(--text4);font-size:11px">'+btSoloFecha(o.r.f.ts)+' · '+btHoraLocal(o.r.f.ts)+'</span></td>' +
       '<td style="text-align:right;font-weight:700;font-size:14.5px">'+btPct(o.m.p)+'%'+btBarra(o.m.p*100, sem[2], 3)+'</td>' +
       '<td style="text-align:right;color:var(--text3);font-size:13px">'+btFair(o.m.p)+'</td>' +
-      '<td style="text-align:right"><input type="number" step="0.01" min="1" value="'+(o.odd?o.odd.toFixed(2):'')+
-        '" placeholder="—" onchange="btSetManual('+o.mi+','+o.idx+',this.value)" ' +
-        'style="width:72px;padding:4px 7px;font-size:13px;text-align:right;font-weight:600" title="Cuota de Betano: escribila y el valor se recalcula"></td>' +
-      '<td style="text-align:right;font-weight:700;font-size:14px;color:'+evCol+'">'+evTxt+'</td>' +
+      (HAY_CUOTAS
+        ? '<td style="text-align:right"><input type="number" step="0.01" min="1" value="'+(o.odd?o.odd.toFixed(2):'')+
+            '" placeholder="—" onchange="btSetManual('+o.mi+','+o.idx+',this.value)" ' +
+            'style="width:72px;padding:4px 7px;font-size:13px;text-align:right;font-weight:600" title="Cuota de la casa"></td>' +
+          '<td style="text-align:right;font-weight:700;font-size:14px;color:'+evCol+'">'+evTxt+'</td>'
+        : '') +
       '<td style="text-align:center;font-size:11px;color:'+sem[2]+'">'+sem[0]+' '+o.conf+btBarra(o.conf, sem[2], 3)+'</td></tr>';
   });
   document.getElementById('bt-top').innerHTML = h + '</tbody></table></div>';
@@ -46601,7 +47173,9 @@ function btRenderTop(){
     '<strong>Cómo se calcula la confianza.</strong> No es sólo la probabilidad: pesa también la calidad del dato ' +
     '(verde = goles reales del equipo, rojo = estimado con promedios de liga), cuántos partidos lleva jugados cada equipo, ' +
     'la solidez del mercado y si el modelo coincide con lo que dice la casa.' +
-    (conCuota ? ' Hay ' + conCuota + ' selecciones con cuota (' + btEsc(Object.keys(fuentes).join(', ')) + ').' : ' Ninguna selección tiene cuota: marcá “Traer cuotas” antes de analizar, o cargalas a mano en cada partido.') +
+    (conCuota
+      ? ' Hay ' + conCuota + ' selecciones con cuota (' + btEsc(Object.keys(fuentes).join(', ')) + ').'
+      : ' Sin cuotas conectadas no hay valor, pero la <strong>cuota justa</strong> sí sirve: es el precio mínimo al que esa apuesta vale la pena. Si en Betano te pagan menos que eso, el margen queda para la casa.') +
     (nb ? ' <span style="color:var(--amber)">⚠️ Estas cuotas no son de Betano.</span> Cargá la de Betano a mano en el detalle del partido para que el valor sea real.' : '') +
     ' Un valor arriba del 20% casi siempre significa que se equivoca el modelo, no la casa.';
 }
@@ -46700,8 +47274,10 @@ function btRenderMatchBody(mi){
     '<span>🏠 local</span><span>🤝 empate</span><span>✈️ visitante</span></div></div>';
 
   h += btComparativa(mi);
-  h += '<div id="bt-form-' + mi + '" style="display:' +
-       ((btTS(r.f,'h') && btTS(r.f,'a')) ? 'none' : 'block') + '">' + btFormStats(mi) + '</div>';
+  // v280 · El formulario manual queda SIEMPRE cerrado. Es opcional: el panel
+  // funciona entero sin tocarlo. Se abre desde el botón de la comparativa sólo
+  // si alguna vez se quiere afinar un partido puntual.
+  h += '<div id="bt-form-' + mi + '" style="display:none">' + btFormStats(mi) + '</div>';
   h += '<div id="bt-porque-' + mi + '"></div>';
   h += btCargaRapida(mi);
 
@@ -46768,7 +47344,16 @@ function btRenderMatchBody(mi){
     h += '<div class="infobox" style="font-size:11.5px;margin:10px 0;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text3)">⚠️ Cuota de Betano no disponible automáticamente. Cargala a mano en la columna “Cuota” y se recalcula el valor al instante.</div>';
   }
 
+  h += '<div id="bt-ctx-' + mi + '"></div>';
+  if(BT_CTX[mi]) setTimeout(function(){ btRenderCtx(mi); }, 0);
+
+  h += '<div id="bt-ia-' + mi + '">' + '</div>';
+  if(BT_IA[mi]) setTimeout(function(){ btRenderIA(mi); }, 0);
+
   h += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0">' +
+    '<button class="btn btn-primary btn-xs" onclick="btBuscarContexto('+mi+',event)" ' +
+      'title="Busca en Google alineaciones, bajas y árbitro">🌐 Buscar datos en vivo</button>' +
+    '<button class="btn btn-primary btn-xs" onclick="btAnalizarIA('+mi+',event)">🤖 Analizar con IA</button>' +
     '<button class="btn btn-ghost btn-xs" onclick="btInjuries('+mi+',event)">🏥 Ver lesionados (1 consulta)</button>' +
     '<button class="btn btn-ghost btn-xs" onclick="btMoves('+mi+',event)">📉 Movimiento de cuotas</button>' +
     '<span id="bt-ex'+mi+'" style="font-size:11px;color:var(--text3)"></span></div>';
