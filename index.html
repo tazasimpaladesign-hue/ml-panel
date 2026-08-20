@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v284 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v285 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -44931,6 +44931,31 @@ function btParseIA(raw){
 }
 
 // Muestra la respuesta cruda para poder ver qué devolvió realmente.
+/* v285 · Un JSON que parsea no siempre es un analisis. Si el modelo devolvio
+   algo vacio o sin los campos clave, mostrar la tarjeta con "Confianza —" y
+   todo en blanco es peor que avisar: parece que funciono cuando no. */
+function btIAValido(o){
+  if(!o || typeof o !== 'object') return false;
+  const tm = Array.isArray(o.top_mercados) ? o.top_mercados : [];
+  const utiles = tm.filter(function (m) {
+    return m && m.mercado && String(m.mercado).trim() && isFinite(Number(m.probabilidad));
+  });
+  // Alcanza con 3 mercados usables, o con una lectura mas alguna combinacion.
+  if(utiles.length >= 3) return true;
+  if(o.lectura && String(o.lectura).trim().length > 25 && (utiles.length || (o.combinaciones || []).length)) return true;
+  return false;
+}
+
+function btCtxValido(o){
+  if(!o || typeof o !== 'object') return false;
+  const hay = [o.estado_alineaciones, o.formacion_local, o.formacion_visitante, o.contexto, o.impacto]
+    .some(function (x) { return x && String(x).trim(); });
+  const listas = ((o.xi_local||[]).length + (o.xi_visitante||[]).length +
+                  (o.bajas_local||[]).length + (o.bajas_visitante||[]).length +
+                  (o.noticias||[]).length) > 0;
+  return hay || listas || !!(o.arbitro && o.arbitro.nombre);
+}
+
 function btBloqueCrudo(crudo){
   if(!crudo) return '';
   return '<details style="margin-top:10px"><summary style="font-size:11.5px;color:var(--text3);cursor:pointer">' +
@@ -46864,6 +46889,10 @@ function btAnalizarIA(mi, ev){
           if(cont) cont.innerHTML = btIAError(mi, pr.error || 'No pude leer la respuesta.') + btBloqueCrudo(pr.crudo);
           return;
         }
+        if(!btIAValido(obj)){
+          if(cont) cont.innerHTML = btIAError(mi, 'No pude obtener un análisis usable. Reintentá.') + btBloqueCrudo(txt);
+          return;
+        }
         obj._modelo = j.model || '';
         obj._reparado = true;
         BT_IA[mi] = obj;
@@ -46872,6 +46901,15 @@ function btAnalizarIA(mi, ev){
       return;
     }
     const out = pr.ok;
+    if(!btIAValido(out)){
+      // El JSON parseó pero está vacío: casi siempre es un modelo que no sirve
+      // para conversar (clasificadores, guardarraíles) o una respuesta cortada.
+      if(cont) cont.innerHTML = btIAError(mi,
+        'El modelo devolvió una respuesta vacía' + (j.model ? ' (' + j.model + ')' : '') +
+        '. Suele pasar cuando la cascada engancha un modelo que no es de chat. Reintentá: va a tomar otro.') +
+        btBloqueCrudo(txt);
+      return;
+    }
     out._reparado = !!pr.reparado;
     out._modelo = j.model || '';
     BT_IA[mi] = out;
@@ -47147,6 +47185,7 @@ function btBuscarContexto(mi, ev){
     .then(function (res) {
       BT_CTX_CARGANDO[mi] = false;
       if(!res) return;
+      if(res.obj && !btCtxValido(res.obj)) res.obj = null;
       if(!res.obj){
         // No se pudo estructurar, pero la búsqueda SÍ trajo información útil.
         // Mostrarla como texto es mucho mejor que tirar un error.
@@ -47180,6 +47219,8 @@ function btPista(msg){
     return 'Se alcanzó el límite de consultas por minuto. Esperá un minuto y reintentá.';
   if(/gemini|google|search|grounding/.test(m))
     return 'Puede que la clave de Gemini no tenga habilitada la búsqueda de Google.';
+  if(/vac[ií]a|no es de chat|content-safety|guard/.test(m))
+    return 'La cascada enganchó un modelo que no sirve para conversar. Reintentá: la próxima toma otro de la lista.';
   if(/openrouter|modelo|model/.test(m))
     return 'Ningún modelo de la cascada respondió. Suele resolverse reintentando en un minuto.';
   return 'El resto del panel sigue funcionando igual.';
