@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v283 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v284 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -44940,6 +44940,48 @@ function btBloqueCrudo(crudo){
     btEsc(crudo.slice(0, 3000)) + (crudo.length > 3000 ? '\n…' : '') + '</pre></details>';
 }
 
+/* v284 · Pedir a la IA y obtener JSON sí o sí.
+   Aprendizaje del error anterior: Gemini con busqueda de Google NO respeta el
+   formato JSON. La respuesta con fuentes viene en prosa, que es lo natural para
+   una busqueda. Pelearse con eso no sirve.
+   La solucion son dos pasos: primero se busca y se deja que conteste en prosa;
+   despues, una segunda llamada SIN busqueda convierte esa prosa al esquema.
+   Los modelos sin herramientas siguen el formato mucho mejor. */
+function btPedirIA(opts){
+  return fetch(WORKER + '/ai', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + btToken() },
+    body: JSON.stringify({
+      system: opts.system,
+      messages: [{ role: 'user', content: opts.user }],
+      max_tokens: opts.max || 2500,
+      temperature: opts.temp !== undefined ? opts.temp : 0.3,
+      buscar: !!opts.buscar
+    })
+  }).then(function (x) { return x.json(); });
+}
+
+function btTextoDe(j){
+  return (j && j.content) ? j.content.map(function (x) { return x.text || ''; }).join('').trim() : '';
+}
+
+// Convierte texto libre al esquema pedido. Se usa cuando el primer intento
+// devolvio prosa. Va sin busqueda a proposito: es una tarea de formato.
+function btEstructurar(texto, esquema){
+  return btPedirIA({
+    system: 'Convertís el texto que te dan a JSON. Respondés SOLO el objeto JSON, sin markdown ni comentarios. ' +
+            'Usás EXACTAMENTE este esquema: ' + esquema + ' ' +
+            'Lo que el texto no mencione lo dejás en null o en lista vacía. NO inventes nada que no esté en el texto.',
+    user: texto,
+    max: 2500,
+    temp: 0.1
+  }).then(function (j2) {
+    const t2 = btTextoDe(j2);
+    const pr = btParseIA(t2);
+    return pr.ok ? pr.ok : null;
+  }).catch(function () { return null; });
+}
+
 function btToken(){
   try { if(typeof token !== 'undefined' && token) return token; } catch(e){}
   try { if(window.token) return window.token; } catch(e){}
@@ -46756,6 +46798,12 @@ function btIADatos(mi){
   };
 }
 
+const BT_IA_ESQUEMA =
+  '{"lectura":null,"confianza":"ALTA|MEDIA|BAJA","motivo_confianza":null,"parejo":false,' +
+  '"top_mercados":[{"mercado":"","probabilidad":0,"cuota_justa":0,"por_que":"","riesgo":"BAJO|MEDIO|ALTO"}],' +
+  '"combinaciones":[{"selecciones":[],"probabilidad_estimada":0,"razon":"","correlacion":"BAJA|MEDIA|ALTA"}],' +
+  '"vs_mercado":null,"advertencias":[],"evitar":[{"mercado":"","motivo":""}]}';
+
 const BT_IA_SYSTEM =
   'Sos un analista cuantitativo de futbol. Te paso el resultado de un modelo estadistico ya ejecutado. ' +
   'REGLAS ABSOLUTAS: (1) NO tenes acceso a internet. (2) NO inventes alineaciones, lesiones, arbitros, xG, ' +
@@ -46807,7 +46855,20 @@ function btAnalizarIA(mi, ev){
     }
     const pr = btParseIA(txt);
     if(!pr.ok){
-      if(cont) cont.innerHTML = btIAError(mi, pr.error || 'No pude leer la respuesta.') + btBloqueCrudo(pr.crudo);
+      // Segundo intento: pedirle a otro modelo que ordene la respuesta.
+      if(cont) cont.innerHTML = '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:9px;' +
+        'padding:14px 16px;margin:12px 0;font-size:12.5px;color:var(--text3)">' +
+        '<span class="spin"></span> La IA contestó en texto, ordenándolo…</div>';
+      btEstructurar(txt, BT_IA_ESQUEMA).then(function (obj) {
+        if(!obj){
+          if(cont) cont.innerHTML = btIAError(mi, pr.error || 'No pude leer la respuesta.') + btBloqueCrudo(pr.crudo);
+          return;
+        }
+        obj._modelo = j.model || '';
+        obj._reparado = true;
+        BT_IA[mi] = obj;
+        btRenderIA(mi);
+      });
       return;
     }
     const out = pr.ok;
@@ -47018,23 +47079,29 @@ function btLimpiarAnalisis(){
 let BT_CTX = {};          // contexto en vivo por partido
 let BT_CTX_CARGANDO = {};
 
+// v284 · Al buscador se le pide PROSA, no JSON: con la busqueda activada los
+// modelos no respetan el formato, y forzarlo era lo que rompia.
 const BT_CTX_SYSTEM =
-  'Sos un asistente que BUSCA EN GOOGLE informacion de un partido de futbol que todavia no se jugo. ' +
-  'REGLAS: (1) Usa la busqueda para cada dato: no respondas de memoria. ' +
-  '(2) Si un dato NO lo encontras en los resultados de busqueda, devolvelo como null. NUNCA lo inventes. ' +
-  '(3) Si encontras informacion contradictoria entre fuentes, elegí la mas reciente y aclaralo en "notas". ' +
-  '(4) Si las alineaciones todavia no salieron, marcá "estado_alineaciones":"no publicadas" y dejá los XI en null. ' +
-  'Respondes UNICAMENTE con JSON valido, sin markdown, con esta forma: ' +
+  'Buscás en Google información de un partido de fútbol que todavía no se jugó y la contás en texto claro. ' +
+  'REGLAS: (1) Buscá cada dato, no respondas de memoria. ' +
+  '(2) Si algo NO lo encontrás, escribí explícitamente "no encontrado". NUNCA lo inventes. ' +
+  '(3) Si las fuentes se contradicen, quedate con la más reciente y aclaralo. ' +
+  'Cubrí, en este orden y con estos títulos exactos: ' +
+  'ALINEACIONES (si son oficiales, probables o si todavía no salieron; formación y once de cada equipo), ' +
+  'BAJAS (lesionados y suspendidos de cada equipo, con el motivo), ' +
+  'ÁRBITRO (nombre y promedio de amarillas si figura), ' +
+  'CONTEXTO (qué se juega cada equipo), ' +
+  'NOVEDADES (hasta 3 de los últimos días), ' +
+  'IMPACTO (cómo afecta todo esto al partido, 1 o 2 frases). ' +
+  'Escribí en castellano rioplatense, breve y al grano.';
+
+const BT_CTX_ESQUEMA =
   '{"estado_alineaciones":"oficiales|probables|no publicadas",' +
   '"formacion_local":null,"formacion_visitante":null,' +
   '"xi_local":[],"xi_visitante":[],' +
   '"bajas_local":[{"jugador":"","motivo":""}],"bajas_visitante":[{"jugador":"","motivo":""}],' +
   '"arbitro":{"nombre":null,"amarillas_promedio":null,"nota":null},' +
-  '"contexto":"que se juega cada equipo, en 1 o 2 frases, o null",' +
-  '"noticias":["hasta 3 novedades relevantes de los ultimos dias"],' +
-  '"impacto":"como afecta lo encontrado a las probabilidades del partido, 1 o 2 frases, o null",' +
-  '"notas":["contradicciones o dudas, o vacio"]}. ' +
-  'Escribi en castellano rioplatense.';
+  '"contexto":null,"noticias":[],"impacto":null,"notas":[]}';
 
 function btBuscarContexto(mi, ev){
   if(ev) ev.stopPropagation();
@@ -47053,39 +47120,54 @@ function btBuscarContexto(mi, ev){
     '. Buscá alineaciones probables u oficiales, lesionados, suspendidos, arbitro designado, ' +
     'que se juega cada equipo y novedades de los ultimos dias.';
 
-  // v282 · La variable global del token de ML se llama "token" (asi la usan
-  // todas las demas secciones). Antes buscaba "mlToken", que no existe, y por
-  // eso el Worker devolvia 401 "Token ML invalido o expirado".
-  fetch(WORKER + '/ai', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + btToken() },
-    body: JSON.stringify({ system: BT_CTX_SYSTEM, messages: [{ role:'user', content: pedido }],
-                           max_tokens: 2000, temperature: 0.3, buscar: true })
-  }).then(function (x) { return x.json(); }).then(function (j) {
-    BT_CTX_CARGANDO[mi] = false;
-    // Se arma el texto como en el resto del panel: puede venir en varias partes.
-    const txt = (j && j.content) ? j.content.map(function (x) { return x.text || ''; }).join('').trim() : '';
-    if(!txt){
-      if(cont) cont.innerHTML = btCtxError(mi, (j && j.error) || 'La búsqueda no devolvió nada.');
-      return;
-    }
-    const pr = btParseIA(txt);
-    if(!pr.ok){
-      if(cont) cont.innerHTML = btCtxError(mi, pr.error || 'No pude leer la respuesta.') + btBloqueCrudo(pr.crudo);
-      return;
-    }
-    const out = pr.ok;
-    out._reparado = !!pr.reparado;
-    out._fuentes = j.fuentes || [];
-    out._buscado = !!j.buscado;
-    out._modelo = j.model || '';
-    out._t = Date.now();
-    BT_CTX[mi] = out;
-    btRenderCtx(mi);
-  }).catch(function (e) {
-    BT_CTX_CARGANDO[mi] = false;
-    if(cont) cont.innerHTML = btCtxError(mi, 'No pude contactar al Worker: ' + e.message);
-  });
+  // PASO 1 · Buscar. Se acepta prosa: es lo que devuelve bien con búsqueda.
+  btPedirIA({ system: BT_CTX_SYSTEM, user: pedido, max: 2200, temp: 0.3, buscar: true })
+    .then(function (j) {
+      const txt = btTextoDe(j);
+      if(!txt){
+        BT_CTX_CARGANDO[mi] = false;
+        if(cont) cont.innerHTML = btCtxError(mi, (j && j.error) || 'La búsqueda no devolvió nada.');
+        return null;
+      }
+      const meta = { fuentes: j.fuentes || [], buscado: !!j.buscado, modelo: j.model || '', texto: txt };
+
+      // Por si acaso devolvió JSON directamente: no gastamos una segunda llamada.
+      const directo = btParseIA(txt);
+      if(directo.ok) return { obj: directo.ok, meta: meta };
+
+      if(cont) cont.innerHTML = '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:9px;' +
+        'padding:14px 16px;margin:12px 0;font-size:12.5px;color:var(--text3)">' +
+        '<span class="spin"></span> Encontré la información, ordenándola…</div>';
+
+      // PASO 2 · Convertir esa prosa al esquema, sin búsqueda.
+      return btEstructurar(txt, BT_CTX_ESQUEMA).then(function (obj) {
+        return { obj: obj, meta: meta };
+      });
+    })
+    .then(function (res) {
+      BT_CTX_CARGANDO[mi] = false;
+      if(!res) return;
+      if(!res.obj){
+        // No se pudo estructurar, pero la búsqueda SÍ trajo información útil.
+        // Mostrarla como texto es mucho mejor que tirar un error.
+        BT_CTX[mi] = { _crudo: res.meta.texto, _fuentes: res.meta.fuentes,
+                       _buscado: res.meta.buscado, _modelo: res.meta.modelo, _t: Date.now() };
+        btRenderCtx(mi);
+        return;
+      }
+      const out = res.obj;
+      out._fuentes = res.meta.fuentes;
+      out._buscado = res.meta.buscado;
+      out._modelo = res.meta.modelo;
+      out._texto = res.meta.texto;
+      out._t = Date.now();
+      BT_CTX[mi] = out;
+      btRenderCtx(mi);
+    })
+    .catch(function (e) {
+      BT_CTX_CARGANDO[mi] = false;
+      if(cont) cont.innerHTML = btCtxError(mi, 'No pude contactar al Worker: ' + e.message);
+    });
 }
 
 // v282 · Cada error explica SU causa. Antes todo culpaba a Gemini, incluso
@@ -47115,6 +47197,25 @@ function btRenderCtx(mi){
   const o = BT_CTX[mi], cont = document.getElementById('bt-ctx-' + mi);
   if(!o || !cont) return;
   const r = BT_ANA[mi];
+
+  // Modo texto: la búsqueda trajo datos pero no se pudieron ordenar en tabla.
+  // Sigue siendo información real y con fuentes, así que se muestra igual.
+  if(o._crudo){
+    cont.innerHTML = '<div style="background:var(--bg2);border:1px solid var(--green);border-radius:10px;padding:16px 18px;margin:12px 0">' +
+      '<div style="display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;margin-bottom:10px">' +
+        '<strong style="font-size:14px">🌐 Contexto en vivo</strong>' +
+        '<span style="font-size:11px;color:var(--amber)">en texto · no pude armar la tabla</span>' +
+        '<button class="btn btn-ghost btn-xs" style="margin-left:auto" onclick="btBuscarContexto(' + mi + ',event)">↻ Reintentar</button></div>' +
+      '<div style="font-size:12.5px;color:var(--text2);line-height:1.8;white-space:pre-wrap">' + btEsc(o._crudo.slice(0, 4000)) + '</div>' +
+      (o._fuentes && o._fuentes.length
+        ? '<div style="margin-top:14px;padding-top:11px;border-top:1px dashed var(--border);display:flex;gap:6px;flex-wrap:wrap">' +
+          o._fuentes.map(function (f) {
+            return '<a href="' + btEsc(f.url) + '" target="_blank" rel="noopener" style="font-size:11px;color:var(--accent);' +
+              'border:1px solid var(--border);border-radius:14px;padding:3px 10px;text-decoration:none">' +
+              btEsc((f.titulo || f.url).slice(0, 42)) + '</a>'; }).join('') + '</div>'
+        : '') + '</div>';
+    return;
+  }
   const dato = function (v) { return (v === null || v === undefined || v === '') ? null : v; };
 
   const estadoCol = { 'oficiales':'var(--green)', 'probables':'var(--amber)', 'no publicadas':'var(--text4)' };
