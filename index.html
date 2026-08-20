@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v281 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v282 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1659,6 +1659,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <button class="btn btn-ghost btn-xs" onclick="btRefreshQuota()">↻ Actualizar contador</button>
         <button class="btn btn-ghost btn-xs" onclick="btVerComps()">📋 Ver competiciones incluidas</button>
         <button class="btn btn-ghost btn-xs" onclick="btDiag()">🔬 Comparar fuentes</button>
+        <button class="btn btn-ghost btn-xs" onclick="btDiagIA(event)">🔧 Probar la IA</button>
         <button class="btn btn-ghost btn-xs" id="bt-unlock" onclick="btUnlock()" style="display:none">🔓 Destrabar</button>
       </div>
     </div>
@@ -6585,7 +6586,7 @@ function startConfigSync(){
     if(!token || !userId) return;
     try{
       const r = await fetch(WORKER + '/check-sync', {
-        headers: { 'Authorization': 'Bearer ' + token }
+        headers: { 'Authorization': 'Bearer ' + btToken() }
       });
       if(!r.ok) return;
       const { lastUpdate } = await r.json();
@@ -6659,7 +6660,7 @@ function _onTabVisible(){
   var now = Date.now();
   if(now - _lastVisibilityCheck < 10000) return;
   _lastVisibilityCheck = now;
-  fetch(WORKER + '/check-sync', { headers: { 'Authorization': 'Bearer ' + token } })
+  fetch(WORKER + '/check-sync', { headers: { 'Authorization': 'Bearer ' + btToken() } })
     .then(function(r){ return r.ok ? r.json() : null; })
     .then(function(d){
       if(!d) return;
@@ -14181,7 +14182,7 @@ let _comboState = { combos: [], publicados: [], loaded: false, generating: false
 async function _comboLoadPublicados() {
   if (_comboState.loaded) return;
   try {
-    const r = await fetch(WORKER + '/api/combos', { headers: { 'Authorization': 'Bearer ' + token } });
+    const r = await fetch(WORKER + '/api/combos', { headers: { 'Authorization': 'Bearer ' + btToken() } });
     if (r.ok) {
       const d = await r.json();
       _comboState.publicados = (d.ok && Array.isArray(d.combos)) ? d.combos : [];
@@ -14201,7 +14202,7 @@ function _comboSavePublicados() {
   try { localStorage.setItem('mlp_combos_pub', JSON.stringify(_comboState.publicados)); } catch (e) {}
   // e intentar subir a la nube (si el worker lo soporta)
   fetch(WORKER + '/api/combos', {
-    method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+    method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + btToken() },
     body: JSON.stringify({ combos: _comboState.publicados })
   }).catch(e => console.warn('[combos save]', e.message));
 }
@@ -44856,6 +44857,25 @@ let BT_LIGAS = {};   // v267 · promedios ya traidos, por liga+temporada
 let BT_TSTATS = {};  // v277 · estadisticas cargadas a mano, por fuente|equipo
 let BT_CUOTAS = null;   // v281 · cuotas automaticas del dia, ya cruzadas
 
+// v282 · El token de ML vive en el primer bloque <script> y este modulo esta en
+// el segundo. En el navegador los "let" de nivel superior se comparten entre
+// scripts, pero por las dudas hay respaldo desde localStorage: un 401 por una
+// variable fuera de alcance es un error muy caro de diagnosticar.
+function btToken(){
+  try { if(typeof token !== 'undefined' && token) return token; } catch(e){}
+  try { if(window.token) return window.token; } catch(e){}
+  try {
+    const app = (typeof activeApp !== 'undefined' && activeApp) ? activeApp : null;
+    if(app){ const t = localStorage.getItem('ml_token_' + app); if(t) return t; }
+    // Sin app activa: se toma el primer token de ML que haya guardado.
+    for(let i = 0; i < localStorage.length; i++){
+      const k = localStorage.key(i);
+      if(k && k.indexOf('ml_token_') === 0){ const v = localStorage.getItem(k); if(v) return v; }
+    }
+  } catch(e){}
+  return '';
+}
+
 // v281 · Trae las cuotas del dia en UNA consulta y las cruza con los partidos
 // por nombre de equipo, reusando el mismo comparador tolerante que usa la
 // fusion de fuentes ("Man City" contra "Manchester City").
@@ -46690,15 +46710,16 @@ function btAnalizarIA(mi, ev){
   const datos = btIADatos(mi);
   fetch(WORKER + '/ai', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (typeof mlToken !== 'undefined' ? mlToken : '') },
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + btToken() },
     body: JSON.stringify({
       system: BT_IA_SYSTEM,
       messages: [{ role: 'user', content: JSON.stringify(datos) }],
-      max_tokens: 2200
+      max_tokens: 2200,
+      temperature: 0.4
     })
   }).then(function (x) { return x.json(); }).then(function (j) {
     BT_IA_CARGANDO[mi] = false;
-    const txt = (j && j.content && j.content[0] && j.content[0].text) || '';
+    const txt = (j && j.content) ? j.content.map(function (x) { return x.text || ''; }).join('').trim() : '';
     if(!txt){
       if(cont) cont.innerHTML = btIAError(mi, (j && j.error) || 'La IA no devolvió nada.');
       return;
@@ -46718,7 +46739,53 @@ function btAnalizarIA(mi, ev){
 function btIAError(mi, msg){
   return '<div style="background:rgba(226,112,95,.08);border:1px solid var(--red);border-radius:9px;padding:13px 15px;margin:12px 0">' +
     '<div style="font-size:12.5px;color:var(--text2);margin-bottom:8px">❌ ' + btEsc(msg) + '</div>' +
-    '<button class="btn btn-ghost btn-xs" onclick="btAnalizarIA(' + mi + ',event)">Reintentar</button></div>';
+    '<div style="font-size:11px;color:var(--text4);margin-bottom:9px">' + btPista(msg) + '</div>' +
+    '<button class="btn btn-ghost btn-xs" onclick="btAnalizarIA(' + mi + ',event)">Reintentar</button>' +
+    '<button class="btn btn-ghost btn-xs" onclick="btDiagIA(event)" style="margin-left:6px">🔧 Probar la IA</button></div>';
+}
+
+/* v282 · Diagnóstico de la IA en un botón. Hace una llamada mínima y dice
+   exactamente qué anda y qué no, para no tener que abrir la consola. */
+function btDiagIA(ev){
+  if(ev) ev.stopPropagation();
+  btSetStatus('<span class="spin"></span> Probando la conexión con la IA…');
+  const paso = [];
+  const tk = btToken();
+  paso.push(tk
+    ? '🟢 Sesión de MercadoLibre activa (token de ' + tk.length + ' caracteres)'
+    : '🔴 No hay sesión de MercadoLibre: cerrá sesión y volvé a entrar desde la barra lateral');
+
+  fetch(WORKER + '/ai', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + btToken() },
+    body: JSON.stringify({ system: 'Respondé solamente OK.', messages: [{ role:'user', content: 'test' }], max_tokens: 20 })
+  }).then(function (x) { return x.json().then(function (j) { return { s: x.status, j: j }; }); })
+    .then(function (r) {
+      if(r.s === 401){ paso.push('🔴 El Worker rechazó el token (401). Volvé a iniciar sesión.'); return null; }
+      if(r.j && r.j.error){ paso.push('🔴 IA sin búsqueda: ' + btEsc(r.j.error)); return null; }
+      const t = (r.j.content || []).map(function (x) { return x.text || ''; }).join('').trim();
+      paso.push(t ? ('🟢 IA sin búsqueda responde · modelo ' + btEsc(r.j.model || '?')) : '🟡 IA respondió vacío');
+      // Segunda prueba: ahora CON búsqueda de Google.
+      return fetch(WORKER + '/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + btToken() },
+        body: JSON.stringify({ system: 'Respondé en una línea.', messages: [{ role:'user', content: '¿Qué día es hoy en Argentina?' }],
+                               max_tokens: 60, buscar: true })
+      }).then(function (x) { return x.json(); });
+    })
+    .then(function (j) {
+      if(j){
+        if(j.error) paso.push('🔴 Búsqueda de Google: ' + btEsc(j.error));
+        else if(j.buscado) paso.push('🟢 Búsqueda de Google activa · ' + (j.fuentes || []).length + ' fuentes · modelo ' + btEsc(j.model || '?'));
+        else paso.push('🟡 La IA respondió pero SIN búsqueda: la clave de Gemini no tiene Google Search habilitado. ' +
+                       'El botón 🤖 funciona igual; el 🌐 no va a traer alineaciones reales.');
+      }
+      btSetStatus('<strong>Diagnóstico de la IA</strong><br><span style="font-size:11.5px;line-height:1.9">' + paso.join('<br>') + '</span>');
+    })
+    .catch(function (e) {
+      paso.push('🔴 No pude contactar al Worker: ' + btEsc(e.message));
+      btSetStatus('<strong>Diagnóstico de la IA</strong><br><span style="font-size:11.5px;line-height:1.9">' + paso.join('<br>') + '</span>');
+    });
 }
 
 function btRenderIA(mi){
@@ -46897,15 +46964,18 @@ function btBuscarContexto(mi, ev){
     '. Buscá alineaciones probables u oficiales, lesionados, suspendidos, arbitro designado, ' +
     'que se juega cada equipo y novedades de los ultimos dias.';
 
+  // v282 · La variable global del token de ML se llama "token" (asi la usan
+  // todas las demas secciones). Antes buscaba "mlToken", que no existe, y por
+  // eso el Worker devolvia 401 "Token ML invalido o expirado".
   fetch(WORKER + '/ai', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json',
-               'Authorization': 'Bearer ' + (typeof mlToken !== 'undefined' ? mlToken : '') },
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + btToken() },
     body: JSON.stringify({ system: BT_CTX_SYSTEM, messages: [{ role:'user', content: pedido }],
-                           max_tokens: 2000, buscar: true })
+                           max_tokens: 2000, temperature: 0.3, buscar: true })
   }).then(function (x) { return x.json(); }).then(function (j) {
     BT_CTX_CARGANDO[mi] = false;
-    const txt = (j && j.content && j.content[0] && j.content[0].text) || '';
+    // Se arma el texto como en el resto del panel: puede venir en varias partes.
+    const txt = (j && j.content) ? j.content.map(function (x) { return x.text || ''; }).join('').trim() : '';
     if(!txt){
       if(cont) cont.innerHTML = btCtxError(mi, (j && j.error) || 'La búsqueda no devolvió nada.');
       return;
@@ -46925,12 +46995,27 @@ function btBuscarContexto(mi, ev){
   });
 }
 
+// v282 · Cada error explica SU causa. Antes todo culpaba a Gemini, incluso
+// cuando el problema era la sesión de MercadoLibre.
+function btPista(msg){
+  const m = String(msg || '').toLowerCase();
+  if(/token|401|unauthorized|expirad/.test(m))
+    return 'Se venció la sesión de MercadoLibre. Cerrá sesión y volvé a entrar desde la barra lateral: el Worker usa ese token para autorizar la IA.';
+  if(/429|l[ií]mite|rate/.test(m))
+    return 'Se alcanzó el límite de consultas por minuto. Esperá un minuto y reintentá.';
+  if(/gemini|google|search|grounding/.test(m))
+    return 'Puede que la clave de Gemini no tenga habilitada la búsqueda de Google.';
+  if(/openrouter|modelo|model/.test(m))
+    return 'Ningún modelo de la cascada respondió. Suele resolverse reintentando en un minuto.';
+  return 'El resto del panel sigue funcionando igual.';
+}
+
 function btCtxError(mi, msg){
   return '<div style="background:rgba(226,112,95,.08);border:1px solid var(--red);border-radius:9px;padding:13px 15px;margin:12px 0">' +
     '<div style="font-size:12.5px;color:var(--text2);margin-bottom:8px">❌ ' + btEsc(msg) + '</div>' +
-    '<div style="font-size:11px;color:var(--text4);margin-bottom:9px">Si se repite, puede que la clave de Gemini no tenga ' +
-    'habilitada la búsqueda de Google. El resto del panel sigue funcionando igual.</div>' +
-    '<button class="btn btn-ghost btn-xs" onclick="btBuscarContexto(' + mi + ',event)">Reintentar</button></div>';
+    '<div style="font-size:11px;color:var(--text4);margin-bottom:9px">' + btPista(msg) + '</div>' +
+    '<button class="btn btn-ghost btn-xs" onclick="btBuscarContexto(' + mi + ',event)">Reintentar</button>' +
+    '<button class="btn btn-ghost btn-xs" onclick="btDiagIA(event)" style="margin-left:6px">🔧 Probar la IA</button></div>';
 }
 
 function btRenderCtx(mi){
