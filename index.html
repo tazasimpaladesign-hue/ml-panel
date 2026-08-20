@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v282 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v283 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -44861,6 +44861,85 @@ let BT_CUOTAS = null;   // v281 · cuotas automaticas del dia, ya cruzadas
 // el segundo. En el navegador los "let" de nivel superior se comparten entre
 // scripts, pero por las dudas hay respaldo desde localStorage: un 401 por una
 // variable fuera de alcance es un error muy caro de diagnosticar.
+/* v283 · Parser propio para las respuestas de la IA.
+   El del panel es bueno pero no cubre dos cosas que rompen seguido con modelos
+   gratuitos: (1) la respuesta se corta por limite de tokens y el JSON queda sin
+   cerrar; (2) algunos modelos de razonamiento emiten <think>...</think> antes
+   del JSON. Ademas, cuando todo falla devolvemos el texto crudo en vez de
+   tragarnoslo: sin ver la respuesta no hay forma de diagnosticar nada. */
+function btParseIA(raw){
+  if(!raw || typeof raw !== 'string') return { error: 'Respuesta vacía', crudo: '' };
+  let s = raw;
+
+  // 1 · Fuera bloques de razonamiento y cercos de markdown.
+  s = s.replace(/<think>[\s\S]*?<\/think>/gi, '')
+       .replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, '')
+       .replace(/^```(?:json)?\s*/i, '')
+       .replace(/```\s*$/, '')
+       .trim();
+
+  // 2 · Aislar desde la primera llave.
+  const ini = s.indexOf('{');
+  if(ini < 0) return { error: 'La IA respondió texto plano, sin JSON', crudo: raw };
+  s = s.slice(ini);
+  const fin = s.lastIndexOf('}');
+  const completo = (fin > 0) ? s.slice(0, fin + 1) : s;
+
+  try { return { ok: JSON.parse(completo) }; } catch(e){}
+
+  // 3 · Reparar un JSON cortado a la mitad. Se cierra lo que quedó abierto,
+  //     descartando el último elemento incompleto.
+  try {
+    let t = s;
+    // Si terminó dentro de un string, se corta antes de esa comilla.
+    let comillas = 0, esc = false;
+    for(let i = 0; i < t.length; i++){
+      const c = t[i];
+      if(esc){ esc = false; continue; }
+      if(c === '\\'){ esc = true; continue; }
+      if(c === '"') comillas++;
+    }
+    if(comillas % 2 === 1) t = t.slice(0, t.lastIndexOf('"'));
+
+    // Se poda hasta el último cierre de elemento, para no dejar basura.
+    const corte = Math.max(t.lastIndexOf('}'), t.lastIndexOf(']'), t.lastIndexOf('"'));
+    if(corte > 0) t = t.slice(0, corte + 1);
+    t = t.replace(/,\s*$/, '');
+
+    // Se cierran corchetes y llaves pendientes, en el orden correcto.
+    const pila = [];
+    let dentro = false; esc = false;
+    for(let i = 0; i < t.length; i++){
+      const c = t[i];
+      if(esc){ esc = false; continue; }
+      if(c === '\\'){ esc = true; continue; }
+      if(c === '"'){ dentro = !dentro; continue; }
+      if(dentro) continue;
+      if(c === '{' || c === '[') pila.push(c);
+      else if(c === '}' || c === ']') pila.pop();
+    }
+    while(pila.length){ t += (pila.pop() === '{') ? '}' : ']'; }
+
+    const obj = JSON.parse(t);
+    return { ok: obj, reparado: true };
+  } catch(e){}
+
+  // 4 · Último intento: el sanitizador del panel.
+  try { return { ok: _aiParseJSON(raw) }; } catch(e){}
+
+  return { error: 'No pude interpretar la respuesta', crudo: raw };
+}
+
+// Muestra la respuesta cruda para poder ver qué devolvió realmente.
+function btBloqueCrudo(crudo){
+  if(!crudo) return '';
+  return '<details style="margin-top:10px"><summary style="font-size:11.5px;color:var(--text3);cursor:pointer">' +
+    'Ver lo que respondió la IA (' + crudo.length + ' caracteres)</summary>' +
+    '<pre style="margin:8px 0 0;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:7px;' +
+    'font-size:10.5px;line-height:1.5;white-space:pre-wrap;word-break:break-word;max-height:260px;overflow:auto">' +
+    btEsc(crudo.slice(0, 3000)) + (crudo.length > 3000 ? '\n…' : '') + '</pre></details>';
+}
+
 function btToken(){
   try { if(typeof token !== 'undefined' && token) return token; } catch(e){}
   try { if(window.token) return window.token; } catch(e){}
@@ -46614,7 +46693,7 @@ function btIADatos(mi){
     .filter(function (m) { return m.p >= 0.05 && m.p <= 0.96; })
     .slice()
     .sort(function (a, b) { return b.p - a.p; })
-    .slice(0, 40)
+    .slice(0, 28)
     .map(function (m) {
       const idx = r.MK.indexOf(m), eff = btOddOf(mi, idx);
       return {
@@ -46692,8 +46771,10 @@ const BT_IA_SYSTEM =
   '"vs_mercado":"una frase comparando el modelo con las casas, o null si no hay cuotas",' +
   '"advertencias":["maximo 4, sobre datos faltantes o incertidumbre"],' +
   '"evitar":[{"mercado":"","motivo":""}]}. ' +
-  'En top_mercados incluis entre 6 y 10, ordenados por calidad de oportunidad (no solo por probabilidad: ' +
+  'En top_mercados incluis EXACTAMENTE 8, ordenados por calidad de oportunidad (no solo por probabilidad: ' +
   'penaliza los que tengan origen_dato "promedio de liga (estimado)"). ' +
+  'IMPORTANTE: cada campo de texto ("por_que", "razon", "lectura") tiene que ser CORTO, maximo 90 caracteres, ' +
+  'para que la respuesta entre completa. No uses saltos de linea dentro de los textos. ' +
   'En combinaciones proponé hasta 3, y aclara en razon si las selecciones son del mismo partido y por lo tanto ' +
   'NO son independientes. Escribi en castellano rioplatense, en frases cortas.';
 
@@ -46714,8 +46795,8 @@ function btAnalizarIA(mi, ev){
     body: JSON.stringify({
       system: BT_IA_SYSTEM,
       messages: [{ role: 'user', content: JSON.stringify(datos) }],
-      max_tokens: 2200,
-      temperature: 0.4
+      max_tokens: 3500,
+      temperature: 0.3
     })
   }).then(function (x) { return x.json(); }).then(function (j) {
     BT_IA_CARGANDO[mi] = false;
@@ -46724,9 +46805,13 @@ function btAnalizarIA(mi, ev){
       if(cont) cont.innerHTML = btIAError(mi, (j && j.error) || 'La IA no devolvió nada.');
       return;
     }
-    let out;
-    try { out = _aiParseJSON(txt); }
-    catch(e){ if(cont) cont.innerHTML = btIAError(mi, 'La IA respondió en un formato que no pude leer. Probá de nuevo.'); return; }
+    const pr = btParseIA(txt);
+    if(!pr.ok){
+      if(cont) cont.innerHTML = btIAError(mi, pr.error || 'No pude leer la respuesta.') + btBloqueCrudo(pr.crudo);
+      return;
+    }
+    const out = pr.ok;
+    out._reparado = !!pr.reparado;
     out._modelo = j.model || '';
     BT_IA[mi] = out;
     btRenderIA(mi);
@@ -46802,6 +46887,10 @@ function btRenderIA(mi){
       '<button class="btn btn-ghost btn-xs" style="margin-left:auto" onclick="btAnalizarIA(' + mi + ',event)">↻ Rehacer</button>' +
     '</div>';
 
+  if(o._reparado){
+    h += '<div style="font-size:11.5px;color:var(--amber);margin-bottom:10px">⚠️ La respuesta vino cortada por ' +
+         'límite de tokens y la completé: puede faltar alguna fila al final.</div>';
+  }
   if(o.parejo === true){
     h += '<div class="alert a-warn" style="font-size:12.5px;margin:0 0 12px">⚖️ <strong>Partido muy parejo.</strong> ' +
          'El modelo no tiene una lectura fuerte de quién gana.</div>';
@@ -46980,9 +47069,13 @@ function btBuscarContexto(mi, ev){
       if(cont) cont.innerHTML = btCtxError(mi, (j && j.error) || 'La búsqueda no devolvió nada.');
       return;
     }
-    let out;
-    try { out = _aiParseJSON(txt); }
-    catch(e){ if(cont) cont.innerHTML = btCtxError(mi, 'La respuesta vino en un formato que no pude leer.'); return; }
+    const pr = btParseIA(txt);
+    if(!pr.ok){
+      if(cont) cont.innerHTML = btCtxError(mi, pr.error || 'No pude leer la respuesta.') + btBloqueCrudo(pr.crudo);
+      return;
+    }
+    const out = pr.ok;
+    out._reparado = !!pr.reparado;
     out._fuentes = j.fuentes || [];
     out._buscado = !!j.buscado;
     out._modelo = j.model || '';
