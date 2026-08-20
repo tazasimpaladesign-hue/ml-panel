@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v285 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v286 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -46756,11 +46756,27 @@ let BT_IA_CARGANDO = {};
 // Arma el paquete de datos REALES que se le pasa a la IA.
 function btIADatos(mi){
   const r = BT_ANA[mi], D = r.D;
-  const top = r.MK
-    .filter(function (m) { return m.p >= 0.05 && m.p <= 0.96; })
-    .slice()
+  // v286 · ANTES: se mandaban los 28 mercados de mayor probabilidad. Como los
+  // de goles son siempre los mas probables, la IA nunca veia cornersolos,
+  // tarjetas, handicap ni marcador exacto, y devolvia ocho variantes del mismo
+  // mercado. AHORA se toma una muestra REPARTIDA: hasta 6 por categoria, y
+  // dentro de cada una se eligen extremos y medio para cubrir el rango.
+  const porCat = {};
+  r.MK.filter(function (m) { return m.p >= 0.05 && m.p <= 0.96; })
+      .forEach(function (m) { (porCat[m.g] = porCat[m.g] || []).push(m); });
+
+  const muestra = [];
+  Object.keys(porCat).forEach(function (cat) {
+    const lista = porCat[cat].sort(function (a, b) { return b.p - a.p; });
+    const cuantos = Math.min(6, lista.length);
+    if(lista.length <= cuantos){ lista.forEach(function (m) { muestra.push(m); }); return; }
+    // Se reparten a lo largo del rango de probabilidad, no sólo los de arriba.
+    const paso = (lista.length - 1) / (cuantos - 1);
+    for(let i = 0; i < cuantos; i++) muestra.push(lista[Math.round(i * paso)]);
+  });
+
+  const top = muestra
     .sort(function (a, b) { return b.p - a.p; })
-    .slice(0, 28)
     .map(function (m) {
       const idx = r.MK.indexOf(m), eff = btOddOf(mi, idx);
       return {
@@ -46825,7 +46841,7 @@ function btIADatos(mi){
 
 const BT_IA_ESQUEMA =
   '{"lectura":null,"confianza":"ALTA|MEDIA|BAJA","motivo_confianza":null,"parejo":false,' +
-  '"top_mercados":[{"mercado":"","probabilidad":0,"cuota_justa":0,"por_que":"","riesgo":"BAJO|MEDIO|ALTO"}],' +
+  '"top_mercados":[{"mercado":"","categoria":"","probabilidad":0,"cuota_justa":0,"por_que":"","riesgo":"BAJO|MEDIO|ALTO"}],' +
   '"combinaciones":[{"selecciones":[],"probabilidad_estimada":0,"razon":"","correlacion":"BAJA|MEDIA|ALTA"}],' +
   '"vs_mercado":null,"advertencias":[],"evitar":[{"mercado":"","motivo":""}]}';
 
@@ -46839,13 +46855,18 @@ const BT_IA_SYSTEM =
   '{"lectura":"2 o 3 frases sobre como se proyecta el partido",' +
   '"confianza":"ALTA|MEDIA|BAJA","motivo_confianza":"una frase",' +
   '"parejo":true|false,' +
-  '"top_mercados":[{"mercado":"","probabilidad":0,"cuota_justa":0,"por_que":"una frase","riesgo":"BAJO|MEDIO|ALTO"}],' +
+  '"top_mercados":[{"mercado":"","categoria":"","probabilidad":0,"cuota_justa":0,"por_que":"una frase","riesgo":"BAJO|MEDIO|ALTO"}],' +
   '"combinaciones":[{"selecciones":["",""],"probabilidad_estimada":0,"razon":"una frase","correlacion":"BAJA|MEDIA|ALTA"}],' +
   '"vs_mercado":"una frase comparando el modelo con las casas, o null si no hay cuotas",' +
   '"advertencias":["maximo 4, sobre datos faltantes o incertidumbre"],' +
   '"evitar":[{"mercado":"","motivo":""}]}. ' +
-  'En top_mercados incluis EXACTAMENTE 8, ordenados por calidad de oportunidad (no solo por probabilidad: ' +
+  'En top_mercados incluis EXACTAMENTE 12, ordenados por calidad de oportunidad (no solo por probabilidad: ' +
   'penaliza los que tengan origen_dato "promedio de liga (estimado)"). ' +
+  'OBLIGATORIO: los 12 tienen que cubrir al menos 5 CATEGORIAS distintas del campo "categoria". ' +
+  'NO devuelvas ocho variantes del mismo mercado de goles: eso no le sirve a nadie. ' +
+  'Si una categoria (cornersolos, tarjetas, handicap, marcador exacto, tiempos) tiene alguna opcion razonable, incluila ' +
+  'aunque su probabilidad sea menor, y aclara el riesgo en el campo "riesgo". ' +
+  'Agrega el campo "categoria" a cada item de top_mercados, copiando el que viene en los datos. ' +
   'IMPORTANTE: cada campo de texto ("por_que", "razon", "lectura") tiene que ser CORTO, maximo 90 caracteres, ' +
   'para que la respuesta entre completa. No uses saltos de linea dentro de los textos. ' +
   'En combinaciones proponé hasta 3, y aclara en razon si las selecciones son del mismo partido y por lo tanto ' +
@@ -46868,7 +46889,7 @@ function btAnalizarIA(mi, ev){
     body: JSON.stringify({
       system: BT_IA_SYSTEM,
       messages: [{ role: 'user', content: JSON.stringify(datos) }],
-      max_tokens: 3500,
+      max_tokens: 4200,
       temperature: 0.3
     })
   }).then(function (x) { return x.json(); }).then(function (j) {
@@ -47001,13 +47022,14 @@ function btRenderIA(mi){
   if(Array.isArray(o.top_mercados) && o.top_mercados.length){
     h += '<div style="font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--text3);margin:14px 0 8px">Mejores mercados según la IA</div>' +
       '<div class="tbl-wrap"><table><thead><tr>' +
-      '<th>Mercado</th><th style="text-align:right">Prob.</th><th style="text-align:right">Justa</th>' +
+      '<th>Mercado</th><th>Categoría</th><th style="text-align:right">Prob.</th><th style="text-align:right">Justa</th>' +
       '<th style="text-align:center">Riesgo</th><th>Por qué</th></tr></thead><tbody>';
-    o.top_mercados.slice(0, 12).forEach(function (m) {
+    o.top_mercados.slice(0, 14).forEach(function (m) {
       const pr = Number(m.probabilidad) || 0;
       const col = pr >= 75 ? 'var(--green)' : (pr >= 55 ? '#7cb342' : (pr >= 35 ? 'var(--amber)' : 'var(--red)'));
       h += '<tr>' +
         '<td style="font-size:13px;font-weight:600">' + btEsc(m.mercado) + '</td>' +
+        '<td style="font-size:10.5px;color:var(--text4);white-space:nowrap">' + btEsc(m.categoria || '—') + '</td>' +
         '<td style="text-align:right;font-weight:700;font-size:14px;color:' + col + '">' + pr.toFixed(1) + '%' +
           btBarra(pr, col, 3) + '</td>' +
         '<td style="text-align:right;font-size:13px;color:var(--text3)">' + (m.cuota_justa ? Number(m.cuota_justa).toFixed(2) : '—') + '</td>' +
@@ -47015,6 +47037,15 @@ function btRenderIA(mi){
         '<td style="font-size:11.5px;color:var(--text3);line-height:1.5">' + btEsc(m.por_que || '') + '</td></tr>';
     });
     h += '</tbody></table></div>';
+    // Control de calidad: si todo cae en una sola categoría, la lectura sirve poco.
+    const cats = {};
+    o.top_mercados.forEach(function (m) { if(m.categoria) cats[m.categoria] = 1; });
+    const nCats = Object.keys(cats).length;
+    if(nCats && nCats < 3){
+      h += '<div style="font-size:11.5px;color:var(--amber);margin-top:8px">⚠️ La IA se concentró en ' +
+        (nCats === 1 ? 'una sola categoría' : 'sólo ' + nCats + ' categorías') +
+        '. Mirá la tabla completa del partido para ver córners, tarjetas y el resto.</div>';
+    }
   }
 
   if(Array.isArray(o.combinaciones) && o.combinaciones.length){
