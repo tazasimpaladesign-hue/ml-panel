@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v287 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v288 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1140,7 +1140,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <thead><tr>
           <th class="th-check"><input type="checkbox" id="check-all" onchange="toggleAll(this)"></th>
           <th>Publicación</th>
-          <th style="white-space:nowrap;text-align:center" title="Medidas y peso del paquete para Mercado Envíos. ML recomienda mantenerlas actualizadas.">📦 Empaque</th>
+          <th onclick="pubSort('empaque')" style="cursor:pointer;user-select:none;white-space:nowrap;text-align:center" title="Medidas y peso del paquete para Mercado Envíos. Clic para ordenar por volumen; segundo clic invierte. Las publicaciones sin datos van siempre al final.">📦 Empaque <span id="pub-sort-empaque" style="font-size:10px"></span></th>
           <th onclick="pubSort('sku')"   style="cursor:pointer;user-select:none;white-space:nowrap">SKU <span id="pub-sort-sku" style="font-size:10px"></span></th>
           <th onclick="pubSort('lastMod')" style="cursor:pointer;user-select:none;white-space:nowrap;text-align:center" title="Última fecha que ML registró un cambio (precio, fotos, stock). Detecta publicaciones que hace mucho no se tocan y pueden perder posicionamiento.">Fecha modif. <span id="pub-sort-lastMod" style="font-size:10px"></span></th>
           <th onclick="pubSort('price')" style="cursor:pointer;user-select:none;white-space:nowrap;text-align:right">Precio <span id="pub-sort-price" style="font-size:10px"></span></th>
@@ -8721,9 +8721,11 @@ function _itemThermoScore(item){
 // ── Ordenamiento Publicaciones (clic en encabezado) ──────────
 function pubSort(col){
   if(pubState.sortCol===col) pubState.sortDir*=-1;
-  else{ pubState.sortCol=col; pubState.sortDir=-1; }
+  // v288 · Empaque y peso arrancan de mayor a menor: lo que se busca es
+  // detectar los bultos grandes, no los chicos.
+  else{ pubState.sortCol=col; pubState.sortDir=(col==='empaque'||col==='peso') ? 1 : -1; }
   // actualizar flechas (v141: nuevas columnas sku, ean, type, avail, thermo)
-  ['price','stock','sold','sku','ean','type','avail','thermo','lastMod'].forEach(c=>{
+  ['price','stock','sold','sku','ean','type','avail','thermo','lastMod','empaque','peso'].forEach(c=>{
     const el=document.getElementById('pub-sort-'+c);
     if(el) el.innerHTML=sortArrow(c,pubState.sortCol,pubState.sortDir);
   });
@@ -8763,6 +8765,25 @@ function renderPubs(){
     else if(col==='avail')   { va=_itemManufDays(a);                       vb=_itemManufDays(b); }
     else if(col==='thermo')  { va=_itemThermoScore(a);                     vb=_itemThermoScore(b); }
     else if(col==='lastMod') { va=a.last_updated?new Date(a.last_updated).getTime():0; vb=b.last_updated?new Date(b.last_updated).getTime():0; }
+    // v288 · Empaque: ordena por VOLUMEN (alto×ancho×largo), que es lo que
+    // define si un paquete es "grande". Las que no tienen datos van siempre al
+    // final, en los dos sentidos: un paquete sin medir no es chico, es desconocido.
+    else if(col==='empaque'){
+      const da=_pubParseDims(a), db=_pubParseDims(b);
+      if(!da && !db) return 0;
+      if(!da) return 1;
+      if(!db) return -1;
+      va = da.h * da.w * da.l;
+      vb = db.h * db.w * db.l;
+      if(va === vb){ va = da.p || 0; vb = db.p || 0; }   // a igual volumen, pesa el peso
+    }
+    else if(col==='peso'){
+      const da=_pubParseDims(a), db=_pubParseDims(b);
+      if(!da && !db) return 0;
+      if(!da) return 1;
+      if(!db) return -1;
+      va = da.p || 0; vb = db.p || 0;
+    }
     else if(legacySort==='sold')       { return (b.sold_quantity||0)-(a.sold_quantity||0); }
     else if(legacySort==='price-asc')  { return (a.price||0)-(b.price||0); }
     else if(legacySort==='price-desc') { return (b.price||0)-(a.price||0); }
@@ -8902,7 +8923,10 @@ function _pubEmpaqueEditable(item){
 function _pubEmpaqueCell(item){
   const d = _pubParseDims(item);
   const editable = _pubEmpaqueEditable(item);
-  const txt = d ? (d.h+'×'+d.w+'×'+d.l+' · '+d.p+'g') : '<span style="color:var(--text3)">sin datos</span>';
+  // v288 · Se muestra el volumen en litros: es el número por el que se ordena.
+  const vol = d ? (d.h*d.w*d.l)/1000 : null;
+  const volTxt = vol!==null ? ('<span style="color:var(--text3)"> · '+(vol>=1?vol.toFixed(1)+'L':Math.round(vol*1000)+'cm³')+'</span>') : '';
+  const txt = d ? (d.h+'×'+d.w+'×'+d.l+' · '+d.p+'g'+volTxt) : '<span style="color:var(--text3)">sin datos</span>';
   if(!editable){
     return '<span style="color:var(--text3)" title="Solo editable en publicaciones con Mercado Envíos propio (no catálogo)">'+txt+' 🔒</span>';
   }
@@ -26106,6 +26130,7 @@ function _ctaRecalcMontoDesdeItems(op) {
 }
 
 function ctaEditItem(opId, idx, campo, valor) {
+  undoSnapshot('editar ítem');
   const found = _ctaFind(opId);
   if (!found || !found.op.items || !found.op.items[idx]) return;
   const op = found.op;
@@ -26130,6 +26155,7 @@ function ctaEditItem(opId, idx, campo, valor) {
 
 // v177: agrega un ítem nuevo a una operación desde el carrito expandido
 function ctaAddItemToOp(opId) {
+  undoSnapshot('agregar ítem');
   const found = _ctaFind(opId);
   if (!found) return;
   const op = found.op;
@@ -26150,6 +26176,7 @@ function ctaAddItemToOp(opId) {
 
 // v177: quita un ítem de una operación desde el carrito
 function ctaRemoveItemFromOp(opId, idx) {
+  undoSnapshot('quitar ítem');
   const found = _ctaFind(opId);
   if (!found || !found.op.items) return;
   const op = found.op;
@@ -26183,7 +26210,8 @@ async function ctaEditEnvio(id) {
 function ctaDeleteOp(id) {
   const found = _ctaFind(id);
   if (!found) return;
-  if (!confirm('🗑️ ¿Eliminar la operación "' + (found.op.detalle || id) + '"?\n\nNo se puede deshacer.')) return;
+  undoSnapshot('borrar operación');
+  if (!confirm('🗑️ ¿Eliminar la operación "' + (found.op.detalle || id) + '"?\n\nPodés revertirlo con Ctrl+Z.')) return;
   // v161: revertir el efecto en stock antes de borrar
   if (_ctaAplicarStock(found.op, -1)) _ctaPersistCatalogo();
   _ctaState.chunks[found.ym] = _ctaState.chunks[found.ym].filter(o => o.id !== id);
@@ -26293,6 +26321,7 @@ function _ctaManualTs(fecha, editId) {
 }
 
 function ctaSaveOp() {
+  undoSnapshot('guardar operación');
   const get = i => document.getElementById('cta-f-' + i).value;
   const fecha = get('fecha');
   const monto = parseFloat(get('monto')) || 0;
@@ -33772,6 +33801,7 @@ function _ecoModalShell(inner, maxw, fullHeight){
 // ── Editor de celda (importe + estado) ──
 let _ecoEdit = { gid:null, mes:null }, _ecoEstSel='pagado';
 function ecoEditCell(gid, mes){
+  undoSnapshot('editar importe');
   const g=_ecoState.gastos.find(x=>x.id===gid);
   if(!g) return;
   _ecoEdit={gid,mes};
@@ -33842,6 +33872,7 @@ function _ecoCellBorrar(){
 
 // ── Editar gasto: nombre, categoría, mostrar/ocultar a futuro ──
 function ecoEditGasto(gid){
+  undoSnapshot('editar gasto');
   const g=_ecoState.gastos.find(x=>x.id===gid); if(!g) return;
   const inner=
     '<div style="font-size:15px;font-weight:800;margin-bottom:14px;color:'+_ECO_TXT+'">✎ Editar gasto</div>'+
@@ -33919,6 +33950,7 @@ function _ecoMergeCnt(){
 // v208: fusiona el gasto "otroId" DENTRO de "gid" (gid queda como el nombre final).
 // Combina los datos por año: si ambos tienen el mismo año, suma; si solo uno, lo copia.
 function _ecoMergeGasto(gid){
+  undoSnapshot('unificar gastos');
   const ids=[..._ecoMergeSel()];
   if(!ids.length){ showToast('Marcá al menos un gasto para fusionar','info'); return; }
   const g=_ecoState.gastos.find(x=>x.id===gid); if(!g) return;
@@ -34459,6 +34491,7 @@ function _ecoSaveGasto(gid){
   showToast('✓ Gasto actualizado','success');
 }
 function _ecoDelGasto(gid){
+  undoSnapshot('borrar gasto');
   if(!confirm('¿Eliminar este gasto y todos sus datos históricos? No se puede deshacer.')) return;
   _ecoDelReg(gid);   // v261: queda registrado para que no revuelva desde otra PC
   _ecoState.gastos=_ecoState.gastos.filter(x=>x.id!==gid);
@@ -34484,6 +34517,7 @@ function ecoAddGasto(){
   setTimeout(()=>document.getElementById('eco-new-name')?.focus(),50);
 }
 function _ecoNewSave(){
+  undoSnapshot('nuevo gasto');
   const name=(document.getElementById('eco-new-name').value||'').trim();
   const cat=document.getElementById('eco-new-cat').value;
   if(!name){ showToast('Poné un nombre','error'); return; }
@@ -36397,6 +36431,147 @@ function _startAutoSave() {
 // ── Autoguardado de SETTINGS en la nube cada 60 minutos ───────────────────────
 var _SETTINGS_AUTOSAVE_KEY = 'mlp_settings_last_autosave';
 var _settingsAutoSaveTid   = null;
+// ═══════════════════════════════════════════════════════════
+// v288 · DESHACER CON CTRL+Z
+// ═══════════════════════════════════════════════════════════
+// Guarda una foto del estado ANTES de cada cambio y permite volver atrás.
+// Sólo trabaja en memoria: no toca la nube hasta que el usuario guarda, así
+// que deshacer no gasta ni una operación de KV.
+//
+// Alcance: Cuenta Impala y Economía, que son las secciones donde un borrado
+// accidental duele de verdad. Se ignora si el foco está en un campo de texto,
+// para no pisar el Ctrl+Z propio del navegador al escribir.
+
+var _undoStack = [];
+var _redoStack = [];
+var _UNDO_MAX  = 40;
+
+// Qué se puede deshacer en cada sección: cómo leer el estado y cómo reponerlo.
+var _UNDO_AMBITOS = {
+  cta: {
+    nombre: 'Cuenta Impala',
+    // Sólo se fotografían los DATOS, no la vista: página, orden y selección
+    // quedan como están, para no marear al deshacer.
+    leer: function(){
+      try {
+        if(typeof _ctaState === 'undefined' || !_ctaState) return null;
+        return JSON.stringify({
+          chunks:   _ctaState.chunks,
+          catalogo: _ctaState.catalogo,
+          resumen:  _ctaState.resumen,
+          months:   _ctaState.months
+        });
+      } catch(e){ return null; }
+    },
+    reponer: function(s){
+      var d = JSON.parse(s);
+      _ctaState.chunks   = d.chunks;
+      _ctaState.catalogo = d.catalogo;
+      _ctaState.resumen  = d.resumen;
+      _ctaState.months   = d.months;
+      // Los meses restaurados quedan pendientes de guardar, para que el
+      // deshacer también llegue a la nube cuando se sincronice.
+      if(!_ctaState.dirty) _ctaState.dirty = new Set();
+      Object.keys(d.chunks || {}).forEach(function(ym){ _ctaState.dirty.add(ym); });
+      if(typeof ctaRenderAll === 'function') ctaRenderAll();
+    }
+  },
+  economia: {
+    nombre: 'Economía',
+    leer: function(){
+      try {
+        if(typeof _ecoState === 'undefined' || !_ecoState) return null;
+        return JSON.stringify({ gastos: _ecoState.gastos, year: _ecoState.year });
+      } catch(e){ return null; }
+    },
+    reponer: function(s){
+      var d = JSON.parse(s);
+      _ecoState.gastos = d.gastos;
+      _ecoState.dirty  = true;
+      if(typeof _ecoSel !== 'undefined') _ecoSel = [];
+      if(typeof ecoRender === 'function') ecoRender();
+    }
+  }
+};
+
+function _undoAmbitoActivo(){
+  for(var k in _UNDO_AMBITOS){
+    var s = document.getElementById('section-' + k);
+    if(s && s.classList.contains('active')) return k;
+  }
+  return null;
+}
+
+// Se llama ANTES de modificar. Etiqueta es lo que se le muestra al usuario.
+function undoSnapshot(etiqueta){
+  var amb = _undoAmbitoActivo();
+  if(!amb) return;
+  var estado = _UNDO_AMBITOS[amb].leer();
+  if(estado === null) return;
+  // Si nada cambió respecto de la última foto, no se apila otra igual.
+  var ultimo = _undoStack[_undoStack.length - 1];
+  if(ultimo && ultimo.ambito === amb && ultimo.estado === estado) return;
+  _undoStack.push({ ambito: amb, estado: estado, etiqueta: etiqueta || 'cambio', t: Date.now() });
+  if(_undoStack.length > _UNDO_MAX) _undoStack.shift();
+  _redoStack = [];   // una acción nueva invalida el rehacer
+}
+
+function undoDeshacer(){
+  var amb = _undoAmbitoActivo();
+  if(!amb){ return; }
+  // Se busca la última foto de ESTA sección.
+  var i = -1;
+  for(var k = _undoStack.length - 1; k >= 0; k--){ if(_undoStack[k].ambito === amb){ i = k; break; } }
+  if(i < 0){ showToast('No hay nada para deshacer en ' + _UNDO_AMBITOS[amb].nombre, 'warn'); return; }
+
+  var foto = _undoStack.splice(i, 1)[0];
+  // Antes de volver atrás se guarda el estado actual, para poder rehacer.
+  var actual = _UNDO_AMBITOS[amb].leer();
+  if(actual !== null) _redoStack.push({ ambito: amb, estado: actual, etiqueta: foto.etiqueta });
+
+  try {
+    _UNDO_AMBITOS[amb].reponer(foto.estado);
+    showToast('↩️ Deshecho: ' + foto.etiqueta + ' · Ctrl+Shift+Z para rehacer', 'ok');
+  } catch(e){
+    showToast('No pude deshacer: ' + e.message, 'err');
+  }
+}
+
+function undoRehacer(){
+  var amb = _undoAmbitoActivo();
+  if(!amb) return;
+  var i = -1;
+  for(var k = _redoStack.length - 1; k >= 0; k--){ if(_redoStack[k].ambito === amb){ i = k; break; } }
+  if(i < 0){ showToast('No hay nada para rehacer', 'warn'); return; }
+
+  var foto = _redoStack.splice(i, 1)[0];
+  var actual = _UNDO_AMBITOS[amb].leer();
+  if(actual !== null) _undoStack.push({ ambito: amb, estado: actual, etiqueta: foto.etiqueta, t: Date.now() });
+  try {
+    _UNDO_AMBITOS[amb].reponer(foto.estado);
+    showToast('↪️ Rehecho: ' + foto.etiqueta, 'ok');
+  } catch(e){}
+}
+
+// Si estás escribiendo, Ctrl+Z tiene que deshacer el texto, no los datos.
+function _undoEnCampo(el){
+  if(!el) return false;
+  var t = (el.tagName || '').toLowerCase();
+  return t === 'input' || t === 'textarea' || t === 'select' || el.isContentEditable;
+}
+
+document.addEventListener('keydown', function(ev){
+  if(!(ev.ctrlKey || ev.metaKey)) return;
+  var tecla = (ev.key || '').toLowerCase();
+  if(tecla !== 'z' && tecla !== 'y') return;
+  if(_undoEnCampo(document.activeElement)) return;
+  if(!_undoAmbitoActivo()) return;
+
+  ev.preventDefault();
+  if(tecla === 'y' || ev.shiftKey) undoRehacer();
+  else undoDeshacer();
+});
+
 // ═══════════════════════════════════════════════════════════
 // WHATSAPP BUSINESS — Configuración, plantillas y log
 // ═══════════════════════════════════════════════════════════
