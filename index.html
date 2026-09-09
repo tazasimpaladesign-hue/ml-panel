@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v288 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v289 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -5434,14 +5434,14 @@ let _heartbeatInterval=null; // v119: heartbeat al Worker para skip del cron
 
 function startPolling(){
   if(_pollingInterval)clearInterval(_pollingInterval);
-  _pollingInterval=setInterval(pollNewData,60000);
+  _pollingInterval=setInterval(function(){ if(!panelDormido()) pollNewData(); },60000);
   // v89 [P2]: arrancar polling ligero de envíos pendientes (cada 30s)
   if(typeof startPendingShipPoll === 'function') startPendingShipPoll();
   // v119: heartbeat al Worker cada 10 min para que el cron skipee este usuario
   // (las notifs ya están llegando por el polling en tiempo real del panel).
   if(_heartbeatInterval) clearInterval(_heartbeatInterval);
   _heartbeatPing(); // primer ping inmediato al abrir
-  _heartbeatInterval = setInterval(_heartbeatPing, 10 * 60 * 1000);
+  _heartbeatInterval = setInterval(function(){ if(!panelDormido()) _heartbeatPing(); }, 10 * 60 * 1000);
 }
 
 function stopPolling(){
@@ -5753,7 +5753,7 @@ function startPendingShipPoll(){
   // trae estados reales). Este polling solo refresca cambios mientras el panel
   // está abierto, sin recargar todas las órdenes. Intervalo: 30 minutos.
   setTimeout(_pollPendingShipments, 60 * 1000);
-  _pendingShipPollTimer = setInterval(_pollPendingShipments, _PENDING_SHIP_POLL_MS);
+  _pendingShipPollTimer = setInterval(function(){ if(!panelDormido()) _pollPendingShipments(); }, _PENDING_SHIP_POLL_MS);
 }
 function stopPendingShipPoll(){
   if(_pendingShipPollTimer){ clearInterval(_pendingShipPollTimer); _pendingShipPollTimer = null; }
@@ -6678,6 +6678,7 @@ function startConfigSync(){
   // Ahorro: 648 reqs/día/panel.
   _configSyncInterval = setInterval(async () => {
     if(!token || !userId) return;
+    if(panelDormido()) return;
     try{
       const r = await fetch(WORKER + '/check-sync', {
         headers: { 'Authorization': 'Bearer ' + btToken() }
@@ -24781,7 +24782,7 @@ function startPersoPolling() {
   // Primer chequeo a los 20s del boot (establece línea base sin toast),
   // luego cada 5 min — 1 lectura KV por ciclo, costo despreciable.
   setTimeout(_persoPoll, 20 * 1000);
-  _persoPollTimer = setInterval(_persoPoll, 5 * 60 * 1000);
+  _persoPollTimer = setInterval(function(){ if(!panelDormido()) _persoPoll(); }, 5 * 60 * 1000);
   console.log('[PersoPoll] Iniciado — cada 5 min');
 }
 // ═══════════════ /v156 PERSONALIZADAS WA ════════════════════════
@@ -28804,7 +28805,7 @@ function startMessagePolling(){
   // No ejecutar inmediato al boot — esperar 2 minutos para no competir con la carga
   // inicial de publicaciones (loadItemsFull). Luego cada 1 hora.
   setTimeout(_pollMessages, 2 * 60 * 1000);
-  _msgPollTimer = setInterval(_pollMessages, _MSG_POLL_MS);
+  _msgPollTimer = setInterval(function(){ if(!panelDormido()) _pollMessages(); }, _MSG_POLL_MS);
   console.log('[MsgPoll] Polling iniciado cada', Math.round(_MSG_POLL_MS/60000), 'min (primer call en 2 min)');
 }
 
@@ -28956,7 +28957,7 @@ function startWooPolling(){
   // v101: primer poll a los 10s del boot (antes 30s) para ver ventas más rápido,
   // luego cada 5 min para no saturar Cloudflare
   setTimeout(_pollWooNotifications, 10 * 1000);
-  _wooPollTimer = setInterval(_pollWooNotifications, _WOO_POLL_MS);
+  _wooPollTimer = setInterval(function(){ if(!panelDormido()) _pollWooNotifications(); }, _WOO_POLL_MS);
   console.log('[WooPoll] Iniciado — cada', _WOO_POLL_MS/60000, 'min');
 }
 function stopWooPolling(){
@@ -36424,6 +36425,9 @@ function trashDrop(event)  {
 function _startAutoSave() {
   if (_autoSaveTid) clearInterval(_autoSaveTid);
   _autoSaveTid = setInterval(function() {
+    // v289 · No tiene sentido respaldar si nadie esta usando el panel: si algo
+    // cambio, ya se respaldo en el momento del cambio.
+    if (panelDormido()) return;
     if (_tasks.length && token) pushFullBackup();
   }, 5 * 60 * 1000);
 }
@@ -36441,6 +36445,37 @@ var _settingsAutoSaveTid   = null;
 // Alcance: Cuenta Impala y Economía, que son las secciones donde un borrado
 // accidental duele de verdad. Se ignora si el foco está en un campo de texto,
 // para no pisar el Ctrl+Z propio del navegador al escribir.
+
+// ═══════════════════════════════════════════════════════════
+// v289 · FRENO DE SINCRONIZACIONES EN SEGUNDO PLANO
+// ═══════════════════════════════════════════════════════════
+// Siete de los diez temporizadores del panel seguian consultando la nube con
+// la pestaña minimizada o en otra solapa. Dejar el panel abierto todo el dia
+// consumia cupo de Cloudflare KV sin que nadie mirara la pantalla.
+//
+// Regla: si la pestaña no esta visible, o hace mas de 30 minutos que no tocas
+// nada, los sondeos periodicos se saltean. Al volver, el primer tick corre
+// enseguida, asi que no se pierde nada: se recupera al instante.
+var _ultimaActividad = Date.now();
+var _INACTIVO_MS = 30 * 60 * 1000;
+
+['mousedown','keydown','wheel','touchstart'].forEach(function(ev){
+  document.addEventListener(ev, function(){ _ultimaActividad = Date.now(); }, { passive: true });
+});
+
+// true = conviene saltear este tick.
+function panelDormido(){
+  try {
+    if(document.visibilityState !== 'visible') return true;
+    if(Date.now() - _ultimaActividad > _INACTIVO_MS) return true;
+  } catch(e){}
+  return false;
+}
+
+// Al volver a la pestaña se marca actividad para que el proximo tick corra.
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState === 'visible') _ultimaActividad = Date.now();
+});
 
 var _undoStack = [];
 var _redoStack = [];
