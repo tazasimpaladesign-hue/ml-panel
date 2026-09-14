@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v290 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v291 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1142,6 +1142,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <th>Publicación</th>
           <th onclick="pubSort('empaque')" style="cursor:pointer;user-select:none;white-space:nowrap;text-align:center" title="Medidas y peso del paquete para Mercado Envíos. Clic para ordenar por volumen; segundo clic invierte. Las publicaciones sin datos van siempre al final.">📦 Empaque <span id="pub-sort-empaque" style="font-size:10px"></span></th>
           <th onclick="pubSort('sku')"   style="cursor:pointer;user-select:none;white-space:nowrap">SKU <span id="pub-sort-sku" style="font-size:10px"></span></th>
+          <th onclick="pubSort('personaje')" style="cursor:pointer;user-select:none;white-space:nowrap" title="Atributo CHARACTER de Mercado Libre, dentro de Características principales. Se edita con el lápiz. En publicaciones de catálogo ML no permite modificarlo.">🎭 Personaje <span id="pub-sort-personaje" style="font-size:10px"></span></th>
           <th onclick="pubSort('lastMod')" style="cursor:pointer;user-select:none;white-space:nowrap;text-align:center" title="Última fecha que ML registró un cambio (precio, fotos, stock). Detecta publicaciones que hace mucho no se tocan y pueden perder posicionamiento.">Fecha modif. <span id="pub-sort-lastMod" style="font-size:10px"></span></th>
           <th onclick="pubSort('price')" style="cursor:pointer;user-select:none;white-space:nowrap;text-align:right">Precio <span id="pub-sort-price" style="font-size:10px"></span></th>
           <th onclick="pubSort('stock')" style="cursor:pointer;user-select:none;white-space:nowrap;text-align:center">Stock <span id="pub-sort-stock" style="font-size:10px"></span></th>
@@ -6469,6 +6470,7 @@ function _saveDataCache(){
       last_updated: i.last_updated,
       seller_custom_field: i.seller_custom_field, tags: i.tags,
       shipping: i.shipping,  // v164: mode + dimensions para columna Empaque
+      catalog_listing: i.catalog_listing,  // v291: define si Personaje es editable
       // v142: persistir SKU(attr), EAN y tiempo de disponibilidad ya extraídos
       // como atributos mínimos, para que itemGetSKU/itemGetEAN/itemGetManufacturingTime
       // sigan funcionando al renderizar desde el cache de localStorage (sin API).
@@ -6478,6 +6480,11 @@ function _saveDataCache(){
         const ean = (typeof itemGetEAN==='function') ? itemGetEAN(i) : '';
         if(sku) out.push({ id:'SELLER_SKU', value_name: sku });
         if(ean) out.push({ id:'GTIN', value_name: ean });
+        // v291 · El personaje también viaja al caché, con su value_id por si
+        // después hace falta, y el value_type para saber si ML lo infiere.
+        const pj = (i.attributes||[]).find(a => a.id === 'CHARACTER');
+        if(pj) out.push({ id:'CHARACTER', name:'Personaje', value_name: pj.value_name,
+                          value_id: pj.value_id || null, value_type: pj.value_type || null });
         return out;
       }catch(e){ return []; } })(),
       sale_terms: (()=>{ try{
@@ -8726,7 +8733,7 @@ function pubSort(col){
   // detectar los bultos grandes, no los chicos.
   else{ pubState.sortCol=col; pubState.sortDir=(col==='empaque'||col==='peso') ? 1 : -1; }
   // actualizar flechas (v141: nuevas columnas sku, ean, type, avail, thermo)
-  ['price','stock','sold','sku','ean','type','avail','thermo','lastMod','empaque','peso'].forEach(c=>{
+  ['price','stock','sold','sku','ean','type','avail','thermo','lastMod','empaque','peso','personaje'].forEach(c=>{
     const el=document.getElementById('pub-sort-'+c);
     if(el) el.innerHTML=sortArrow(c,pubState.sortCol,pubState.sortDir);
   });
@@ -8769,6 +8776,16 @@ function renderPubs(){
     // v288 · Empaque: ordena por VOLUMEN (alto×ancho×largo), que es lo que
     // define si un paquete es "grande". Las que no tienen datos van siempre al
     // final, en los dos sentidos: un paquete sin medir no es chico, es desconocido.
+    else if(col==='personaje'){
+      // Alfabético, como SKU y EAN. Las que no tienen personaje van al final en
+      // los dos sentidos: "sin personaje" no es un valor, es una ausencia.
+      const pa = itemGetPersonaje(a).toLowerCase();
+      const pb = itemGetPersonaje(b).toLowerCase();
+      if(!pa && !pb) return 0;
+      if(!pa) return 1;
+      if(!pb) return -1;
+      return dir * (pa < pb ? -1 : pa > pb ? 1 : 0);
+    }
     else if(col==='empaque'){
       const da=_pubParseDims(a), db=_pubParseDims(b);
       if(!da && !db) return 0;
@@ -8796,7 +8813,7 @@ function renderPubs(){
 
   const tbody=document.getElementById('pubs-tbody');
   if(!tbody) return;
-  if(!items.length){tbody.innerHTML='<tr><td colspan="14" style="text-align:center;color:var(--text3);padding:22px">Sin resultados para los filtros actuales</td></tr>';return;}
+  if(!items.length){tbody.innerHTML='<tr><td colspan="15" style="text-align:center;color:var(--text3);padding:22px">Sin resultados para los filtros actuales</td></tr>';return;}
   const _pubTypeLabel = { catalog:'Catálogo', premium:'Premium', free:'Gratuita', classic:'Clásica' };
   tbody.innerHTML=items.map(item=>{
     const sku = itemGetSKU(item) || '';
@@ -8824,6 +8841,7 @@ function renderPubs(){
             onclick="startSKUEdit('${item.id}','${skuDisp.replace(/'/g,"\\'")}')">✎</button>
         </div>
       </td>
+      <td style="font-size:11px" id="pers-cell-${item.id}">${_pubPersonajeCell(item)}</td>
       <td style="text-align:center;font-size:10.5px;color:var(--text2);white-space:nowrap" title="${item.last_updated ? 'Modificada: '+fmtTs(item.last_updated) : 'Sin datos de modificación'}">${_seoFechaModCell(item)}</td>
       <td style="text-align:right">
         <div id="price-cell-${item.id}" style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
@@ -9459,6 +9477,152 @@ function mlRepublishLink(item){
 //   2. seller_custom_field (forma legacy, todavía presente en muchas pubs)
 //   3. variations[].attributes[] con id "SELLER_SKU" (publicaciones con variaciones)
 // Esta función devuelve el primer SKU que encuentre, priorizando el atributo oficial.
+// ═══════════════════════════════════════════════════════════
+// v291 · COLUMNA PERSONAJE (atributo CHARACTER de Mercado Libre)
+// ═══════════════════════════════════════════════════════════
+// Verificado en la documentacion de ML:
+//   · Los atributos viajan en el array "attributes" del item.
+//   · Se modifican con PUT /items/{id} mandando {attributes:[{id,value_name}]}.
+//   · Los atributos varian por categoria: no todas admiten CHARACTER.
+//   · Tag "inferred": ML lo dedujo solo y NO se puede modificar.
+//   · En publicaciones de CATALOGO la ficha tecnica la maneja Mercado Libre y
+//     titulo, fotos, descripcion y atributos NO se pueden cambiar. Por eso esas
+//     filas se muestran en modo lectura, con el motivo.
+//
+// Para valores de tipo lista ML prefiere value_id, pero acepta value_name y el
+// mismo resuelve el id si el texto coincide con un valor conocido. Mandamos
+// value_name porque es lo unico que se puede tipear en una grilla.
+
+function itemGetPersonaje(item){
+  if(!item) return '';
+  const attrs = item.attributes || [];
+  const a = attrs.find(x => x.id === 'CHARACTER');
+  if(a && a.value_name && String(a.value_name).trim() && String(a.value_name).trim() !== 'N/A'){
+    return String(a.value_name).trim();
+  }
+  // Tambien puede venir dentro de una variacion.
+  for(const v of (item.variations || [])){
+    const va = (v.attributes || []).find(x => x.id === 'CHARACTER');
+    if(va && va.value_name && String(va.value_name).trim()) return String(va.value_name).trim();
+  }
+  return '';
+}
+
+// ¿Se puede editar? El catalogo es el unico caso que ML bloquea siempre.
+function _pubPersonajeEditable(item){
+  if(!item) return { ok:false, motivo:'Sin datos' };
+  if(item.catalog_listing === true) {
+    return { ok:false, motivo:'Publicación de catálogo: la ficha técnica la maneja Mercado Libre' };
+  }
+  const a = (item.attributes || []).find(x => x.id === 'CHARACTER');
+  if(a && a.value_type === 'inferred') {
+    return { ok:false, motivo:'Mercado Libre infiere este valor y no permite cambiarlo' };
+  }
+  if(a && a.attribute_group_id && a.tags && a.tags.read_only) {
+    return { ok:false, motivo:'Atributo de sólo lectura en esta categoría' };
+  }
+  return { ok:true };
+}
+
+function _pubPersonajeCell(item){
+  const val = itemGetPersonaje(item);
+  const disp = val || '<span style="color:var(--text3)">—</span>';
+  const ed = _pubPersonajeEditable(item);
+  const seguro = (val || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+
+  if(!ed.ok){
+    return '<span style="font-size:11px;color:var(--text2)">' + disp + '</span>' +
+      ' <span title="' + ed.motivo + '" style="cursor:help;opacity:.55;font-size:10px">🔒</span>';
+  }
+  return '<span id="pers-val-' + item.id + '" style="font-size:11px">' + disp + '</span>' +
+    ' <button class="btn btn-ghost btn-xs" style="padding:2px 5px;font-size:10px;opacity:.6" ' +
+    'title="Editar personaje" onclick="startPersonajeEdit(\'' + item.id + '\',\'' + seguro + '\')">✎</button>';
+}
+
+function startPersonajeEdit(itemId, actual){
+  const cell = document.getElementById('pers-cell-' + itemId);
+  if(!cell) return;
+  cell.innerHTML =
+    '<div style="display:flex;flex-direction:column;gap:3px">' +
+      '<div style="display:flex;gap:4px;align-items:center">' +
+        '<input id="pers-inp-' + itemId + '" value="' + (actual || '').replace(/"/g,'&quot;') + '" ' +
+          'maxlength="60" placeholder="Ej: Spiderman" ' +
+          'style="width:120px;padding:3px 6px;font-size:11px" ' +
+          'onkeydown="if(event.key===\'Enter\')savePersonaje(\'' + itemId + '\');if(event.key===\'Escape\')cancelPersonaje(\'' + itemId + '\')">' +
+        '<button class="btn btn-primary btn-xs" style="padding:3px 7px;font-size:10px" onclick="savePersonaje(\'' + itemId + '\')">✓</button>' +
+        '<button class="btn btn-ghost btn-xs" style="padding:3px 7px;font-size:10px" onclick="cancelPersonaje(\'' + itemId + '\')">✕</button>' +
+      '</div>' +
+      '<span id="pers-msg-' + itemId + '" style="font-size:10px"></span>' +
+    '</div>';
+  document.getElementById('pers-inp-' + itemId)?.focus();
+}
+
+function cancelPersonaje(itemId){
+  const item = allItems.find(i => i.id === itemId);
+  const cell = document.getElementById('pers-cell-' + itemId);
+  if(cell && item) cell.innerHTML = _pubPersonajeCell(item);
+}
+
+async function savePersonaje(itemId){
+  const inp = document.getElementById('pers-inp-' + itemId);
+  const msg = document.getElementById('pers-msg-' + itemId);
+  if(!inp) return;
+  const val = inp.value.trim().slice(0, 60);
+
+  inp.disabled = true;
+  if(msg){ msg.textContent = 'Guardando…'; msg.style.color = 'var(--text3)'; }
+
+  const item = allItems.find(i => i.id === itemId);
+  // Vaciar un atributo: ML no acepta null en un PUT, se manda cadena vacía.
+  const body = { attributes: [{ id: 'CHARACTER', value_name: val }] };
+
+  try{
+    const res = await fetch(WORKER + '/api/items/' + itemId, {
+      method: 'PUT',
+      headers: { 'Authorization':'Bearer '+token, 'Content-Type':'application/json', 'Accept':'application/json' },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+
+    if(res.status === 401 || data.error === 'unauthorized'){
+      inp.disabled = false;
+      if(msg){ msg.textContent = '❌ Token vencido — reconectá'; msg.style.color = 'var(--red)'; }
+      return;
+    }
+    if(data.error){
+      inp.disabled = false;
+      let m = String(data.message || data.error);
+      // Mensajes de ML traducidos a algo que se entienda.
+      if(/attribute.*not.*valid|invalid.*attribute/i.test(m))
+        m = 'Esta categoría no admite el atributo Personaje';
+      else if(/catalog/i.test(m))
+        m = 'Publicación de catálogo: ML no permite cambiarlo';
+      else if(/read.?only|inferred/i.test(m))
+        m = 'ML marca este atributo como no modificable';
+      if(msg){ msg.textContent = '❌ ' + m.slice(0, 60); msg.style.color = 'var(--red)'; }
+      return;
+    }
+
+    // Se actualiza el ítem en memoria para que la grilla quede consistente.
+    if(item){
+      item.attributes = item.attributes || [];
+      const i = item.attributes.findIndex(a => a.id === 'CHARACTER');
+      if(val){
+        if(i >= 0) item.attributes[i] = Object.assign({}, item.attributes[i], { id:'CHARACTER', value_name: val });
+        else item.attributes.push({ id:'CHARACTER', name:'Personaje', value_name: val });
+      } else if(i >= 0){
+        item.attributes.splice(i, 1);
+      }
+    }
+    if(msg){ msg.textContent = '✅ Guardado'; msg.style.color = 'var(--green)'; }
+    setTimeout(function(){ cancelPersonaje(itemId); }, 700);
+
+  }catch(e){
+    inp.disabled = false;
+    if(msg){ msg.textContent = '❌ ' + e.message.slice(0, 50); msg.style.color = 'var(--red)'; }
+  }
+}
+
 function itemGetSKU(item){
   if(!item) return '';
   // 1. Atributo SELLER_SKU a nivel raíz (oficial)
