@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v291 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v292 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4455,7 +4455,12 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
         <div class="card-title" style="margin:0">📊 Evolución de la cuenta</div>
         <span style="font-size:10px;color:var(--text3)" id="cta-chart-note"></span>
-        <select id="cta-chart-mode" onchange="ctaRenderChart()" style="margin-left:auto;font-size:12px;padding:5px 9px;border-radius:8px">
+        <select id="cta-cmp-modo" onchange="ctaRenderKPIs();ctaRenderChart()" style="margin-left:auto;font-size:12px;padding:5px 9px;border-radius:8px" title="Con qué período comparar. Las líneas punteadas del gráfico y los % de los KPIs usan esta opción.">
+          <option value="off" selected>Sin comparar</option>
+          <option value="auto">Comparar con período anterior</option>
+          <option value="yoy">Comparar con año anterior</option>
+        </select>
+        <select id="cta-chart-mode" onchange="ctaRenderChart()" style="font-size:12px;padding:5px 9px;border-radius:8px">
           <option value="diario" selected>Diario</option>
           <option value="mensual">Mensual</option>
           <option value="trimestral">Trimestral</option>
@@ -25726,6 +25731,57 @@ function _ctaResumenMes(ym) {
 }
 
 // Suma ingresos/egresos/unidades de las operaciones en [d0,d1]
+// v292 · Devuelve el rango del período ANTERIOR equivalente al actual, pero
+// recortado a la MISMA cantidad de días ya transcurridos.
+// El bug que corrige: comparar los 16 días de este mes contra los 30 del mes
+// pasado siempre daba en rojo. Ahora, si vamos por el día 16, compara contra
+// los primeros 16 días del mes anterior.
+//
+// La lógica según el período:
+//   · mes / mesant: mismo día-de-mes del mes previo (o del mismo mes año pasado
+//     cuando el usuario compara "mes con año anterior" desde el selector de comparación)
+//   · trimestre: mismos días corridos del trimestre anterior
+//   · anio: mismo día-del-año del año anterior
+//   · semana: semana previa completa (7 días fijos)
+//   · personalizado: los N días justo antes del rango
+// Segundo parámetro `modo`: 'auto' (previo inmediato) o 'yoy' (año anterior).
+function _ctaPeriodoAnterior(f0, f1, modo) {
+  const L = _ctaLocalDateStr;
+  const p = _ctaState.periodo;
+  const d0 = new Date(f0 + 'T00:00:00');
+  const d1 = new Date(f1 + 'T00:00:00');
+  const dias = Math.round((d1 - d0) / 86400000) + 1;
+
+  // Comparación interanual explícita: mismo tramo, un año antes.
+  if (modo === 'yoy') {
+    const a0 = new Date(d0); a0.setFullYear(a0.getFullYear() - 1);
+    const a1 = new Date(d1); a1.setFullYear(a1.getFullYear() - 1);
+    return [L(a0), L(a1)];
+  }
+
+  // Mes / mes anterior: el previo arranca el día 1 del mes anterior y se corta
+  // a la misma cantidad de días transcurridos.
+  if (p === 'mes' || p === 'mesant') {
+    const ini = new Date(d0.getFullYear(), d0.getMonth() - 1, 1);
+    const fin = new Date(ini.getTime() + (dias - 1) * 86400000);
+    // No pasarse del último día real del mes anterior (feb, meses de 30, etc.)
+    const ultimoDelMesPrev = new Date(d0.getFullYear(), d0.getMonth(), 0);
+    if (fin > ultimoDelMesPrev) return [L(ini), L(ultimoDelMesPrev)];
+    return [L(ini), L(fin)];
+  }
+
+  if (p === 'anio') {
+    const a0 = new Date(d0); a0.setFullYear(a0.getFullYear() - 1);
+    const a1 = new Date(d1); a1.setFullYear(a1.getFullYear() - 1);
+    return [L(a0), L(a1)];
+  }
+
+  // Trimestre, semana, hoy, ayer, personalizado: los mismos N días, justo antes.
+  const pf1 = new Date(d0.getTime() - 86400000);
+  const pf0 = new Date(d0.getTime() - dias * 86400000);
+  return [L(pf0), L(pf1)];
+}
+
 function _ctaSumaRango(f0, f1) {
   let ing = 0, eg = 0, uni = 0, ops = 0;
   Object.values(_ctaState.chunks).forEach(ch => (ch || []).forEach(o => {
@@ -25740,6 +25796,18 @@ function _ctaSumaRango(f0, f1) {
 
 // v176: nombre exacto del período anterior según el filtro activo, para los
 // badges de comparación ("vs mayo 2026", "vs 2024", "vs Q1 2026", etc.)
+// v292 · Etiqueta cuando se compara contra el mismo período del año anterior.
+function _ctaPeriodoAnteriorLabelYoY() {
+  const [f0] = _ctaPeriodoRango();
+  const y = parseInt(f0.slice(0, 4), 10) - 1;
+  const MES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  const m = parseInt(f0.slice(5, 7), 10) - 1;
+  const p = _ctaState.periodo;
+  if (p === 'mes' || p === 'mesant') return MES[m] + ' ' + y;
+  if (p === 'anio') return String(y);
+  return 'mismo período de ' + y;
+}
+
 function _ctaPeriodoAnteriorLabel() {
   const now = new Date();
   const p = _ctaState.periodo;
@@ -25780,26 +25848,31 @@ function ctaRenderKPIs() {
   const lblEl = document.getElementById('cta-periodo-label');
   if (lblEl) lblEl.textContent = '· ' + label;
 
-  // Período anterior equivalente (misma cantidad de días, justo antes) para el %
+  // v292 · El período anterior se recorta a los MISMOS días transcurridos, así
+  // el % no queda siempre en rojo por comparar 16 días contra 30.
   const a = _ctaSumaRango(f0, f1);
   let b = { ing: 0, eg: 0, uni: 0, ops: 0 };
   if (f0 > '0000-01-01' && f1 < '9999-12-31') {
-    const ms0 = new Date(f0 + 'T00:00:00').getTime();
-    const ms1 = new Date(f1 + 'T00:00:00').getTime();
-    const dias = Math.round((ms1 - ms0) / 86400000) + 1;
-    const pf1 = _ctaLocalDateStr(new Date(ms0 - 86400000));
-    const pf0 = _ctaLocalDateStr(new Date(ms0 - dias * 86400000));
+    const modoCmp = (document.getElementById('cta-cmp-modo') || {}).value || 'auto';
+    const [pf0, pf1] = _ctaPeriodoAnterior(f0, f1, modoCmp === 'yoy' ? 'yoy' : 'auto');
     b = _ctaSumaRango(pf0, pf1);
   }
 
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.innerHTML = v; };
-  const prevLabel = _ctaPeriodoAnteriorLabel();
+  const modoCmp = (document.getElementById('cta-cmp-modo') || {}).value || 'auto';
+  // Los días transcurridos del período actual, para que la etiqueta lo aclare.
+  const diasTrans = Math.round((new Date(f1 + 'T00:00:00') - new Date(f0 + 'T00:00:00')) / 86400000) + 1;
+  const prevLabel = (modoCmp === 'yoy')
+    ? _ctaPeriodoAnteriorLabelYoY()
+    : _ctaPeriodoAnteriorLabel();
+  const sufijo = (modoCmp !== 'yoy' && (_ctaState.periodo === 'mes' || _ctaState.periodo === 'mesant'))
+    ? (' (primeros ' + diasTrans + ' días)') : '';
   const vs = (now, before) => {
     if (!before) return '<span style="color:var(--text3)">— sin datos ' + prevLabel + '</span>';
     const p = ((now - before) / Math.abs(before)) * 100;
     const up = p >= 0;
     return '<span style="color:' + (up ? '#22c55e' : '#ef4444') + '">' + (up ? '▲' : '▼') + ' ' +
-      Math.abs(p).toFixed(0) + '%</span> vs ' + prevLabel;
+      Math.abs(p).toFixed(0) + '%</span> vs ' + prevLabel + sufijo;
   };
   set('cta-kpi-ing', PERSO_FMT_MONEY(a.ing)); set('cta-kpi-ing-vs', vs(a.ing, b.ing));
   set('cta-kpi-eg', PERSO_FMT_MONEY(a.eg)); set('cta-kpi-eg-vs', vs(a.eg, b.eg));
@@ -25893,15 +25966,45 @@ function ctaRenderChart() {
       const e = map.get(k);
       if (o.tipo === 'ingreso') e.i += (+o.monto || 0) + (+o.envio || 0); else e.e += (+o.monto || 0);
     });
-    let labels = [], ings = [], egs = [], netos = [];
+    let labels = [], ings = [], egs = [], netos = [], claves = [];
     [...map.keys()].sort().forEach(k => {
       let lbl = k;
       if (mode === 'diario') lbl = k.slice(8) + '/' + k.slice(5, 7);   // DD/MM
       else if (mode === 'mensual') lbl = k.slice(2).replace('-', '/');
       else if (mode.indexOf('trimestral') === 0 || k.indexOf('-Q') > 0) lbl = k.replace('-', ' ');
-      labels.push(lbl); ings.push(map.get(k).i); egs.push(map.get(k).e); netos.push(map.get(k).i - map.get(k).e);
+      labels.push(lbl); claves.push(k); ings.push(map.get(k).i); egs.push(map.get(k).e); netos.push(map.get(k).i - map.get(k).e);
     });
-    if (!labels.length) { labels = ['Sin datos']; ings = [0]; egs = [0]; netos = [0]; }
+    if (!labels.length) { labels = ['Sin datos']; ings = [0]; egs = [0]; netos = [0]; claves = ['']; }
+
+    // v292 · PUNTO 2 · Serie del período ANTERIOR, alineada día a día con el
+    // actual, dibujada con línea punteada. Sólo en diario/mensual, que son
+    // líneas: en barras (trimestral/anual) no tiene sentido superponer.
+    const cmpModo = (document.getElementById('cta-cmp-modo') || {}).value || 'off';
+    let prevIngs = null, prevEgs = null, prevRent = null, prevLbl = '';
+    if (cmpModo !== 'off' && (mode === 'diario' || mode === 'mensual')) {
+      const [af0, af1] = _ctaPeriodoAnterior(pf0, pf1, cmpModo === 'yoy' ? 'yoy' : 'auto');
+      prevLbl = (cmpModo === 'yoy') ? _ctaPeriodoAnteriorLabelYoY() : _ctaPeriodoAnteriorLabel();
+      // Se agrupan las operaciones del período anterior con la misma lógica.
+      const pmap = new Map();
+      Object.values(_ctaState.chunks).forEach(ch => (ch || []).forEach(o => {
+        const f = o.fecha || ''; if (!f || f < af0 || f > af1) return;
+        const k = keyOf(f);
+        if (!pmap.has(k)) pmap.set(k, { i: 0, e: 0 });
+        const e = pmap.get(k);
+        if (o.tipo === 'ingreso') e.i += (+o.monto || 0) + (+o.envio || 0); else e.e += (+o.monto || 0);
+      }));
+      // Se ordenan las claves del período anterior y se ALINEAN por POSICIÓN con
+      // las del actual: día 1 contra día 1, día 2 contra día 2, etc. Así el
+      // 16/09 se compara con el 16/08 aunque las fechas sean distintas.
+      const pk = [...pmap.keys()].sort();
+      prevIngs = []; prevEgs = []; prevRent = [];
+      for (let i = 0; i < labels.length; i++) {
+        const e = (i < pk.length) ? pmap.get(pk[i]) : null;
+        const iv = e ? e.i : null, ev = e ? e.e : null;
+        prevIngs.push(iv); prevEgs.push(ev);
+        prevRent.push((iv && iv > 0) ? Math.round(((iv - ev) / iv) * 1000) / 10 : null);
+      }
+    }
     config = {
       type: (mode === 'mensual' || mode === 'diario') ? 'line' : 'bar',
       data: { labels, datasets: [
@@ -25922,6 +26025,20 @@ function ctaRenderChart() {
       ]},
       options: _ctaChartOpts()
     };
+    // v292 · Se agregan las líneas punteadas del período anterior, si corresponde.
+    if (prevIngs) {
+      const pd = (color, data, axis, ancho) => ({
+        type: 'line', label: '', yAxisID: axis, data, borderColor: color,
+        backgroundColor: 'transparent', borderWidth: ancho || 2, borderDash: [5, 4],
+        pointRadius: 0, pointHoverRadius: 4, cubicInterpolationMode: 'monotone',
+        fill: false, spanGaps: true, order: 5
+      });
+      const dI = pd('#10b981', prevIngs, 'y', 2);      dI.label = 'Ingresos · ' + prevLbl;
+      const dE = pd('#ef4444', prevEgs, 'y', 2);       dE.label = 'Egresos · ' + prevLbl;
+      const dR = pd('#f59e0b', prevRent, 'y1', 2.5);   dR.label = 'Rentabilidad % · ' + prevLbl;
+      config.data.datasets.push(dI, dE, dR);
+      if (note) note.textContent = 'Línea llena: período actual · línea punteada: ' + prevLbl;
+    }
   } else {
     if (note) note.textContent = 'Sobre las operaciones del rango cargado (' + _ctaState.rango + ')';
     const field = mode; // 'origen' | 'provincia'
