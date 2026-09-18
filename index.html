@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v292 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v293 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4456,8 +4456,8 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <div class="card-title" style="margin:0">📊 Evolución de la cuenta</div>
         <span style="font-size:10px;color:var(--text3)" id="cta-chart-note"></span>
         <select id="cta-cmp-modo" onchange="ctaRenderKPIs();ctaRenderChart()" style="margin-left:auto;font-size:12px;padding:5px 9px;border-radius:8px" title="Con qué período comparar. Las líneas punteadas del gráfico y los % de los KPIs usan esta opción.">
-          <option value="off" selected>Sin comparar</option>
-          <option value="auto">Comparar con período anterior</option>
+          <option value="off">Sin comparar</option>
+          <option value="auto" selected>Comparar con período anterior</option>
           <option value="yoy">Comparar con año anterior</option>
         </select>
         <select id="cta-chart-mode" onchange="ctaRenderChart()" style="font-size:12px;padding:5px 9px;border-radius:8px">
@@ -25782,6 +25782,18 @@ function _ctaPeriodoAnterior(f0, f1, modo) {
   return [L(pf0), L(pf1)];
 }
 
+// v293 · Recorta el fin del período al día de HOY cuando el período todavía
+// está en curso. El bug del rojo permanente venía de acá: el período "mes"
+// devolvía f1 = último día del mes (día 30), no hoy (día 16). Entonces se
+// comparaban los 16 días reales del mes actual contra los 30 del mes anterior.
+// Ahora, si el período incluye hoy y todavía no terminó, f1 pasa a ser hoy.
+function _ctaRecortarAHoy(f0, f1) {
+  const hoy = _ctaLocalDateStr(new Date());
+  // Sólo se recorta si hoy cae DENTRO del rango (período en curso).
+  if (f0 <= hoy && hoy < f1) return [f0, hoy];
+  return [f0, f1];
+}
+
 function _ctaSumaRango(f0, f1) {
   let ing = 0, eg = 0, uni = 0, ops = 0;
   Object.values(_ctaState.chunks).forEach(ch => (ch || []).forEach(o => {
@@ -25848,25 +25860,26 @@ function ctaRenderKPIs() {
   const lblEl = document.getElementById('cta-periodo-label');
   if (lblEl) lblEl.textContent = '· ' + label;
 
-  // v292 · El período anterior se recorta a los MISMOS días transcurridos, así
-  // el % no queda siempre en rojo por comparar 16 días contra 30.
-  const a = _ctaSumaRango(f0, f1);
+  // v293 · Se recorta el período actual a hoy si está en curso, y el anterior
+  // se calcula sobre ESE rango recortado. Así 16 días se comparan con 16 días.
+  const [cf0, cf1] = _ctaRecortarAHoy(f0, f1);
+  const a = _ctaSumaRango(cf0, cf1);
   let b = { ing: 0, eg: 0, uni: 0, ops: 0 };
-  if (f0 > '0000-01-01' && f1 < '9999-12-31') {
+  if (cf0 > '0000-01-01' && cf1 < '9999-12-31') {
     const modoCmp = (document.getElementById('cta-cmp-modo') || {}).value || 'auto';
-    const [pf0, pf1] = _ctaPeriodoAnterior(f0, f1, modoCmp === 'yoy' ? 'yoy' : 'auto');
+    const [pf0, pf1] = _ctaPeriodoAnterior(cf0, cf1, modoCmp === 'yoy' ? 'yoy' : 'auto');
     b = _ctaSumaRango(pf0, pf1);
   }
 
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.innerHTML = v; };
   const modoCmp = (document.getElementById('cta-cmp-modo') || {}).value || 'auto';
-  // Los días transcurridos del período actual, para que la etiqueta lo aclare.
-  const diasTrans = Math.round((new Date(f1 + 'T00:00:00') - new Date(f0 + 'T00:00:00')) / 86400000) + 1;
+  // Días transcurridos del período actual (sobre el rango recortado a hoy).
+  const diasTrans = Math.round((new Date(cf1 + 'T00:00:00') - new Date(cf0 + 'T00:00:00')) / 86400000) + 1;
+  const enCurso = (cf1 !== f1);   // ¿el período todavía no terminó?
   const prevLabel = (modoCmp === 'yoy')
     ? _ctaPeriodoAnteriorLabelYoY()
     : _ctaPeriodoAnteriorLabel();
-  const sufijo = (modoCmp !== 'yoy' && (_ctaState.periodo === 'mes' || _ctaState.periodo === 'mesant'))
-    ? (' (primeros ' + diasTrans + ' días)') : '';
+  const sufijo = enCurso ? (' (primeros ' + diasTrans + ' días)') : '';
   const vs = (now, before) => {
     if (!before) return '<span style="color:var(--text3)">— sin datos ' + prevLabel + '</span>';
     const p = ((now - before) / Math.abs(before)) * 100;
@@ -25980,6 +25993,7 @@ function ctaRenderChart() {
     // actual, dibujada con línea punteada. Sólo en diario/mensual, que son
     // líneas: en barras (trimestral/anual) no tiene sentido superponer.
     const cmpModo = (document.getElementById('cta-cmp-modo') || {}).value || 'off';
+    window.__ctaPrevFechas = null; window.__ctaCurFechas = null;   // v293
     let prevIngs = null, prevEgs = null, prevRent = null, prevLbl = '';
     if (cmpModo !== 'off' && (mode === 'diario' || mode === 'mensual')) {
       const [af0, af1] = _ctaPeriodoAnterior(pf0, pf1, cmpModo === 'yoy' ? 'yoy' : 'auto');
@@ -25998,12 +26012,23 @@ function ctaRenderChart() {
       // 16/09 se compara con el 16/08 aunque las fechas sean distintas.
       const pk = [...pmap.keys()].sort();
       prevIngs = []; prevEgs = []; prevRent = [];
+      // v293 · Fecha del período anterior alineada a cada punto, para el tooltip.
+      window.__ctaPrevFechas = [];
+      const fmtClave = (k) => {
+        if (mode === 'diario') return k.slice(8) + '/' + k.slice(5, 7) + '/' + k.slice(0, 4);
+        if (mode === 'mensual') return k.slice(5, 7) + '/' + k.slice(0, 4);
+        return k;
+      };
       for (let i = 0; i < labels.length; i++) {
         const e = (i < pk.length) ? pmap.get(pk[i]) : null;
         const iv = e ? e.i : null, ev = e ? e.e : null;
         prevIngs.push(iv); prevEgs.push(ev);
         prevRent.push((iv && iv > 0) ? Math.round(((iv - ev) / iv) * 1000) / 10 : null);
+        window.__ctaPrevFechas.push((i < pk.length) ? fmtClave(pk[i]) : null);
       }
+      // La fecha del período actual, en el mismo formato, para el título.
+      window.__ctaCurFechas = claves.map(fmtClave);
+      window.__ctaPrevLbl = prevLbl;
     }
     config = {
       type: (mode === 'mensual' || mode === 'diario') ? 'line' : 'bar',
@@ -26013,12 +26038,12 @@ function ctaRenderChart() {
             : (c => { const { ctx, chartArea } = c.chart; return chartArea ? _persoGrad(ctx, chartArea, '#10b981', 'e8', '78') : '#10b981cc'; }),
           borderWidth: 2.5, fill: (mode === 'mensual' || mode === 'diario'), cubicInterpolationMode: 'monotone',
           pointRadius: 2.5, pointHoverRadius: 6, borderRadius: 8, borderSkipped: false, yAxisID: 'y' },
-        { label: 'Egresos', data: egs, borderColor: '#ef4444', backgroundColor: (mode === 'mensual' || mode === 'diario')
+        { label: 'Egresos', hidden: true, data: egs, borderColor: '#ef4444', backgroundColor: (mode === 'mensual' || mode === 'diario')
             ? (c => { const { ctx, chartArea } = c.chart; return chartArea ? _persoGrad(ctx, chartArea, '#ef4444', '24', '02') : '#ef444418'; })
             : (c => { const { ctx, chartArea } = c.chart; return chartArea ? _persoGrad(ctx, chartArea, '#ef4444', 'e8', '78') : '#ef4444cc'; }),
           borderWidth: 2.5, fill: (mode === 'mensual' || mode === 'diario'), cubicInterpolationMode: 'monotone',
           pointRadius: 2.5, pointHoverRadius: 6, borderRadius: 8, borderSkipped: false, yAxisID: 'y' },
-        { type: 'line', label: 'Rentabilidad %', yAxisID: 'y1',
+        { type: 'line', label: 'Rentabilidad %', yAxisID: 'y1', hidden: true,
           data: ings.map((iv, k) => iv > 0 ? Math.round((netos[k] / iv) * 1000) / 10 : 0),
           borderColor: '#f59e0b', backgroundColor: '#f59e0b', borderWidth: 3,
           pointRadius: 3, pointHoverRadius: 6, cubicInterpolationMode: 'monotone', fill: false, order: 0 },
@@ -26034,8 +26059,8 @@ function ctaRenderChart() {
         fill: false, spanGaps: true, order: 5
       });
       const dI = pd('#10b981', prevIngs, 'y', 2);      dI.label = 'Ingresos · ' + prevLbl;
-      const dE = pd('#ef4444', prevEgs, 'y', 2);       dE.label = 'Egresos · ' + prevLbl;
-      const dR = pd('#f59e0b', prevRent, 'y1', 2.5);   dR.label = 'Rentabilidad % · ' + prevLbl;
+      const dE = pd('#ef4444', prevEgs, 'y', 2);       dE.label = 'Egresos · ' + prevLbl;       dE.hidden = true;
+      const dR = pd('#f59e0b', prevRent, 'y1', 2.5);   dR.label = 'Rentabilidad % · ' + prevLbl;  dR.hidden = true;
       config.data.datasets.push(dI, dE, dR);
       if (note) note.textContent = 'Línea llena: período actual · línea punteada: ' + prevLbl;
     }
@@ -26074,10 +26099,23 @@ function _ctaChartOpts(moneyY) {
       datalabels: { display: false },
       tooltip: {
         backgroundColor: '#1e293b', titleColor: '#fff', bodyColor: '#fff', borderRadius: 8, padding: 10,
-        callbacks: { label: c => {
-          if (c.dataset.label === 'Rentabilidad %') return ' Rentabilidad: ' + (c.parsed.y || 0).toFixed(1) + '%';
-          return ' ' + c.dataset.label + ': ' + PERSO_FMT_MONEY(c.parsed.y);
-        } }
+        callbacks: {
+          // v293 · El título muestra la fecha del punto y, si hay comparación,
+          // al lado un guión con la fecha equivalente del período anterior.
+          title: items => {
+            if (!items.length) return '';
+            const i = items[0].dataIndex;
+            const cur = (window.__ctaCurFechas && window.__ctaCurFechas[i]) || items[0].label || '';
+            const prev = window.__ctaPrevFechas && window.__ctaPrevFechas[i];
+            if (prev) return cur + ' — ' + prev + '  (' + (window.__ctaPrevLbl || 'anterior') + ')';
+            return cur;
+          },
+          label: c => {
+            if ((c.dataset.label || '').indexOf('Rentabilidad') === 0)
+              return ' ' + c.dataset.label + ': ' + (c.parsed.y == null ? '—' : (c.parsed.y).toFixed(1) + '%');
+            return ' ' + c.dataset.label + ': ' + (c.parsed.y == null ? '—' : PERSO_FMT_MONEY(c.parsed.y));
+          }
+        }
       },
     },
     scales: {
