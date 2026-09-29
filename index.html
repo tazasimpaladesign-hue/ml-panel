@@ -775,7 +775,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v293 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v294 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -5440,14 +5440,20 @@ let _heartbeatInterval=null; // v119: heartbeat al Worker para skip del cron
 
 function startPolling(){
   if(_pollingInterval)clearInterval(_pollingInterval);
-  _pollingInterval=setInterval(function(){ if(!panelDormido()) pollNewData(); },60000);
+  // v294 · Las NOTIFICACIONES no se frenan en segundo plano (el freno de la v289
+  // las pausaba y el aviso recién sonaba al volver a la pestaña). Solo leen,
+  // no escriben en KV.
+  _pollingInterval=setInterval(pollNewData,60000);
   // v89 [P2]: arrancar polling ligero de envíos pendientes (cada 30s)
   if(typeof startPendingShipPoll === 'function') startPendingShipPoll();
   // v119: heartbeat al Worker cada 10 min para que el cron skipee este usuario
   // (las notifs ya están llegando por el polling en tiempo real del panel).
-  if(_heartbeatInterval) clearInterval(_heartbeatInterval);
-  _heartbeatPing(); // primer ping inmediato al abrir
-  _heartbeatInterval = setInterval(function(){ if(!panelDormido()) _heartbeatPing(); }, 10 * 60 * 1000);
+  // v294 · Heartbeat retirado. Servía para que el cron "se callara" con el
+  // panel abierto, pero eso dejaba al teléfono sin avisos cuando el panel
+  // quedaba en otra pestaña, y cada ping + cada salto del cron escribía en KV
+  // (~200 escrituras/día con el panel abierto). Ahora cron y panel avisan los
+  // dos y la marca tg_dedup evita duplicados.
+  if(_heartbeatInterval){ clearInterval(_heartbeatInterval); _heartbeatInterval = null; }
 }
 
 function stopPolling(){
@@ -5587,7 +5593,7 @@ async function pollNewData(){
         const thumbnail = (localItem && localItem.thumbnail) || (q.item_id && _thumbCache[q.item_id]) || '';
       // v90 [P2]: WhatsApp DESACTIVADO — solo Telegram sigue activo
       // waTrigger('pregunta', { pregunta, producto });
-      tgNotify('pregunta', { pregunta, producto, thumbnail }, 'pregunta_'+q.id);
+      tgNotify('pregunta', { pregunta, producto, thumbnail }, 'preg_'+q.id); // v294: misma marca que cron/webhook (antes 'pregunta_' → aviso doble)
       });
     }
     document.getElementById('nb-q').textContent=pend;
@@ -24951,7 +24957,7 @@ function startPersoPolling() {
   // Primer chequeo a los 20s del boot (establece línea base sin toast),
   // luego cada 5 min — 1 lectura KV por ciclo, costo despreciable.
   setTimeout(_persoPoll, 20 * 1000);
-  _persoPollTimer = setInterval(function(){ if(!panelDormido()) _persoPoll(); }, 5 * 60 * 1000);
+  _persoPollTimer = setInterval(_persoPoll, 5 * 60 * 1000); // v294: sin freno (aviso de pedido)
   console.log('[PersoPoll] Iniciado — cada 5 min');
 }
 // ═══════════════ /v156 PERSONALIZADAS WA ════════════════════════
@@ -29129,7 +29135,7 @@ function startMessagePolling(){
   // No ejecutar inmediato al boot — esperar 2 minutos para no competir con la carga
   // inicial de publicaciones (loadItemsFull). Luego cada 1 hora.
   setTimeout(_pollMessages, 2 * 60 * 1000);
-  _msgPollTimer = setInterval(function(){ if(!panelDormido()) _pollMessages(); }, _MSG_POLL_MS);
+  _msgPollTimer = setInterval(_pollMessages, _MSG_POLL_MS); // v294: sin freno (es aviso)
   console.log('[MsgPoll] Polling iniciado cada', Math.round(_MSG_POLL_MS/60000), 'min (primer call en 2 min)');
 }
 
@@ -29281,7 +29287,7 @@ function startWooPolling(){
   // v101: primer poll a los 10s del boot (antes 30s) para ver ventas más rápido,
   // luego cada 5 min para no saturar Cloudflare
   setTimeout(_pollWooNotifications, 10 * 1000);
-  _wooPollTimer = setInterval(function(){ if(!panelDormido()) _pollWooNotifications(); }, _WOO_POLL_MS);
+  _wooPollTimer = setInterval(_pollWooNotifications, _WOO_POLL_MS); // v294: sin freno (es aviso)
   console.log('[WooPoll] Iniciado — cada', _WOO_POLL_MS/60000, 'min');
 }
 function stopWooPolling(){
@@ -36778,7 +36784,9 @@ var _settingsAutoSaveTid   = null;
 // consumia cupo de Cloudflare KV sin que nadie mirara la pantalla.
 //
 // Regla: si la pestaña no esta visible, o hace mas de 30 minutos que no tocas
-// nada, los sondeos periodicos se saltean. Al volver, el primer tick corre
+// nada, los sondeos periodicos se saltean.
+// v294 · EXCEPTO los avisos (ventas/preguntas ML, mensajes, Woo): esos corren
+// siempre, aunque la pestaña esté oculta. Solo leen, no gastan escrituras. Al volver, el primer tick corre
 // enseguida, asi que no se pierde nada: se recupera al instante.
 var _ultimaActividad = Date.now();
 var _INACTIVO_MS = 30 * 60 * 1000;
