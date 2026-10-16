@@ -844,7 +844,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v296 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v297 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -18389,6 +18389,7 @@ function aiqAgregar(registros, desde, hasta, campId) {
     estrategia: ultimo ? ultimo.estrategia : null,
     campNombre: ultimo ? ultimo.campNombre : null,
     usoPresupuesto: capacidad ? s.cost / capacidad : null,   // gasto / (presupuesto × días)
+    presEstimado: base.some(function (r) { return r.presEstimado; }),
     diasTope: diasConPres ? diasTope : null,                  // días que gastó ≥95% del presupuesto
     diasConPres: diasConPres || null
   };
@@ -18485,6 +18486,7 @@ function aiqAnalizar(cur, prev, cfg, cambios) {
   if (cur.ventasInd && cur.ventas) r.notas.push(Math.round(cur.ventasInd / cur.ventas * 100) +
     '% de las ventas atribuidas son indirectas (el comprador hizo clic en un anuncio y compró otro producto).');
   r.notas.push('Ventas atribuidas no es lo mismo que ventas causadas por la publicidad: una parte se habría vendido igual.');
+  if (cur.presEstimado) r.notas.push('Mercado Libre no informa el presupuesto de días pasados: para los días anteriores a la primera captura diaria se supone igual al actual. El uso del presupuesto de esos días es aproximado.');
 
   // Lectura del presupuesto vs ranking
   var limPres = cur.lostBud != null && cur.lostBud >= 0.15;
@@ -18625,6 +18627,7 @@ function aiqDetectarCambios(registros) {
     var a = ant[r.campId];
     if (a) {
       [['presupuesto', 'Presupuesto'], ['estado', 'Estado'], ['acosObj', 'ACOS objetivo'], ['estrategia', 'Estrategia']].forEach(function (c) {
+        if (c[0] === 'presupuesto' && (r.presEstimado || a.presEstimado)) return;   // presupuesto supuesto: no es un cambio real
         if (r[c[0]] != null && a[c[0]] != null && String(r[c[0]]) !== String(a[c[0]]))
           out.push({ fecha: r.desde, tipo: c[1], de: a[c[0]], a: r[c[0]], campId: r.campId, origen: 'api' });
       });
@@ -18803,7 +18806,7 @@ function aiqAlertas(registros, cfg, meta, hoy) {
   if (B.ok) {
     var an = aiqAnalizar(B.c, B.p, { margen: cfg.margen || 0.4, hoy: hoy }, aiqDetectarCambios(registros));
     if (an.categoria === 'aumentar' && an.confianza !== 'bajo')
-      out.push({ tipo: 'rendimiento', nivel: 'oportunidad', titulo: 'Oportunidad de crecimiento verificada', detalle: an.que });
+      out.push({ tipo: 'rendimiento', nivel: 'oportunidad', titulo: 'Oportunidad de crecimiento verificada (últimos 14 días)', detalle: 'Mirando solo los últimos 14 días cerrados: ' + an.que + ' Elegí el período 14d para ver el análisis completo.' });
   }
   return out;
 }
