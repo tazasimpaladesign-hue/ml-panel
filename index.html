@@ -822,8 +822,15 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     </div>
     <div class="sep"></div>
     <div style="font-size:12px;font-weight:700;margin:6px 0">Objetivo de rentabilidad <span style="font-weight:400;color:var(--text3)">(para el ranking por publicación)</span></div>
-    <label style="display:flex;gap:6px;align-items:center;font-size:12px">ROAS objetivo: <input type="number" id="aiq-cfg-roasobj" step="0.1" style="width:80px" placeholder="auto"> x
-      <span style="color:var(--text3);font-size:11px">Vacío = equilibrio × 1,4 (con 40% de margen: 3,5x)</span></label>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">
+      <div><label title="Verde desde este valor (ACOS objetivo = 1 ÷ ROAS objetivo)">ROAS objetivo (verde)</label><input type="number" id="aiq-cfg-roasobj" step="0.1" placeholder="5"></div>
+      <div><label>ROAS atención (amarillo desde)</label><input type="number" id="aiq-cfg-roasat" step="0.1"></div>
+      <div><label>ROAS de riesgo (rojo debajo)</label><input type="number" id="aiq-cfg-roasri" step="0.1"></div>
+      <div><label>ROAS revisión prioritaria</label><input type="number" id="aiq-cfg-roasrev" step="0.1"></div>
+      <div><label title="Inversión ÷ facturación total. Sin objetivo, el TACOS se muestra como informativo">TACOS objetivo %</label><input type="number" id="aiq-cfg-tacosobj" step="0.1" placeholder="sin definir"></div>
+    </div>
+    <div style="font-size:10.5px;color:var(--text3);margin-top:4px">Por defecto: 5x verde, 4x amarillo, 2,5x riesgo. El ROAS de equilibrio (1 ÷ margen) siempre manda: debajo de él es rojo.</div>
+    <label style="display:flex;gap:6px;align-items:flex-start;font-size:12px;margin-top:8px"><input type="checkbox" id="aiq-cfg-confirmado" style="margin-top:2px"> Confirmo que el margen ya descuenta producto, comisión, envío e impuestos (no la publicidad). Mientras no lo confirmes, el panel lo trata como hipótesis.</label>
     <div class="sep"></div>
     <div style="display:flex;gap:8px">
       <button class="btn btn-primary" style="flex:1" onclick="aiqConfigGuardar()">Guardar</button>
@@ -849,7 +856,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v298 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v299 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -2676,7 +2683,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   </div>
 
 
-  <!-- ═══ v295-v298 · INTELIGENCIA PUBLICITARIA ═══ -->
+  <!-- ═══ v295-v299 · INTELIGENCIA PUBLICITARIA ═══ -->
   <div class="card" id="aiq-card" style="margin-bottom:16px">
     <div class="card-hd" style="flex-wrap:wrap;gap:10px">
       <div>
@@ -2712,13 +2719,12 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <div class="g60 mb">
       <div class="card" style="margin:0">
         <div class="card-hd">
-          <div><div class="card-title">📈 Evolución diaria</div><div class="card-sub" id="aiq-chart-sub">—</div></div>
-          <select id="aiq-metrica" onchange="aiqRenderGrafico()" style="width:auto;font-size:11px;padding:3px 6px">
-            <option value="rev">Ingresos</option><option value="cost">Inversión</option><option value="roas">ROAS</option>
-            <option value="acos">ACOS</option><option value="clicks">Clics</option><option value="ventas">Ventas</option>
-          </select>
+          <div><div class="card-title">📈 Evolución diaria · período vs anterior</div><div class="card-sub" id="aiq-chart-sub">—</div></div>
+
         </div>
-        <div style="position:relative;height:220px"><canvas id="aiq-chart"></canvas></div>
+        <div id="aiq-pills" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"></div>
+        <div style="position:relative;height:240px"><canvas id="aiq-chart"></canvas></div>
+        <div id="aiq-peak" style="font-size:11px;color:var(--text3);margin-top:6px;min-height:16px"></div>
         <div id="aiq-chart-msg" style="display:none;font-size:12px;color:var(--text3);text-align:center;padding:30px 10px"></div>
       </div>
       <div class="card" style="margin:0">
@@ -18906,6 +18912,16 @@ function aiqResumen(a, cur, prev, cfg) {
   if (dCvr == null) luz('Eficiencia de conversión', 'gris', 'Conversión ' + aiqPct(cur.cvr, 2) + '; sin período anterior para comparar.');
   else luz('Eficiencia de conversión', dCvr >= -0.1 ? 'verde' : (dCvr >= -0.25 ? 'amarillo' : 'rojo'), 'Conversión ' + aiqPct(cur.cvr, 2) + ' (' + aiqSigno(dCvr) + ').');
 
+  // 5) Calidad y actualización de datos (la pasa la pantalla)
+  var cal = cfg && cfg.calidad;
+  if (cal) luz('Calidad de los datos', cal.color, cal.texto);
+  // Estado general: NO es un promedio. Manda la rentabilidad y lo crítico.
+  var rentC = out.semaforo[0].color;
+  var peor = out.semaforo.reduce(function (acc, x) { return (AIQ_RANGO[x.color] || 0) > (AIQ_RANGO[acc] || 0) ? x.color : acc; }, 'verde');
+  out.general = rentC === 'rojo' ? 'rojo' : rentC === 'gris' ? 'gris' : (peor === 'rojo' ? 'naranja' : (peor === 'amarillo' || peor === 'naranja' ? 'amarillo' : rentC));
+  if (cal && cal.color === 'gris' && out.general === 'verde') out.general = 'amarillo';   // sin datos confiables no hay verde
+  if (cfg && cfg.margenConfirmado === false && out.general === 'verde') out.general = 'amarillo';
+
   // Tres datos clave
   var verdes = out.semaforo.filter(function (x) { return x.color === 'verde'; });
   var malos = out.semaforo.filter(function (x) { return x.color === 'rojo' || x.color === 'amarillo'; });
@@ -18994,8 +19010,187 @@ function aiqContextoItems(items, cfg) {
   var t = { cost: 0, ventas: 0, clicks: 0, prints: 0 };
   items.forEach(function (i) { t.cost += i.cost || 0; t.ventas += i.ventas || 0; t.clicks += i.clicks || 0; t.prints += i.prints || 0; });
   var m = (cfg && cfg.margen) || 0.4;
-  return { margen: m, roasObj: (cfg && cfg.roasObj) || (1 / m) * 1.4, cpvCuenta: t.ventas ? t.cost / t.ventas : null,
+  return { margen: m, roasObj: (cfg && cfg.roasObj) || AIQ_UMBRALES_DEF.roasObj, cpvCuenta: t.ventas ? t.cost / t.ventas : null,
     ctrCuenta: t.prints ? t.clicks / t.prints : null, cvrCuenta: t.clicks ? t.ventas / t.clicks : null };
+}
+
+// ═══ v299 · SEMÁFOROS DE TODOS LOS KPI ══════════════════════
+// Escala: verde (saludable) · amarillo (atención) · naranja (optimizar) · rojo (crítico)
+// · info (informativo / sin comparación / muestra insuficiente). Ningún KPI se
+// pinta de verde por falta de datos. ROAS y ACOS comparten UNA clasificación
+// (ACOS = 1/ROAS), así nunca se contradicen.
+var AIQ_UMBRALES_DEF = { roasObj: 5, roasAtencion: 4, roasRiesgo: 2.5, roasRevision: 3, tacosObj: null, minVentas: 10 };
+var AIQ_COLORES = {
+  verde:    { c: '#15803d', bg: '#f0fdf4', bd: '#bbf7d0', txt: 'Saludable' },
+  amarillo: { c: '#a16207', bg: '#fefce8', bd: '#fde68a', txt: 'Atención' },
+  naranja:  { c: '#c2410c', bg: '#fff7ed', bd: '#fed7aa', txt: 'Optimizar' },
+  rojo:     { c: '#991b1b', bg: '#fef2f2', bd: '#fecaca', txt: 'Crítico' },
+  info:     { c: '#1d4ed8', bg: '#eff6ff', bd: '#bfdbfe', txt: 'Informativo' },
+  gris:     { c: '#475569', bg: '#f8fafc', bd: '#cbd5e1', txt: 'Sin datos' }
+};
+var AIQ_RANGO = { verde: 1, amarillo: 2, naranja: 3, rojo: 4, info: 0, gris: 0 };
+function aiqPeor(a, b) { return (AIQ_RANGO[b] || 0) > (AIQ_RANGO[a] || 0) ? b : a; }
+function aiqClasifRoas(roas, eq, u) {
+  if (roas == null) return 'gris';
+  if (roas < eq) return 'rojo';                       // el equilibrio manda sobre cualquier umbral fijo
+  if (roas >= u.roasObj - 1e-9) return 'verde';
+  if (roas >= u.roasAtencion - 1e-9) return 'amarillo';
+  if (roas >= Math.max(u.roasRiesgo, eq) - 1e-9) return 'naranja';
+  return 'rojo';
+}
+// ctx: { cur, prev, cfg, hoy:{cost,pct,fracDia,hora}|null, tacos:{tacos,ventaTotal}|null, tacosPrev, margenConfirmado }
+function aiqKpis(ctx) {
+  var c = ctx.cur, p = ctx.prev, cfg = ctx.cfg || {};
+  var u = Object.assign({}, AIQ_UMBRALES_DEF, cfg.umbrales || {}, cfg.roasObj ? { roasObj: cfg.roasObj } : {});
+  var m = cfg.margen || 0.48, eq = 1 / m;
+  var comp = p && !p.vacio && p.dias === c.dias && p.cobertura >= 0.8 && c.cobertura >= 0.8;
+  var dv = function (k) { return comp ? aiqVar(c[k], p[k]) : null; };
+  var poca = (c.ventas || 0) < u.minVentas;
+  var K = {};
+  var mk = function (id, o) { K[id] = Object.assign({ id: id, estado: 'info' }, o); };
+  var per = 'el período anterior equivalente';
+  var dRoas = dv('roas'), dCost = dv('cost'), dRev = dv('rev'), dCvr = dv('cvr'), dCpc = dv('cpc'), dV = dv('ventas'),
+      dCl = dv('clicks'), dPr = dv('prints'), dCtr = dv('ctr'), dCpv = dv('costoPorVenta');
+  var res = c.rev != null && c.cost != null ? c.rev * m - c.cost : null;
+  var resPrev = comp && p.rev != null ? p.rev * m - p.cost : null;
+  var dRes = resPrev ? (res - resPrev) / Math.abs(resPrev) : null;
+
+  // 1 · Inversión
+  var eI = 'info', iI = 'ℹ️', mI = 'Inversión ' + aiqPesos(c.cost) + ' (sin período anterior para comparar)', rI = 'Seguí acumulando datos.';
+  if (comp && dCost != null) {
+    if (dCost > 0.05 && res != null && res < 0) { eI = 'rojo'; iI = '🔴'; mI = 'La inversión sube ' + aiqSigno(dCost) + ' y el resultado estimado es negativo'; rI = 'Revisá la inversión ya: no se cubre el margen.'; }
+    else if (dCost > 0.05 && dRoas != null && dRoas < -0.2) { eI = 'naranja'; iI = '🟠'; mI = 'La inversión sube ' + aiqSigno(dCost) + ' y el ROAS cae ' + aiqSigno(dRoas); rI = 'Identificá qué publicaciones absorben el gasto extra.'; }
+    else if (dCost > 0.2 && (dRev == null || dRev < dCost / 2)) { eI = 'amarillo'; iI = '⚠️'; mI = 'La inversión sube ' + aiqSigno(dCost) + ' sin mejora proporcional de ingresos (' + aiqSigno(dRev) + ')'; rI = 'Vigilá si el gasto adicional se convierte en ventas.'; }
+    else { eI = 'verde'; iI = dCost > 0.05 ? '📈' : '✅'; mI = 'Inversión ' + aiqSigno(dCost) + ' con rentabilidad estable'; rI = 'Mantener.'; }
+  }
+  mk('inversion', { titulo: 'Inversión', valor: aiqPesos(c.cost), sub: aiqPesos(c.gastoDiario) + '/día', estado: eI, icono: iI, mensaje: mI, reco: rI,
+    ayuda: 'Dinero gastado en publicidad durante el período.', tip: 'Suma del gasto diario del período. Comparado con ' + per + '.' });
+
+  // 2 · Ingresos atribuidos
+  var eR = 'info', iR = 'ℹ️', mR = 'Ingresos atribuidos ' + aiqPesos(c.rev), rR = 'Sin período anterior para comparar.';
+  if (comp && dRev != null) {
+    if (dRev < -0.25 && dRes != null && dRes < 0) { eR = 'rojo'; iR = '🚨'; mR = 'Caída fuerte de ingresos atribuidos (' + aiqSigno(dRev) + ') y del resultado'; rR = 'Investigá visibilidad, precio y stock.'; }
+    else if (dRev < -0.1) { eR = 'naranja'; iR = '📉'; mR = 'Caen los ingresos atribuidos (' + aiqSigno(dRev) + ')'; rR = 'Revisá las publicaciones que más cayeron en el ranking.'; }
+    else if (dRev < 0.05) { eR = 'amarillo'; iR = '➖'; mR = 'Ingresos atribuidos estables (' + aiqSigno(dRev) + ')'; rR = 'Vigilar la tendencia.'; }
+    else if (dRoas != null && dRoas < -0.1) { eR = 'amarillo'; iR = '⚠️'; mR = 'Suben los ingresos (' + aiqSigno(dRev) + ') pero baja el ROAS (' + aiqSigno(dRoas) + ')'; rR = 'Crecer en ventas no implica crecer en ganancia.'; }
+    else { eR = 'verde'; iR = dRev >= 0.25 ? '🚀' : '📈'; mR = (dRev >= 0.25 ? 'Suba fuerte' : 'Suba') + ' en ingresos atribuidos (' + aiqSigno(dRev) + ')'; rR = 'Mantener.'; }
+  }
+  mk('ingresos', { titulo: 'Ingresos atribuidos', valor: aiqPesos(c.rev), sub: c.ventas + ' ventas atribuidas', estado: eR, icono: iR, mensaje: mR, reco: rR,
+    ayuda: 'Ventas que Mercado Libre relaciona con tus anuncios.', tip: 'Directas + indirectas, a precio de venta. No todas son ventas causadas por la publicidad.' });
+
+  // 3 · ROAS / ACOS (una sola clasificación)
+  var eRo = aiqClasifRoas(c.roas, eq, u), iRo, mRo, rRo;
+  if (eRo === 'gris') { iRo = 'ℹ️'; mRo = 'Sin inversión: ROAS N/D'; rRo = ''; }
+  else if (c.roas < eq) { iRo = '🔴'; mRo = 'ROAS ' + aiqX(c.roas) + ' debajo del equilibrio ' + aiqX(eq); rRo = 'Posible pérdida: revisá inversión y rentabilidad.'; }
+  else if (eRo === 'rojo') { iRo = '🔴'; mRo = 'ROAS ' + aiqX(c.roas) + ': se aproxima al equilibrio ' + aiqX(eq) + ' (debajo del umbral de riesgo ' + aiqX(u.roasRiesgo) + ')'; rRo = 'Revisá las publicaciones menos rentables antes de que haya pérdida.'; }
+  else if (eRo === 'naranja') { iRo = '🟠'; mRo = 'ROAS ' + aiqX(c.roas) + (c.roas < u.roasRiesgo + 0.42 ? ', cerca del equilibrio ' + aiqX(eq) : ', debajo de ' + aiqX(u.roasAtencion)); rRo = c.roas < u.roasRevision ? 'Revisión prioritaria: ROAS menor a ' + aiqX(u.roasRevision) + '.' : 'Optimizá conversión y costo por venta.'; }
+  else if (eRo === 'amarillo') { iRo = '⚠️'; mRo = 'ROAS ' + aiqX(c.roas) + ', debajo del objetivo ' + aiqX(u.roasObj); rRo = 'Vigilar conversión y CPC.'; }
+  else { iRo = '🚀'; mRo = 'ROAS saludable: ' + aiqX(c.roas); rRo = 'Mantener y evaluar escalado gradual.'; }
+  if (eRo === 'verde' && dRoas != null && dRoas < -0.2) { eRo = 'amarillo'; iRo = '⚠️'; mRo = 'ROAS ' + aiqX(c.roas) + ' bueno, pero cae ' + aiqSigno(dRoas); rRo = 'Tendencia a vigilar.'; }
+  mk('roas', { titulo: 'ROAS / ACOS', valor: aiqX(c.roas), sub: 'ACOS ' + aiqPct(c.acos) + ' · equilibrio ' + aiqX(eq) + ' / ' + aiqPct(m, 0), estado: eRo, icono: iRo, mensaje: mRo, reco: rRo,
+    ayuda: 'ROAS: pesos de ingresos por cada $1 invertido. ACOS: qué % de esos ingresos es publicidad.',
+    tip: 'ROAS = ingresos ÷ inversión. ACOS = inversión ÷ ingresos. Equilibrio = 1 ÷ margen (' + aiqPct(m, 0) + '). Rangos: ≥' + aiqX(u.roasObj) + ' verde, ≥' + aiqX(u.roasAtencion) + ' amarillo, ≥' + aiqX(Math.max(u.roasRiesgo, eq)) + ' naranja, menor rojo.' });
+
+  // 4 · Resultado estimado
+  var eS, iS, mS, rS;
+  if (res == null || (!c.cost && !c.rev)) { eS = 'gris'; iS = 'ℹ️'; mS = 'Sin inversión ni ingresos en el período'; rS = ''; }
+  else if (res < 0) { eS = 'rojo'; iS = '🔴'; mS = 'Resultado estimado negativo'; rS = 'La publicidad no cubre el margen estimado.'; }
+  else if (c.rev && res < c.rev * 0.03) { eS = 'naranja'; iS = '🟠'; mS = 'Resultado estimado cercano a cero'; rS = 'Revisá inversión y margen.'; }
+  else if (dRes != null && dRes < -0.3) { eS = 'naranja'; iS = '📉'; mS = 'Resultado positivo, pero cae ' + aiqSigno(dRes); rS = 'Identificá qué empeoró: CPC, conversión o ticket.'; }
+  else if (dRes != null && dRes < -0.05) { eS = 'amarillo'; iS = '💰'; mS = 'Resultado positivo, pero descendió ' + aiqSigno(dRes); rS = 'Vigilar.'; }
+  else { eS = 'verde'; iS = '💰'; mS = 'Resultado estimado positivo' + (dRes != null ? ' (' + aiqSigno(dRes) + ')' : ''); rS = 'Mantener.'; }
+  mk('resultado', { titulo: 'Resultado estimado', valor: aiqPesos(res), sub: '<b>Estimación</b>' + (ctx.margenConfirmado ? '' : ' · margen sin confirmar'), estado: eS, icono: iS, mensaje: mS, reco: rS,
+    ayuda: 'Margen estimado de las ventas atribuidas menos publicidad.',
+    tip: 'Ingresos atribuidos × ' + aiqPct(m, 0) + ' − inversión. No es una ganancia contable verificada.' + (ctx.margenConfirmado ? '' : ' El margen es una hipótesis: confirmalo en ⚙ Configuración.') });
+
+  // 5 · TACOS
+  var t = ctx.tacos, eT = 'info', iT = 'ℹ️', mT, rT = '';
+  if (!t) { eT = 'gris'; mT = 'TACOS N/D: sin ventas totales del período'; }
+  else if (u.tacosObj == null) { mT = 'TACOS ' + aiqPct(t.tacos, 2) + ' (sin objetivo configurado)'; rT = 'Definí un TACOS objetivo en ⚙ Configuración.'; }
+  else {
+    var ex = (t.tacos - u.tacosObj / 100) * 100;   // puntos porcentuales sobre el objetivo
+    if (ex <= 0) { eT = 'verde'; iT = '✅'; mT = 'TACOS ' + aiqPct(t.tacos, 2) + ' dentro del objetivo ' + u.tacosObj + '%'; rT = 'Mantener.'; }
+    else if (ex <= 2) { eT = 'amarillo'; iT = '⚠️'; mT = 'TACOS ' + ex.toFixed(1).replace('.', ',') + ' p.p. sobre el objetivo'; rT = 'Vigilar la dependencia de la publicidad.'; }
+    else if (ex <= 5 || !(ctx.tacosPrev != null && ctx.tacosPrev > u.tacosObj / 100 + 0.05 && dRes != null && dRes < 0)) { eT = 'naranja'; iT = '🟠'; mT = 'TACOS ' + ex.toFixed(1).replace('.', ',') + ' p.p. sobre el objetivo'; rT = 'Revisá la eficiencia de la inversión.'; }
+    else { eT = 'rojo'; iT = '🔴'; mT = 'TACOS alto y persistente, con rentabilidad en baja'; rT = 'Revisá la inversión y la dependencia de la publicidad.'; }
+  }
+  mk('tacos', { titulo: 'TACOS', valor: t ? aiqPct(t.tacos, 2) : 'N/D', sub: t ? 'sobre ' + aiqPesos(t.ventaTotal) + ' facturados' : 'sin ventas totales', estado: eT, icono: iT, mensaje: mT, reco: rT,
+    ayuda: 'Publicidad como porcentaje de todas las ventas de la tienda.', tip: 'Inversión ÷ facturación total de Mercado Libre del mismo período (órdenes no canceladas cargadas en el panel).' });
+
+  // 6 · Presupuesto diario (nunca rojo por ser bajo)
+  var uso = c.usoPresupuesto, eP = 'info', iP = '🎛️', mP = 'Presupuesto ' + aiqPesos(c.presupuesto) + '/día', rP = 'Informativo.';
+  if (c.presupuesto && uso != null) {
+    var frec = c.diasConPres ? c.diasTope / c.diasConPres : null;
+    if (frec != null && frec >= 0.3 && c.lostBud != null && c.lostBud >= 0.15 && eRo === 'verde') { eP = 'naranja'; iP = '🟠'; mP = 'El presupuesto se agota y limita impresiones (' + aiqPct(c.lostBud, 0) + ' perdidas)'; rP = 'Confirmá que más presupuesto daría ventas rentables antes de subirlo.'; }
+    else if (frec != null && frec >= 0.3) { eP = 'amarillo'; iP = '⚠️'; mP = 'Se alcanza el tope en ' + c.diasTope + ' de ' + c.diasConPres + ' días'; rP = 'No subir solo porque se agota: mirá la rentabilidad.'; }
+    else mP = 'Se usa el ' + aiqPct(uso, 0) + ' del presupuesto del período';
+  }
+  mk('presupuesto', { titulo: 'Presupuesto diario', valor: aiqPesos(c.presupuesto), sub: (c.estado === 'active' ? '● Activa' : c.estado === 'paused' ? '⏸ Pausada' : 'estado N/D') + (c.presEstimado ? ' · histórico supuesto' : ''), estado: eP, icono: iP, mensaje: mP, reco: rP,
+    ayuda: 'Referencia de gasto de la campaña (promedio diario de un presupuesto mensual).', tip: 'No es lo gastado. Un presupuesto bajo no es malo por sí mismo.' });
+
+  // 7 · Gasto de hoy (contra el tiempo transcurrido del día)
+  var h = ctx.hoy, eH = 'gris', iH = 'ℹ️', mH = 'Gasto de hoy N/D', rH = '';
+  if (h && h.cost != null && c.presupuesto) {
+    var pct = h.cost / c.presupuesto, fr = h.fracDia;
+    if (pct > 1.0001) { eH = 'rojo'; iH = '🔴'; mH = 'Hoy ya se superó el presupuesto (' + aiqPct(pct, 0) + ')'; rH = 'Verificá en Mercado Libre: el presupuesto es un promedio mensual.'; }
+    else if (pct > 0.95) { eH = 'naranja'; iH = '🟠'; mH = 'Presupuesto de hoy agotado (' + aiqPct(pct, 0) + ')' + (fr < 0.5 ? ' temprano, a las ' + h.hora : ' a las ' + h.hora); rH = 'Confirmá si está limitando ventas rentables.'; }
+    else if (pct > 0.8) { eH = 'amarillo'; iH = '⚠️'; mH = 'Lleva el ' + aiqPct(pct, 0) + ' del presupuesto a las ' + h.hora; rH = fr < 0.6 ? 'Va rápido para la hora del día.' : 'Ritmo normal para la hora.'; }
+    else if (pct > fr + 0.25) { eH = 'amarillo'; iH = '⏱️'; mH = 'Lleva el ' + aiqPct(pct, 0) + ' a las ' + h.hora + ': va rápido para la hora (' + aiqPct(fr, 0) + ' del día)'; rH = 'Podría agotarse temprano.'; }
+    else { eH = 'verde'; iH = '✅'; mH = 'Lleva el ' + aiqPct(pct, 0) + ' del presupuesto a las ' + h.hora + ' (' + aiqPct(fr, 0) + ' del día)'; rH = 'Ritmo de gasto normal.'; }
+  } else if (h && h.sinDatos) mH = 'Mercado Libre todavía no informa el gasto de hoy';
+  mk('hoy', { titulo: 'Gasto de hoy', valor: h && h.cost != null ? aiqPesos(h.cost) : 'N/D', sub: h && h.cost != null && c.presupuesto ? 'de ' + aiqPesos(c.presupuesto) + ' · ' + aiqPct(h.cost / c.presupuesto, 0) : '', estado: eH, icono: iH, mensaje: mH, reco: rH, pct: h && h.cost != null && c.presupuesto ? h.cost / c.presupuesto : null,
+    ayuda: 'Cuánto llevás invertido hoy y qué % del presupuesto representa.', tip: 'Dato parcial del día, consultado en vivo a la API' + (h && h.hora ? ' a las ' + h.hora : '') + '. Se compara con la fracción del día transcurrida.' });
+
+  // 8 · Clics y CPC
+  var eC = 'info', mC = 'Sin período anterior para comparar', iC = 'ℹ️', rC = '';
+  if (comp && dCl != null) {
+    if (dCl < -0.2 && dV != null && dV < -0.2) { eC = 'rojo'; iC = '🔴'; mC = 'Caen los clics (' + aiqSigno(dCl) + ') y las ventas (' + aiqSigno(dV) + ')'; rC = 'Investigá visibilidad y competencia.'; }
+    else if (dCl < -0.2) { eC = 'naranja'; iC = '📉'; mC = 'Los clics cayeron ' + aiqSigno(dCl) + ' frente a ' + per; rC = 'Revisá impresiones y CTR.'; }
+    else if (dCl < -0.1) { eC = 'amarillo'; iC = '⚠️'; mC = 'Los clics bajan ' + aiqSigno(dCl); rC = 'Vigilar.'; }
+    else if (dCl > 0.1 && dCvr != null && dCvr < -0.1) { eC = 'amarillo'; iC = '⚠️'; mC = 'Más clics (' + aiqSigno(dCl) + ') pero menor conversión (' + aiqSigno(dCvr) + ')'; rC = 'Puede ser tráfico menos eficiente.'; }
+    else { eC = 'verde'; iC = dCl > 0.1 ? '📈' : '✅'; mC = 'Clics ' + aiqSigno(dCl) + ' con conversión estable'; rC = 'Mantener.'; }
+    // CPC
+    var eCp = 'verde';
+    if (dCpc != null && dCpc > 0.2 && !(dCvr != null && dCvr > dCpc)) eCp = (c.roas != null && c.roas < eq) ? 'rojo' : 'naranja';
+    else if (dCpc != null && dCpc > 0.1 && !(dCvr != null && dCvr > dCpc)) eCp = 'amarillo';
+    if ((AIQ_RANGO[eCp] || 0) > (AIQ_RANGO[eC] || 0)) { eC = eCp; iC = eCp === 'rojo' ? '🔴' : eCp === 'naranja' ? '🟠' : '⚠️'; mC = 'El CPC sube ' + aiqSigno(dCpc) + ' sin mejora de conversión'; rC = eCp === 'rojo' ? 'CPC alto con pérdidas: revisá inversión.' : 'Revisá costo por venta antes de actuar.'; }
+  }
+  mk('clics', { titulo: 'Clics y CPC', valor: (c.clicks || 0).toLocaleString('es-AR'), sub: 'CPC ' + aiqPesos(c.cpc) + (dCpc != null ? ' (' + aiqSigno(dCpc) + ')' : ''), estado: eC, icono: iC, mensaje: mC, reco: rC,
+    ayuda: 'CPC: cuánto pagás, en promedio, por cada clic.', tip: 'CPC = inversión ÷ clics. Más clics no es mejor si no se convierten en ventas.' });
+
+  // 9 · Impresiones y CTR
+  var eM = 'info', iM = 'ℹ️', mM = 'Sin período anterior para comparar', rM = '';
+  if (comp && dPr != null) {
+    if (dPr < -0.2 && dV != null && dV < -0.2) { eM = 'rojo'; iM = '🔴'; mM = 'Caída de impresiones (' + aiqSigno(dPr) + ') con menos ventas'; rM = 'Investigá visibilidad y competencia.'; }
+    else if (dPr < -0.2) { eM = 'naranja'; iM = '📉'; mM = 'Las impresiones cayeron ' + aiqSigno(dPr); rM = 'Revisá ranking y presupuesto.'; }
+    else if (dPr < -0.1) { eM = 'amarillo'; iM = '⚠️'; mM = 'Las impresiones bajan ' + aiqSigno(dPr); rM = 'Vigilar.'; }
+    else { eM = 'verde'; iM = dPr > 0.1 ? '📈' : '✅'; mM = 'Impresiones ' + aiqSigno(dPr); rM = 'Mantener.'; }
+    var eCt = dCtr == null ? 'info' : dCtr > 0.0005 ? 'verde' : dCtr >= -0.1 ? 'amarillo' : (dCvr != null && dCvr < -0.1 ? 'rojo' : 'naranja');
+    if ((AIQ_RANGO[eCt] || 0) > (AIQ_RANGO[eM] || 0)) { eM = eCt; iM = eCt === 'rojo' ? '🔴' : eCt === 'naranja' ? '🟠' : '⚠️'; mM = 'El CTR ' + (dCtr < -0.0005 ? 'cae ' : 'está estable ') + aiqSigno(dCtr) + ' (relativo)'; rM = dCtr < -0.0005 ? 'Revisá foto principal, título y precio.' : 'Sin cambios: vigilar.'; }
+  }
+  mk('impresiones', { titulo: 'Impresiones y CTR', valor: (c.prints || 0).toLocaleString('es-AR'), sub: 'CTR ' + aiqPct(c.ctr, 2) + (dCtr != null ? ' (' + aiqSigno(dCtr) + ')' : '') + (c.is != null ? ' · ganadas ' + aiqPct(c.is, 0) : ''), estado: eM, icono: iM, mensaje: mM, reco: rM,
+    ayuda: 'CTR: porcentaje de impresiones que terminan en un clic.', tip: 'CTR = clics ÷ impresiones. La variación es relativa: de 0,30% a 0,27% es −10%.' });
+
+  // 10 · Ventas, conversión y costo por venta
+  var eV = 'info', iV = 'ℹ️', mV, rV = '';
+  if (poca) { mV = 'Muestra insuficiente: ' + (c.ventas || 0) + ' ventas (mínimo ' + u.minVentas + ')'; }
+  else if (!comp || dV == null) { mV = c.ventas + ' ventas · conversión ' + aiqPct(c.cvr, 2) + ' (sin comparación)'; }
+  else {
+    if (dV < -0.25 && dRoas != null && dRoas < -0.1) { eV = 'rojo'; iV = '🚨'; mV = 'Caída fuerte de ventas (' + aiqSigno(dV) + ') con menor rentabilidad'; rV = 'Revisá precio, stock y competencia.'; }
+    else if (dV < -0.1) { eV = 'naranja'; iV = '📉'; mV = 'Caen las ventas atribuidas (' + aiqSigno(dV) + ')'; rV = 'Revisá conversión en el ranking.'; }
+    else if (dV < 0.05) { eV = 'amarillo'; iV = '➖'; mV = 'Ventas estables (' + aiqSigno(dV) + ')'; rV = 'Vigilar.'; }
+    else { eV = 'verde'; iV = dV >= 0.25 ? '🚀' : '📈'; mV = (dV >= 0.25 ? 'Suba fuerte' : 'Suba') + ' en ventas atribuidas (' + aiqSigno(dV) + ')'; rV = 'Mantener.'; }
+    var eCv = dCvr == null ? 'info' : dCvr >= 0 ? 'verde' : dCvr >= -0.1 ? 'amarillo' : (dCpv != null && dCpv > 0.1 ? 'rojo' : 'naranja');
+    if ((AIQ_RANGO[eCv] || 0) > (AIQ_RANGO[eV] || 0)) { eV = eCv; iV = eCv === 'rojo' ? '🔴' : eCv === 'naranja' ? '🟠' : '⚠️'; mV = 'La conversión ' + aiqSigno(dCvr) + ' (relativa)' + (eCv === 'rojo' ? ' y sube el costo por venta' : ''); rV = 'Revisá precio, envío, fotos y stock.'; }
+    // costo por venta frente al beneficio disponible por venta (margen promedio)
+    var ben = c.ticket != null ? c.ticket * m : null;
+    if (ben && c.costoPorVenta != null && c.costoPorVenta > ben) { eV = 'rojo'; iV = '🔴'; mV = 'El costo por venta (' + aiqPesos(c.costoPorVenta) + ') supera el margen por venta (' + aiqPesos(ben) + ')'; rV = 'Requiere validar el margen real de los productos.'; }
+    else if (dCpv != null && dCpv > 0.2 && AIQ_RANGO[eV] < 3) { eV = 'naranja'; iV = '🟠'; mV = 'El costo por venta sube ' + aiqSigno(dCpv); rV = 'Revisá CPC y conversión.'; }
+    else if (dCpv != null && dCpv > 0.1 && AIQ_RANGO[eV] < 2) { eV = 'amarillo'; iV = '⚠️'; mV = 'El costo por venta sube ' + aiqSigno(dCpv); rV = 'Vigilar.'; }
+  }
+  mk('ventas', { titulo: 'Ventas y conversión', valor: String(c.ventas || 0), sub: 'Conv. ' + aiqPct(c.cvr, 2) + ' · costo/venta ' + aiqPesos(c.costoPorVenta), estado: eV, icono: iV, mensaje: mV, reco: rV,
+    ayuda: 'Conversión: % de clics que terminan en venta atribuida. Costo por venta: inversión ÷ ventas.', tip: 'Conversión = ventas ÷ clics. El margen por venta usa el margen promedio, no el de cada producto.' });
+  return K;
 }
 
 if (typeof module !== 'undefined' && module.exports) module.exports = {
@@ -19003,9 +19198,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = {
   aiqParsearReporte: aiqParsearReporte, aiqHuella: aiqHuella, aiqRangoPrevio: aiqRangoPrevio,
   aiqDetectarCambios: aiqDetectarCambios, aiqDiasEntre: aiqDiasEntre, aiqSumarDias: aiqSumarDias,
   aiqAlertas: aiqAlertas, aiqInformeSemanal: aiqInformeSemanal, aiqFormulas: aiqFormulas,
-  aiqResumen: aiqResumen, aiqRecoItem: aiqRecoItem, aiqContextoItems: aiqContextoItems, aiqItemDerivadas: aiqItemDerivadas
+  aiqResumen: aiqResumen, aiqRecoItem: aiqRecoItem, aiqContextoItems: aiqContextoItems, aiqItemDerivadas: aiqItemDerivadas,
+  aiqKpis: aiqKpis, aiqClasifRoas: aiqClasifRoas, AIQ_UMBRALES_DEF: AIQ_UMBRALES_DEF
 };
-
 // ═══════════════════════════════════════════════════════════
 // v295 · INTELIGENCIA PUBLICITARIA — PANTALLA
 // ═══════════════════════════════════════════════════════════
@@ -19021,11 +19216,12 @@ function _aiqEsc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, funct
 function _aiqFmtF(f) { return f ? f.slice(8, 10) + '/' + f.slice(5, 7) + '/' + f.slice(0, 4) : '—'; }
 function _aiqMargen() {
   var m = _aiq.meta && _aiq.meta.cfg && Number(_aiq.meta.cfg.margen);
-  return m > 0 && m < 1 ? m : 0.4;
+  return m > 0 && m < 1 ? m : 0.48;   // v299: valor inicial 48% (hipótesis a confirmar)
 }
 function _aiqCfg() {
   var c = (_aiq.meta && _aiq.meta.cfg) || {};
-  return { margen: _aiqMargen(), margenDesglose: c.margenDesglose || null, alertas: c.alertas || null, roasObj: Number(c.roasObj) > 0 ? Number(c.roasObj) : null };
+  return { margen: _aiqMargen(), margenDesglose: c.margenDesglose || null, alertas: c.alertas || null, roasObj: Number(c.roasObj) > 0 ? Number(c.roasObj) : null,
+    umbrales: Object.assign({}, c.umbrales || {}, Number(c.tacosObj) > 0 ? { tacosObj: Number(c.tacosObj) } : {}), margenConfirmado: c.margenConfirmado === true, calidad: aiqCalidadDatos() };
 }
 function _aiqFuenteBadge(f) {
   var t = { api: ['API', '#dbeafe', '#1e40af'], excel: ['Excel', '#dcfce7', '#166534'], mixto: ['API + Excel', '#ede9fe', '#5b21b6'], calc: ['Calculado', '#f1f5f9', '#475569'] }[f] || ['—', '#f1f5f9', '#475569'];
@@ -19127,43 +19323,6 @@ function aiqSerie(desde, hasta, metrica) {
   }
   return out;
 }
-function aiqRenderGrafico() {
-  var cv = document.getElementById('aiq-chart'), msg = document.getElementById('aiq-chart-msg'), sub = document.getElementById('aiq-chart-sub');
-  if (!cv || !_aiq.cur) return;
-  var c = _aiq.cur, p = _aiq.prev;
-  var met = (document.getElementById('aiq-metrica') || {}).value || 'rev';
-  var serie = c.vacio ? [] : aiqSerie(c.desde, c.hasta, met);
-  var hay = serie.some(function (v) { return v != null; });
-  if (_aiq.chart) { try { _aiq.chart.destroy(); } catch (e) {} _aiq.chart = null; }
-  if (!hay) {
-    cv.style.display = 'none'; msg.style.display = 'block';
-    msg.innerHTML = c.fuente === 'excel'
-      ? 'El reporte importado es un <b>total del período</b>: no trae datos por día.<br>Para ver la evolución, usá <b>⤓ Traer historial API</b> o importá un reporte con agrupación diaria.'
-      : 'Sin datos diarios para este período.';
-    if (sub) sub.textContent = '—';
-    return;
-  }
-  cv.style.display = ''; msg.style.display = 'none';
-  var labels = [], f = c.desde; for (var i = 0; i < serie.length; i++) { labels.push(f.slice(8, 10) + '/' + f.slice(5, 7)); f = aiqSumarDias(f, 1); }
-  var nombre = { rev: 'Ingresos', cost: 'Inversión', roas: 'ROAS', acos: 'ACOS %', clicks: 'Clics', ventas: 'Ventas' }[met];
-  var ds = [{ label: nombre + ' · período', data: serie, borderColor: '#4f8ef7', backgroundColor: 'rgba(79,142,247,.08)', fill: true, tension: .3, borderWidth: 2, pointRadius: 2, spanGaps: false }];
-  if (p && !p.vacio) {
-    var sp = aiqSerie(p.desde, p.hasta, met);
-    if (sp.some(function (v) { return v != null; }))
-      ds.push({ label: nombre + ' · anterior', data: sp, borderColor: '#94a3b8', borderDash: [5, 4], fill: false, tension: .3, borderWidth: 1.5, pointRadius: 0 });
-  }
-  if (sub) sub.textContent = nombre + ' por día' + (ds.length > 1 ? ' · punteado: período anterior' : '');
-  var prevIni = p && !p.vacio ? p.desde : null;
-  _aiq.chart = new Chart(cv, { type: 'line', data: { labels: labels, datasets: ds }, options: {
-    responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
-    plugins: { legend: { display: true, labels: { boxWidth: 10, font: { size: 10 } } },
-      tooltip: { callbacks: { title: function (it) {
-        var i = it[0].dataIndex, t = _aiqFmtF(aiqSumarDias(c.desde, i));
-        return prevIni ? t + ' — ' + _aiqFmtF(aiqSumarDias(prevIni, i)) : t;
-      } } } },
-    scales: { y: { beginAtZero: true, ticks: { font: { size: 10 } } }, x: { ticks: { font: { size: 9 }, maxRotation: 0, autoSkip: true } } } } });
-}
-
 function aiqRenderSimulador(reset) {
   var el = document.getElementById('aiq-sim'), inp = document.getElementById('aiq-sim-pres');
   if (!el || !_aiq.cur) return;
@@ -19407,7 +19566,10 @@ function aiqConfigAbrir() {
   v('aiq-cfg-margen', Math.round(c.margen * 1000) / 10);
   ['costo', 'comision', 'envio', 'impuestos', 'otros'].forEach(function (k) { v('aiq-cfg-' + k, d ? d[k] : ''); });
   ['roas', 'acos', 'cvr', 'gasto', 'topeDias', 'minVentas', 'diasViejo'].forEach(function (k) { v('aiq-cfg-al-' + k, u[k]); });
-  v('aiq-cfg-roasobj', c.roasObj || '');
+  var cc = (_aiq.meta && _aiq.meta.cfg) || {};
+  v('aiq-cfg-roasobj', c.roasObj || ''); v('aiq-cfg-tacosobj', cc.tacosObj || '');
+  var cu = Object.assign({}, AIQ_UMBRALES_DEF, cc.umbrales || {}); v('aiq-cfg-roasat', cu.roasAtencion); v('aiq-cfg-roasri', cu.roasRiesgo); v('aiq-cfg-roasrev', cu.roasRevision);
+  var ck = document.getElementById('aiq-cfg-confirmado'); if (ck) ck.checked = cc.margenConfirmado === true;
   aiqConfigCalcular();
   document.getElementById('aiq-config-modal').classList.add('open');
 }
@@ -19431,7 +19593,10 @@ async function aiqConfigGuardar() {
   var m = Number(document.getElementById('aiq-cfg-margen').value);
   if (!(m > 0 && m < 95)) { alert('El margen tiene que estar entre 1% y 95%.'); return; }
   var ro = Number(document.getElementById('aiq-cfg-roasobj').value);
-  var cfg = { margen: m / 100, margenDesglose: null, alertas: {}, roasObj: ro > 0 ? ro : null };
+  var to = Number(document.getElementById('aiq-cfg-tacosobj').value);
+  var cfg = { margen: m / 100, margenDesglose: null, alertas: {}, roasObj: ro > 0 ? ro : null, tacosObj: to > 0 ? to : null,
+    margenConfirmado: !!(document.getElementById('aiq-cfg-confirmado') || {}).checked,
+    umbrales: { roasAtencion: Number(document.getElementById('aiq-cfg-roasat').value) || AIQ_UMBRALES_DEF.roasAtencion, roasRiesgo: Number(document.getElementById('aiq-cfg-roasri').value) || AIQ_UMBRALES_DEF.roasRiesgo, roasRevision: Number(document.getElementById('aiq-cfg-roasrev').value) || AIQ_UMBRALES_DEF.roasRevision } };
   if (des) { cfg.margenDesglose = {}; ['costo', 'comision', 'envio', 'impuestos', 'otros'].forEach(function (k) { cfg.margenDesglose[k] = Number(document.getElementById('aiq-cfg-' + k).value) || 0; }); }
   ['roas', 'acos', 'cvr', 'gasto', 'topeDias', 'minVentas', 'diasViejo'].forEach(function (k) { var n = Number(document.getElementById('aiq-cfg-al-' + k).value); if (n > 0) cfg.alertas[k] = n; });
   try {
@@ -19440,50 +19605,150 @@ async function aiqConfigGuardar() {
     closeModal('aiq-config-modal'); showToast('Configuración guardada', 'success'); _aiqRk.clave = null; aiqRender();
   } catch (e) { alert('No se pudo guardar: ' + e.message); }
 }
-// ═══ v298 · KPIs EN DOS FILAS DE CINCO ═══════════════════════
+// ═══ v299 · KPIs CON SEMÁFORO (estilo Resumen General) ═══════
+function _aiqHoyCtx() {
+  var h = _aiq.hoyGasto; if (!h || !h.ok) return h && !h.ok ? { error: h.error } : null;
+  if (h.sinDatos) return { sinDatos: true };
+  var t = new Date(h.consultado || Date.now()), ar = new Date(t.getTime() - 3 * 3600 * 1000);
+  var min = ar.getUTCHours() * 60 + ar.getUTCMinutes();
+  return { cost: h.cost, fracDia: min / 1440, hora: String(ar.getUTCHours()).padStart(2, '0') + ':' + String(ar.getUTCMinutes()).padStart(2, '0') };
+}
+function aiqCalidadDatos() {
+  var m = _aiq.meta || {}, c = _aiq.cur || {}, cap = m.cap || {};
+  if (!m.rutas || !m.rutas.camp) return { color: 'gris', texto: 'API sin validar: solo datos del Excel importado.' };
+  var ayer = _aiqAyer();
+  if (!cap.ultOk || aiqDiasEntre(cap.ultOk, ayer) - 1 >= 2) return { color: 'rojo', texto: 'Datos desactualizados: último día capturado ' + (cap.ultOk ? _aiqFmtF(cap.ultOk) : 'ninguno') + '.' };
+  if (c.fuente === 'excel') return { color: 'amarillo', texto: 'El período usa un reporte total del Excel, sin detalle diario.' };
+  if (c.cobertura != null && c.cobertura < 1) return { color: 'amarillo', texto: 'Faltan días del período en el historial.' };
+  if (c.presEstimado) return { color: 'amarillo', texto: 'API al día (' + _aiqFmtF(cap.ultOk) + '); el presupuesto de días viejos es supuesto.' };
+  return { color: 'verde', texto: 'Datos diarios de la API completos, actualizados al ' + _aiqFmtF(cap.ultOk) + '.' };
+}
 function aiqRenderKpis() {
   var el = document.getElementById('aiq-kpis'); if (!el) return;
-  var c = _aiq.cur, p = _aiq.prev, a = _aiq.analisis, rent = a.rent;
-  if (c.vacio) { el.innerHTML = '<div style="font-size:12px;color:var(--text3);padding:10px;text-align:center">Sin datos para este período. Usá <b>⤓ Traer historial API</b> o <b>📥 Importar Excel</b>.</div>'; return; }
-  var cmp = p && !p.vacio;
+  var c = _aiq.cur, p = _aiq.prev;
+  if (!c || c.vacio) { el.innerHTML = '<div style="font-size:12px;color:var(--text3);padding:10px;text-align:center">Sin datos para este período. Usá <b>⤓ Traer historial API</b> o <b>📥 Importar Excel</b>.</div>'; return; }
+  var cfg = _aiqCfg();
+  var K = aiqKpis({ cur: c, prev: p, cfg: cfg, hoy: _aiqHoyCtx(), tacos: aiqTacos(c), tacosPrev: p && !p.vacio && aiqTacos(p) ? aiqTacos(p).tacos : null, margenConfirmado: cfg.margenConfirmado });
+  _aiq.kpis = K;
   var per = _aiqFmtF(c.desde).slice(0, 5) + '–' + _aiqFmtF(c.hasta).slice(0, 5);
-  function delta(x, y, invertir) {
-    if (!cmp || x == null || !y) return '';
-    var v = x / y - 1, bueno = invertir ? v < 0 : v > 0;
-    return ' <span style="font-size:10px;font-weight:700;color:' + (Math.abs(v) < 0.005 ? '#64748b' : (bueno ? '#166534' : '#991b1b')) + '" title="Contra el período anterior equivalente">' + aiqSigno(v) + '</span>';
-  }
-  function tarjeta(color, titulo, valor, sub, ayuda, tip) {
-    return '<div class="mc ' + color + '" title="' + _aiqEsc(tip || ayuda) + '"><div class="mc-label">' + titulo + '</div>' +
-      '<div class="mc-val" style="font-size:18px">' + valor + '</div><div class="mc-sub">' + sub + '</div>' +
-      '<div style="font-size:10.5px;color:var(--text3);margin-top:4px;line-height:1.3">' + ayuda + '</div></div>';
-  }
-  var t = aiqTacos(c);
-  var hoy = _aiq.hoyGasto;
-  var estado = c.estado === 'active' ? '● Activa' : (c.estado === 'paused' ? '⏸ Pausada' : (c.estado || 'N/D'));
-  var gastoHoy = 'Cargando…', gastoHoySub = '', pctHoy = null;
-  if (hoy && hoy.ok && !hoy.sinDatos) { pctHoy = c.presupuesto ? hoy.cost / c.presupuesto : null; gastoHoy = aiqPesos(hoy.cost);
-    gastoHoySub = 'de ' + aiqPesos(c.presupuesto) + ' · ' + (pctHoy != null ? aiqPct(pctHoy, 0) + ' consumido' : 'N/D') +
-      '<div style="height:5px;background:#e5e7eb;border-radius:3px;margin-top:4px"><div style="height:5px;border-radius:3px;background:' + (pctHoy >= 0.95 ? '#d97706' : '#2563eb') + ';width:' + Math.min(100, Math.round((pctHoy || 0) * 100)) + '%"></div></div>'; }
-  else if (hoy && hoy.ok && hoy.sinDatos) { gastoHoy = 'N/D'; gastoHoySub = 'Mercado Libre todavía no informa datos de hoy.'; }
-  else if (hoy && !hoy.ok) { gastoHoy = 'N/D'; gastoHoySub = 'No se pudo consultar: ' + _aiqEsc(hoy.error || ''); }
-  var fila1 = [
-    tarjeta('c-blue', 'Inversión · ' + per, aiqPesos(c.cost) + delta(c.cost, p && p.cost, true), aiqPesos(c.gastoDiario) + '/día · ' + _aiqFuenteBadge(c.fuente), 'Dinero gastado en publicidad durante el período.'),
-    tarjeta('c-green', 'Ingresos atribuidos · ' + per, aiqPesos(c.rev) + delta(c.rev, p && p.rev), c.ventas + ' ventas · ' + _aiqFuenteBadge(c.fuente), 'Ventas que Mercado Libre relaciona con tus anuncios.', 'Incluye ventas directas (compró el producto del anuncio) e indirectas (hizo clic en un anuncio y compró otro producto tuyo).'),
-    tarjeta('c-teal', 'ROAS / ACOS', aiqX(c.roas) + delta(c.roas, p && p.roas), 'ACOS ' + aiqPct(c.acos) + ' · equilibrio ' + aiqX(rent.roasEq), 'ROAS: pesos de ingresos por cada $1 invertido. ACOS: qué % de esos ingresos es publicidad.', 'Equilibrio = 1 ÷ margen configurado (' + aiqPct(rent.margen, 0) + ').'),
-    tarjeta('c-amber', 'Resultado estimado', aiqPesos(rent.resultado), '<b>Estimación</b> · ' + _aiqFuenteBadge('calc'), 'Margen estimado de las ventas atribuidas menos publicidad.', 'Ingresos atribuidos × ' + aiqPct(rent.margen, 0) + ' − inversión. No es el beneficio contable.'),
-    tarjeta('c-pink', 'TACOS', t ? aiqPct(t.tacos, 2) : 'N/D', t ? 'sobre ' + aiqPesos(t.ventaTotal) + ' facturados' : 'Sin ventas totales cargadas para este período', 'Publicidad como porcentaje de todas las ventas de la tienda.', 'Inversión ÷ facturación total de Mercado Libre del mismo período (órdenes no canceladas cargadas en el panel).')
-  ];
-  var fila2 = [
-    tarjeta('c-purple', 'Presupuesto diario', aiqPesos(c.presupuesto), estado + (c.presEstimado ? ' · <span title="Mercado Libre no informa presupuestos pasados">histórico supuesto</span>' : ''), 'Referencia de gasto de la campaña: Mercado Libre lo define como promedio diario de un presupuesto mensual.', 'No es lo gastado: algunos días se gasta más y otros menos.'),
-    tarjeta('c-blue', 'Gasto de hoy', gastoHoy, gastoHoySub, 'Cuánto llevás invertido hoy y qué % del presupuesto representa.', 'Dato parcial del día, consultado en vivo a la API.'),
-    tarjeta('c-teal', 'Clics y CPC · ' + per, (c.clicks || 0).toLocaleString('es-AR') + delta(c.clicks, p && p.clicks), 'CPC ' + aiqPesos(c.cpc) + delta(c.cpc, p && p.cpc, true), 'CPC: cuánto pagás, en promedio, por cada clic.'),
-    tarjeta('c-green', 'Impresiones y CTR · ' + per, (c.prints || 0).toLocaleString('es-AR'), 'CTR ' + aiqPct(c.ctr, 2) + (c.is != null ? ' · ganadas ' + aiqPct(c.is, 0) : ''), 'CTR: porcentaje de impresiones que terminan en un clic.'),
-    tarjeta('c-amber', 'Ventas y conversión · ' + per, String(c.ventas || 0) + delta(c.ventas, p && p.ventas), 'Conv. ' + aiqPct(c.cvr, 2) + ' · costo/venta ' + aiqPesos(c.costoPorVenta), 'Conversión: % de clics que terminan en venta atribuida. Costo por venta: inversión ÷ ventas.')
-  ];
-  el.className = '';
-  el.innerHTML = '<div class="mgt mgt-5" style="margin-bottom:10px">' + fila1.join('') + '</div><div class="mgt mgt-5" style="margin-bottom:0">' + fila2.join('') + '</div>';
+  var porPeriodo = { inversion: 1, ingresos: 1, roas: 1, resultado: 1, tacos: 1, clics: 1, impresiones: 1, ventas: 1 };
+  var card = function (k) {
+    var col = AIQ_COLORES[k.estado] || AIQ_COLORES.info;
+    var barra = k.id === 'hoy' && k.pct != null ? '<div style="height:5px;background:rgba(0,0,0,.08);border-radius:3px;margin-top:5px"><div style="height:5px;border-radius:3px;background:' + col.c + ';width:' + Math.min(100, Math.round(k.pct * 100)) + '%"></div></div>' : '';
+    return '<div title="' + _aiqEsc(k.tip) + '" style="background:' + col.bg + ';border:1px solid ' + col.bd + ';border-left:3px solid ' + col.c + ';border-radius:var(--rs,8px);padding:10px 12px;display:flex;flex-direction:column;gap:3px;min-width:0">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px"><span style="font-size:10.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.03em">' + k.titulo +
+        (porPeriodo[k.id] ? ' <span style="font-weight:500;text-transform:none;color:var(--text3)">· ' + per + '</span>' : (k.id === 'hoy' ? ' <span style="font-weight:500;text-transform:none;color:var(--text3)">· Hoy</span>' : '')) + '</span>' +
+        '<span style="font-size:9.5px;font-weight:700;color:' + col.c + ';white-space:nowrap">' + col.txt + '</span></div>' +
+      '<div style="font-size:19px;font-weight:700;color:var(--text);line-height:1.15">' + k.valor + '</div>' +
+      (k.sub ? '<div style="font-size:11px;color:var(--text2)">' + k.sub + '</div>' : '') + barra +
+      '<div style="display:flex;gap:5px;align-items:flex-start;margin-top:3px"><span style="font-size:14px;line-height:1.1">' + k.icono + '</span><span style="font-size:11.5px;font-weight:600;color:' + col.c + ';line-height:1.3">' + _aiqEsc(k.mensaje) + '</span></div>' +
+      (k.reco ? '<div style="font-size:10.5px;color:#4b5563;line-height:1.3">→ ' + _aiqEsc(k.reco) + '</div>' : '') +
+      '<div style="font-size:10px;color:var(--text3);line-height:1.3;margin-top:2px">' + k.ayuda + '</div></div>';
+  };
+  var aviso = cfg.margenConfirmado ? '' : '<div style="font-size:11px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:8px;padding:6px 10px;margin-bottom:8px">⚠️ El margen (' + aiqPct(cfg.margen, 0) + ') es una <b>hipótesis sin confirmar</b>: el resultado estimado, el equilibrio y los colores dependen de él. <a href="#publicidad" onclick="aiqConfigAbrir();return false;">Confirmalo en ⚙ Configuración</a>.</div>';
+  el.innerHTML = aviso +
+    '<div class="mgt mgt-5" style="margin-bottom:10px">' + ['inversion', 'ingresos', 'roas', 'resultado', 'tacos'].map(function (id) { return card(K[id]); }).join('') + '</div>' +
+    '<div class="mgt mgt-5" style="margin-bottom:0">' + ['presupuesto', 'hoy', 'clics', 'impresiones', 'ventas'].map(function (id) { return card(K[id]); }).join('') + '</div>';
   if (!_aiq.hoyGasto || Date.now() - (_aiq.hoyTs || 0) > 5 * 60 * 1000) aiqCargarHoy();
 }
+
+// ═══ v299 · GRÁFICO (misma operativa que "Evolución 30d vs 30d anteriores") ═══
+var AIQ_PILLS = {
+  rev:    { lbl: '💰 Ingresos',    col: '#4f8ef7', bg: 'rgba(79,142,247,0.1)',  tipo: '$' },
+  cost:   { lbl: '💸 Gasto',       col: '#f5a623', bg: 'rgba(245,166,35,0.08)', tipo: '$' },
+  roas:   { lbl: '🎯 ROAS',        col: '#23d18b', bg: 'rgba(35,209,139,0.1)',  tipo: 'x' },
+  acos:   { lbl: '📊 ACOS',        col: '#f472b6', bg: 'rgba(244,114,182,0.08)', tipo: '%' },
+  tacos:  { lbl: '🧾 TACOS',       col: '#9d7bea', bg: 'rgba(157,123,234,0.08)', tipo: '%' },
+  clicks: { lbl: '🖱 Clics',        col: '#29d4c5', bg: 'rgba(41,212,197,0.08)', tipo: 'n' },
+  prints: { lbl: '👁 Impresiones', col: '#94a3b8', bg: 'rgba(148,163,184,0.1)', tipo: 'n' },
+  ventas: { lbl: '🛒 Ventas',      col: '#ef4444', bg: 'rgba(239,68,68,0.08)',  tipo: 'n' }
+};
+var _aiqMetricas = new Set(['rev']);
+function aiqTogglePill(btn) {
+  var m = btn.dataset.metric;
+  if (_aiqMetricas.has(m)) { if (_aiqMetricas.size === 1) return; _aiqMetricas.delete(m); }
+  else _aiqMetricas.add(m);
+  aiqRenderGrafico();
+}
+function _aiqVentasTiendaDia() {
+  // facturación total de la tienda por día (para TACOS diario), solo si las órdenes cubren el día
+  var porDia = {}, min = null;
+  try { (allOrders || []).forEach(function (o) {
+    if (o.status === 'cancelled' || o.status === 'invalid') return;
+    var f = String(o.date_created || '').slice(0, 10); if (!f) return;
+    if (!min || f < min) min = f;
+    porDia[f] = (porDia[f] || 0) + (Number(o.total_amount) || 0);
+  }); } catch (e) {}
+  return { porDia: porDia, desde: min };
+}
+function aiqSerieMetrica(desde, hasta, m, vt) {
+  var out = [];
+  for (var f = desde; f <= hasta; f = aiqSumarDias(f, 1)) {
+    var dia = aiqAgregar(_aiq.registros.filter(function (r) { return r.kind === 'dia'; }), f, f);
+    if (dia.vacio || dia.cobertura < 1) { out.push(null); continue; }
+    var v;
+    if (m === 'acos') v = dia.acos != null ? dia.acos * 100 : null;
+    else if (m === 'tacos') v = (vt.desde && f >= vt.desde && vt.porDia[f]) ? dia.cost / vt.porDia[f] * 100 : null;
+    else v = dia[m];
+    out.push(v == null || !isFinite(v) ? null : Math.round(v * 100) / 100);
+  }
+  return out;
+}
+function aiqRenderGrafico() {
+  var cv = document.getElementById('aiq-chart'), msg = document.getElementById('aiq-chart-msg'), sub = document.getElementById('aiq-chart-sub'), pk = document.getElementById('aiq-peak');
+  var pills = document.getElementById('aiq-pills');
+  if (pills) pills.innerHTML = Object.keys(AIQ_PILLS).map(function (k) {
+    var P = AIQ_PILLS[k], on = _aiqMetricas.has(k);
+    return '<button class="dash-pill' + (on ? ' active' : '') + '" data-metric="' + k + '" onclick="aiqTogglePill(this)"' + (on ? ' style="background:' + P.col + ';color:#fff"' : '') + '>' + P.lbl + '</button>';
+  }).join('');
+  if (!cv || !_aiq.cur) return;
+  var c = _aiq.cur, p = _aiq.prev;
+  var vt = _aiqVentasTiendaDia();
+  var labels = [], f = c.desde;
+  for (var i = 0; i < c.dias; i++) { labels.push(f.slice(8, 10) + '/' + f.slice(5, 7)); f = aiqSumarDias(f, 1); }
+  var series = {}, hayAlgo = false;
+  _aiqMetricas.forEach(function (m) { series[m] = c.vacio ? [] : aiqSerieMetrica(c.desde, c.hasta, m, vt); if (series[m].some(function (v) { return v != null; })) hayAlgo = true; });
+  if (chartInstances['aiq-chart']) { try { chartInstances['aiq-chart'].destroy(); } catch (e) {} delete chartInstances['aiq-chart']; }
+  if (!hayAlgo) {
+    cv.style.display = 'none'; msg.style.display = 'block'; if (pk) pk.textContent = '';
+    msg.innerHTML = c.fuente === 'excel' ? 'El reporte importado es un <b>total del período</b>: no trae datos por día.<br>Para ver la evolución usá <b>⤓ Traer historial API</b>.' : 'Sin datos diarios de estas métricas en el período' + (_aiqMetricas.has('tacos') ? ' (el TACOS necesita las órdenes de esos días cargadas en el panel)' : '') + '.';
+    if (sub) sub.textContent = '—';
+    return;
+  }
+  cv.style.display = ''; msg.style.display = 'none';
+  var single = _aiqMetricas.size === 1, ds = [];
+  var esRatio = function (m) { return AIQ_PILLS[m].tipo === 'x' || AIQ_PILLS[m].tipo === '%'; };
+  var mezcla = !single && [..._aiqMetricas].some(esRatio) && [..._aiqMetricas].some(function (m) { return !esRatio(m); });
+  _aiqMetricas.forEach(function (m) {
+    var P = AIQ_PILLS[m];
+    ds.push({ label: P.lbl, data: series[m], borderColor: P.col, backgroundColor: single ? P.bg : 'transparent', borderWidth: 2, fill: single, tension: .4,
+      pointRadius: 2, pointBackgroundColor: P.col, spanGaps: false, yAxisID: mezcla && esRatio(m) ? 'y2' : 'y', _tipo: P.tipo });
+    if (single && p && !p.vacio) {
+      var sp = aiqSerieMetrica(p.desde, p.hasta, m, vt);
+      if (sp.some(function (v) { return v != null; }))
+        ds.push({ label: P.lbl + ' (ant.)', data: sp, borderColor: P.col, backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [4, 3], fill: false, tension: .4, pointRadius: 0, yAxisID: 'y', _tipo: P.tipo });
+    }
+  });
+  // Mejor día de la primera métrica activa
+  var m0 = [..._aiqMetricas][0], v0 = series[m0], mx = null, ix = -1;
+  v0.forEach(function (v, i) { if (v != null && (mx == null || (m0 === 'acos' || m0 === 'tacos' ? v < mx : v > mx))) { mx = v; ix = i; } });
+  var fmt = function (v, t) { return v == null ? 'N/D' : t === '$' ? aiqPesos(v) : t === 'x' ? aiqX(v) : t === '%' ? v.toFixed(2).replace('.', ',') + '%' : Math.round(v).toLocaleString('es-AR'); };
+  if (pk) pk.textContent = ix >= 0 ? '📍 Mejor día: ' + labels[ix] + ' — ' + fmt(mx, AIQ_PILLS[m0].tipo) + ' (' + AIQ_PILLS[m0].lbl + (m0 === 'acos' || m0 === 'tacos' ? ', el más bajo' : '') + ')' : '';
+  if (sub) sub.textContent = _aiqFmtF(c.desde) + ' – ' + _aiqFmtF(c.hasta) + (single && p && !p.vacio ? ' vs ' + _aiqFmtF(p.desde) + ' – ' + _aiqFmtF(p.hasta) + ' (punteado)' : '') + ' · datos diarios reales';
+  var t0 = AIQ_PILLS[m0].tipo;
+  var yTick = function (v) { if (!single && mezcla) return v; return t0 === '$' ? '$' + (v >= 1000 ? (v / 1000).toFixed(0) + 'k' : v) : t0 === 'x' ? v + 'x' : t0 === '%' ? v + '%' : v; };
+  var scales = { y: Object.assign({}, tOpts(), { position: 'left', beginAtZero: true, ticks: Object.assign({}, tOpts().ticks, { callback: yTick }) }), x: tXOpts() };
+  if (mezcla) scales.y2 = Object.assign({}, tOpts(), { position: 'right', beginAtZero: true, grid: { display: false } });
+  var prevIni = p && !p.vacio ? p.desde : null;
+  makeChart('aiq-chart', { type: 'line', data: { labels: labels, datasets: ds }, options: Object.assign({}, chartDefaults(), {
+    interaction: { mode: 'index', intersect: false },
+    plugins: { legend: { display: !single, position: 'top', labels: { color: '#8892a8', font: { size: 10 }, boxWidth: 8, padding: 8 } },
+      tooltip: { callbacks: {
+        title: function (it) { var i = it[0].dataIndex, t = _aiqFmtF(aiqSumarDias(c.desde, i)); return prevIni && single ? t + ' — ' + _aiqFmtF(aiqSumarDias(prevIni, i)) : t; },
+        label: function (ctx) { return ctx.dataset.label + ': ' + fmt(ctx.raw, ctx.dataset._tipo); } } } },
+    scales: scales }) });
+}
+
 async function aiqCargarHoy() {
   _aiq.hoyTs = Date.now();
   try { var r = await fetch(WORKER + '/api/ads/hoy', { headers: { Authorization: 'Bearer ' + btToken() } }); _aiq.hoyGasto = await r.json(); }
@@ -19496,9 +19761,10 @@ function aiqRenderDiag() {
   var el = document.getElementById('aiq-diag'); if (!el) return;
   var a = _aiq.analisis, cat = AIQ_CATEGORIAS[a.categoria] || AIQ_CATEGORIAS.sin_datos;
   var R = aiqResumen(a, _aiq.cur, _aiq.prev, _aiqCfg());
+  var G = AIQ_COLORES[R.general] || AIQ_COLORES.gris;
   var conf = { alto: ['Alta', '#166534'], medio: ['Media', '#92400e'], bajo: ['Baja', '#991b1b'] }[a.confianza];
   var ico = { mantener: '✓', aumentar: '↑', reducir: '↓', investigar: '?', sin_datos: '…' }[a.categoria] || '?';
-  var colLuz = { verde: '#16a34a', amarillo: '#d97706', rojo: '#dc2626', gris: '#9ca3af' };
+  var colLuz = { verde: '#16a34a', amarillo: '#d97706', naranja: '#ea580c', rojo: '#dc2626', gris: '#9ca3af', info: '#2563eb' };
   function lista(t, arr, ic) { return arr && arr.length ? '<div style="margin-top:8px"><div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:3px">' + t + '</div>' +
     arr.map(function (x) { return '<div style="font-size:11.5px;line-height:1.45;margin:2px 0">' + ic + ' ' + _aiqEsc(x) + '</div>'; }).join('') + '</div>' : ''; }
   var semaforo = R.semaforo.map(function (s) {
@@ -19514,7 +19780,7 @@ function aiqRenderDiag() {
       '<div style="border:1px solid ' + cat.color + '44;background:' + cat.bg + '66;border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px">' +
         '<div style="display:flex;align-items:center;gap:10px"><span style="width:34px;height:34px;border-radius:50%;background:' + cat.bg + ';color:' + cat.color + ';display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px;border:1px solid ' + cat.color + '55">' + ico + '</span>' +
         '<div><div style="font-weight:800;font-size:13.5px;color:' + cat.color + ';text-transform:uppercase;letter-spacing:.02em">' + cat.txt + '</div>' +
-        '<div style="font-size:11px;color:var(--text3)">Confianza: <b style="color:' + conf[1] + '">' + conf[0] + '</b></div></div></div>' +
+        '<div style="font-size:11px;color:var(--text3)">Confianza: <b style="color:' + conf[1] + '">' + conf[0] + '</b> · Estado general: <b style="color:' + G.c + '">' + G.txt + '</b></div></div></div>' +
         '<div style="font-size:12.5px;line-height:1.45">' + _aiqEsc(R.frase) + '</div>' +
         (a.categoria !== 'sin_datos' ? '<div><a href="#publicidad" class="btn btn-ghost btn-xs" onclick="aiqRegistrarReco();return false;" title="Guarda esta recomendación para registrar qué decidiste y ver el resultado">📌 Registrar recomendación</a></div>' : '') +
       '</div>' +
@@ -19540,7 +19806,14 @@ function aiqRenderDiag() {
 }
 
 // ═══ v298 · RANKING POR PUBLICACIÓN ══════════════════════════
-var _aiqRk = { datos: null, clave: null, orden: 'reco', dir: 1, pagina: 1, porPagina: 25, abierto: {}, cargando: false };
+var _aiqRk = { datos: null, clave: null, orden: 'reco', dir: 1, pagina: 1, porPagina: 100000, abierto: {}, cargando: false };
+// v299: tono de fila según la recomendación (fila muy clara, celda RECOMENDADO un poco más marcada)
+var AIQ_RK_TONO = {
+  mantener:  ['#f6fdf8', '#e3f7ea', '#15803d'], escalar:  ['#f5f9ff', '#e2edfe', '#1d4ed8'],
+  optimizar: ['#fffdf2', '#fdf6d3', '#a16207'], reducir:  ['#fffaf5', '#ffedd9', '#c2410c'],
+  pausar:    ['#fff7f7', '#fde4e4', '#991b1b'], retirar:  ['#fff7f7', '#fde4e4', '#991b1b'],
+  revisar:   ['#fafbfc', '#eef1f5', '#475569'], sin_datos: ['#fafbfc', '#eef1f5', '#475569']
+};
 var AIQ_RK_COLS = [
   ['prints', 'Impr.', 'Impresiones del período'], ['clicks', 'Clics', 'Clics del período'], ['ctr', 'CTR', 'Clics ÷ impresiones'],
   ['cpc', 'CPC', 'Inversión ÷ clics'], ['cost', 'Inversión', 'Gasto publicitario del período'], ['rev', 'Ingresos', 'Ingresos atribuidos (directos + indirectos)'],
@@ -19642,12 +19915,12 @@ function aiqRankingRender() {
   });
   var tot = xs.length, pags = Math.max(1, Math.ceil(tot / _aiqRk.porPagina));
   if (_aiqRk.pagina > pags) _aiqRk.pagina = pags;
-  var vista = xs.slice((_aiqRk.pagina - 1) * _aiqRk.porPagina, _aiqRk.pagina * _aiqRk.porPagina);
+  var vista = xs;   // v299: todas las publicaciones, con scroll
   var ndQuit = function (campo) { return (D.quitadas || []).indexOf(campo) >= 0 || (D.metricas && D.metricas.indexOf(campo) < 0) ? 'Mercado Libre no entrega esta métrica por publicación' : 'Dato no disponible en la respuesta'; };
   var flecha = function (c) { return '<span style="font-size:10px">' + (_aiqRk.orden === c ? (_aiqRk.dir > 0 ? '▲' : '▼') : '↕') + '</span>'; };
   var th = function (c, t, tip, extra) { return '<th onclick="aiqRankingOrden(\'' + c + '\')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;white-space:nowrap;position:sticky;top:0;z-index:1;' + (extra || '') + '" title="' + _aiqEsc(tip) + '">' + t + '<br>' + flecha(c) + '</th>'; };
   var head = '<tr>' + th('titulo', 'Publicación', 'Ordenar por título', 'text-align:left;min-width:220px') + AIQ_RK_COLS.map(function (c) { return th(c[0], c[1], c[2]); }).join('') +
-    '<th style="text-align:center;position:sticky;top:0;z-index:1;white-space:nowrap">Act.</th>' + th('reco', 'RECOMENDADO', 'Orden por prioridad de acción y luego por inversión', 'min-width:170px;background:#f5f3ff') + '</tr>';
+    '<th style="text-align:center;position:sticky;top:0;z-index:1;white-space:nowrap">Act.</th>' + th('reco', 'RECOMENDADO', 'Orden por prioridad de acción y luego por inversión', 'min-width:170px') + '</tr>';
   var filas = vista.map(function (i) {
     var badge = i.estado ? '<span class="badge ' + (i.estado === 'active' ? 'bg-green' : 'bg-gray') + '" style="font-size:9.5px;padding:1px 6px">' + _aiqEsc(i.estado === 'active' ? 'Activo' : (i.estado === 'paused' ? 'Pausado' : i.estado)) + '</span>' : '<span style="font-size:9.5px;color:var(--text3)" title="Estado no informado">estado N/D</span>';
     var r = i.reco;
@@ -19657,19 +19930,20 @@ function aiqRankingRender() {
       cost: _aiqNum(i.cost, '$'), rev: _aiqNum(i.rev, '$', ndQuit('total_amount')), ventas: _aiqNum(i.ventas, '', ndQuit('advertising_items_quantity')), dirInd: dirInd,
       roas: _aiqNum(i.roas, 'x', i.cost ? null : 'Sin inversión'), acos: _aiqNum(i.acos, '%', i.rev ? null : 'Sin ingresos'), cvr: _aiqNum(i.cvr, '%', i.clicks ? null : 'Sin clics'), cpv: _aiqNum(i.cpv, '$', i.ventas ? null : 'Sin ventas')
     };
-    var tr = '<tr>' +
+    var tono = AIQ_RK_TONO[r.clave] || AIQ_RK_TONO.revisar;
+    var tr = '<tr style="background:' + tono[0] + '">' +
       '<td style="max-width:280px;min-width:220px"><div style="display:flex;align-items:flex-start;gap:8px">' +
         '<div style="flex-shrink:0;width:42px;height:42px;border-radius:5px;overflow:hidden;background:var(--bg4);border:1px solid var(--border)">' +
           (i.thumb ? '<img src="' + _aiqEsc(i.thumb) + '" alt="" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display=\'none\'">' : '<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:18px">☕</div>') + '</div>' +
         '<div style="min-width:0;flex:1"><div style="font-size:12px;font-weight:500;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.35" title="' + _aiqEsc(i.titulo || i.id) + '">' + _aiqEsc(i.titulo || 'Título N/D') + '</div>' +
         '<div style="font-size:10px;color:var(--text3);margin-top:2px;display:flex;gap:5px;flex-wrap:wrap;align-items:center"><span>' + _aiqEsc(i.id) + '</span>' + badge + '</div></div></div></td>' +
-      AIQ_RK_COLS.map(function (c) { return '<td style="text-align:right;white-space:nowrap;font-size:11.5px">' + celdas[c[0]] + '</td>'; }).join('') +
-      '<td style="text-align:center;font-size:10px;color:var(--text3);white-space:nowrap" title="' + (D.fuente === 'historial' ? 'Suma de capturas diarias' : 'Consulta en vivo') + '">' + D.consultado.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' }) + '</td>' +
-      '<td style="min-width:170px;max-width:240px;cursor:pointer;background:#faf9ff" onclick="aiqRankingDetalle(\'' + i.id + '\')" title="Ver motivos">' +
-        '<div style="font-size:11px;font-weight:700;white-space:nowrap">' + r.ic + ' ' + r.txt + '</div>' +
+      AIQ_RK_COLS.map(function (c) { return '<td style="text-align:center;vertical-align:middle;white-space:nowrap;font-size:11.5px">' + celdas[c[0]] + '</td>'; }).join('') +
+      '<td style="text-align:center;vertical-align:middle;font-size:10px;color:var(--text3);white-space:nowrap" title="' + (D.fuente === 'historial' ? 'Suma de capturas diarias' : 'Consulta en vivo') + '">' + D.consultado.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' }) + '</td>' +
+      '<td style="min-width:170px;max-width:240px;cursor:pointer;vertical-align:middle;background:' + tono[1] + ';border-left:3px solid ' + tono[2] + '" onclick="aiqRankingDetalle(\'' + i.id + '\')" title="Ver motivos">' +
+        '<div style="font-size:11px;font-weight:700;white-space:nowrap;color:' + tono[2] + '">' + r.ic + ' ' + r.txt + '</div>' +
         '<div style="font-size:10.5px;color:var(--text2);line-height:1.3;margin-top:2px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">' + _aiqEsc(r.frase) + '</div>' +
         '<div style="font-size:10px;color:#4f46e5;margin-top:2px">' + (_aiqRk.abierto[i.id] ? '▲ ocultar motivos' : '▼ ver motivos') + '</div></td></tr>';
-    if (_aiqRk.abierto[i.id]) tr += '<tr><td colspan="' + (AIQ_RK_COLS.length + 3) + '" style="background:var(--bg2,#f8f9fc);font-size:11.5px;line-height:1.5;padding:8px 14px">' +
+    if (_aiqRk.abierto[i.id]) tr += '<tr style="background:' + tono[0] + '"><td colspan="' + (AIQ_RK_COLS.length + 3) + '" style="background:var(--bg2,#f8f9fc);font-size:11.5px;line-height:1.5;padding:8px 14px">' +
       r.motivos.map(function (x) { return '• ' + _aiqEsc(x); }).join('<br>') +
       (i.prev ? '<br><span style="color:var(--text3)">Período anterior: inversión ' + aiqPesos(i.prev.cost) + ', ingresos ' + aiqPesos(i.prev.rev) + ', ventas ' + (i.prev.ventas == null ? 'N/D' : i.prev.ventas) + ', clics ' + (i.prev.clicks == null ? 'N/D' : i.prev.clicks) + '.</span>' : '<br><span style="color:var(--text3)">Sin datos del período anterior equivalente.</span>') +
       '<br><span style="color:var(--text3)">Informativo: el panel no pausa ni cambia anuncios. Cualquier cambio se hace en Mercado Libre con tu confirmación.</span></td></tr>';
@@ -19677,17 +19951,7 @@ function aiqRankingRender() {
   }).join('');
   el.innerHTML = '<div class="tw" style="max-height:72vh;overflow:auto"><table style="width:100%"><thead>' + head + '</thead><tbody>' +
     (filas || '<tr><td colspan="' + (AIQ_RK_COLS.length + 3) + '" style="text-align:center;padding:22px;color:var(--text3)">Sin resultados para este filtro</td></tr>') + '</tbody></table></div>';
-  if (pg) {
-    if (pags <= 1) pg.innerHTML = '<span style="font-size:11px;color:var(--text3)">' + tot + ' publicaciones</span>';
-    else {
-      var b = '<span style="font-size:11px;color:var(--text3)">' + tot + ' publicaciones</span><div style="display:flex;gap:4px;flex-wrap:wrap">';
-      b += '<button class="btn btn-ghost btn-xs" onclick="aiqRankingPagina(' + (_aiqRk.pagina - 1) + ')" ' + (_aiqRk.pagina <= 1 ? 'disabled' : '') + '>← Ant</button>';
-      var s = Math.max(1, _aiqRk.pagina - 2), e = Math.min(pags, s + 4);
-      for (var n = s; n <= e; n++) b += '<button class="btn btn-xs ' + (n === _aiqRk.pagina ? 'btn-primary' : 'btn-ghost') + '" onclick="aiqRankingPagina(' + n + ')">' + n + '</button>';
-      b += '<button class="btn btn-ghost btn-xs" onclick="aiqRankingPagina(' + (_aiqRk.pagina + 1) + ')" ' + (_aiqRk.pagina >= pags ? 'disabled' : '') + '>Sig →</button></div>';
-      pg.innerHTML = b;
-    }
-  }
+  if (pg) pg.innerHTML = '<span style="font-size:11px;color:var(--text3)">' + tot + ' publicaciones · desplazá la tabla para ver todas</span>';
 }
 // Actualización manual: avanza la captura de ayer hasta completarla
 async function aiqRankingActualizar() {
