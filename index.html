@@ -856,7 +856,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v299 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v300 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1479,11 +1479,28 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <div class="chip" id="chip-st-paused"   onclick="seoSetStatus('paused')"     style="font-size:11px">⏸ Pausadas</div>
         <div class="chip" id="chip-st-inactive" onclick="seoSetStatus('under_review')" style="font-size:11px">🔍 Inactivas</div>
       </div>
+      <span style="font-size:11px;color:var(--text3);font-weight:600;white-space:nowrap;margin-left:10px" title="Según la lista de anuncios de Product Ads">📢 Publicidad:</span>
+      <div class="chips" style="margin:0;gap:5px">
+        <div class="chip" id="chip-pub-all" onclick="seoSetPub(null)"  style="font-size:11px;background:var(--accent);color:#fff;border-color:var(--accent)">Todas</div>
+        <div class="chip" id="chip-pub-con" onclick="seoSetPub('con')" style="font-size:11px" title="Anuncio activo, pausado o en espera">📢 Con anuncio</div>
+        <div class="chip" id="chip-pub-sin" onclick="seoSetPub('sin')" style="font-size:11px" title="Fuera de campaña (idle)">🎯 Sin anuncio</div>
+        <div class="chip" id="chip-pub-unk" onclick="seoSetPub('unk')" style="font-size:11px" title="No figura en la lista de anuncios o estado no confirmado">❔ Desconocido</div>
+      </div>
     </div>
     <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap">
       <span style="font-size:11px;color:var(--text3);font-weight:600;white-space:nowrap;padding-top:5px">Escenarios:</span>
       <div class="chips" id="seo-scenario-chips" style="margin:0;gap:5px;flex:1"></div>
     </div>
+    <!-- v300: escenarios de publicidad (últimos 30 días) -->
+    <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-top:6px">
+      <span style="font-size:11px;color:var(--text3);font-weight:600;white-space:nowrap;padding-top:5px;min-width:112px">📢 Con publicidad:</span>
+      <div class="chips" id="seo-ads-chips" style="margin:0;gap:5px;flex:1"></div>
+    </div>
+    <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-top:6px">
+      <span style="font-size:11px;color:var(--text3);font-weight:600;white-space:nowrap;padding-top:5px;min-width:112px">🎯 Sin publicidad:</span>
+      <div class="chips" id="seo-op-chips" style="margin:0;gap:5px;flex:1"></div>
+    </div>
+    <div id="seo-ads-estado" style="font-size:10.5px;color:var(--text3);margin-top:4px;line-height:1.4"></div>
     <!-- v245: filtros dinámicos declarados por el servidor de ML -->
     <div id="seo-mlfilters" style="display:none;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-top:6px"></div>
     <!-- v79: Panel descriptivo del escenario activo (vacío si no hay ninguno seleccionado) -->
@@ -1589,6 +1606,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <th onclick="seoSort('visits')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:58px;max-width:58px;background:#eff6ff" title="Visitas últimos 7 días">Visitas<br>7d<br><span style="font-size:10px">↕</span><span id="seo-sort-visits" style="font-size:10px"></span></th>
           <th onclick="seoSort('conv')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:70px;max-width:70px;background:#fefce8" title="Tasa de conversión = Ventas/Visitas">Conv%<br><span style="font-size:10px">↕</span><span id="seo-sort-conv" style="font-size:10px"></span></th>
           <th style="text-align:center;line-height:1.2;width:120px;max-width:120px;background:#f5f3ff">Estrategia</th>
+          <th style="text-align:center;line-height:1.2;min-width:104px" title="Recomendación publicitaria según los últimos 30 días cerrados. Pasá el mouse sobre cada celda para ver los motivos.">Publicidad<br><span style="font-size:9.5px;font-weight:400">30 días</span></th>
           <th style="line-height:1.2;width:120px;max-width:120px">Problemas</th>
           <th style="line-height:1.2;width:78px;max-width:78px;text-align:center">Acciones</th>
         </tr></thead>
@@ -10768,6 +10786,339 @@ const SEO_SCENARIO_ORDER = [
   'ml_reputacion',
 ];
 
+// ═══════════════════════════════════════════════════════════
+// v300 · PUBLICIDAD DENTRO DEL ANALIZADOR SEO
+// ═══════════════════════════════════════════════════════════
+// Cruza el estado de cada anuncio (catálogo guardado por el Worker) con las
+// recomendaciones del ranking calculadas SIEMPRE sobre los últimos 30 días
+// cerrados (vs los 30 anteriores), independientes del período de Publicidad.
+// Para las publicaciones fuera de campaña (idle) clasifica la oportunidad con
+// las métricas del propio Analizador SEO. Solo lectura: nunca toca anuncios.
+var _aiqSeo = { ts: 0, cargando: false, cat: null, catInfo: null, recos: {}, ctx: null, desde: null, hasta: null, fuente: null, error: null, memo: {}, gen: '' };
+var AIQ_SEO_CACHE = 'aiq_seo_v1', AIQ_SEO_TTL = 3 * 3600 * 1000;
+var AIQ_SEO_ADS_ORDER = ['ads_escalar', 'ads_mantener', 'ads_optimizar', 'ads_revisar', 'ads_reducir', 'ads_pausar', 'ads_retirar', 'ads_hold'];
+var AIQ_SEO_OP_ORDER = ['op_publicitar', 'op_optimizar', 'op_evaluar', 'op_sin_datos'];
+// Umbrales de oportunidad (ajustables)
+var AIQ_OP_UMB = { minVentas60: 3, maxDiasUltVenta: 30, minVisitas30: 50, convRel: 0.8, minCalidad: 60, cubreCosto: 1.5,
+  visitasSinVenta: 100, convBaja: 0.5, minVisitasConv: 100, histMin: 5, sinDatosVisitas: 30, minEdad: 30, stockBajo: 5 };
+// Tonos: [fila, celda, color]. Con anuncio = mismos del ranking; sin anuncio = otra familia
+var AIQ_SEO_TONO_OP = {
+  op_publicitar: ['#f0fbff', '#dcf3fc', '#0284c7'],
+  op_optimizar:  ['#faf7ff', '#efe7fd', '#7c3aed'],
+  op_evaluar:    ['#fdfaf3', '#f5ecd9', '#92651b'],
+  ads_hold:      ['#f8f8fa', '#ececf1', '#64748b']
+};
+var AIQ_EST_TXT = { active: 'Activo', paused: 'Pausado', idle: 'Fuera de campaña', hold: 'En espera (ML)' };
+
+function _aiqSeoEstadoTxt(s) { return AIQ_EST_TXT[s] || (s ? s : 'N/D'); }
+
+// Verifica la hipótesis de "hold": ¿la publicación está pausada, en revisión o sin stock?
+function _aiqHoldCausa(item) {
+  if (!item) return null;
+  if (item.status === 'paused') return 'publicación pausada';
+  if (item.status === 'under_review' || item.status === 'inactive') return 'publicación en revisión / inactiva';
+  if (item.status && item.status !== 'active') return 'publicación ' + item.status;
+  if ((item.available_quantity != null) && item.available_quantity <= 0) return 'publicación sin stock';
+  return null;
+}
+
+// ── Escenarios nuevos (se suman a SEO_SCENARIOS, en filas propias) ──
+(function () {
+  if (typeof SEO_SCENARIOS === 'undefined') return;
+  var tag = ' Según últimos 30 días cerrados vs los 30 anteriores. Informativo: el panel no cambia anuncios.';
+  var f = function (k) { return function (i) { var x = aiqSeoInfo(i); return !!x && x.key === k; }; };
+  Object.assign(SEO_SCENARIOS, {
+    ads_escalar:   { emoji: '🔵', label: 'Escalar', color: '#1d4ed8', grupo: 'ads', filter: f('ads_escalar'),
+      description: 'Con anuncio y ROAS muy por encima del objetivo en los dos períodos, con ventas suficientes.' + tag,
+      actionMain: 'Evaluá darle más inversión (por ejemplo, una campaña propia con más presupuesto). El cambio lo hacés vos en Mercado Libre.',
+      actionSecondary: 'Asegurá stock y revisá que el precio siga competitivo antes de invertir más.' },
+    ads_mantener:  { emoji: '🟢', label: 'Mantener', color: '#15803d', grupo: 'ads', filter: f('ads_mantener'),
+      description: 'Con anuncio y ROAS sobre el objetivo.' + tag,
+      actionMain: 'Dejalo como está y seguí el ROAS semana a semana.',
+      actionSecondary: 'Mejorá fotos y título para bajar el costo por venta.' },
+    ads_optimizar: { emoji: '🟡', label: 'Optimizar', color: '#a16207', grupo: 'ads', filter: f('ads_optimizar'),
+      description: 'Con anuncio rentable pero debajo del objetivo, o con clics sin ventas por encima del costo por venta de la cuenta.' + tag,
+      actionMain: 'Revisá foto principal, título, precio y envío: es lo que sube CTR y conversión.',
+      actionSecondary: 'Compará con el promedio de la cuenta en la columna Publicidad (pasá el mouse para ver los motivos).' },
+    ads_revisar:   { emoji: '⚪', label: 'Revisar', color: '#475569', grupo: 'ads', filter: f('ads_revisar'),
+      description: 'Con anuncio, pero sin datos suficientes o con señales mixtas: todavía no alcanza para decidir.' + tag,
+      actionMain: 'No tomes decisiones todavía; volvé a mirar cuando acumule más clics.',
+      actionSecondary: 'Si no tiene impresiones, verificá stock, precio y estado de la publicación.' },
+    ads_reducir:   { emoji: '🟠', label: 'Reducir', color: '#c2410c', grupo: 'ads', filter: f('ads_reducir'),
+      description: 'ROAS debajo del equilibrio en los dos períodos, con ventas: pierde plata por cada venta publicitada.' + tag,
+      actionMain: 'Evaluá bajar la inversión o mejorar precio/margen. Toda modificación la confirmás vos.',
+      actionSecondary: 'Si mejora la conversión (fotos, precio, envío), el ROAS sube sin tocar el presupuesto.' },
+    ads_pausar:    { emoji: '🔴', label: 'Pausar', color: '#991b1b', grupo: 'ads', filter: f('ads_pausar'),
+      description: 'Dos períodos seguidos con clics y sin ventas, gastando más que el costo por venta de la cuenta.' + tag,
+      actionMain: 'Evaluá sacarla de la campaña en Mercado Libre (el panel no lo hace solo).',
+      actionSecondary: 'Antes, revisá si hay un problema de precio, stock o fotos que explique la falta de ventas.' },
+    ads_retirar:   { emoji: '🔴', label: 'Evaluar retirar', color: '#991b1b', grupo: 'ads', filter: f('ads_retirar'),
+      description: 'ROAS muy por debajo del equilibrio en los dos períodos con inversión alta.' + tag,
+      actionMain: 'Evaluá retirarla de la campaña. La decisión y el cambio son tuyos.',
+      actionSecondary: 'Si querés mantenerla, primero corregí precio o margen.' },
+    ads_hold:      { emoji: '🔇', label: 'Anuncio sin entrega', color: '#64748b', grupo: 'ads', filter: f('ads_hold'),
+      description: 'Mercado Libre tiene el anuncio "en espera" (hold) y la publicación está pausada, en revisión o sin stock: el anuncio no se muestra.' +
+        ' Es una hipótesis confirmada solo por el estado de la publicación; si la publicación está activa y con stock el estado figura como desconocido.',
+      actionMain: 'Reactivá la publicación o reponé stock si querés que el anuncio vuelva a mostrarse.',
+      actionSecondary: 'Si no la vas a vender por un tiempo, no hace falta hacer nada: no consume presupuesto.' },
+    op_publicitar: { emoji: '🚀', label: 'Publicitar', color: '#0284c7', grupo: 'op', filter: f('op_publicitar'),
+      description: 'Sin anuncio, con ventas recientes y repetidas, tráfico suficiente, conversión cerca o sobre el promedio de la tienda, buena calidad y un margen que cubre con holgura el costo por venta publicitaria real de la cuenta.',
+      actionMain: 'Candidata a sumar a una campaña. Agregarla lo hacés vos en Mercado Libre.',
+      actionSecondary: 'Empezá con poco presupuesto y medí 14 días antes de subirlo.' },
+    op_optimizar:  { emoji: '🛠️', label: 'Optimizar antes', color: '#7c3aed', grupo: 'op', filter: f('op_optimizar'),
+      description: 'Sin anuncio y con demanda, pero con algo que frena la venta: muchas visitas sin ventas, conversión menor a la mitad del promedio o calidad baja.',
+      actionMain: 'Corregí fotos, título, precio o ficha antes de pagar por tráfico.',
+      actionSecondary: 'Publicitar una publicación que no convierte solo encarece cada venta.' },
+    op_evaluar:    { emoji: '🔍', label: 'Evaluar', color: '#92651b', grupo: 'op', filter: f('op_evaluar'),
+      description: 'Sin anuncio, con historial de ventas pero sin ventas recientes, pocas ventas con poco tráfico, o un margen que no cubre el costo por venta publicitaria.',
+      actionMain: 'Mirá si es estacional, si cambió el precio o la competencia.',
+      actionSecondary: 'No conviene publicitarla hasta que recupere ventas orgánicas.' },
+    op_sin_datos:  { emoji: '⚪', label: 'Sin datos', color: '#94a3b8', grupo: 'op', filter: f('op_sin_datos'),
+      description: 'Sin anuncio y con muy pocas visitas (menos de 30 en 30 días) o creada hace menos de 30 días: no hay base para recomendar.',
+      actionMain: 'Esperá a que junte tráfico orgánico.',
+      actionSecondary: 'Si es nueva, cuidá título, fotos y precio desde el arranque.' }
+  });
+})();
+
+// ── Carga de datos (Worker, con caché de 3 h) ──
+function _aiqSeoRangos() {
+  var hasta = _aiqAyer(), desde = aiqSumarDias(hasta, -29);
+  return { desde: desde, hasta: hasta, pDesde: aiqSumarDias(desde, -30), pHasta: aiqSumarDias(desde, -1) };
+}
+function _aiqSeoAplicar(d) {
+  _aiqSeo.cat = d.cat; _aiqSeo.catInfo = d.catInfo; _aiqSeo.recos = d.recos || {}; _aiqSeo.ctx = d.ctx; _aiqSeo.desde = d.desde; _aiqSeo.hasta = d.hasta;
+  _aiqSeo.fuente = d.fuente; _aiqSeo.ts = d.ts; _aiqSeo.error = null; _aiqSeo.memo = {}; _aiqSeo.gen = '';
+}
+function _aiqSeoRefrescar() {
+  try { if (typeof seoInvalidateScenarioCounts === 'function') seoInvalidateScenarioCounts(); } catch (e) {}
+  try { if (typeof renderScenarioChips === 'function') renderScenarioChips(); } catch (e) {}
+  try { if (typeof renderSEOTable === 'function' && document.getElementById('seo-tbody')) renderSEOTable(); } catch (e) {}
+}
+async function aiqSeoCargar(forzar) {
+  if (_aiqSeo.cargando) return;
+  if (!forzar && _aiqSeo.ts && Date.now() - _aiqSeo.ts < AIQ_SEO_TTL && _aiqSeo.hasta === _aiqAyer()) { _aiqSeoRefrescar(); return; }
+  if (!forzar && !_aiqSeo.ts) {
+    try {
+      var c = JSON.parse(localStorage.getItem(AIQ_SEO_CACHE) || 'null');
+      if (c && c.ts && Date.now() - c.ts < AIQ_SEO_TTL && c.hasta === _aiqAyer()) { _aiqSeoAplicar(c); _aiqSeoRefrescar(); return; }
+    } catch (e) {}
+  }
+  if (typeof token === 'undefined' || !token) return;
+  _aiqSeo.cargando = true; _aiqSeoEstadoUI('⏳ Cargando datos de publicidad…');
+  var h = { headers: { Authorization: 'Bearer ' + btToken() } };
+  var R = _aiqSeoRangos();
+  var j = function (u) { return fetch(WORKER + u, h).then(function (r) { return r.json(); }).catch(function (e) { return { ok: false, error: e.message }; }); };
+  try {
+    var res = await Promise.all([j('/api/ads/catalogo'), j('/api/ads/ranking?desde=' + R.desde + '&hasta=' + R.hasta)]);
+    var catR = res[0], hist = res[1];
+    var items, fuente, prevOk, vivo = null;
+    if (hist.ok && hist.diasPedidos > 0 && hist.diasConCaptura === hist.diasPedidos && hist.prevDiasConCaptura === hist.diasPedidos) {
+      items = hist.items; fuente = 'historial'; prevOk = true;
+    } else {
+      var lv = await Promise.all([j('/api/ads/items?desde=' + R.desde + '&hasta=' + R.hasta), j('/api/ads/items?desde=' + R.pDesde + '&hasta=' + R.pHasta)]);
+      if (!lv[0].ok) throw new Error(lv[0].error || 'la API de anuncios no respondió');
+      vivo = lv[0];
+      var prev = {}; (lv[1].ok ? lv[1].items : []).forEach(function (i) { prev[i.id] = i; });
+      items = lv[0].items.map(function (i) { i.prev = prev[i.id] || null; return i; });
+      fuente = 'vivo'; prevOk = !!lv[1].ok;
+    }
+    // Catálogo de estados: el del Worker si está completo y al día; si no, el de la consulta en vivo (completa)
+    var cat = {}, catInfo = { completo: false, fecha: null, total: null, origen: null };
+    var catFresco = catR.ok && catR.completo && aiqDiasEntre(catR.completo, _aiqAyer()) <= 3;
+    if (catR.ok) Object.keys(catR.items || {}).forEach(function (id) {
+      var c = catR.items[id];
+      if (catR.completo && c.f && c.f < catR.completo) return;   // ya no figura en la lista de anuncios
+      cat[id] = { s: c.s || null, sr: c.sr || null, cp: c.cp || null };
+    });
+    if (catFresco) catInfo = { completo: true, fecha: catR.completo, total: catR.total, origen: 'captura diaria' };
+    else if (vivo && vivo.total != null && vivo.leidos >= vivo.total) {
+      cat = {}; vivo.items.forEach(function (i) { cat[i.id] = { s: i.estado, sr: i.estadoRaw, cp: i.campId }; });
+      catInfo = { completo: true, fecha: _aiqAyer(), total: vivo.total, origen: 'consulta en vivo' };
+    } else catInfo = { completo: false, fecha: catR.completo || null, total: catR.total || null, origen: catR.ok ? 'captura parcial' : 'no disponible' };
+    // Recomendaciones por publicación (mismo motor que el ranking)
+    var cfg = (typeof _aiq !== 'undefined' && _aiq.meta) ? _aiqCfg() : { margen: (catR.cfg && Number(catR.cfg.margen) > 0 && Number(catR.cfg.margen) < 1) ? Number(catR.cfg.margen) : 0.48,
+      roasObj: catR.cfg && Number(catR.cfg.roasObj) > 0 ? Number(catR.cfg.roasObj) : null };
+    var activos = items.filter(function (i) { return (i.prints || 0) + (i.clicks || 0) + (i.cost || 0) > 0; });
+    if (!prevOk) activos.forEach(function (i) { i.prev = null; });
+    var ctx = aiqContextoItems(activos, cfg);
+    var recos = {};
+    activos.forEach(function (i) {
+      var d = aiqItemDerivadas(i), r = aiqRecoItem(i, ctx);
+      recos[i.id] = { k: r.clave, txt: r.txt, ic: r.ic, mot: r.motivos, roas: d.roas, cost: i.cost, ventas: i.ventas };
+    });
+    var dat = { ts: Date.now(), desde: R.desde, hasta: R.hasta, fuente: fuente, prevOk: prevOk, cat: cat, catInfo: catInfo, recos: recos,
+      ctx: { margen: ctx.margen, roasObj: ctx.roasObj, cpvCuenta: ctx.cpvCuenta } };
+    _aiqSeoAplicar(dat);
+    try { localStorage.setItem(AIQ_SEO_CACHE, JSON.stringify(dat)); } catch (e) {}
+    _aiqSeoEstadoUI();
+  } catch (e) {
+    _aiqSeo.error = e.message;
+    _aiqSeoEstadoUI('⚠ No se pudieron cargar los datos de publicidad: ' + e.message + (_aiqSeo.ts ? ' · se muestran los últimos válidos' : ''));
+  } finally { _aiqSeo.cargando = false; _aiqSeoRefrescar(); }
+}
+function _aiqSeoEstadoUI(txt) {
+  var el = document.getElementById('seo-ads-estado'); if (!el) return;
+  if (txt) { el.textContent = txt; return; }
+  if (!_aiqSeo.ts) { el.textContent = 'Datos de publicidad sin cargar (se cargan con 📊 Cargar métricas).'; return; }
+  var ci = _aiqSeo.catInfo || {};
+  el.innerHTML = 'Publicidad según últimos 30 días (' + _aiqFmtF(_aiqSeo.desde) + ' – ' + _aiqFmtF(_aiqSeo.hasta) + ') · fuente: ' +
+    (_aiqSeo.fuente === 'historial' ? 'historial propio' : 'consulta en vivo') + ' · estados de anuncios: ' + _aiqEsc(ci.origen || 'N/D') +
+    (ci.completo ? '' : ' <span style="color:#a16207">(incompleto: las que no figuran quedan como Desconocido)</span>') +
+    ' · actualizado ' + new Date(_aiqSeo.ts).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+}
+
+// ── Clasificación por publicación ──
+function _aiqSeoGen() {
+  var g = _aiqSeo.ts + ':' + (typeof _globalLastSaleComputedAt !== 'undefined' ? _globalLastSaleComputedAt : 0) + ':' + (typeof itemMetrics !== 'undefined' ? Object.keys(itemMetrics).length : 0);
+  if (g !== _aiqSeo.gen) { _aiqSeo.gen = g; _aiqSeo.memo = {}; _aiqSeo.convTienda = undefined; }
+}
+function _aiqSeoConvTienda() {
+  if (_aiqSeo.convTienda !== undefined) return _aiqSeo.convTienda;
+  var v = 0, s = 0;
+  (allItems || []).forEach(function (i) { if (i.status !== 'active') return; var m = itemMetrics[i.id]; if (!m || !(m.visits30 > 0)) return; v += m.visits30; s += (m.sales60 || 0) / 2; });
+  _aiqSeo.convTienda = v >= 200 ? s / v : null;
+  return _aiqSeo.convTienda;
+}
+// Oportunidad para publicaciones sin anuncio (fuera de campaña)
+function aiqSeoOportunidad(item) {
+  var U = AIQ_OP_UMB, mot = [];
+  if (item.status !== 'active') return { key: null, label: 'Sin anuncio · publicación no activa', mot: ['La publicación no está activa: no se evalúa para publicidad.'] };
+  var stk = item.available_quantity != null ? item.available_quantity : null;
+  if (stk != null && stk < U.stockBajo) return { key: null, label: 'Sin anuncio · stock bajo', mot: ['Stock ' + stk + ': publicitar ahora aceleraría el quiebre.'] };
+  var m = itemMetrics[item.id];
+  if (!m) return { key: 'op_sin_datos', mot: ['Métricas de la publicación sin cargar: usá 📊 Cargar métricas.'] };
+  var v30 = m.visits30 || 0, s60 = m.sales60 || 0, s7 = m.sales || 0, sold = item.sold_quantity || 0;
+  var dias = getDaysSinceLastSale(item.id), cal = qualityScore(item);
+  var edad = item.date_created ? Math.floor((Date.now() - new Date(item.date_created)) / 86400000) : 9999;
+  var conv = v30 > 0 ? (s60 / 2) / v30 : null, cT = _aiqSeoConvTienda();
+  var convJuzgable = v30 >= U.minVisitasConv && conv != null && cT;
+  var ctx = _aiqSeo.ctx || {}, cpv = ctx.cpvCuenta, margen = ctx.margen || 0.48;
+  var ganancia = (item.price || 0) * margen;
+  var base = v30 + (v30 === 1 ? ' visita' : ' visitas') + ' en 30 d · ' + s60 + (s60 === 1 ? ' venta' : ' ventas') + ' en 60 d' + (dias !== Infinity ? ' · última venta hace ' + dias + ' d' : ' · sin ventas registradas');
+  var prio = s7 >= 1 ? 'alta' : (s60 >= 6 ? 'media' : 'normal');
+  var res = function (k, xs) { return { key: k, mot: [base].concat(xs), prio: k === 'op_publicitar' ? prio : null }; };
+  if (v30 < U.sinDatosVisitas) return res('op_sin_datos', ['Menos de ' + U.sinDatosVisitas + ' visitas en 30 días: muy poco tráfico para recomendar.']);
+  if (edad < U.minEdad) return res('op_sin_datos', ['Publicación creada hace ' + edad + ' días: todavía no hay historia suficiente.']);
+  var convTxt = convJuzgable ? 'conversión estimada ' + aiqPct(conv, 1) + ' vs ' + aiqPct(cT, 1) + ' de la tienda' : null;
+  var cubre = cpv ? ganancia >= U.cubreCosto * cpv : null;
+  if (s60 >= U.minVentas60 && dias <= U.maxDiasUltVenta && v30 >= U.minVisitas30 && (!convJuzgable || conv >= U.convRel * cT) && cal >= U.minCalidad) {
+    if (cubre === true) return res('op_publicitar', [(convTxt ? convTxt + '. ' : '') + 'Calidad ' + cal + '.',
+      'Ganancia estimada por venta ' + aiqPesos(ganancia) + ' (precio × margen ' + aiqPct(margen, 0) + ') vs costo por venta publicitaria real de la cuenta ' + aiqPesos(cpv) + '.',
+      s7 >= 1 ? 'Vendió ' + s7 + ' en los últimos 7 días: prioridad alta.' : 'Sin ventas en los últimos 7 días.']);
+    return res('op_evaluar', [cubre === false ? 'La ganancia estimada por venta (' + aiqPesos(ganancia) + ') no cubre 1,5 veces el costo por venta publicitaria de la cuenta (' + aiqPesos(cpv) + ').'
+      : 'No se pudo verificar el costo por venta publicitaria de la cuenta (N/D): no se recomienda publicitar sin ese dato.']);
+  }
+  if (v30 >= U.visitasSinVenta && s60 === 0) return res('op_optimizar', ['Muchas visitas y ninguna venta en 60 días: algo frena la compra (precio, fotos, envío).']);
+  if (convJuzgable && conv < U.convBaja * cT) return res('op_optimizar', [convTxt + ': menos de la mitad del promedio.']);
+  if ((s60 >= U.minVentas60 || v30 >= U.visitasSinVenta) && cal < U.minCalidad) return res('op_optimizar', ['Tiene demanda pero la calidad de la ficha es ' + cal + ' (menos de ' + U.minCalidad + ').']);
+  if (sold >= U.histMin && s60 === 0) return res('op_evaluar', [sold + ' ventas históricas pero ninguna en 60 días.']);
+  if (s60 >= 1 && s60 <= 2 && v30 < U.minVisitas30 * 2) return res('op_evaluar', ['Pocas ventas recientes con poco tráfico: señal débil.']);
+  if (s60 >= U.minVentas60 && dias > U.maxDiasUltVenta) return res('op_evaluar', ['Vende, pero la última venta fue hace más de ' + U.maxDiasUltVenta + ' días.']);
+  return res('op_sin_datos', ['Sin señales suficientes para recomendar publicidad.']);
+}
+// Información publicitaria de una publicación (memoizada por generación de datos)
+function aiqSeoInfo(item) {
+  if (!item || !_aiqSeo.ts) return null;
+  _aiqSeoGen();
+  var id = item.id, memo = _aiqSeo.memo;
+  if (memo[id] !== undefined) return memo[id];
+  var c = _aiqSeo.cat ? _aiqSeo.cat[id] : null, r = _aiqSeo.recos[id], x;
+  if (!c) {
+    x = { grupo: 'unk', key: null, label: '❔ Desconocido', mot: [_aiqSeo.catInfo && _aiqSeo.catInfo.completo ? 'No figura en la lista de anuncios de Mercado Libre.' : 'La lista de anuncios está incompleta y esta publicación no figura: no se puede saber si tiene anuncio.'] };
+  } else if (c.s === 'active' || c.s === 'paused') {
+    var k = r ? (r.k === 'sin_datos' ? 'revisar' : r.k) : 'revisar';
+    var mot = r ? r.mot.slice() : ['Sin impresiones, clics ni gasto en los últimos 30 días.'];
+    var label = r ? r.ic + ' ' + (r.k === 'sin_datos' ? 'Sin datos suficientes' : AIQ_RECO_ITEM[r.k].txt.charAt(0) + AIQ_RECO_ITEM[r.k].txt.slice(1).toLowerCase()) : '⚪ Sin actividad 30 d';
+    if (c.s === 'paused') {
+      mot.unshift('El anuncio está pausado.');
+      if (k === 'pausar' || k === 'retirar' || k === 'reducir') { label = '✔ Ya pausado'; k = null; }
+      else label += ' · pausado';
+    }
+    x = { grupo: 'ads', key: k ? 'ads_' + k : null, reco: k, label: label, mot: mot, roas: r ? r.roas : null, cost: r ? r.cost : null, estado: c.s };
+  } else if (c.s === 'hold') {
+    var causa = _aiqHoldCausa(item);
+    if (causa) x = { grupo: 'ads', key: 'ads_hold', label: '🔇 Anuncio sin entrega', mot: ['Mercado Libre informa el anuncio "en espera" (hold).', 'Causa probable: ' + causa + '.'], estado: 'hold' };
+    else x = { grupo: 'unk', key: null, label: '❔ En espera (ML)', mot: ['Mercado Libre informa el anuncio "en espera" (hold), pero la publicación está activa y con stock: el motivo no se puede confirmar.'], estado: 'hold' };
+  } else if (c.s === 'idle') {
+    var o = aiqSeoOportunidad(item);
+    x = { grupo: 'op', key: o.key, label: o.key ? SEO_SCENARIOS[o.key].emoji + ' ' + SEO_SCENARIOS[o.key].label : o.label, mot: ['Fuera de campaña (sin anuncio activo).'].concat(o.mot), prio: o.prio, estado: 'idle' };
+  } else {
+    x = { grupo: 'unk', key: null, label: '❔ Desconocido', mot: ['Estado del anuncio no reconocido: ' + (c.sr || c.s || 'N/D') + '.'], estado: c.s };
+  }
+  memo[id] = x;
+  return x;
+}
+
+// ── Filtro "Publicidad" en la fila Estado ──
+var _aiqSeoPub = null;   // null | 'con' | 'sin' | 'unk'
+function seoSetPub(v) {
+  _aiqSeoPub = v; seoState.page = 1;
+  ['all', 'con', 'sin', 'unk'].forEach(function (k) {
+    var ch = document.getElementById('chip-pub-' + k); if (!ch) return;
+    var on = (k === 'all' && !v) || k === v;
+    ch.style.background = on ? 'var(--accent)' : ''; ch.style.color = on ? '#fff' : ''; ch.style.borderColor = on ? 'var(--accent)' : '';
+  });
+  if (v && !_aiqSeo.ts) aiqSeoCargar(false);
+  renderSEOTable();
+}
+function _aiqSeoFiltroPub(item) {
+  if (!_aiqSeoPub) return true;
+  var x = aiqSeoInfo(item);
+  if (!x) return _aiqSeoPub === 'unk';
+  if (_aiqSeoPub === 'con') return x.grupo === 'ads';
+  if (_aiqSeoPub === 'sin') return x.grupo === 'op';
+  return x.grupo === 'unk';
+}
+
+// ── Filas de chips ──
+function _aiqSeoTodosEscenarios() { return SEO_SCENARIO_ORDER.concat(AIQ_SEO_ADS_ORDER, AIQ_SEO_OP_ORDER); }
+function _aiqSeoChips(orden, counts) {
+  return orden.map(function (key) {
+    var sc = SEO_SCENARIOS[key]; if (!sc) return '';
+    var on = _seoActiveScenario === key, n = counts[key] || 0;
+    var cBg = on ? 'rgba(255,255,255,.25)' : sc.color + '22', cFg = on ? '#fff' : sc.color;
+    return '<div class="chip seo-scenario-chip" data-key="' + key + '" onclick="seoSetScenario(\'' + key + '\')" style="font-size:11px;cursor:pointer;background:' + (on ? sc.color : '') +
+      ';color:' + (on ? '#fff' : '') + ';border-color:' + (on ? sc.color : '') + ';opacity:' + (n === 0 && !on ? '0.45' : '1') + ';transition:all .15s' + (sc.grupo === 'op' ? ';border-style:dashed' : '') + '">' +
+      sc.emoji + ' ' + sc.label + ' <span style="background:' + cBg + ';color:' + cFg + ';font-weight:700;font-size:10px;padding:1px 6px;border-radius:8px;margin-left:2px">' + (_aiqSeo.ts ? n : '–') + '</span></div>';
+  }).join('');
+}
+function _aiqSeoRenderChips(counts) {
+  var a = document.getElementById('seo-ads-chips'), o = document.getElementById('seo-op-chips');
+  if (a) a.innerHTML = _aiqSeoChips(AIQ_SEO_ADS_ORDER, counts);
+  if (o) o.innerHTML = _aiqSeoChips(AIQ_SEO_OP_ORDER, counts);
+  _aiqSeoEstadoUI(_aiqSeo.cargando ? '⏳ Cargando datos de publicidad…' : null);
+}
+
+// ── Resaltado de fila y columna "Publicidad" ──
+function _aiqSeoTono(x) {
+  if (!x || !x.key) return null;
+  if (x.grupo === 'ads') return x.key === 'ads_hold' ? AIQ_SEO_TONO_OP.ads_hold : (AIQ_RK_TONO[x.reco] || null);
+  return AIQ_SEO_TONO_OP[x.key] || null;   // op_sin_datos: sin resaltado
+}
+function _aiqSeoTrAttr(item) {
+  var t = _aiqSeoTono(aiqSeoInfo(item));
+  return t ? ' style="background:' + t[0] + '"' : '';
+}
+function _aiqSeoTdStripe(item) {
+  var x = aiqSeoInfo(item), t = _aiqSeoTono(x);
+  return t ? 'border-left:4px ' + (x.grupo === 'op' ? 'dotted' : 'solid') + ' ' + t[2] + ';' : '';
+}
+function _aiqSeoCelda(item) {
+  if (!_aiqSeo.ts) return '<span style="font-size:9.5px;color:var(--text3)" title="Datos de publicidad sin cargar: usá 📊 Cargar métricas">—</span>';
+  var x = aiqSeoInfo(item); if (!x) return '—';
+  var t = _aiqSeoTono(x), col = t ? t[2] : '#64748b';
+  var tip = x.mot.concat(['Según últimos 30 días (' + _aiqFmtF(_aiqSeo.desde) + ' – ' + _aiqFmtF(_aiqSeo.hasta) + '). Informativo: el panel no cambia anuncios.']).join('\n');
+  var sub = '';
+  if (x.grupo === 'ads' && x.estado !== 'hold') sub = (x.roas != null ? 'ROAS ' + aiqX(x.roas) : 'ROAS N/D') + ' · ' + (x.cost != null ? aiqPesos(x.cost) : '$ N/D');
+  else if (x.grupo === 'op') sub = 'Sin anuncio' + (x.prio ? ' · prioridad ' + x.prio : '');
+  else if (x.estado === 'hold') sub = 'En espera (ML)';
+  return '<div title="' + _aiqEsc(tip) + '" style="cursor:help;line-height:1.25">' +
+    '<div style="font-size:10px;font-weight:700;color:' + col + ';white-space:nowrap">' + _aiqEsc(x.label) + '</div>' +
+    (sub ? '<div style="font-size:9.5px;color:var(--text2);margin-top:2px;white-space:nowrap">' + _aiqEsc(sub) + '</div>' : '') +
+    '<div style="font-size:9px;color:var(--text3);margin-top:1px">30 d</div></div>';
+}
+
+
 // v80: ¿Califica un ítem para un escenario? Esta función es la fuente de verdad
 // para tres usos: (1) filtrar la tabla cuando se selecciona un escenario,
 // (2) badges en la columna Estrategia, (3) contadores de cantidad por chip.
@@ -10827,15 +11178,16 @@ let _scenarioCountsCache = null;
 let _scenarioCountsCacheKey = '';
 function _getScenarioCounts(){
   // Invalidación basada en cantidad de items + timestamp del último itemMetrics
-  const key = (allItems?.length || 0) + ':' + (_globalLastSaleComputedAt || 0);
+  const key = (allItems?.length || 0) + ':' + (_globalLastSaleComputedAt || 0) + ':' + (_aiqSeo.ts || 0);   // v300
   if(_scenarioCountsCache && _scenarioCountsCacheKey === key) return _scenarioCountsCache;
   const counts = {};
-  for(const k of SEO_SCENARIO_ORDER) counts[k] = 0;
+  const _todos = _aiqSeoTodosEscenarios();   // v300: + escenarios de publicidad
+  for(const k of _todos) counts[k] = 0;
   if(!Array.isArray(allItems)) return counts;
   // Solo iteramos publicaciones que aparecerían en la lista (excluyendo cerradas)
   const visible = allItems.filter(i => i && i.status !== 'closed' && i.status !== 'deleted');
   for(const item of visible){
-    for(const k of SEO_SCENARIO_ORDER){
+    for(const k of _todos){
       if(_scenarioMatchesItem(k, item)) counts[k]++;
     }
   }
@@ -11596,6 +11948,7 @@ function renderScenarioChips(){
       ${sc.emoji} ${sc.label} ${counter}
     </div>`;
   }).join('');
+  try{ _aiqSeoRenderChips(counts); }catch(e){ console.warn('[SEO publicidad] chips', e.message); }   // v300
   cont.innerHTML = html
     + `<button class="btn btn-ghost btn-xs" onclick="seoSetScenario(null)" id="seo-scenario-clear" style="font-size:11px;${_seoActiveScenario?'':'display:none'}">✕ Limpiar escenario</button>`;
 }
@@ -12637,6 +12990,7 @@ function seoGetFilteredItems(){
     }
     if(st&&i.status!==st) return false;
     if(seoState.tipoFilter && getPubTypeKey(i)!==seoState.tipoFilter) return false;
+    if(!_aiqSeoFiltroPub(i)) return false;   // v300: Con anuncio / Sin anuncio / Desconocido
     // v149: Filtros avanzados por rango (precio, stock, fecha, metricas) -- AND estricto
     if(typeof seoAdvMatches==='function' && !seoAdvMatches(i)) return false;
 
@@ -12735,7 +13089,7 @@ function renderSEOTable(){
   const tbody=document.getElementById('seo-tbody');
   if(!tbody) return;
   if(!paged.length){
-    tbody.innerHTML='<tr><td colspan="14" style="text-align:center;padding:22px;color:var(--text3)">Sin resultados para este filtro</td></tr>';
+    tbody.innerHTML='<tr><td colspan="15" style="text-align:center;padding:22px;color:var(--text3)">Sin resultados para este filtro</td></tr>';
     const pg=document.getElementById('seo-pagination');if(pg)pg.innerHTML='';
     return;
   }
@@ -12765,8 +13119,8 @@ function renderSEOTable(){
 
     // metricsHtml removido — ahora son 3 columnas separadas
 
-    return `<tr>
-      <td style="max-width:240px;min-width:180px">
+    return `<tr${_aiqSeoTrAttr(item)}>
+      <td style="max-width:240px;min-width:180px;${_aiqSeoTdStripe(item)}">
         <div style="display:flex;align-items:flex-start;gap:8px">
           <div style="flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:2px">
             <div style="width:42px;height:42px;border-radius:5px;overflow:hidden;background:var(--bg4);border:1px solid var(--border)">
@@ -12923,6 +13277,7 @@ function renderSEOTable(){
           return `<div style="display:flex;flex-direction:column;align-items:flex-start;gap:2px">${html}${moreSpan}</div>`;
         })()}
       </td>
+      <td style="text-align:center;padding:6px 6px;min-width:104px">${_aiqSeoCelda(item)}</td>
       <td style="max-width:160px"><div style="display:flex;flex-wrap:wrap;gap:3px">
         ${tI.map(i=>`<span class="badge bg-amber" style="font-size:9px">${i}</span>`).join('')}
         ${ch.map(p=>`<span class="badge ${p.sev===2?'bg-red':'bg-amber'}" style="font-size:9px">${p.label}</span>`).join('')}
@@ -13541,6 +13896,7 @@ async function loadSEOMetricsFull(){
   if(mainBtn) mainBtn.disabled = false;
 
   // Ahora invocar loadSEOMetrics normal (que va a ir a ML porque no hay cache)
+  window._aiqSeoForzar = true;   // v300: también renueva los datos de publicidad
   return loadSEOMetrics();
 }
 
@@ -13606,6 +13962,8 @@ async function loadSEOMetrics(){
     }
     if(btn){ btn.disabled=false; btn.textContent='📊 Métricas ✓'; }
     console.log('[SEO] Métricas completas para', ids.length, 'ítems');
+    // v300: datos publicitarios (caché 3 h; el Refresh total los fuerza)
+    aiqSeoCargar(!!window._aiqSeoForzar).catch(e=>console.warn('[SEO publicidad]', e.message)).finally(()=>{ window._aiqSeoForzar=false; });
 
     // v201: después de las visitas, cargar fechas + tiempo disponib + descuentos
     // (usa las métricas recién cargadas para priorizar los más visitados).
@@ -19193,7 +19551,7 @@ function aiqKpis(ctx) {
   return K;
 }
 
-if (typeof module !== 'undefined' && module.exports) module.exports = {
+if (typeof module !== 'undefined') module.exports = {
   aiqAgregar: aiqAgregar, aiqAnalizar: aiqAnalizar, aiqSimular: aiqSimular, aiqRentabilidad: aiqRentabilidad,
   aiqParsearReporte: aiqParsearReporte, aiqHuella: aiqHuella, aiqRangoPrevio: aiqRangoPrevio,
   aiqDetectarCambios: aiqDetectarCambios, aiqDiasEntre: aiqDiasEntre, aiqSumarDias: aiqSumarDias,
@@ -19201,6 +19559,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = {
   aiqResumen: aiqResumen, aiqRecoItem: aiqRecoItem, aiqContextoItems: aiqContextoItems, aiqItemDerivadas: aiqItemDerivadas,
   aiqKpis: aiqKpis, aiqClasifRoas: aiqClasifRoas, AIQ_UMBRALES_DEF: AIQ_UMBRALES_DEF
 };
+
+
 // ═══════════════════════════════════════════════════════════
 // v295 · INTELIGENCIA PUBLICITARIA — PANTALLA
 // ═══════════════════════════════════════════════════════════
@@ -19812,7 +20172,8 @@ var AIQ_RK_TONO = {
   mantener:  ['#f6fdf8', '#e3f7ea', '#15803d'], escalar:  ['#f5f9ff', '#e2edfe', '#1d4ed8'],
   optimizar: ['#fffdf2', '#fdf6d3', '#a16207'], reducir:  ['#fffaf5', '#ffedd9', '#c2410c'],
   pausar:    ['#fff7f7', '#fde4e4', '#991b1b'], retirar:  ['#fff7f7', '#fde4e4', '#991b1b'],
-  revisar:   ['#fafbfc', '#eef1f5', '#475569'], sin_datos: ['#fafbfc', '#eef1f5', '#475569']
+  revisar:   ['#fafbfc', '#eef1f5', '#475569'], sin_datos: ['#fafbfc', '#eef1f5', '#475569'],
+  fuera:     ['#fafafa', '#f1f5f9', '#64748b']
 };
 var AIQ_RK_COLS = [
   ['prints', 'Impr.', 'Impresiones del período'], ['clicks', 'Clics', 'Clics del período'], ['ctr', 'CTR', 'Clics ÷ impresiones'],
@@ -19896,8 +20257,9 @@ function aiqRankingRender() {
   var selE = document.getElementById('aiq-rk-estado');
   if (selE && selE.options.length <= 1) {
     var estados = {}; D.items.forEach(function (i) { if (i.estado) estados[i.estado] = 1; });
-    Object.keys(estados).forEach(function (e) { var o = document.createElement('option'); o.value = e; o.textContent = e; selE.appendChild(o); });
+    Object.keys(estados).forEach(function (e) { var o = document.createElement('option'); o.value = e; o.textContent = _aiqSeoEstadoTxt(e); selE.appendChild(o); });
   }
+  var tit = {}; try { (allItems || []).forEach(function (it) { tit[it.id] = it; }); } catch (e) {}
   var ql = q.trim().toLowerCase();
   var xs = D.items.filter(function (i) {
     if (ql && (String(i.titulo || '').toLowerCase().indexOf(ql) < 0 && String(i.id).toLowerCase().indexOf(ql) < 0)) return false;
@@ -19922,8 +20284,13 @@ function aiqRankingRender() {
   var head = '<tr>' + th('titulo', 'Publicación', 'Ordenar por título', 'text-align:left;min-width:220px') + AIQ_RK_COLS.map(function (c) { return th(c[0], c[1], c[2]); }).join('') +
     '<th style="text-align:center;position:sticky;top:0;z-index:1;white-space:nowrap">Act.</th>' + th('reco', 'RECOMENDADO', 'Orden por prioridad de acción y luego por inversión', 'min-width:170px') + '</tr>';
   var filas = vista.map(function (i) {
-    var badge = i.estado ? '<span class="badge ' + (i.estado === 'active' ? 'bg-green' : 'bg-gray') + '" style="font-size:9.5px;padding:1px 6px">' + _aiqEsc(i.estado === 'active' ? 'Activo' : (i.estado === 'paused' ? 'Pausado' : i.estado)) + '</span>' : '<span style="font-size:9.5px;color:var(--text3)" title="Estado no informado">estado N/D</span>';
+    // v300: estados traducidos; "hold" se cruza con el estado de la publicación
+    var holdCausa = i.estado === 'hold' ? _aiqHoldCausa(tit[i.id]) : null;
+    var estTip = i.estado === 'idle' ? 'Mercado Libre: idle — la publicación ya no está en la campaña' : i.estado === 'hold' ? 'Mercado Libre: hold — ' + (holdCausa ? 'causa probable: ' + holdCausa : 'la publicación está activa y con stock: motivo no confirmado') : 'Mercado Libre: ' + (i.estadoRaw || i.estado || 'N/D');
+    var badge = i.estado ? '<span class="badge ' + (i.estado === 'active' ? 'bg-green' : 'bg-gray') + '" style="font-size:9.5px;padding:1px 6px" title="' + _aiqEsc(estTip) + '">' + _aiqEsc(_aiqSeoEstadoTxt(i.estado)) + (i.estado === 'hold' ? (holdCausa ? ' · ' + holdCausa : ' · motivo N/D') : '') + '</span>' : '<span style="font-size:9.5px;color:var(--text3)" title="Estado no informado">estado N/D</span>';
     var r = i.reco;
+    if (i.estado === 'idle') r = { clave: 'fuera', ic: '✔', txt: 'Ya fuera de campaña', frase: 'Ya no está en la campaña: no hay acción pendiente. Las métricas son de cuando estaba publicitada.',
+      motivos: ['Mercado Libre informa el anuncio como idle: la publicación ya fue retirada de la campaña.', 'Recomendación que tenía con estas métricas: ' + i.reco.ic + ' ' + i.reco.txt + ' — ' + i.reco.frase], ord: 9 };
     var dirInd = i.ventasDir == null && i.ventasInd == null ? _aiqNum(null, '', ndQuit('direct_items_quantity')) : (i.ventasDir == null ? 'N/D' : i.ventasDir) + ' / ' + (i.ventasInd == null ? 'N/D' : i.ventasInd);
     var celdas = {
       prints: _aiqNum(i.prints), clicks: _aiqNum(i.clicks), ctr: _aiqNum(i.ctr, '%', i.prints ? null : 'Sin impresiones'), cpc: _aiqNum(i.cpc, '$', i.clicks ? null : 'Sin clics'),
@@ -30606,6 +30973,7 @@ function showSection(id){
   if(id==='publicaciones') renderPubs();
   if(id==='seo'){
     renderSEOSection(); updateMetricsTimestamp(); renderScenarioChips();
+    try{ aiqSeoCargar(false); }catch(e){}   // v300: usa la caché si tiene menos de 3 h
     // v204: espejar los widgets del Resumen General (por si ya estaban renderizados)
     try{ _dashMirror('dash-top-pubs','seo-top-pubs'); _dashMirror('dash-last50','seo-last50'); _dashMirror('dash-most-visited','seo-most-visited'); }catch(e){}
   }
