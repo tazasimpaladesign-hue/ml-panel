@@ -856,7 +856,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v302 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v303 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -2719,7 +2719,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   </div>
 
 
-  <!-- ═══ v295-v299 · INTELIGENCIA PUBLICITARIA ═══ -->
+  <!-- ═══ v295-v303 · INTELIGENCIA PUBLICITARIA ═══ -->
   <div class="card" id="aiq-card" style="margin-bottom:16px">
     <div class="card-hd" style="flex-wrap:wrap;gap:10px">
       <div>
@@ -2762,11 +2762,34 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <div style="position:relative;height:240px"><canvas id="aiq-chart"></canvas></div>
         <div id="aiq-peak" style="font-size:11px;color:var(--text3);margin-top:6px;min-height:16px"></div>
         <div id="aiq-chart-msg" style="display:none;font-size:12px;color:var(--text3);text-align:center;padding:30px 10px"></div>
+        <!-- v303: torta con / sin publicidad + Top 5 + dónde va la inversión -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px;margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
+          <div>
+            <div style="font-size:12.5px;font-weight:700">🥧 Ventas del período: con y sin publicidad</div>
+            <div id="aiq-pie-sub" style="font-size:10.5px;color:var(--text3);margin:2px 0 6px"></div>
+            <div style="position:relative;height:190px"><canvas id="aiq-pie"></canvas><div id="aiq-pie-centro" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;text-align:center"></div></div>
+            <div id="aiq-pie-leyenda" style="font-size:11.5px;margin-top:8px;line-height:1.55"></div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap">
+              <div style="font-size:12.5px;font-weight:700">🏆 Top 5 publicaciones que más rinden</div>
+              <select id="aiq-top5-crit" onchange="aiqRenderTop5()" style="width:auto;font-size:10.5px;padding:2px 5px">
+                <option value="gan">Ganancia estimada</option><option value="rev">Ingresos</option><option value="roas">ROAS (≥ 3 ventas)</option><option value="ventas">Ventas</option>
+              </select>
+            </div>
+            <div id="aiq-top5-sub" style="font-size:10.5px;color:var(--text3);margin:2px 0 6px"></div>
+            <div id="aiq-top5"></div>
+          </div>
+        </div>
+        <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
+          <div style="font-size:12.5px;font-weight:700">💸 ¿Dónde va tu inversión? <span style="font-weight:400;font-size:10.5px;color:var(--text3)">· inversión del período según la recomendación de cada publicación</span></div>
+          <div id="aiq-inv"></div>
+        </div>
       </div>
       <div class="card" style="margin:0">
         <div class="card-title" style="margin-bottom:8px">🧮 Simulador de presupuesto</div>
         <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:8px">
-          <div style="flex:1"><label>Presupuesto diario a simular (ARS)</label><input type="number" id="aiq-sim-pres" step="100" oninput="aiqRenderSimulador()"></div>
+          <div style="flex:1"><label>Presupuesto diario a simular (ARS, sin IVA — como se carga en Mercado Libre)</label><input type="number" id="aiq-sim-pres" step="100" oninput="aiqRenderSimulador()"></div>
           <div style="width:110px"><label title="Margen de contribución ANTES de publicidad, sobre el precio de venta">Margen</label><a href="#publicidad" class="btn btn-ghost btn-sm" style="width:100%;margin:0" onclick="aiqConfigAbrir();return false;" id="aiq-margen-btn">40% ⚙</a></div>
         </div>
         <div id="aiq-sim"></div>
@@ -19439,6 +19462,30 @@ function aiqSimular(cur, presNuevo, cfg) {
   return { ok: true, presActual: pres, presNuevo: presNuevo, dias: dias, escenarios: esc, supuestos: supuestos, limites: limites };
 }
 
+// v303 · Proyección MENSUAL con el presupuesto elegido (valores totales, no diferencias)
+// Usa los escenarios de aiqSimular (ROAS del dinero extra / del recorte) y los lleva a 30 días.
+// IVA: Mercado Libre factura la publicidad + 21% de IVA.
+function aiqSimularMensual(cur, presNuevo, cfg) {
+  cfg = cfg || {};
+  var s = aiqSimular(cur, presNuevo, cfg);
+  if (!s.ok) return s;
+  if (cur.rev == null || !cur.gastoDiario) return { ok: false, motivo: 'Faltan los ingresos o el gasto del período para proyectar.' };
+  var iva = cfg.iva != null ? cfg.iva : 0.21, margen = cfg.margen || 0.4, D = cfg.diasMes || 30;
+  var gDia = cur.gastoDiario, iDia = cur.rev / cur.dias, ticket = cur.ventas ? cur.rev / cur.ventas : null;
+  var fila = function (nombre, presDia, gastoDia, ingDia) {
+    var gm = gastoDia * D, gIva = gm * (1 + iva), im = ingDia * D;
+    return { nombre: nombre, presDia: presDia, gastoDia: gastoDia, gastoMes: gm, ivaMes: gm * iva, gastoMesIva: gIva, ingMes: im,
+      ventasMes: ticket ? im / ticket : null, roas: gm ? im / gm : null, ganBruta: im * margen,
+      resultado: im * margen - gIva, resultadoSinIva: im * margen - gm };
+  };
+  var actual = fila('Actual', cur.presupuesto, gDia, iDia);
+  var esc = s.escenarios.map(function (e) {
+    return fila(e.nombre, presNuevo, Math.max(0, gDia + (e.gastoExtra || 0) / s.dias), Math.max(0, iDia + (e.ingresoExtra || 0) / s.dias));
+  });
+  return { ok: true, actual: actual, escenarios: esc, iva: iva, margen: margen, diasMes: D, ticket: ticket, presActual: s.presActual, presNuevo: presNuevo,
+    dias: s.dias, supuestos: s.supuestos, limites: s.limites, sube: presNuevo >= s.presActual };
+}
+
 // ── Cambios detectados en la configuración (día a día) ─────
 function aiqDetectarCambios(registros) {
   var dias = (registros || []).filter(function (r) { return r.kind === 'dia' && r.src === 'api'; })
@@ -20000,7 +20047,7 @@ if (typeof module !== 'undefined') module.exports = {
   aiqParsearReporte: aiqParsearReporte, aiqHuella: aiqHuella, aiqRangoPrevio: aiqRangoPrevio,
   aiqDetectarCambios: aiqDetectarCambios, aiqDiasEntre: aiqDiasEntre, aiqSumarDias: aiqSumarDias,
   aiqAlertas: aiqAlertas, aiqInformeSemanal: aiqInformeSemanal, aiqFormulas: aiqFormulas,
-  aiqResumen: aiqResumen, aiqRecoItem: aiqRecoItem, aiqContextoItems: aiqContextoItems, aiqItemDerivadas: aiqItemDerivadas,
+  aiqResumen: aiqResumen, aiqSimularMensual: aiqSimularMensual, aiqRecoItem: aiqRecoItem, aiqContextoItems: aiqContextoItems, aiqItemDerivadas: aiqItemDerivadas,
   aiqKpis: aiqKpis, aiqClasifRoas: aiqClasifRoas, AIQ_UMBRALES_DEF: AIQ_UMBRALES_DEF
 };
 
@@ -20127,23 +20174,55 @@ function aiqSerie(desde, hasta, metrica) {
   }
   return out;
 }
+var _aiqSimIvaRes = true;   // descontar el IVA en el resultado (si no sos Responsable Inscripto)
+function aiqSimPreset(f) { var inp = document.getElementById('aiq-sim-pres'); if (!inp || !_aiq.cur || !_aiq.cur.presupuesto) return; inp.value = Math.round(_aiq.cur.presupuesto * f / 100) * 100; aiqRenderSimulador(); }
 function aiqRenderSimulador(reset) {
   var el = document.getElementById('aiq-sim'), inp = document.getElementById('aiq-sim-pres');
   if (!el || !_aiq.cur) return;
   var c = _aiq.cur;
   if (c.vacio || !c.presupuesto) { el.innerHTML = '<div style="font-size:12px;color:var(--text3)">Necesita un período con presupuesto y métricas.</div>'; return; }
   if (reset || !inp.value) inp.value = Math.round(c.presupuesto * 1.15 / 100) * 100;
-  var s = aiqSimular(c, Number(inp.value), { margen: _aiqMargen() });
-  if (!s.ok) { el.innerHTML = '<div style="font-size:12px;color:var(--text3)">' + _aiqEsc(s.motivo) + '</div>' + _aiqSimAyuda(c); return; }
-  var filas = s.escenarios.map(function (e) {
-    return '<tr><td>' + e.nombre + '</td><td style="text-align:right">' + aiqX(e.roasMarginal) + '</td><td style="text-align:right">' + aiqPesos(e.gastoExtra || 0) +
-      '</td><td style="text-align:right">' + aiqPesos(e.ingresoExtra || 0) + '</td><td style="text-align:right;font-weight:700;color:' + ((e.resultadoExtra || 0) >= 0 ? '#166534' : '#991b1b') + '">' + aiqPesos(e.resultadoExtra || 0) + '</td></tr>';
-  }).join('');
-  el.innerHTML = '<div style="font-size:11px;color:var(--text3);margin-bottom:6px">De ' + aiqPesos(s.presActual) + ' a ' + aiqPesos(s.presNuevo) + '/día, sobre ' + s.dias + ' días:</div>' +
-    '<table style="width:100%;font-size:11.5px;border-collapse:collapse"><thead><tr style="color:var(--text3);font-size:10px;text-align:left"><th>Escenario</th><th style="text-align:right">ROAS del extra</th><th style="text-align:right">Δ inversión</th><th style="text-align:right">Δ ingresos</th><th style="text-align:right">Δ resultado</th></tr></thead><tbody>' + filas + '</tbody></table>' +
+  var s = aiqSimularMensual(c, Number(inp.value), { margen: _aiqMargen(), iva: 0.21, diasMes: 30 });
+  var presets = '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">' + [[0.7, '−30%'], [0.8, '−20%'], [0.9, '−10%'], [1, 'Actual'], [1.1, '+10%'], [1.2, '+20%'], [1.5, '+50%']].map(function (p) {
+    var v = Math.round(c.presupuesto * p[0] / 100) * 100, on = Number(inp.value) === v;
+    return '<button type="button" onclick="aiqSimPreset(' + p[0] + ')" style="font-size:10.5px;padding:2px 8px;border-radius:12px;cursor:pointer;border:1px solid ' + (on ? '#4f8ef7' : 'var(--border)') + ';background:' + (on ? '#4f8ef7' : 'transparent') + ';color:' + (on ? '#fff' : 'var(--text2)') + '">' + p[1] + '</button>';
+  }).join('') + '</div>';
+  if (!s.ok) { el.innerHTML = presets + '<div style="font-size:12px;color:var(--text3)">' + _aiqEsc(s.motivo) + '</div>' + _aiqSimAyuda(c); return; }
+  var cols = [s.actual].concat(s.escenarios);
+  var P = function (v) { return v == null ? 'N/D' : aiqPesos(v); };
+  var colR = function (v) { return v >= 0 ? '#166534' : '#991b1b'; };
+  var th = '<tr style="color:var(--text3);font-size:10px"><th style="text-align:left"></th>' + cols.map(function (x, n) {
+    return '<th style="text-align:right;padding:3px 4px;' + (n === 0 ? 'color:var(--text3)' : x.nombre === 'Central' ? 'color:#1d4ed8' : '') + '">' + (n === 0 ? 'ACTUAL' : x.nombre.toUpperCase()) + '</th>';
+  }).join('') + '</tr>';
+  var fila = function (lbl, fn, opt) {
+    opt = opt || {};
+    return '<tr style="' + (opt.fuerte ? 'font-weight:800;' : '') + (opt.borde ? 'border-top:1px solid var(--border);' : '') + '"><td style="padding:4px 4px 4px 0;color:var(--text2);' + (opt.fuerte ? 'color:var(--text);' : '') + '" title="' + _aiqEsc(opt.tip || '') + '">' + lbl + '</td>' +
+      cols.map(function (x, n) { var v = fn(x); var st = opt.color ? 'color:' + colR(v) + ';' : ''; return '<td style="text-align:right;padding:4px;white-space:nowrap;' + st + (n === 0 ? 'opacity:.75;' : '') + (x.nombre === 'Central' ? 'background:rgba(79,142,247,.06);' : '') + '">' + (opt.fmt ? opt.fmt(v) : P(v)) + '</td>'; }).join('') + '</tr>';
+  };
+  var res = function (x) { return _aiqSimIvaRes ? x.resultado : x.resultadoSinIva; };
+  var cen = s.escenarios[1], dif = res(cen) - res(s.actual);
+  el.innerHTML = presets +
+    '<div style="font-size:11px;color:var(--text3);margin-bottom:6px">Presupuesto de ' + aiqPesos(s.presActual) + ' a <b style="color:var(--text)">' + aiqPesos(s.presNuevo) + '/día</b> · proyección a <b>30 días</b> con lo que rindió ' + _aiqFmtF(c.desde) + ' – ' + _aiqFmtF(c.hasta) + ' (' + s.dias + ' días):</div>' +
+    '<div style="overflow-x:auto"><table style="width:100%;font-size:11.5px;border-collapse:collapse"><thead>' + th + '</thead><tbody>' +
+      fila('Presupuesto diario', function (x) { return x.presDia; }) +
+      fila('Gasto diario esperado', function (x) { return x.gastoDia; }, { tip: 'Mercado Libre no siempre gasta todo el presupuesto: se estima con el uso actual' }) +
+      fila('Gasto mensual sin IVA', function (x) { return x.gastoMes; }, { borde: true }) +
+      fila('+ IVA 21%', function (x) { return x.ivaMes; }) +
+      fila('Gasto mensual con IVA', function (x) { return x.gastoMesIva; }, { fuerte: true, tip: 'Lo que vas a pagar en la factura de Mercado Libre' }) +
+      fila('Ingresos estimados (mes)', function (x) { return x.ingMes; }, { borde: true }) +
+      fila('Ventas estimadas (mes)', function (x) { return x.ventasMes; }, { fmt: function (v) { return v == null ? 'N/D' : '≈ ' + Math.round(v); } }) +
+      fila('ROAS estimado', function (x) { return x.roas; }, { fmt: function (v) { return v == null ? 'N/D' : aiqX(v); } }) +
+      fila('Ganancia bruta (ingresos × margen ' + aiqPct(s.margen, 0) + ')', function (x) { return x.ganBruta; }) +
+      fila('Resultado estimado (mes)', res, { fuerte: true, borde: true, color: true, tip: _aiqSimIvaRes ? 'Ganancia bruta − gasto con IVA' : 'Ganancia bruta − gasto sin IVA (el IVA se recupera como crédito fiscal)' }) +
+    '</tbody></table></div>' +
+    '<label style="display:flex;align-items:center;gap:6px;font-size:11px;margin-top:6px;cursor:pointer"><input type="checkbox" ' + (_aiqSimIvaRes ? 'checked' : '') + ' onchange="_aiqSimIvaRes=this.checked;aiqRenderSimulador()"> Restar el IVA en el resultado <span style="color:var(--text3)">(destildalo si sos Responsable Inscripto: el IVA vuelve como crédito fiscal)</span></label>' +
+    '<div style="margin-top:8px;padding:7px 9px;border-radius:6px;font-size:11.5px;background:' + (dif >= 0 ? '#f0fdf4' : '#fef2f2') + ';color:' + colR(dif) + '">' +
+      '<b>Escenario central:</b> con ' + aiqPesos(s.presNuevo) + '/día pagarías ≈ <b>' + aiqPesos(cen.gastoMesIva) + '</b> por mes con IVA, venderías ≈ <b>' + aiqPesos(cen.ingMes) + '</b> por publicidad y el resultado sería <b>' + aiqPesos(res(cen)) + '</b>/mes, ' +
+      (Math.abs(dif) < 1 ? 'igual que hoy' : (dif > 0 ? aiqPesos(dif) + ' más' : aiqPesos(-dif) + ' menos') + ' que hoy (' + aiqPesos(res(s.actual)) + ')') + '.</div>' +
     '<div style="margin-top:8px;font-size:10.5px;color:var(--text3);line-height:1.45">' + s.supuestos.concat(s.limites).map(function (x) { return '· ' + _aiqEsc(x); }).join('<br>') + '</div>' +
     _aiqSimAyuda(c, s);
 }
+
 // v302: guía de uso del simulador con los valores reales del período (API de Product Ads)
 var _aiqSimAyudaAbierta = true;
 function _aiqSimAyuda(c, s) {
@@ -20163,9 +20242,10 @@ function _aiqSimAyuda(c, s) {
     '<div><b>Para qué sirve:</b> antes de cambiar el presupuesto diario en Mercado Libre, estima qué pasaría con la inversión, los ingresos y la ganancia. No cambia nada en la campaña.</div>' +
     '<div style="margin-top:6px"><b>Cómo se usa:</b></div>' +
     '<div>1. Escribí arriba el presupuesto diario que querés probar (sale cargado un 15% más que el actual).</div>' +
-    '<div>2. Leé la fila <b>Central</b> (la más probable); Pesimista y Optimista marcan el rango.</div>' +
-    '<div>3. Mirá <b>Δ resultado</b>: es la ganancia extra = Δ ingresos × margen − Δ inversión. <span style="color:#166534;font-weight:700">Verde</span> conviene, <span style="color:#991b1b;font-weight:700">rojo</span> pierde plata.</div>' +
-    '<div>4. Si decidís cambiarlo, lo hacés vos en Mercado Libre y registrás la decisión; a los 14 días se mide el efecto real.</div>' +
+    '<div>2. También podés tocar los botones −30% … +50% para probar rápido, tanto para <b>bajar</b> como para subir.</div>' +
+    '<div>3. La tabla muestra el <b>mes completo (30 días)</b>: gasto con y sin IVA, ingresos, ventas y <b>Resultado estimado</b> = ingresos × margen − gasto. La columna <b>Actual</b> es lo que pasa hoy con tu presupuesto; <b>Central</b> es lo más probable con el nuevo, y Pesimista / Optimista marcan el rango.</div>' +
+    '<div>4. <span style="color:#166534;font-weight:700">Verde</span> = el mes deja ganancia; <span style="color:#991b1b;font-weight:700">rojo</span> = la publicidad cuesta más de lo que deja. El recuadro de abajo compara el Central contra hoy.</div>' +
+    '<div>5. Si decidís cambiarlo, lo hacés vos en Mercado Libre y registrás la decisión; a los 14 días se mide el efecto real. Cuantos más días acumule el historial, más confiable es la proyección (conviene mirarla con el período de 30 días).</div>' +
     '<div style="margin-top:8px"><b>Con qué datos calcula</b> (período elegido, ' + _aiqFmtF(c.desde) + ' – ' + _aiqFmtF(c.hasta) + '):</div>' +
     '<table style="font-size:11.5px;border-collapse:collapse;margin-top:2px">' +
       fila('Presupuesto diario actual', c.presupuesto ? aiqPesos(c.presupuesto) : nd, 'Presupuesto de la campaña según la API de Product Ads') +
@@ -20177,7 +20257,7 @@ function _aiqSimAyuda(c, s) {
       fila('Impresiones perdidas por presupuesto', c.lostBud != null ? aiqPct(c.lostBud, 0) : nd, 'Si el dato existe, pone un techo al gasto extra. La API actual no lo entrega por día; viene del Excel importado') +
     '</table>' +
     '<div style="margin-top:8px;padding:7px 9px;background:var(--bg2,#f8f9fc);border-radius:6px"><b>Lectura con tus datos:</b> ' + lectura + '</div>' +
-    '<div style="margin-top:6px;color:var(--text3);font-size:10.5px">El "ROAS del extra" es menor al actual porque el dinero adicional compra impresiones de menor calidad (rendimientos decrecientes). Son rangos con supuestos, no una predicción.</div>' +
+    '<div style="margin-top:6px;color:var(--text3);font-size:10.5px">Al subir, el dinero extra rinde menos que el promedio (rendimientos decrecientes: 40% / 65% / 90% del ROAS actual). Al bajar, se pierden primero las ventas menos rentables (100% / 75% / 50%). Son rangos con supuestos, no una predicción.</div>' +
     '</div></details>';
 }
 
@@ -20549,6 +20629,7 @@ function aiqSerieSinPub(desde, hasta, m, vt) {
   return { sin: out, total: tot };
 }
 function aiqRenderGrafico() {
+  try { aiqRenderTorta(); } catch (e) { console.warn('[aiq torta]', e.message); }
   var cv = document.getElementById('aiq-chart'), msg = document.getElementById('aiq-chart-msg'), sub = document.getElementById('aiq-chart-sub'), pk = document.getElementById('aiq-peak');
   var pills = document.getElementById('aiq-pills');
   if (pills) pills.innerHTML = Object.keys(AIQ_PILLS).map(function (k) {
@@ -20623,6 +20704,7 @@ function aiqRenderGrafico() {
         } } } },
     scales: scales }) });
 }
+
 
 async function aiqCargarHoy() {
   _aiq.hoyTs = Date.now();
@@ -20834,6 +20916,7 @@ function aiqRankingRender() {
   el.innerHTML = '<div class="tw" style="max-height:72vh;overflow:auto"><table style="width:100%"><thead>' + head + '</thead><tbody>' +
     (filas || '<tr><td colspan="' + (AIQ_RK_COLS.length + 3) + '" style="text-align:center;padding:22px;color:var(--text3)">Sin resultados para este filtro</td></tr>') + '</tbody></table></div>';
   if (pg) pg.innerHTML = '<span style="font-size:11px;color:var(--text3)">' + tot + ' publicaciones · desplazá la tabla para ver todas</span>';
+  try { aiqRenderTop5(); aiqRenderInversion(); } catch (e) { console.warn('[aiq top5]', e.message); }
 }
 // Actualización manual: avanza la captura de ayer hasta completarla
 async function aiqRankingActualizar() {
@@ -20848,6 +20931,95 @@ async function aiqRankingActualizar() {
     }
   } catch (e) { showToast('No se pudo actualizar: ' + e.message, 'error'); }
   await aiqCargar(true); aiqRankingCargar(true);
+}
+
+// ═══ v303 · TORTA CON / SIN PUBLICIDAD, TOP 5 Y DESTINO DE LA INVERSIÓN ═══
+function aiqRenderTorta() {
+  var sub = document.getElementById('aiq-pie-sub'), ley = document.getElementById('aiq-pie-leyenda'), cen = document.getElementById('aiq-pie-centro');
+  if (!sub || !_aiq.cur) return;
+  var c = _aiq.cur, vt = _aiqVentasTiendaDia();
+  var cubre = vt.desde && vt.desde <= c.desde;
+  var tot = 0, uni = 0;
+  for (var f = c.desde; f <= c.hasta; f = aiqSumarDias(f, 1)) { tot += vt.porDia[f] || 0; uni += vt.uniDia[f] || 0; }
+  if (chartInstances['aiq-pie']) { try { chartInstances['aiq-pie'].destroy(); } catch (e) {} delete chartInstances['aiq-pie']; }
+  if (c.vacio || c.rev == null || !cubre || !tot) {
+    sub.textContent = _aiqFmtF(c.desde) + ' – ' + _aiqFmtF(c.hasta);
+    cen.innerHTML = ''; ley.innerHTML = '<div style="color:var(--text3);padding:30px 0;text-align:center">' + (c.vacio || c.rev == null ? 'Sin datos de publicidad en el período.' : 'Faltan las órdenes de la tienda de esos días para comparar.') + '</div>';
+    return;
+  }
+  var con = Math.min(c.rev, tot), sin = Math.max(0, tot - c.rev);
+  var uCon = c.ventas != null ? Math.min(c.ventas, uni) : null, uSin = uCon != null ? Math.max(0, uni - uCon) : null;
+  var pc = Math.round(con / tot * 100);
+  sub.textContent = _aiqFmtF(c.desde) + ' – ' + _aiqFmtF(c.hasta) + ' · facturación de la tienda (órdenes) vs atribuida a publicidad (API)';
+  makeChart('aiq-pie', { type: 'doughnut', data: { labels: ['Con publicidad', 'Sin publicidad'], datasets: [{ data: [con, sin], backgroundColor: ['#4f8ef7', '#38bdf8'], borderColor: '#fff', borderWidth: 2, hoverOffset: 6 }] },
+    options: Object.assign({}, chartDefaults(), { cutout: '66%', plugins: { legend: { display: false }, datalabels: { display: false },
+      tooltip: { callbacks: { label: function (x) { return x.label + ': ' + aiqPesos(x.raw) + ' (' + Math.round(x.raw / tot * 100) + '%)'; } } } } }) });
+  cen.innerHTML = '<div style="font-size:22px;font-weight:800;color:#4f8ef7;line-height:1">' + pc + '%</div><div style="font-size:10px;color:var(--text3);margin-top:3px">con publicidad</div>';
+  var tacos = c.cost != null ? c.cost / tot : null;
+  var fila = function (col, t, v, u) { return '<div style="display:flex;justify-content:space-between;gap:8px"><span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:' + col + ';margin-right:6px"></span>' + t + '</span><b>' + aiqPesos(v) + ' · ' + Math.round(v / tot * 100) + '%' + (u != null ? ' · ' + u + ' u.' : '') + '</b></div>'; };
+  ley.innerHTML = fila('#4f8ef7', 'Con publicidad', con, uCon) + fila('#38bdf8', 'Sin publicidad', sin, uSin) +
+    '<div style="display:flex;justify-content:space-between;border-top:1px dashed var(--border);margin-top:4px;padding-top:4px"><span>Total de la tienda</span><b>' + aiqPesos(tot) + ' · ' + uni + ' u.</b></div>' +
+    (tacos != null ? '<div style="font-size:10.5px;color:var(--text3);margin-top:3px">La inversión publicitaria (' + aiqPesos(c.cost) + ') equivale al <b>' + aiqPct(tacos, 1) + '</b> de toda la facturación (TACOS).</div>' : '') +
+    (c.rev > tot ? '<div style="font-size:10.5px;color:#a16207;margin-top:3px">⚠ Lo atribuido a publicidad supera lo facturado: Mercado Libre incluye ventas indirectas y de días cercanos.</div>' : '');
+}
+function aiqRenderTop5() {
+  var el = document.getElementById('aiq-top5'), sub = document.getElementById('aiq-top5-sub'); var D = _aiqRk.datos;
+  if (!el) return;
+  if (!D || !D.items) { el.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:24px 0;text-align:center">Se completa cuando carga el ranking por publicación.</div>'; return; }
+  var crit = (document.getElementById('aiq-top5-crit') || {}).value || 'gan', m = _aiqMargen();
+  var xs = D.items.filter(function (i) { return i.cost > 0 && (i.ventas || 0) > 0 && i.rev != null; }).map(function (i) {
+    return Object.assign({}, i, { gan: i.rev * m - i.cost });
+  });
+  if (crit === 'roas') xs = xs.filter(function (i) { return i.ventas >= 3 && i.roas != null; });
+  xs.sort(function (a, b) { return (b[crit] || 0) - (a[crit] || 0); });
+  xs = xs.slice(0, 5);
+  if (sub) sub.textContent = _aiqFmtF(D.desde) + ' – ' + _aiqFmtF(D.hasta) + ' · ganancia estimada = ingresos × margen ' + aiqPct(m, 0) + ' − inversión';
+  if (!xs.length) { el.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:24px 0;text-align:center">Ninguna publicación con ventas publicitadas en el período.</div>'; return; }
+  var max = Math.max.apply(null, xs.map(function (i) { return Math.abs(i[crit] || 0); })) || 1;
+  var medal = ['🥇', '🥈', '🥉', '4', '5'];
+  el.innerHTML = xs.map(function (i, n) {
+    var v = i[crit], ancho = Math.max(4, Math.round(Math.abs(v || 0) / max * 100));
+    var val = crit === 'roas' ? aiqX(v) : crit === 'ventas' ? v + ' ventas' : aiqPesos(v);
+    var col = crit === 'gan' && v < 0 ? '#dc2626' : '#4f8ef7';
+    return '<div style="display:flex;gap:9px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">' +
+      '<div style="width:22px;text-align:center;font-size:' + (n < 3 ? '18px' : '13px;font-weight:800;color:var(--text3)') + '">' + medal[n] + '</div>' +
+      '<div style="flex-shrink:0;width:44px;height:44px;border-radius:6px;overflow:hidden;background:var(--bg4);border:1px solid var(--border)">' +
+        (i.thumb ? '<img src="' + _aiqEsc(i.thumb) + '" alt="" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display=\'none\'">' : '<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:18px">☕</div>') + '</div>' +
+      '<div style="min-width:0;flex:1">' +
+        '<div style="font-size:11.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + _aiqEsc(i.titulo || i.id) + '">' + _aiqEsc(i.titulo || i.id) + '</div>' +
+        '<div style="height:7px;background:var(--bg3,#eef1f5);border-radius:4px;margin:4px 0 3px;overflow:hidden"><div style="height:100%;width:' + ancho + '%;background:' + col + ';border-radius:4px"></div></div>' +
+        '<div style="font-size:10.5px;color:var(--text3)">ROAS ' + aiqX(i.roas) + ' · ' + (i.ventas || 0) + ' ventas · ingresos ' + aiqPesos(i.rev) + ' · inversión ' + aiqPesos(i.cost) + '</div></div>' +
+      '<div style="text-align:right;font-size:13px;font-weight:800;color:' + col + ';white-space:nowrap">' + val + '</div></div>';
+  }).join('');
+}
+function aiqRenderInversion() {
+  var el = document.getElementById('aiq-inv'); var D = _aiqRk.datos;
+  if (!el) return;
+  if (!D || !D.items) { el.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:10px 0">Se completa cuando carga el ranking por publicación.</div>'; return; }
+  var grupos = [
+    ['bien', 'Rinde (Escalar / Mantener)', '#16a34a', ['escalar', 'mantener']],
+    ['mejorar', 'A mejorar (Optimizar)', '#eab308', ['optimizar']],
+    ['revisar', 'Sin conclusión (Revisar / pocos datos)', '#94a3b8', ['revisar', 'sin_datos']],
+    ['pierde', 'Pierde plata (Reducir / Pausar / Retirar)', '#dc2626', ['reducir', 'pausar', 'retirar']],
+    ['fuera', 'Ya fuera de campaña (gasto anterior)', '#cbd5e1', []]
+  ];
+  var tot = 0, por = {};
+  D.items.forEach(function (i) {
+    var k = i.reco && i.reco.clave, c = i.cost || 0; if (!c) return; tot += c;
+    var g = i.estado === 'idle' ? grupos[4] : grupos.filter(function (x) { return x[3].indexOf(k) >= 0; })[0]; if (!g) return;
+    por[g[0]] = por[g[0]] || { c: 0, n: 0 }; por[g[0]].c += c; por[g[0]].n++;
+  });
+  if (!tot) { el.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:10px 0">Sin inversión registrada en el período.</div>'; return; }
+  var barra = grupos.map(function (g) { var p = por[g[0]]; if (!p) return ''; return '<div title="' + _aiqEsc(g[1] + ': ' + aiqPesos(p.c)) + '" style="width:' + (p.c / tot * 100) + '%;background:' + g[2] + '"></div>'; }).join('');
+  var ley = grupos.map(function (g) {
+    var p = por[g[0]] || { c: 0, n: 0 };
+    return '<div style="display:flex;align-items:center;gap:7px;font-size:11.5px;padding:3px 0"><span style="width:10px;height:10px;border-radius:3px;background:' + g[2] + ';flex-shrink:0"></span><span style="flex:1">' + g[1] + ' <span style="color:var(--text3)">· ' + p.n + ' publ.</span></span><b>' + aiqPesos(p.c) + '</b><span style="width:42px;text-align:right;color:var(--text3)">' + Math.round(p.c / tot * 100) + '%</span></div>';
+  }).join('');
+  var pierde = por.pierde ? por.pierde.c : 0;
+  el.innerHTML = '<div style="display:flex;height:16px;border-radius:8px;overflow:hidden;margin:8px 0 6px;background:var(--bg3,#eef1f5)">' + barra + '</div>' +
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));column-gap:18px">' + ley + '</div>' +
+    '<div style="font-size:10.5px;color:var(--text3);margin-top:4px">' + _aiqFmtF(D.desde) + ' – ' + _aiqFmtF(D.hasta) + ' · inversión total ' + aiqPesos(tot) +
+    (pierde ? ' · <b style="color:#dc2626">' + aiqPesos(pierde) + '</b> fueron a publicaciones que hoy pierden plata (detalle en el Ranking).' : '') + '</div>';
 }
 
 // Estado interno del módulo
@@ -38921,6 +39093,139 @@ const BKP_SECTIONS = {
   // calcula todo client-side desde visitas (sin estado persistido).
 };
 
+// ═══════════════════════════════════════════════════════════
+// v303 · BACKUP COMPLETO — secciones nuevas
+// ═══════════════════════════════════════════════════════════
+// Se suman a las de siempre:
+//   · Datos y configuraciones guardados en este navegador (todas las secciones)
+//   · Publicidad (historial, configuración, Excel importados, decisiones y capturas por publicación — en la nube)
+//   · Analizador SEO: foto del último Refresh total (visitas, descuentos, posición, publicidad)
+//   · Cuenta Impala: configuración y proveedores (en la nube)
+// Nunca incluye tokens, contraseñas ni claves de APIs.
+var BKP_LS_EXCLUIR = [/^ml_token_/, /^ml_refresh_/, /^ml_ref_/, /^ml_active_app$/, /^pkce_/, /^mlp_metrics_v\d+_/, /^mlp_items_v\d+$/,
+  /^mlp_orders_v\d+$/, /^mlp_emergency_backup$/, /^mlp_last_backup_export$/, /^mlp_settings_synced_at$/, /^mlp_ship_cache_v\d+$/,
+  /^gsuggest:/, /^mlp_ai_feed_cache_v\d+$/, /^impala_mv_cache$/, /^goog_draft$/, /token|secret|password|passwd|api[_-]?key/i];
+// Contenido que delata credenciales: esas claves tampoco viajan
+var BKP_LS_SECRETO = /"(client_?secret|clientSecret|refresh_?token|refreshToken|access_?token|accessToken|api_?key|apiKey|password)"\s*:\s*"[^"]{8,}"/i;
+// Claves que ya viajan en otras secciones del backup (así una restauración parcial no las pisa)
+var BKP_LS_YA = ['impala_cal_custom', 'impala_cal_birthdays', 'impala_calc_history', 'astro_biblioteca_v1', 'mlp_quick_replies', 'mlp_q_tmpl',
+  'perso_wa_msgs', 'mlp_economia_v1', 'eco_met_cmp_sel', 'mlp_eco_dolar_v1', 'mlp_eco_infl_v1', 'rp_rules', 'impala_active_rules'];
+var _bkpCacheAsync = {};
+
+function _bkpLsLeer() {
+  var out = {}, omitidas = [];
+  try {
+    for (var i = 0; i < localStorage.length; i++) {
+      var k = localStorage.key(i); if (!k) continue;
+      if (BKP_LS_YA.indexOf(k) >= 0) continue;
+      if (BKP_LS_EXCLUIR.some(function (r) { return r.test(k); })) continue;
+      var v = localStorage.getItem(k);
+      if (v == null) continue;
+      if (BKP_LS_SECRETO.test(v)) { omitidas.push(k); continue; }
+      if (v.length > 4 * 1024 * 1024) { omitidas.push(k + ' (muy grande)'); continue; }
+      out[k] = v;
+    }
+  } catch (e) {}
+  if (omitidas.length) out.__omitidas = omitidas.join(', ');
+  return out;
+}
+function _bkpKb(o) { try { return Math.round(JSON.stringify(o).length / 1024); } catch (e) { return 0; } }
+
+Object.assign(BKP_SECTIONS, {
+  lsGeneral: {
+    label: 'Datos y configuraciones de todas las secciones (guardados en este navegador)',
+    icon: '🗂️',
+    get: _bkpLsLeer,
+    hint: function () { var o = _bkpLsLeer(); var n = Object.keys(o).filter(function (k) { return k !== '__omitidas'; }).length; return n + ' claves · ' + _bkpKb(o) + ' KB'; },
+  },
+  publicidad: {
+    label: 'Publicidad — historial diario, configuración, Excel importados, decisiones y ranking por publicación (nube)',
+    icon: '📢',
+    async: true,
+    get: function () { return _bkpCacheAsync.publicidad || null; },
+    hint: function () { return 'se descarga al exportar'; },
+    fetch: async function () {
+      var r = await fetch(WORKER + '/api/ads/backup', { headers: { Authorization: 'Bearer ' + btToken() } });
+      var j = await r.json();
+      if (!j.ok) throw new Error(j.error || ('HTTP ' + r.status));
+      return j.datos;
+    },
+  },
+  seoSnapshot: {
+    label: 'Analizador SEO — datos del último Refresh total (visitas, descuentos, posición SEO, publicidad)',
+    icon: '💾',
+    async: true,
+    get: function () { return _bkpCacheAsync.seoSnapshot || null; },
+    hint: function () { return (typeof _snap !== 'undefined' && _snap.cargado) ? 'refresh del ' + new Date(_snap.cargado.ts).toLocaleDateString('es-AR') : 'se descarga al exportar'; },
+    fetch: async function () { return (typeof _snapGet === 'function') ? await _snapGet() : null; },
+  },
+  ctaNube: {
+    label: 'Cuenta Impala — configuración (orígenes, mensajes, categorías, columnas) y proveedores (nube)',
+    icon: '🧾',
+    async: true,
+    get: function () { return _bkpCacheAsync.ctaNube || null; },
+    hint: function () { return 'se descarga al exportar'; },
+    fetch: async function () {
+      var a = await fetch(WORKER + '/api/cta/config').then(function (r) { return r.json(); });
+      var b = await fetch(WORKER + '/api/cta/proveedores').then(function (r) { return r.json(); });
+      return { config: a && a.ok ? { origenes: a.origenes, waMsgs: a.waMsgs, categorias: a.categorias, preciosCols: a.preciosCols } : null,
+        proveedores: b && b.ok ? b.proveedores : null };
+    },
+  }
+});
+
+// Antes de exportar: bajar las secciones que viven en la nube / IndexedDB
+async function _bkpPrefetch(selection) {
+  var errores = [];
+  for (var key in BKP_SECTIONS) {
+    var sec = BKP_SECTIONS[key];
+    if (!sec.async || (selection && !selection[key])) continue;
+    try { _bkpCacheAsync[key] = await sec.fetch(); }
+    catch (e) { _bkpCacheAsync[key] = null; errores.push(sec.label.split(' — ')[0] + ': ' + e.message); }
+  }
+  if (errores.length) showToast('⚠ Parte del backup no se pudo descargar: ' + errores.join(' · '), 'warn', 8000);
+}
+
+// Restaurar las secciones nuevas
+async function _bkpAplicarExtra(data, selection) {
+  var hechos = [];
+  if (selection.lsGeneral && data.lsGeneral && typeof data.lsGeneral === 'object') {
+    var n = 0;
+    Object.keys(data.lsGeneral).forEach(function (k) {
+      if (k === '__omitidas' || BKP_LS_EXCLUIR.some(function (r) { return r.test(k); })) return;
+      var v = data.lsGeneral[k]; if (typeof v !== 'string') return;
+      try { localStorage.setItem(k, v); n++; } catch (e) { console.warn('[Backup] no entra en el navegador:', k); }
+    });
+    hechos.push(n + ' claves del navegador');
+  }
+  if (selection.publicidad && data.publicidad && typeof data.publicidad === 'object') {
+    try {
+      var r = await fetch(WORKER + '/api/ads/restore', { method: 'POST', headers: { Authorization: 'Bearer ' + btToken(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ datos: data.publicidad }) }).then(function (x) { return x.json(); });
+      if (r.ok) hechos.push('publicidad (' + r.dias + ' días de historial, ' + r.capturas + ' capturas por publicación' + (r.meta ? ', configuración y decisiones' : '') + ')');
+      else console.warn('[Backup] publicidad no restaurada:', r.error);
+    } catch (e) { console.warn('[Backup] publicidad → Worker falló:', e.message); }
+  }
+  if (selection.seoSnapshot && data.seoSnapshot && data.seoSnapshot.ts) {
+    try {
+      var actual = typeof _snapGet === 'function' ? await _snapGet() : null;
+      // solo si la foto del archivo es más nueva que la de este navegador (o no hay ninguna)
+      if (!actual || actual.ts < data.seoSnapshot.ts) { await _snapPut(data.seoSnapshot); _snap.cargado = undefined; hechos.push('foto del último Refresh total'); }
+      else hechos.push('foto del Refresh (se conservó la de este navegador, más nueva)');
+    } catch (e) { console.warn('[Backup] foto SEO no restaurada:', e.message); }
+  }
+  if (selection.ctaNube && data.ctaNube) {
+    try {
+      if (data.ctaNube.config) await fetch(WORKER + '/api/cta/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data.ctaNube.config) });
+      if (Array.isArray(data.ctaNube.proveedores)) await fetch(WORKER + '/api/cta/proveedores', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ proveedores: data.ctaNube.proveedores }) });
+      hechos.push('Cuenta Impala (configuración y proveedores)');
+    } catch (e) { console.warn('[Backup] cta nube falló:', e.message); }
+  }
+  if (hechos.length) console.log('[Backup] restaurado también:', hechos.join(' · '));
+  return hechos;
+}
+
+
 // Construir el objeto de backup desde las variables globales actuales.
 // v113: acepta opcional `selection` (objeto con claves true/false por sección).
 // Si no se pasa, incluye TODAS las secciones (retrocompatible con v86-v112).
@@ -38929,7 +39234,7 @@ function _bkpBuildPayload(selection){
   const includedSections = [];
   const payload = {
     _meta: {
-      panelVersion: 'v118',
+      panelVersion: 'v303',
       exportedAt: new Date().toISOString(),
       userId: typeof userId !== 'undefined' ? userId : null,
       nickname: (typeof APP_CONFIG !== 'undefined' && APP_CONFIG.STORE_NAME) ? APP_CONFIG.STORE_NAME : null,
@@ -38954,8 +39259,10 @@ function _bkpBuildPayload(selection){
 }
 
 // Descargar como archivo .json. v113: acepta selection opcional.
-function bkpExport(selection){
+async function bkpExport(selection){
   try{
+    showToast('⏳ Armando el backup (incluye datos de la nube)…', 'info');
+    await _bkpPrefetch(selection);   // v303: publicidad, foto del Refresh y Cuenta Impala
     const payload = _bkpBuildPayload(selection);
     const json = JSON.stringify(payload, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
@@ -39131,6 +39438,7 @@ async function bkpApplyImport(data, selection){
       if(typeof persoRender === 'function') persoRender();
       if(typeof persoUpdateBadge === 'function') persoUpdateBadge();
     }
+    try{ await _bkpAplicarExtra(data, selection); }catch(e){ console.warn('[Backup] secciones nuevas:', e.message); }   // v303
     // v118: bloque de seoKeywords removido — el SEO Tracker viejo fue descontinuado.
     // Backups antiguos con seoKeywords se ignoran silenciosamente.
 
@@ -39184,7 +39492,8 @@ function bkpOpenModal(){
       const v = sec.get();
       count = Array.isArray(v) ? v.length : (v && typeof v === 'object' ? Object.keys(v).length : 0);
     } catch(e){}
-    const countLabel = count + (count === 1 ? ' item' : ' items');
+    let countLabel = count + (count === 1 ? ' item' : ' items');
+    try{ if(sec.hint) countLabel = sec.hint(); }catch(e){}   // v303
     rowsHtml += '<label style="display:flex;align-items:center;gap:9px;padding:8px 11px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:7px;cursor:pointer;font-size:12.5px;color:#1f2937" onmouseover="this.style.background=\'#f3f4f6\'" onmouseout="this.style.background=\'#f9fafb\'">';
     rowsHtml += '<input type="checkbox" class="bkp-export-check" data-section="'+key+'" checked style="margin:0;cursor:pointer">';
     rowsHtml += '<span style="font-size:14px">'+sec.icon+'</span>';
@@ -39236,7 +39545,7 @@ function bkpOpenModal(){
       <input type="file" id="bkp-import-input" accept="application/json,.json" style="display:none" onchange="bkpImport(this.files[0]);this.value='';" />
 
       <div style="font-size:11px;color:#6b7280;line-height:1.5;text-align:center;margin-top:8px">
-        No incluye: tokens, claves API, AI Rules ni cache de visitas/órdenes (eso se reconstruye solo de ML).
+        Incluye todas las secciones, la publicidad guardada en la nube y la foto del último Refresh total.<br>No incluye tokens, contraseñas ni claves de APIs, ni los caches que se reconstruyen solos desde Mercado Libre.
       </div>
     </div>`;
   document.body.appendChild(modal);
