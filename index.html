@@ -856,7 +856,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v301 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v302 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1344,6 +1344,22 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           Indicá los días corridos que tardás en tener listo el producto para entregar. Cuanto más tiempo tardes en tener tu producto listo para entregar, menos exposición tendrás. <b>0 = entrega inmediata</b> (elimina el tiempo).
         </div>
         <div id="bulk-avail-result" style="margin-top:8px;font-size:12px;min-height:16px"></div>
+      </div>
+
+      <!-- v302: Cambiar stock en masa -->
+      <div style="padding:14px;background:var(--bg3);border-radius:8px;border:1px solid var(--border)">
+        <div style="font-size:13px;font-weight:600;margin-bottom:10px">📦 Cambiar stock</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <div>
+            <label style="font-size:11px;font-weight:500;display:block;margin-bottom:3px">Unidades</label>
+            <input type="number" id="bulk-stock-val" placeholder="Ej: 4" min="0" step="1" style="width:90px;font-size:12px;padding:6px 8px">
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="bulkUpdateStock()">Aplicar</button>
+        </div>
+        <div style="font-size:10.5px;color:var(--text3);margin-top:8px;line-height:1.45">
+          Fija esa cantidad en todas las publicaciones filtradas (con variaciones, en cada variación). <b>0 = stock en 0 y se pausan</b>. Siempre pide confirmación antes de aplicar. Las publicaciones en Full no se pueden modificar.
+        </div>
+        <div id="bulk-stock-result" style="margin-top:8px;font-size:12px;min-height:16px"></div>
       </div>
     </div>
   </div>
@@ -6064,6 +6080,7 @@ function _saveExtraData(){
         map[i.id] = {
           lu: i.last_updated || null,
           rp: i._regularPrice || null,
+          pp: (+i._regularPrice > 0 && +i.price > 0 && +i._regularPrice > +i.price) ? +i.price : null,   // v302: precio con descuento
           st: (i.sale_terms||[]).filter(t=>t.id==='MANUFACTURING_TIME').map(t=>({id:t.id,value_name:t.value_name})),
           // v203: guardar también las métricas (visitas/ventas) para que queden visibles
           m: m ? { v30:m.visits30||0, v7:m.visits||0, s60:m.sales60||0, s7:m.sales7||0, sold:m.sold||0, conv:m.conv||0 } : null,
@@ -6090,7 +6107,12 @@ function _restoreExtraData(){
       const d = map[i.id];
       if(d){
         if(d.lu && !i.last_updated) i.last_updated = d.lu;
-        if(d.rp && !i._regularPrice) i._regularPrice = d.rp;
+        // v302: restaurar el descuento completo (tachado + precio con descuento), solo si el precio no cambió
+        if(d.rp && !i._regularPrice && d.pp){
+          const p0 = +i.price || 0, tol = Math.max(1, d.rp * 0.005);
+          if(Math.abs(p0 - d.rp) <= tol){ i._regularPrice = d.rp; i.price = d.pp; }
+          else if(Math.abs(p0 - d.pp) <= tol){ i._regularPrice = d.rp; }
+        }
         if(d.st && d.st.length && !(i.sale_terms&&i.sale_terms.length)) i.sale_terms = d.st;
         // v203: restaurar métricas (visitas/ventas) si no están en memoria
         if(d.m && typeof itemMetrics!=='undefined' && !itemMetrics[i.id]){
@@ -11271,6 +11293,71 @@ function _seoUmbralHtml(key) {
     L.map(function (x) { return '<div>• ' + _aiqEsc(x) + '</div>'; }).join('') + '</div>';
 }
 
+// ── v302: columnas extra del Exportar Reporte .xlsx (todo lo que muestra la tabla) ──
+function _seoExportColsExtra(fmtTs) {
+  var pct1 = function (v) { return v == null ? '' : Math.round(v * 1000) / 10; };
+  var r2 = function (v) { return v == null ? '' : Math.round(v * 100) / 100; };
+  var rec = function (i) { var x = aiqSeoInfo(i); return x && _aiqSeo.recos ? _aiqSeo.recos[i.id] || null : null; };
+  var inf = function (i) { return aiqSeoInfo(i); };
+  var catS = function (i) { var c = _aiqSeo.cat ? _aiqSeo.cat[i.id] : null; return c ? c.s : null; };
+  var A = function (k) { return function (i) { var r = rec(i); return r && r[k] != null ? r[k] : ''; }; };
+  return [
+    { id: 'regPrice', label: 'Precio original (sin descuento)', type: 'num', def: true, value: function (i) { return _itemTieneDescuento(i) ? _itemPrecioRegular(i) : ''; } },
+    { id: 'discPct', label: 'Descuento %', type: 'num', def: true, value: function (i) { return _itemTieneDescuento(i) ? _itemDescuentoPct(i) : ''; } },
+    { id: 'lastUpd', label: 'Última modificación', type: 'text', def: true, value: function (i) { return fmtTs(i.last_updated); } },
+    { id: 'healthPct', label: 'Calidad pub. (columna, %)', type: 'num', def: true, value: function (i) { try { return itemHealthPct(i); } catch (e) { return ''; } } },
+    { id: 'pkg', label: 'Medidas paquete', type: 'text', def: true, value: function (i) { var d = _pubParseDims(i); if (d) return d.h + ' × ' + d.w + ' × ' + d.l + ' cm · ' + d.p + ' g'; return _pubEmpaqueEditable(i) ? 'sin medidas' : 'sin envío ME'; } },
+    { id: 'estrategia', label: 'Estrategia (escenarios)', type: 'text', def: true, value: function (i) { return SEO_SCENARIO_ORDER.filter(function (k) { try { return _scenarioMatchesItem(k, i); } catch (e) { return false; } }).map(function (k) { return SEO_SCENARIOS[k].label; }).join(' · '); } },
+    { id: 'adsEstado', label: 'Publicidad · estado del anuncio', type: 'text', def: true, value: function (i) { if (!_aiqSeo.ts) return 'sin cargar'; var s = catS(i); return s ? _aiqSeoEstadoTxt(s) : 'No figura en la lista de anuncios'; } },
+    { id: 'adsGrupo', label: 'Publicidad · grupo', type: 'text', def: true, value: function (i) { var x = inf(i); return !x ? '' : ({ ads: 'Con anuncio', op: 'Sin anuncio', unk: 'Desconocido' })[x.grupo]; } },
+    { id: 'adsReco', label: 'Publicidad · recomendación', type: 'text', def: true, value: function (i) { var x = inf(i); return x ? x.label : ''; } },
+    { id: 'adsEsc', label: 'Publicidad · escenario', type: 'text', def: true, value: function (i) { var x = inf(i); return x && x.key && SEO_SCENARIOS[x.key] ? SEO_SCENARIOS[x.key].label : ''; } },
+    { id: 'adsPrio', label: 'Publicidad · prioridad', type: 'text', def: true, value: function (i) { var x = inf(i); return x && x.prio ? x.prio : ''; } },
+    { id: 'adsMot', label: 'Publicidad · motivos', type: 'text', def: true, value: function (i) { var x = inf(i); return x ? x.mot.join(' | ') : ''; } },
+    { id: 'adsPrints', label: 'Publicidad · impresiones 30d', type: 'num', def: true, value: A('prints') },
+    { id: 'adsClicks', label: 'Publicidad · clics 30d', type: 'num', def: true, value: A('clicks') },
+    { id: 'adsCtr', label: 'Publicidad · CTR %', type: 'num', def: true, value: function (i) { var r = rec(i); return r && r.prints ? pct1(r.clicks / r.prints) : ''; } },
+    { id: 'adsCpc', label: 'Publicidad · valor del clic (CPC)', type: 'num', def: true, value: function (i) { var r = rec(i); return r ? r2(r.cpc) : ''; } },
+    { id: 'adsCost', label: 'Publicidad · inversión 30d', type: 'num', def: true, value: function (i) { var r = rec(i); return r ? r2(r.cost) : ''; } },
+    { id: 'adsRev', label: 'Publicidad · ingresos 30d', type: 'num', def: true, value: function (i) { var r = rec(i); return r ? r2(r.rev) : ''; } },
+    { id: 'adsVentas', label: 'Publicidad · ventas 30d', type: 'num', def: true, value: A('ventas') },
+    { id: 'adsRoas', label: 'Publicidad · ROAS', type: 'num', def: true, value: function (i) { var r = rec(i); return r ? r2(r.roas) : ''; } },
+    { id: 'adsAcos', label: 'Publicidad · ACOS %', type: 'num', def: true, value: function (i) { var r = rec(i); return r ? pct1(r.acos) : ''; } },
+    { id: 'adsPeriodo', label: 'Publicidad · período', type: 'text', def: true, value: function () { return _aiqSeo.ts ? _aiqFmtF(_aiqSeo.desde) + ' – ' + _aiqFmtF(_aiqSeo.hasta) : ''; } }
+  ];
+}
+function _seoExportDictExtra() {
+  var c = _aiqSeo.ctx || {};
+  return [
+    ['Precio original / Descuento %', 'Precio tachado y % de descuento vigente (vacío = sin descuento)'],
+    ['Última modificación', 'Fecha de la última modificación de la publicación en ML'],
+    ['Calidad pub. (columna, %)', 'El mismo valor de la columna "Calidad pub." de la tabla'],
+    ['Medidas paquete', 'Alto × ancho × largo y peso del paquete cargados en ML'],
+    ['Estrategia (escenarios)', 'Todos los escenarios del Analizador SEO en los que entra la publicación'],
+    ['Publicidad · estado del anuncio', 'Activo / Pausado / Fuera de campaña (idle) / En espera (hold, no se muestra) / No figura'],
+    ['Publicidad · grupo', 'Con anuncio, Sin anuncio (fuera de campaña) o Desconocido'],
+    ['Publicidad · recomendación / escenario', 'Recomendación del panel según los últimos 30 días cerrados vs los 30 anteriores. Informativa: el panel no cambia anuncios'],
+    ['Publicidad · motivos', 'Por qué se recomienda eso (con los números usados)'],
+    ['Publicidad · métricas 30d', 'Impresiones, clics, CTR, valor del clic, inversión, ingresos y ventas atribuidas a la publicidad (API de Product Ads)'],
+    ['Publicidad · ROAS / ACOS', 'ROAS = ingresos ÷ inversión; ACOS = inversión ÷ ingresos. Equilibrio con margen ' + Math.round((c.margen || 0.48) * 100) + '%: ROAS ' + (1 / (c.margen || 0.48)).toFixed(2).replace('.', ',') + 'x']
+  ];
+}
+function _seoExportResumenExtra(items) {
+  if (!_aiqSeo.ts) return [['── PUBLICIDAD ──'], ['Datos de publicidad', 'sin cargar']];
+  var n = { ads: 0, op: 0, unk: 0 }, t = { cost: 0, rev: 0, ventas: 0, clicks: 0 }, esc = {};
+  items.forEach(function (i) {
+    var x = aiqSeoInfo(i); if (!x) return; n[x.grupo]++;
+    if (x.key) esc[x.key] = (esc[x.key] || 0) + 1;
+    var r = _aiqSeo.recos[i.id]; if (r && x.grupo === 'ads') { t.cost += r.cost || 0; t.rev += r.rev || 0; t.ventas += r.ventas || 0; t.clicks += r.clicks || 0; }
+  });
+  var out = [[''], ['── PUBLICIDAD (últimos 30 días: ' + _aiqFmtF(_aiqSeo.desde) + ' – ' + _aiqFmtF(_aiqSeo.hasta) + ') ──'],
+    ['Con anuncio', n.ads], ['Sin anuncio (fuera de campaña)', n.op], ['Desconocido', n.unk],
+    ['Inversión publicitaria (total)', Math.round(t.cost)], ['Ingresos por publicidad (total)', Math.round(t.rev)], ['Ventas por publicidad (total)', t.ventas], ['Clics (total)', t.clicks],
+    ['ROAS del reporte', t.cost ? Math.round(t.rev / t.cost * 100) / 100 : '']];
+  AIQ_SEO_ADS_ORDER.concat(AIQ_SEO_OP_ORDER).forEach(function (k) { if (esc[k]) out.push(['Escenario ' + SEO_SCENARIOS[k].label, esc[k]]); });
+  return out;
+}
+
 // ═══════════════════════════════════════════════════════════
 // v301 · FOTO DEL ÚLTIMO REFRESH (persistente entre aperturas del panel)
 // ═══════════════════════════════════════════════════════════
@@ -11377,7 +11464,9 @@ async function snapAplicar() {
     if (e.lu && !i.last_updated) i.last_updated = e.lu;
     if (e.st && !(i.sale_terms && i.sale_terms.length)) i.sale_terms = e.st;
     // el descuento solo se restaura si el precio no cambió desde el refresh
-    if (e.rp && !(+i._regularPrice > 0) && (+i.price === e.rp || +i.price === e.pp)) { i._regularPrice = e.rp; i.price = e.pp; }
+    // (v302: también cuando la otra restauración ya puso el precio tachado pero no el precio con descuento)
+    var cerca = function (a, b) { return a > 0 && b > 0 && Math.abs(a - b) <= Math.max(1, b * 0.005); };
+    if (e.rp && e.pp && (cerca(+i.price, e.rp) || cerca(+i.price, e.pp)) && (!(+i._regularPrice > 0) || cerca(+i._regularPrice, e.rp))) { i._regularPrice = e.rp; i.price = e.pp; }
   });
   // 3) Termómetro + posición SEO
   if (d.thermo && (primera || !window._seoThermo)) window._seoThermo = d.thermo;
@@ -11398,6 +11487,67 @@ function snapEstadoUI() {
   el.innerHTML = '💾 Mostrando los datos guardados del ' + (d.origen === 'refresh' ? '🔄 Refresh total' : '📊 Cargar métricas') + ' del <b>' + f(d.ts) + '</b>' +
     (d.origen !== 'refresh' && d.ultRefresh ? ' (último Refresh total: ' + f(d.ultRefresh) + ')' : '') +
     ': visitas, ventas, descuentos, posición SEO, escenarios de ML y publicidad. Quedan fijos hasta el próximo Refresh total o Cargar métricas.';
+}
+
+// ═══════════════════════════════════════════════════════════
+// v302 · EDICIÓN MASIVA — CAMBIAR STOCK DE LAS FILTRADAS
+// ═══════════════════════════════════════════════════════════
+// Fija la misma cantidad en todas las publicaciones filtradas/seleccionadas.
+// Con variaciones, la cantidad se aplica a CADA variación.
+// 0 unidades → stock 0 y además se PAUSA la publicación.
+// Siempre pide confirmación explícita antes de tocar Mercado Libre.
+async function bulkUpdateStock() {
+  var targets = _bulkSelected();
+  if (!targets.length) { alert('Aplicá un filtro primero para seleccionar publicaciones.'); return; }
+  var el = document.getElementById('bulk-stock-val');
+  var raw = el ? String(el.value).trim() : '';
+  var qty = parseInt(raw, 10);
+  if (raw === '' || isNaN(qty) || qty < 0 || String(qty) !== raw.replace(/^0+(?=\d)/, '')) { alert('Ingresá una cantidad entera de 0 o más.'); return; }
+  if (qty > 99999) { alert('La cantidad es demasiado alta.'); return; }
+  var conVar = targets.filter(function (i) { return i.variations && i.variations.length; }).length;
+  var full = targets.filter(function (i) { return i.shipping && i.shipping.logistic_type === 'fulfillment'; }).length;
+  var msg = qty === 0
+    ? '¿Seguro que querés poner el stock en 0 y PAUSAR ' + targets.length + ' publicaciones?'
+    : '¿Seguro que querés fijar el stock en ' + qty + ' unidades en ' + targets.length + ' publicaciones?';
+  if (conVar) msg += '\n\n' + conVar + ' tienen variaciones: la cantidad se aplica a cada variación.';
+  if (full) msg += '\n\n' + full + ' están en Full: Mercado Libre no deja cambiarles el stock (van a figurar como fallidas).';
+  if (qty > 0) msg += '\n\nLas que estén pausadas siguen pausadas (para activarlas usá "▶ Reactivar filtradas").';
+  if (!confirm(msg)) return;
+
+  _cloudStatus('saving');
+  var res = document.getElementById('bulk-stock-result');
+  var ok = 0, fail = 0, pausadas = 0, errores = [];
+  var put = async function (id, body) {
+    var r = await fetch(WORKER + '/api/items/' + id, { method: 'PUT', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    var d = await r.json().catch(function () { return {}; });
+    if (d.error || !r.ok) throw new Error(d.message || d.error || 'HTTP ' + r.status);
+    return d;
+  };
+  for (var n = 0; n < targets.length; n++) {
+    var item = targets[n];
+    if (res) res.innerHTML = '⏳ ' + (n + 1) + '/' + targets.length + ' · ' + ok + ' ok' + (fail ? ' · ' + fail + ' fallaron' : '');
+    try {
+      var body = item.variations && item.variations.length
+        ? { variations: item.variations.map(function (v) { return { id: v.id, available_quantity: qty }; }) }
+        : { available_quantity: qty };
+      await put(item.id, body);
+      if (item.variations && item.variations.length) { item.variations.forEach(function (v) { v.available_quantity = qty; }); item.available_quantity = qty * item.variations.length; }
+      else item.available_quantity = qty;
+      if (qty === 0 && item.status !== 'paused') {
+        await new Promise(function (r) { setTimeout(r, 150); });
+        try { await put(item.id, { status: 'paused' }); item.status = 'paused'; pausadas++; }
+        catch (e) { errores.push(item.id + ': stock en 0 pero no se pudo pausar (' + e.message + ')'); }
+      }
+      ok++;
+    } catch (e) { fail++; errores.push(item.id + ': ' + e.message); console.warn('[Bulk stock]', item.id, e.message); }
+    await new Promise(function (r) { setTimeout(r, 150); });
+  }
+  _cloudStatus(fail === 0 && !errores.length ? 'ok' : 'error');
+  if (res) res.innerHTML = (fail === 0 ? '✅' : '⚠️') + ' ' + ok + ' con stock ' + qty + (qty === 0 ? ' · ' + pausadas + ' pausadas' : '') + (fail ? ' · ' + fail + ' fallaron' : '') +
+    (errores.length ? '<details style="margin-top:4px"><summary style="cursor:pointer;font-size:11px">Ver detalle</summary><div style="font-size:10.5px;color:var(--text3);line-height:1.4">' +
+      errores.slice(0, 50).map(function (x) { return String(x).replace(/[<>&]/g, ''); }).join('<br>') + '</div></details>' : '');
+  try { _saveDataCache && _saveDataCache(); } catch (e) {}
+  renderBulkList();
 }
 
 
@@ -12602,6 +12752,7 @@ function _seoExportColumns(){
     { id:'freeShip',    label:'Envío gratis',       type:'text', def:true,  value:i=> ((i.shipping?.free_shipping)||(i.tags||[]).includes('free_shipping'))?'Sí':'No' },
     { id:'health',      label:'Health ML (%)',      type:'num',  def:true,  value:i=> typeof i.health==='number'?Math.round(i.health*100):'' },
     { id:'problems',    label:'Problemas detectados',type:'text', def:true, value:i=> qualityChecks(i).map(p=>p.label).join(' · ') },
+    ..._seoExportColsExtra(fmtTs),   // v302: descuento, empaque, estrategia y toda la publicidad
     { id:'permalink',   label:'Link publicación',   type:'text', def:true,  value:i=> i.permalink||'' },
   ];
 }
@@ -12695,6 +12846,7 @@ async function seoExportRun(){
   if(st){ st.textContent = 'Cargando librería...'; st.style.color = 'var(--text3)'; }
 
   try{
+    try{ if(!_aiqSeo.ts){ if(st) st.textContent = 'Cargando datos de publicidad...'; await aiqSeoCargar(false); } }catch(e){}   // v302
     const XLSX = await _seoLoadSheetJS();
     if(st) st.textContent = 'Armando archivo...';
 
@@ -12768,6 +12920,7 @@ async function seoExportRun(){
       ['Ventas 7d (total)', sum(M('sales'))],
       ['Vendidas históricas (total)', sum(items.map(i=>i.sold_quantity||0))],
       ['Valor de inventario (precio×stock)', sum(items.map(i=>(i.price||0)*(i.available_quantity??0)))],
+      ..._seoExportResumenExtra(items),
     ];
     const wsResumen = XLSX.utils.aoa_to_sheet(resumen);
     wsResumen['!cols'] = [{ wch: 36 }, { wch: 24 }];
@@ -12808,6 +12961,7 @@ async function seoExportRun(){
       ['Envío gratis', 'Si ofrece envío gratis'],
       ['Health ML (%)', 'Score de salud oficial de MercadoLibre'],
       ['Problemas detectados', 'Lista de issues que el panel encontró en la publicación'],
+      ..._seoExportDictExtra(),
       ['Link publicación', 'URL pública de la publicación'],
       [''],
       ['── PROMPT SUGERIDO (copialo y pegalo junto con este archivo en la IA) ──'],
@@ -19980,14 +20134,51 @@ function aiqRenderSimulador(reset) {
   if (c.vacio || !c.presupuesto) { el.innerHTML = '<div style="font-size:12px;color:var(--text3)">Necesita un período con presupuesto y métricas.</div>'; return; }
   if (reset || !inp.value) inp.value = Math.round(c.presupuesto * 1.15 / 100) * 100;
   var s = aiqSimular(c, Number(inp.value), { margen: _aiqMargen() });
-  if (!s.ok) { el.innerHTML = '<div style="font-size:12px;color:var(--text3)">' + _aiqEsc(s.motivo) + '</div>'; return; }
+  if (!s.ok) { el.innerHTML = '<div style="font-size:12px;color:var(--text3)">' + _aiqEsc(s.motivo) + '</div>' + _aiqSimAyuda(c); return; }
   var filas = s.escenarios.map(function (e) {
     return '<tr><td>' + e.nombre + '</td><td style="text-align:right">' + aiqX(e.roasMarginal) + '</td><td style="text-align:right">' + aiqPesos(e.gastoExtra || 0) +
       '</td><td style="text-align:right">' + aiqPesos(e.ingresoExtra || 0) + '</td><td style="text-align:right;font-weight:700;color:' + ((e.resultadoExtra || 0) >= 0 ? '#166534' : '#991b1b') + '">' + aiqPesos(e.resultadoExtra || 0) + '</td></tr>';
   }).join('');
   el.innerHTML = '<div style="font-size:11px;color:var(--text3);margin-bottom:6px">De ' + aiqPesos(s.presActual) + ' a ' + aiqPesos(s.presNuevo) + '/día, sobre ' + s.dias + ' días:</div>' +
     '<table style="width:100%;font-size:11.5px;border-collapse:collapse"><thead><tr style="color:var(--text3);font-size:10px;text-align:left"><th>Escenario</th><th style="text-align:right">ROAS del extra</th><th style="text-align:right">Δ inversión</th><th style="text-align:right">Δ ingresos</th><th style="text-align:right">Δ resultado</th></tr></thead><tbody>' + filas + '</tbody></table>' +
-    '<div style="margin-top:8px;font-size:10.5px;color:var(--text3);line-height:1.45">' + s.supuestos.concat(s.limites).map(function (x) { return '· ' + _aiqEsc(x); }).join('<br>') + '</div>';
+    '<div style="margin-top:8px;font-size:10.5px;color:var(--text3);line-height:1.45">' + s.supuestos.concat(s.limites).map(function (x) { return '· ' + _aiqEsc(x); }).join('<br>') + '</div>' +
+    _aiqSimAyuda(c, s);
+}
+// v302: guía de uso del simulador con los valores reales del período (API de Product Ads)
+var _aiqSimAyudaAbierta = true;
+function _aiqSimAyuda(c, s) {
+  var m = _aiqMargen(), eq = 1 / m, cfg = _aiqCfg(), obj = cfg.roasObj || AIQ_UMBRALES_DEF.roasObj;
+  var nd = '<span style="color:var(--text3)">N/D</span>';
+  var uso = c.usoPresupuesto, roas = c.roas;
+  var lectura;
+  if (roas == null || !c.presupuesto) lectura = 'Faltan datos del período para sugerir una dirección.';
+  else if (roas < eq) lectura = 'Hoy el ROAS (' + aiqX(roas) + ') está <b>debajo del equilibrio</b> (' + aiqX(eq) + '): cada peso extra probablemente pierda plata. Probá un presupuesto <b>menor</b> y mirá si el Δ resultado da verde.';
+  else if (uso != null && uso < 0.85) lectura = 'Hoy se usa solo el <b>' + aiqPct(uso, 0) + '</b> del presupuesto: Mercado Libre no llega a gastarlo todo, así que <b>subirlo casi no cambia nada</b>. Antes conviene mejorar las publicaciones (fotos, precio, título).';
+  else if (roas >= obj) lectura = 'Se usa el ' + (uso != null ? aiqPct(uso, 0) : 'N/D') + ' del presupuesto con ROAS ' + aiqX(roas) + ' (sobre el objetivo ' + aiqX(obj) + '): es el caso donde <b>subir el presupuesto puede convenir</b>. Probá +10% a +20% y confirmá a los 14 días.';
+  else lectura = 'ROAS ' + aiqX(roas) + ': rentable (sobre ' + aiqX(eq) + ') pero debajo del objetivo ' + aiqX(obj) + '. Subir el presupuesto suele bajar el ROAS: primero optimizá.';
+  var fila = function (k, v, tip) { return '<tr><td style="padding:2px 6px 2px 0;color:var(--text2)" title="' + _aiqEsc(tip || '') + '">' + k + '</td><td style="text-align:right;font-weight:700">' + v + '</td></tr>'; };
+  return '<details ' + (_aiqSimAyudaAbierta ? 'open ' : '') + 'ontoggle="_aiqSimAyudaAbierta=this.open" style="margin-top:10px;border-top:1px dashed var(--border);padding-top:8px">' +
+    '<summary style="cursor:pointer;font-size:12px;font-weight:700">ℹ️ Cómo usar el simulador</summary>' +
+    '<div style="font-size:11.5px;line-height:1.5;margin-top:6px">' +
+    '<div><b>Para qué sirve:</b> antes de cambiar el presupuesto diario en Mercado Libre, estima qué pasaría con la inversión, los ingresos y la ganancia. No cambia nada en la campaña.</div>' +
+    '<div style="margin-top:6px"><b>Cómo se usa:</b></div>' +
+    '<div>1. Escribí arriba el presupuesto diario que querés probar (sale cargado un 15% más que el actual).</div>' +
+    '<div>2. Leé la fila <b>Central</b> (la más probable); Pesimista y Optimista marcan el rango.</div>' +
+    '<div>3. Mirá <b>Δ resultado</b>: es la ganancia extra = Δ ingresos × margen − Δ inversión. <span style="color:#166534;font-weight:700">Verde</span> conviene, <span style="color:#991b1b;font-weight:700">rojo</span> pierde plata.</div>' +
+    '<div>4. Si decidís cambiarlo, lo hacés vos en Mercado Libre y registrás la decisión; a los 14 días se mide el efecto real.</div>' +
+    '<div style="margin-top:8px"><b>Con qué datos calcula</b> (período elegido, ' + _aiqFmtF(c.desde) + ' – ' + _aiqFmtF(c.hasta) + '):</div>' +
+    '<table style="font-size:11.5px;border-collapse:collapse;margin-top:2px">' +
+      fila('Presupuesto diario actual', c.presupuesto ? aiqPesos(c.presupuesto) : nd, 'Presupuesto de la campaña según la API de Product Ads') +
+      fila('Gasto diario promedio', c.gastoDiario != null ? aiqPesos(c.gastoDiario) : nd, 'Inversión del período ÷ días (API)') +
+      fila('Uso del presupuesto', uso != null ? aiqPct(uso, 0) : nd, 'Gasto ÷ (presupuesto × días). Si es bajo, subir el presupuesto no se gasta') +
+      fila('ROAS actual', roas != null ? aiqX(roas) : nd, 'Ingresos atribuidos ÷ inversión (API)') +
+      fila('ROAS de equilibrio', aiqX(eq), 'Con margen ' + aiqPct(m, 0) + ': debajo de este ROAS cada venta publicitada pierde plata') +
+      fila('ROAS objetivo', aiqX(obj), 'Configurable en ⚙ Configuración') +
+      fila('Impresiones perdidas por presupuesto', c.lostBud != null ? aiqPct(c.lostBud, 0) : nd, 'Si el dato existe, pone un techo al gasto extra. La API actual no lo entrega por día; viene del Excel importado') +
+    '</table>' +
+    '<div style="margin-top:8px;padding:7px 9px;background:var(--bg2,#f8f9fc);border-radius:6px"><b>Lectura con tus datos:</b> ' + lectura + '</div>' +
+    '<div style="margin-top:6px;color:var(--text3);font-size:10.5px">El "ROAS del extra" es menor al actual porque el dinero adicional compra impresiones de menor calidad (rendimientos decrecientes). Son rangos con supuestos, no una predicción.</div>' +
+    '</div></details>';
 }
 
 function _aiqResultadoPosterior(reco) {
@@ -20322,14 +20513,15 @@ function aiqTogglePill(btn) {
 }
 function _aiqVentasTiendaDia() {
   // facturación total de la tienda por día (para TACOS diario), solo si las órdenes cubren el día
-  var porDia = {}, min = null;
+  var porDia = {}, uniDia = {}, min = null;
   try { (allOrders || []).forEach(function (o) {
     if (o.status === 'cancelled' || o.status === 'invalid') return;
     var f = String(o.date_created || '').slice(0, 10); if (!f) return;
     if (!min || f < min) min = f;
     porDia[f] = (porDia[f] || 0) + (Number(o.total_amount) || 0);
+    uniDia[f] = (uniDia[f] || 0) + (o.order_items || []).reduce(function (a, oi) { return a + (Number(oi.quantity) || 0); }, 0);
   }); } catch (e) {}
-  return { porDia: porDia, desde: min };
+  return { porDia: porDia, uniDia: uniDia, desde: min };
 }
 function aiqSerieMetrica(desde, hasta, m, vt) {
   var out = [];
@@ -20343,6 +20535,18 @@ function aiqSerieMetrica(desde, hasta, m, vt) {
     out.push(v == null || !isFinite(v) ? null : Math.round(v * 100) / 100);
   }
   return out;
+}
+// v302: ventas SIN publicidad del día = ventas totales de la tienda (órdenes) − ventas atribuidas a publicidad
+function aiqSerieSinPub(desde, hasta, m, vt) {
+  var out = [], tot = [];
+  for (var f = desde; f <= hasta; f = aiqSumarDias(f, 1)) {
+    var dia = aiqAgregar(_aiq.registros.filter(function (r) { return r.kind === 'dia'; }), f, f);
+    var t = !vt.desde || f < vt.desde ? null : (m === 'rev' ? (vt.porDia[f] || 0) : (vt.uniDia[f] || 0));
+    var pub = dia.vacio || dia.cobertura < 1 ? null : (m === 'rev' ? dia.rev : dia.ventas);
+    tot.push(t);
+    out.push(t == null || pub == null ? null : Math.round(Math.max(0, t - pub) * 100) / 100);
+  }
+  return { sin: out, total: tot };
 }
 function aiqRenderGrafico() {
   var cv = document.getElementById('aiq-chart'), msg = document.getElementById('aiq-chart-msg'), sub = document.getElementById('aiq-chart-sub'), pk = document.getElementById('aiq-peak');
@@ -20369,10 +20573,17 @@ function aiqRenderGrafico() {
   var single = _aiqMetricas.size === 1, ds = [];
   var esRatio = function (m) { return AIQ_PILLS[m].tipo === 'x' || AIQ_PILLS[m].tipo === '%'; };
   var mezcla = !single && [..._aiqMetricas].some(esRatio) && [..._aiqMetricas].some(function (m) { return !esRatio(m); });
+  var sinPub = {};
   _aiqMetricas.forEach(function (m) {
     var P = AIQ_PILLS[m];
-    ds.push({ label: P.lbl, data: series[m], borderColor: P.col, backgroundColor: single ? P.bg : 'transparent', borderWidth: 2, fill: single, tension: .4,
+    if ((m === 'rev' || m === 'ventas') && !c.vacio) {
+      var sp0 = aiqSerieSinPub(c.desde, c.hasta, m, vt);
+      if (sp0.sin.some(function (v) { return v != null; })) sinPub[m] = sp0;
+    }
+    ds.push({ label: P.lbl + (sinPub[m] ? ' con publicidad' : ''), data: series[m], borderColor: P.col, backgroundColor: single ? P.bg : 'transparent', borderWidth: 2, fill: single, tension: .4,
       pointRadius: 2, pointBackgroundColor: P.col, spanGaps: false, yAxisID: mezcla && esRatio(m) ? 'y2' : 'y', _tipo: P.tipo });
+    if (sinPub[m]) ds.push({ label: P.lbl + ' sin publicidad', data: sinPub[m].sin, borderColor: '#38bdf8', backgroundColor: 'transparent', borderWidth: 2, fill: false, tension: .4,
+      pointRadius: 2, pointBackgroundColor: '#38bdf8', spanGaps: false, yAxisID: 'y', _tipo: P.tipo, _sinPub: m });
     if (single && p && !p.vacio) {
       var sp = aiqSerieMetrica(p.desde, p.hasta, m, vt);
       if (sp.some(function (v) { return v != null; }))
@@ -20384,7 +20595,8 @@ function aiqRenderGrafico() {
   v0.forEach(function (v, i) { if (v != null && (mx == null || (m0 === 'acos' || m0 === 'tacos' ? v < mx : v > mx))) { mx = v; ix = i; } });
   var fmt = function (v, t) { return v == null ? 'N/D' : t === '$' ? aiqPesos(v) : t === 'x' ? aiqX(v) : t === '%' ? v.toFixed(2).replace('.', ',') + '%' : Math.round(v).toLocaleString('es-AR'); };
   if (pk) pk.textContent = ix >= 0 ? '📍 Mejor día: ' + labels[ix] + ' — ' + fmt(mx, AIQ_PILLS[m0].tipo) + ' (' + AIQ_PILLS[m0].lbl + (m0 === 'acos' || m0 === 'tacos' ? ', el más bajo' : '') + ')' : '';
-  if (sub) sub.textContent = _aiqFmtF(c.desde) + ' – ' + _aiqFmtF(c.hasta) + (single && p && !p.vacio ? ' vs ' + _aiqFmtF(p.desde) + ' – ' + _aiqFmtF(p.hasta) + ' (punteado)' : '') + ' · datos diarios reales';
+  if (sub) sub.textContent = _aiqFmtF(c.desde) + ' – ' + _aiqFmtF(c.hasta) + (single && p && !p.vacio ? ' vs ' + _aiqFmtF(p.desde) + ' – ' + _aiqFmtF(p.hasta) + ' (punteado)' : '') + ' · datos diarios reales' +
+    (Object.keys(sinPub).length ? ' · celeste = ventas sin publicidad (órdenes de la tienda − lo atribuido a publicidad)' : '');
   var t0 = AIQ_PILLS[m0].tipo;
   var yTick = function (v) { if (!single && mezcla) return v; return t0 === '$' ? '$' + (v >= 1000 ? (v / 1000).toFixed(0) + 'k' : v) : t0 === 'x' ? v + 'x' : t0 === '%' ? v + '%' : v; };
   var scales = { y: Object.assign({}, tOpts(), { position: 'left', beginAtZero: true, ticks: Object.assign({}, tOpts().ticks, { callback: yTick }) }), x: tXOpts() };
@@ -20392,10 +20604,23 @@ function aiqRenderGrafico() {
   var prevIni = p && !p.vacio ? p.desde : null;
   makeChart('aiq-chart', { type: 'line', data: { labels: labels, datasets: ds }, options: Object.assign({}, chartDefaults(), {
     interaction: { mode: 'index', intersect: false },
-    plugins: { legend: { display: !single, position: 'top', labels: { color: '#8892a8', font: { size: 10 }, boxWidth: 8, padding: 8 } },
+    plugins: { legend: { display: !single || Object.keys(sinPub).length > 0, position: 'top', labels: { color: '#8892a8', font: { size: 10 }, boxWidth: 8, padding: 8 } },
       tooltip: { callbacks: {
         title: function (it) { var i = it[0].dataIndex, t = _aiqFmtF(aiqSumarDias(c.desde, i)); return prevIni && single ? t + ' — ' + _aiqFmtF(aiqSumarDias(prevIni, i)) : t; },
-        label: function (ctx) { return ctx.dataset.label + ': ' + fmt(ctx.raw, ctx.dataset._tipo); } } } },
+        label: function (ctx) { return ctx.dataset.label + ': ' + fmt(ctx.raw, ctx.dataset._tipo); },
+        // v302: resumen del día con y sin publicidad
+        footer: function (it) {
+          var i = it[0].dataIndex, out = [];
+          Object.keys(sinPub).forEach(function (m) {
+            var tot = sinPub[m].total[i], con = series[m][i], sin = sinPub[m].sin[i], t = AIQ_PILLS[m].tipo, nom = m === 'rev' ? 'Facturación' : 'Unidades';
+            if (tot == null || con == null) { out.push(nom + ': sin órdenes cargadas de ese día'); return; }
+            out.push(nom + ' total del día: ' + fmt(tot, t));
+            out.push('  · con publicidad: ' + fmt(con, t) + (tot ? ' (' + Math.round(Math.min(con, tot) / tot * 100) + '%)' : ''));
+            out.push('  · sin publicidad: ' + fmt(sin, t) + (tot ? ' (' + Math.round(sin / tot * 100) + '%)' : ''));
+            if (con > tot) out.push('  ⚠ Lo atribuido a publicidad supera lo vendido ese día (ML atribuye ventas de días cercanos)');
+          });
+          return out;
+        } } } },
     scales: scales }) });
 }
 
