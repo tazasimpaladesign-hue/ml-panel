@@ -856,7 +856,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v300 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v301 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1500,7 +1500,9 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <span style="font-size:11px;color:var(--text3);font-weight:600;white-space:nowrap;padding-top:5px;min-width:112px">🎯 Sin publicidad:</span>
       <div class="chips" id="seo-op-chips" style="margin:0;gap:5px;flex:1"></div>
     </div>
-    <div id="seo-ads-estado" style="font-size:10.5px;color:var(--text3);margin-top:4px;line-height:1.4"></div>
+    <div id="seo-scenario-clear-wrap" style="display:none;margin-top:10px"></div>
+    <div id="seo-ads-estado" style="font-size:10.5px;color:var(--text3);margin-top:6px;line-height:1.4"></div>
+    <div id="seo-snap-estado" style="font-size:10.5px;color:var(--text3);margin-top:3px;line-height:1.4"></div>
     <!-- v245: filtros dinámicos declarados por el servidor de ML -->
     <div id="seo-mlfilters" style="display:none;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-top:6px"></div>
     <!-- v79: Panel descriptivo del escenario activo (vacío si no hay ninguno seleccionado) -->
@@ -1606,7 +1608,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <th onclick="seoSort('visits')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:58px;max-width:58px;background:#eff6ff" title="Visitas últimos 7 días">Visitas<br>7d<br><span style="font-size:10px">↕</span><span id="seo-sort-visits" style="font-size:10px"></span></th>
           <th onclick="seoSort('conv')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:70px;max-width:70px;background:#fefce8" title="Tasa de conversión = Ventas/Visitas">Conv%<br><span style="font-size:10px">↕</span><span id="seo-sort-conv" style="font-size:10px"></span></th>
           <th style="text-align:center;line-height:1.2;width:120px;max-width:120px;background:#f5f3ff">Estrategia</th>
-          <th style="text-align:center;line-height:1.2;min-width:104px" title="Recomendación publicitaria según los últimos 30 días cerrados. Pasá el mouse sobre cada celda para ver los motivos.">Publicidad<br><span style="font-size:9.5px;font-weight:400">30 días</span></th>
+          <th id="seo-th-ads" onclick="seoAdsSort()" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;min-width:104px;max-width:118px;width:118px" title="Recomendación publicitaria según los últimos 30 días cerrados. Elegí el criterio en el desplegable y tocá para ordenar mayor → menor / menor → mayor.">Publicidad<br><span style="font-size:9.5px;font-weight:400">30 días</span></th>
           <th style="line-height:1.2;width:120px;max-width:120px">Problemas</th>
           <th style="line-height:1.2;width:78px;max-width:78px;text-align:center">Acciones</th>
         </tr></thead>
@@ -6211,6 +6213,7 @@ async function _cargarLastUpdated(soloVisibles){
     // guardar todo para que quede visible en otras PCs
     _saveExtraData();
     try{ _saveDataCache && _saveDataCache(); }catch(e){}
+    try{ snapProgramar(); }catch(e){}   // v301
     showToast('✓ Datos cargados: fechas, tiempo de disponib y descuentos','success');
     console.log('[datosML] fechas+tiempo de', total, 'items · descuentos de', objetivo.length);
   }catch(e){
@@ -6286,6 +6289,7 @@ async function loadItemsFull(){
 }
 
 function _updateItemsUI(){
+  try{ setTimeout(()=>{ snapAplicar(); }, 0); }catch(e){}   // v301: restaurar la foto del último refresh
   const active=allItems.filter(i=>i.status==='active').length;
   const paused=allItems.filter(i=>i.status==='paused').length;
   const review=allItems.filter(i=>i.status==='under_review').length;
@@ -10795,7 +10799,8 @@ const SEO_SCENARIO_ORDER = [
 // Para las publicaciones fuera de campaña (idle) clasifica la oportunidad con
 // las métricas del propio Analizador SEO. Solo lectura: nunca toca anuncios.
 var _aiqSeo = { ts: 0, cargando: false, cat: null, catInfo: null, recos: {}, ctx: null, desde: null, hasta: null, fuente: null, error: null, memo: {}, gen: '' };
-var AIQ_SEO_CACHE = 'aiq_seo_v1', AIQ_SEO_TTL = 3 * 3600 * 1000;
+// v301: los datos quedan fijos hasta el próximo Refresh total (no vencen solos)
+var AIQ_SEO_CACHE = 'aiq_seo_v2';
 var AIQ_SEO_ADS_ORDER = ['ads_escalar', 'ads_mantener', 'ads_optimizar', 'ads_revisar', 'ads_reducir', 'ads_pausar', 'ads_retirar', 'ads_hold'];
 var AIQ_SEO_OP_ORDER = ['op_publicitar', 'op_optimizar', 'op_evaluar', 'op_sin_datos'];
 // Umbrales de oportunidad (ajustables)
@@ -10857,10 +10862,9 @@ function _aiqHoldCausa(item) {
       actionMain: 'Evaluá retirarla de la campaña. La decisión y el cambio son tuyos.',
       actionSecondary: 'Si querés mantenerla, primero corregí precio o margen.' },
     ads_hold:      { emoji: '🔇', label: 'Anuncio sin entrega', color: '#64748b', grupo: 'ads', filter: f('ads_hold'),
-      description: 'Mercado Libre tiene el anuncio "en espera" (hold) y la publicación está pausada, en revisión o sin stock: el anuncio no se muestra.' +
-        ' Es una hipótesis confirmada solo por el estado de la publicación; si la publicación está activa y con stock el estado figura como desconocido.',
-      actionMain: 'Reactivá la publicación o reponé stock si querés que el anuncio vuelva a mostrarse.',
-      actionSecondary: 'Si no la vas a vender por un tiempo, no hace falta hacer nada: no consume presupuesto.' },
+      description: 'El anuncio sigue cargado en la campaña, pero Mercado Libre no lo muestra ("en espera" / hold) porque la publicación está pausada, en revisión o sin stock. Suele pasar con publicaciones que estuvieron promocionadas y después se pausaron por otro motivo. No consume presupuesto.',
+      actionMain: 'Si la vas a reactivar, no hace falta hacer nada: el anuncio vuelve a mostrarse solo al reactivarla o reponer stock.',
+      actionSecondary: 'Si la pausa es definitiva, podés sacarla de la campaña en Mercado Libre para tenerla ordenada (el panel no lo hace solo).' },
     op_publicitar: { emoji: '🚀', label: 'Publicitar', color: '#0284c7', grupo: 'op', filter: f('op_publicitar'),
       description: 'Sin anuncio, con ventas recientes y repetidas, tráfico suficiente, conversión cerca o sobre el promedio de la tienda, buena calidad y un margen que cubre con holgura el costo por venta publicitaria real de la cuenta.',
       actionMain: 'Candidata a sumar a una campaña. Agregarla lo hacés vos en Mercado Libre.',
@@ -10887,7 +10891,7 @@ function _aiqSeoRangos() {
 }
 function _aiqSeoAplicar(d) {
   _aiqSeo.cat = d.cat; _aiqSeo.catInfo = d.catInfo; _aiqSeo.recos = d.recos || {}; _aiqSeo.ctx = d.ctx; _aiqSeo.desde = d.desde; _aiqSeo.hasta = d.hasta;
-  _aiqSeo.fuente = d.fuente; _aiqSeo.ts = d.ts; _aiqSeo.error = null; _aiqSeo.memo = {}; _aiqSeo.gen = '';
+  _aiqSeo.fuente = d.fuente; _aiqSeo.ts = d.ts; _aiqSeo.error = null; _aiqSeo.memo = {}; _aiqSeo.gen = ''; _aiqSeo.dat = d;
 }
 function _aiqSeoRefrescar() {
   try { if (typeof seoInvalidateScenarioCounts === 'function') seoInvalidateScenarioCounts(); } catch (e) {}
@@ -10895,12 +10899,13 @@ function _aiqSeoRefrescar() {
   try { if (typeof renderSEOTable === 'function' && document.getElementById('seo-tbody')) renderSEOTable(); } catch (e) {}
 }
 async function aiqSeoCargar(forzar) {
-  if (_aiqSeo.cargando) return;
-  if (!forzar && _aiqSeo.ts && Date.now() - _aiqSeo.ts < AIQ_SEO_TTL && _aiqSeo.hasta === _aiqAyer()) { _aiqSeoRefrescar(); return; }
-  if (!forzar && !_aiqSeo.ts) {
+  if (_aiqSeo.cargando) { if (forzar) _aiqSeo.repetir = true; return; }   // v301: un Refresh total nunca se pierde
+  _aiqSeo.repetir = false;
+  if (!forzar && _aiqSeo.ts) { _aiqSeoRefrescar(); return; }
+  if (!forzar) {
     try {
       var c = JSON.parse(localStorage.getItem(AIQ_SEO_CACHE) || 'null');
-      if (c && c.ts && Date.now() - c.ts < AIQ_SEO_TTL && c.hasta === _aiqAyer()) { _aiqSeoAplicar(c); _aiqSeoRefrescar(); return; }
+      if (c && c.ts) { _aiqSeoAplicar(c); _aiqSeoRefrescar(); return; }
     } catch (e) {}
   }
   if (typeof token === 'undefined' || !token) return;
@@ -10944,17 +10949,19 @@ async function aiqSeoCargar(forzar) {
     var recos = {};
     activos.forEach(function (i) {
       var d = aiqItemDerivadas(i), r = aiqRecoItem(i, ctx);
-      recos[i.id] = { k: r.clave, txt: r.txt, ic: r.ic, mot: r.motivos, roas: d.roas, cost: i.cost, ventas: i.ventas };
+      recos[i.id] = { k: r.clave, txt: r.txt, ic: r.ic, mot: r.motivos, roas: d.roas, cost: i.cost, ventas: i.ventas,
+        rev: i.rev, clicks: i.clicks, prints: i.prints, cpc: d.cpc, acos: d.acos };
     });
     var dat = { ts: Date.now(), desde: R.desde, hasta: R.hasta, fuente: fuente, prevOk: prevOk, cat: cat, catInfo: catInfo, recos: recos,
       ctx: { margen: ctx.margen, roasObj: ctx.roasObj, cpvCuenta: ctx.cpvCuenta } };
     _aiqSeoAplicar(dat);
     try { localStorage.setItem(AIQ_SEO_CACHE, JSON.stringify(dat)); } catch (e) {}
+    try { if (typeof snapProgramar === 'function') snapProgramar(); } catch (e) {}
     _aiqSeoEstadoUI();
   } catch (e) {
     _aiqSeo.error = e.message;
     _aiqSeoEstadoUI('⚠ No se pudieron cargar los datos de publicidad: ' + e.message + (_aiqSeo.ts ? ' · se muestran los últimos válidos' : ''));
-  } finally { _aiqSeo.cargando = false; _aiqSeoRefrescar(); }
+  } finally { _aiqSeo.cargando = false; _aiqSeoRefrescar(); if (_aiqSeo.repetir) setTimeout(function () { aiqSeoCargar(true); }, 0); }
 }
 function _aiqSeoEstadoUI(txt) {
   var el = document.getElementById('seo-ads-estado'); if (!el) return;
@@ -10964,7 +10971,7 @@ function _aiqSeoEstadoUI(txt) {
   el.innerHTML = 'Publicidad según últimos 30 días (' + _aiqFmtF(_aiqSeo.desde) + ' – ' + _aiqFmtF(_aiqSeo.hasta) + ') · fuente: ' +
     (_aiqSeo.fuente === 'historial' ? 'historial propio' : 'consulta en vivo') + ' · estados de anuncios: ' + _aiqEsc(ci.origen || 'N/D') +
     (ci.completo ? '' : ' <span style="color:#a16207">(incompleto: las que no figuran quedan como Desconocido)</span>') +
-    ' · actualizado ' + new Date(_aiqSeo.ts).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+    ' · calculado el ' + new Date(_aiqSeo.ts).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' (queda fijo hasta el próximo 🔄 Refresh total)';
 }
 
 // ── Clasificación por publicación ──
@@ -11045,6 +11052,7 @@ function aiqSeoInfo(item) {
   } else {
     x = { grupo: 'unk', key: null, label: '❔ Desconocido', mot: ['Estado del anuncio no reconocido: ' + (c.sr || c.s || 'N/D') + '.'], estado: c.s };
   }
+  x.id = id;
   memo[id] = x;
   return x;
 }
@@ -11086,6 +11094,13 @@ function _aiqSeoRenderChips(counts) {
   var a = document.getElementById('seo-ads-chips'), o = document.getElementById('seo-op-chips');
   if (a) a.innerHTML = _aiqSeoChips(AIQ_SEO_ADS_ORDER, counts);
   if (o) o.innerHTML = _aiqSeoChips(AIQ_SEO_OP_ORDER, counts);
+  // v301: botón "Limpiar escenario" debajo de TODAS las filas, distinto del resto
+  var cl = document.getElementById('seo-scenario-clear-wrap');
+  if (cl) {
+    var sc = _seoActiveScenario ? SEO_SCENARIOS[_seoActiveScenario] : null;
+    cl.style.display = sc ? 'flex' : 'none';
+    cl.innerHTML = sc ? '<button type="button" onclick="seoSetScenario(null)" id="seo-scenario-clear" style="font-size:12.5px;font-weight:700;padding:7px 16px;border-radius:8px;cursor:pointer;background:#fee2e2;color:#991b1b;border:1.5px solid #f87171;box-shadow:0 1px 2px rgba(0,0,0,.06)">✕ Limpiar escenario: ' + sc.emoji + ' ' + _aiqEsc(sc.label) + '</button>' : '';
+  }
   _aiqSeoEstadoUI(_aiqSeo.cargando ? '⏳ Cargando datos de publicidad…' : null);
 }
 
@@ -11103,19 +11118,286 @@ function _aiqSeoTdStripe(item) {
   var x = aiqSeoInfo(item), t = _aiqSeoTono(x);
   return t ? 'border-left:4px ' + (x.grupo === 'op' ? 'dotted' : 'solid') + ' ' + t[2] + ';' : '';
 }
+// v301: celda más visible (texto más grande y en negrita, sin ensanchar la columna)
+var AIQ_SEO_SORT = [
+  ['reco', 'Recomendación'], ['roas', 'ROAS'], ['rev', 'Ingresos'], ['cost', 'Inversión'], ['clicks', 'Clics'],
+  ['cpc', 'Valor del clic'], ['prints', 'Impresiones'], ['ventas', 'Ventas'], ['acos', 'ACOS']
+];
+var _aiqSeoOrden = 'reco';
+function _aiqSeoVal(x, k) {
+  if (!x || x.grupo !== 'ads' || x.estado === 'hold') return null;
+  var r = _aiqSeo.recos[x.id]; if (!r) return null;
+  return r[k] != null ? r[k] : null;
+}
+function _aiqSeoFmt(k, v) {
+  if (v == null) return 'N/D';
+  if (k === 'roas') return aiqX(v);
+  if (k === 'acos') return aiqPct(v, 1);
+  if (k === 'rev' || k === 'cost' || k === 'cpc') return aiqPesos(v);
+  return Math.round(v).toLocaleString('es-AR');
+}
 function _aiqSeoCelda(item) {
-  if (!_aiqSeo.ts) return '<span style="font-size:9.5px;color:var(--text3)" title="Datos de publicidad sin cargar: usá 📊 Cargar métricas">—</span>';
+  if (!_aiqSeo.ts) return '<span style="font-size:11px;color:var(--text3)" title="Datos de publicidad sin cargar: usá 📊 Cargar métricas">—</span>';
   var x = aiqSeoInfo(item); if (!x) return '—';
   var t = _aiqSeoTono(x), col = t ? t[2] : '#64748b';
   var tip = x.mot.concat(['Según últimos 30 días (' + _aiqFmtF(_aiqSeo.desde) + ' – ' + _aiqFmtF(_aiqSeo.hasta) + '). Informativo: el panel no cambia anuncios.']).join('\n');
-  var sub = '';
-  if (x.grupo === 'ads' && x.estado !== 'hold') sub = (x.roas != null ? 'ROAS ' + aiqX(x.roas) : 'ROAS N/D') + ' · ' + (x.cost != null ? aiqPesos(x.cost) : '$ N/D');
-  else if (x.grupo === 'op') sub = 'Sin anuncio' + (x.prio ? ' · prioridad ' + x.prio : '');
+  var sub = '', extra = '';
+  if (x.grupo === 'ads' && x.estado !== 'hold') {
+    sub = (x.roas != null ? 'ROAS ' + aiqX(x.roas) : 'ROAS N/D') + ' · ' + (x.cost != null ? aiqPesos(x.cost) : '$ N/D');
+    if (['reco', 'roas', 'cost'].indexOf(_aiqSeoOrden) < 0 && seoState.sortCol === 'ads') {
+      var lb = AIQ_SEO_SORT.filter(function (o) { return o[0] === _aiqSeoOrden; })[0][1];
+      extra = lb + ': ' + _aiqSeoFmt(_aiqSeoOrden, _aiqSeoVal(x, _aiqSeoOrden));
+    }
+  } else if (x.grupo === 'op') sub = 'Sin anuncio' + (x.prio ? ' · prioridad ' + x.prio : '');
   else if (x.estado === 'hold') sub = 'En espera (ML)';
-  return '<div title="' + _aiqEsc(tip) + '" style="cursor:help;line-height:1.25">' +
-    '<div style="font-size:10px;font-weight:700;color:' + col + ';white-space:nowrap">' + _aiqEsc(x.label) + '</div>' +
-    (sub ? '<div style="font-size:9.5px;color:var(--text2);margin-top:2px;white-space:nowrap">' + _aiqEsc(sub) + '</div>' : '') +
-    '<div style="font-size:9px;color:var(--text3);margin-top:1px">30 d</div></div>';
+  return '<div title="' + _aiqEsc(tip) + '" style="cursor:help;line-height:1.25;overflow-wrap:anywhere">' +
+    '<div style="font-size:12px;font-weight:800;color:' + col + '">' + _aiqEsc(x.label) + '</div>' +
+    (sub ? '<div style="font-size:11px;font-weight:700;color:var(--text);margin-top:3px">' + _aiqEsc(sub) + '</div>' : '') +
+    (extra ? '<div style="font-size:11px;font-weight:700;color:#4f46e5;margin-top:2px">' + _aiqEsc(extra) + '</div>' : '') +
+    '</div>';
+}
+
+// ── v301: orden de la columna Publicidad (con selector de criterio) ──
+function _aiqSeoThHtml() {
+  var on = seoState.sortCol === 'ads';
+  var flecha = on ? (seoState.sortDir > 0 ? '↓' : '↑') : '<span style="opacity:.35">↕</span>';
+  return 'Publicidad<br><span style="font-size:9.5px;font-weight:400">30 días</span><br>' +
+    '<select id="seo-ads-sortkey" onclick="event.stopPropagation()" onchange="seoAdsSortKey(this.value)" title="Qué tener en cuenta para ordenar" style="font-size:10px;padding:1px 2px;width:96px;margin-top:3px">' +
+    AIQ_SEO_SORT.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === _aiqSeoOrden ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select>' +
+    '<br><span id="seo-sort-ads" style="font-size:12px;cursor:pointer" title="Mayor → menor / menor → mayor">' + flecha + '</span>';
+}
+function _aiqSeoThPintar() { var th = document.getElementById('seo-th-ads'); if (th) th.innerHTML = _aiqSeoThHtml(); }
+function seoAdsSort() {
+  if (typeof _seoMultiSort !== 'undefined' && _seoMultiSort.length) { _seoMultiSort = []; try { _seoMultiSortUpdateUI(); } catch (e) {} }
+  if (seoState.sortCol === 'ads') seoState.sortDir *= -1; else { seoState.sortCol = 'ads'; seoState.sortDir = _aiqSeoOrden === 'acos' || _aiqSeoOrden === 'cpc' ? -1 : 1; }
+  seoState.page = 1;
+  try { ['quality', 'sold', 'sales7', 'visits', 'conv', 'visits30', 'sales60', 'created', 'lastSale', 'daysNoSale', 'sku'].forEach(function (c) { var el = document.getElementById('seo-sort-' + c); if (el) el.innerHTML = sortArrow(c, 'ads', 1); }); } catch (e) {}
+  if (!_aiqSeo.ts) aiqSeoCargar(false);
+  _aiqSeoThPintar(); renderSEOTable();
+}
+function seoAdsSortKey(k) {
+  _aiqSeoOrden = k;
+  if (seoState.sortCol === 'ads') { seoState.sortDir = k === 'acos' || k === 'cpc' ? -1 : 1; seoState.page = 1; _aiqSeoThPintar(); renderSEOTable(); }
+  else seoAdsSort();
+}
+// Rango de recomendación: acciones de anuncios primero, luego sin entrega, oportunidades, desconocidos
+var AIQ_SEO_RANGO = { ads_pausar: 1, ads_retirar: 2, ads_reducir: 3, ads_optimizar: 4, ads_escalar: 5, ads_revisar: 6, ads_mantener: 7, ads_hold: 8,
+  op_publicitar: 9, op_optimizar: 10, op_evaluar: 11, op_sin_datos: 12 };
+function _aiqSeoCmp(a, b, dir) {
+  var xa = aiqSeoInfo(a), xb = aiqSeoInfo(b);
+  if (_aiqSeoOrden === 'reco') {
+    var ra = xa && xa.key ? AIQ_SEO_RANGO[xa.key] : 99, rb = xb && xb.key ? AIQ_SEO_RANGO[xb.key] : 99;
+    if (ra === 99 && rb === 99) return 0; if (ra === 99) return 1; if (rb === 99) return -1;
+    // ↓ (dir>0) = más urgente primero
+    return dir > 0 ? ra - rb || ((_aiqSeoVal(xb, 'cost') || 0) - (_aiqSeoVal(xa, 'cost') || 0)) : rb - ra;
+  }
+  var va = _aiqSeoVal(xa, _aiqSeoOrden), vb = _aiqSeoVal(xb, _aiqSeoOrden);
+  if (va == null && vb == null) return 0; if (va == null) return 1; if (vb == null) return -1;   // sin dato: siempre al final
+  return dir * (vb - va);
+}
+
+// ── v301: umbrales con valores en la tarjeta de cada escenario ──
+var SEO_UMBRAL_TXT = {
+  venta_inminente: ['Visitas 7 d ≥ 35', 'Conversión histórica ≥ 1,8% (ventas 60 d ÷ 2 ÷ visitas 30 d)', '0 ventas en 7 días', 'Stock > 0'],
+  alta_probabilidad: ['Puntaje de probabilidad ≥ 55 de 100, sumando:', 'Visitas 7 d ≥ 12 → 25 pts', 'Ventas 60 d ≥ 1 y conversión 7 d ≥ 1,2% → 25 pts', 'Visitas 7 d ≥ 8 y 30% más que la semana previa → 20 pts', 'Al menos 1 venta en 7 d → 20 pts', 'Stock > 0 → 10 pts'],
+  peligro_quiebre: ['Ventas 7 d ≥ 2', 'Stock entre 1 y 5'],
+  alta_conv_bajo_stock: ['Conversión 7 d ≥ 5%', 'Stock entre 1 y 8'],
+  trafico_esteril: ['Visitas 30 d ≥ 20', '30 días o más sin vender (con alguna venta anterior)'],
+  falla_cierre: ['Visitas 7 d ≥ 15', 'Conversión 7 d < 1%'],
+  tendencia_alza: ['Ventas 7 d ≥ 2', 'Ventas 60 d ≥ 5'],
+  traccion_estreno: ['Creada hace 45 días o menos', 'Al menos 1 venta en 7 días'],
+  nicho_eficiente: ['Conversión 7 d ≥ 10%', 'Visitas 7 d entre 1 y 9'],
+  candidato_flex: ['Ventas 7 d ≥ 2', 'Stock ≥ 10'],
+  mantenimiento_puesto: ['Vendidas históricas ≥ 20', 'Conversión 7 d < 1,5%', 'Al menos 1 venta en 60 días'],
+  alto_valor: ['Precio ≥ $5.000', 'Conversión 7 d ≥ 3%'],
+  declive_cuenta: ['Ventas 60 d ≥ 5', '0 ventas en 7 días'],
+  lider_caido: ['Vendidas históricas ≥ 50', '60 días o más sin vender'],
+  sobre_stock: ['Stock ≥ 15', '60 días o más sin vender'],
+  rescate_historico: ['180 días o más sin vender', 'Vendidas históricas ≥ 10'],
+  pausa_salud: ['120 días o más sin vender', 'Stock ≥ 5'],
+  sin_ventas: ['90 días o más sin vender', 'Vendidas históricas < 5'],
+  sin_visitas: ['0 visitas en 7 días', '2 visitas o menos en 30 días'],
+  poca_visibilidad: ['Visitas 7 d entre 1 y 5', 'Calidad de ficha ≥ 50'],
+  sin_fotos: ['Menos de 2 fotos (si no tiene ninguna pero sí miniatura, no cuenta)'],
+  sin_ean: ['Sin código EAN/GTIN y sin SKU', 'No aplica a publicaciones de catálogo'],
+  termo_bajo_seo: ['Termómetro SEO ≤ 45 de 100'],
+  con_descuento: ['Publicación activa', 'Precio actual menor al precio original (tachado)'],
+  sin_descuento: ['Publicación activa', 'Sin precio tachado'],
+  ml_precio_mercado: ['Mercado Libre marca el precio como "más alto" que el de referencia'],
+  ml_ganar_catalogo: ['Publicación de catálogo activa', 'No está ganando el catálogo según Mercado Libre'],
+  ml_objetivo_calidad: ['Publicación activa', 'Salud de la publicación (health) menor a 100%'],
+  ml_ajustar_medida: ['Publicación activa con Mercado Envíos', 'Sin medidas del paquete cargadas']
+};
+function _seoUmbralLista(key) {
+  var c = _aiqSeo.ctx || {}, U = AIQ_OP_UMB, m = c.margen || 0.48, eq = 1 / m, obj = c.roasObj || eq * 1.4, cpv = c.cpvCuenta;
+  var X = function (v) { return aiqX(v); }, P = function (v) { return v == null ? 'N/D' : aiqPesos(v); };
+  var cT = (typeof allItems !== 'undefined' && _aiqSeo.ts) ? _aiqSeoConvTienda() : null;
+  var base = 'Valores actuales: margen ' + aiqPct(m, 0) + ' → ROAS de equilibrio ' + X(eq) + ' · objetivo ' + X(obj) + ' · costo por venta publicitaria de la cuenta ' + P(cpv) + '.';
+  var per = 'Período: últimos 30 días cerrados' + (_aiqSeo.desde ? ' (' + _aiqFmtF(_aiqSeo.desde) + ' – ' + _aiqFmtF(_aiqSeo.hasta) + ')' : '') + ' vs los 30 anteriores.';
+  var L = {
+    ads_escalar: ['Anuncio activo o pausado', 'ROAS ≥ ' + X(1.5 * obj) + ' (1,5 × objetivo)', 'Al menos 4 ventas atribuidas', 'Período anterior con ≥ 15 clics y ROAS ≥ ' + X(obj), base, per],
+    ads_mantener: ['ROAS ≥ ' + X(obj) + ' (objetivo)', 'Sin las condiciones de Escalar', base, per],
+    ads_optimizar: ['ROAS entre ' + X(eq) + ' (equilibrio) y ' + X(obj) + ' (objetivo)', 'O bien: 0 ventas con ≥ 40 clics e inversión ≥ ' + P(cpv != null ? 1.5 * cpv : null) + ' (1,5 × costo por venta) en un solo período', base, per],
+    ads_revisar: ['Menos de 15 clics e inversión menor a ' + P(cpv != null ? 0.5 * cpv : null) + ' (poco para decidir)', 'O: sin ventas con menos de 40 clics', 'O: ROAS < ' + X(eq) + ' en un solo período (no alcanza para recortar)', 'O: sin impresiones, clics ni gasto en 30 días', base, per],
+    ads_reducir: ['ROAS < ' + X(eq) + ' (equilibrio) en los DOS períodos', 'Al menos 2 ventas y 40 clics en el período actual', 'Período anterior con ≥ 15 clics', base, per],
+    ads_pausar: ['0 ventas con ≥ 40 clics e inversión ≥ ' + P(cpv != null ? 1.5 * cpv : null) + ' en el período actual', 'Y 0 ventas con ≥ 30 clics en el período anterior', 'Si el anuncio ya está pausado aparece como "✔ Ya pausado" y no se cuenta acá', base, per],
+    ads_retirar: ['ROAS < ' + X(0.6 * eq) + ' (60% del equilibrio) en los DOS períodos', 'Al menos 2 ventas y 40 clics', 'Inversión ≥ ' + P(cpv != null ? 3 * cpv : null) + ' (3 × costo por venta)', base, per],
+    ads_hold: ['Mercado Libre informa el anuncio "en espera" (hold)', 'Y la publicación está pausada, en revisión o con stock 0', 'Si la publicación está activa y con stock queda como ❔ Desconocido'],
+    op_publicitar: ['Anuncio fuera de campaña (idle), publicación activa y stock ≥ ' + U.stockBajo,
+      'Ventas 60 d ≥ ' + U.minVentas60, 'Última venta hace ' + U.maxDiasUltVenta + ' días o menos', 'Visitas 30 d ≥ ' + U.minVisitas30,
+      'Conversión estimada ≥ ' + Math.round(U.convRel * 100) + '% del promedio de la tienda' + (cT ? ' (≥ ' + aiqPct(U.convRel * cT, 2) + '; promedio actual ' + aiqPct(cT, 2) + ')' : '') + ' — se evalúa solo con ≥ ' + U.minVisitasConv + ' visitas',
+      'Calidad de ficha ≥ ' + U.minCalidad,
+      'Precio × margen ≥ ' + String(U.cubreCosto).replace('.', ',') + ' × costo por venta publicitaria ' + (cpv ? '→ precio mínimo ' + P(U.cubreCosto * cpv / m) + ' (margen ' + aiqPct(m, 0) + ', costo por venta ' + P(cpv) + ')' : '(costo por venta N/D: sin ese dato no se recomienda publicitar)'),
+      'Prioridad alta si vendió en los últimos 7 días; media con ≥ 6 ventas en 60 d',
+      'Conversión estimada = ventas 60 d ÷ 2 ÷ visitas 30 d'],
+    op_optimizar: ['Fuera de campaña, publicación activa y stock ≥ ' + U.stockBajo, 'Visitas 30 d ≥ ' + U.visitasSinVenta + ' con 0 ventas en 60 días',
+      'O: conversión estimada < ' + Math.round(U.convBaja * 100) + '% del promedio' + (cT ? ' (< ' + aiqPct(U.convBaja * cT, 2) + ')' : '') + ' con ≥ ' + U.minVisitasConv + ' visitas',
+      'O: con demanda (≥ ' + U.minVentas60 + ' ventas 60 d o ≥ ' + U.visitasSinVenta + ' visitas 30 d) y calidad < ' + U.minCalidad],
+    op_evaluar: ['Fuera de campaña, publicación activa y stock ≥ ' + U.stockBajo, '≥ ' + U.histMin + ' ventas históricas y ninguna en 60 días',
+      'O: 1 a 2 ventas en 60 d con menos de ' + (U.minVisitas30 * 2) + ' visitas en 30 d', 'O: ≥ ' + U.minVentas60 + ' ventas 60 d pero la última hace más de ' + U.maxDiasUltVenta + ' días',
+      'O: cumple Publicitar pero el margen no cubre ' + String(U.cubreCosto).replace('.', ',') + ' × el costo por venta publicitaria (' + P(cpv) + ')'],
+    op_sin_datos: ['Fuera de campaña', 'Menos de ' + U.sinDatosVisitas + ' visitas en 30 días', 'O: creada hace menos de ' + U.minEdad + ' días', 'O: sin señales que encajen en otro escenario']
+  };
+  if (L[key]) return L[key];
+  if (SEO_UMBRAL_TXT[key]) return (/^ml_|^sin_fotos|^sin_ean|_descuento$/.test(key) ? [] : ['Publicación activa']).concat(SEO_UMBRAL_TXT[key]);
+  if (/^ml_/.test(key)) return ['Lista oficial que devuelve Mercado Libre para tu cuenta (se actualiza con 🔄 Refresh total)'];
+  return null;
+}
+function _seoUmbralHtml(key) {
+  var L = _seoUmbralLista(key); if (!L || !L.length) return '';
+  var sc = SEO_SCENARIOS[key] || {}, col = sc.color || '#475569';
+  return '<div style="margin-top:9px;padding:8px 10px;background:' + col + '0d;border:1px dashed ' + col + '66;border-radius:6px;font-size:11.5px;line-height:1.5">' +
+    '<div style="font-weight:700;color:' + col + ';margin-bottom:3px">📏 Umbrales que se tienen en cuenta</div>' +
+    L.map(function (x) { return '<div>• ' + _aiqEsc(x) + '</div>'; }).join('') + '</div>';
+}
+
+// ═══════════════════════════════════════════════════════════
+// v301 · FOTO DEL ÚLTIMO REFRESH (persistente entre aperturas del panel)
+// ═══════════════════════════════════════════════════════════
+// Al terminar 🔄 Refresh total (o 📊 Cargar métricas) se guarda en IndexedDB
+// todo lo que muestra el Analizador SEO: visitas/ventas, descuentos, fechas,
+// termómetro y posición SEO, escenarios oficiales de ML, análisis de precio y
+// catálogo, y publicidad. Al volver a abrir el panel se restaura tal cual, sin
+// vencimiento, hasta el próximo refresh. IndexedDB tiene mucho más espacio que
+// localStorage, que con ~2.400 publicaciones se llenaba y dejaba de guardar.
+var _snap = { uid: null, armado: false, origen: null, timer: null, cargado: undefined, aplicadoA: null, metricasAplicadas: false, error: null };
+
+function _snapClave() { return 'ultimo:' + ((typeof userId !== 'undefined' && userId) ? userId : 'sin_usuario'); }   // una foto por cuenta
+function _snapDB() {
+  return new Promise(function (res, rej) {
+    try {
+      if (!window.indexedDB) return rej(new Error('IndexedDB no disponible'));
+      var r = indexedDB.open('mlp_snapshot', 1);
+      r.onupgradeneeded = function () { r.result.createObjectStore('kv'); };
+      r.onsuccess = function () { res(r.result); };
+      r.onerror = function () { rej(r.error || new Error('IndexedDB')); };
+    } catch (e) { rej(e); }
+  });
+}
+async function _snapGet() {
+  var db = await _snapDB();
+  return new Promise(function (res, rej) {
+    var q = db.transaction('kv', 'readonly').objectStore('kv').get(_snapClave());
+    q.onsuccess = function () { res(q.result || null); }; q.onerror = function () { rej(q.error); };
+  });
+}
+async function _snapPut(v) {
+  var db = await _snapDB();
+  return new Promise(function (res, rej) {
+    var tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').put(v, _snapClave());
+    tx.oncomplete = function () { res(true); }; tx.onerror = function () { rej(tx.error); }; tx.onabort = function () { rej(tx.error); };
+  });
+}
+
+// Se arma al tocar Cargar métricas / Refresh total: recién ahí se permite guardar
+function snapArmar(origen) { _snap.armado = true; _snap.origen = origen || 'metricas'; }
+function snapProgramar() {
+  if (!_snap.armado) return;
+  clearTimeout(_snap.timer);
+  _snap.timer = setTimeout(function () { snapGuardar().catch(function (e) { console.warn('[snap] no se pudo guardar:', e && e.message); }); }, 4000);
+}
+async function snapGuardar() {
+  if (!_snap.armado || !Array.isArray(allItems) || !allItems.length) return;
+  var prev = _snap.cargado || null;
+  var extra = {};
+  allItems.forEach(function (i) {
+    var e = {};
+    if (i.last_updated) e.lu = i.last_updated;
+    if (+i._regularPrice > 0 && +i.price > 0 && +i._regularPrice > +i.price) { e.rp = +i._regularPrice; e.pp = +i.price; }
+    var mt = (i.sale_terms || []).filter(function (t) { return t.id === 'MANUFACTURING_TIME'; });
+    if (mt.length) e.st = mt.map(function (t) { return { id: t.id, value_name: t.value_name }; });
+    // refresh a medias: si este ítem todavía no se volvió a revisar, se conserva lo anterior
+    var pe = prev && prev.extra ? prev.extra[i.id] : null;
+    if (pe) { if (!e.rp && pe.rp && i._regularPrice !== 0) { e.rp = pe.rp; e.pp = pe.pp; } if (!e.lu && pe.lu) e.lu = pe.lu; if (!e.st && pe.st) e.st = pe.st; }
+    if (Object.keys(e).length) extra[i.id] = e;
+  });
+  var vivo = function (c) { return c && c.ts ? c : null; };
+  var d = {
+    v: 1, ts: Date.now(), origen: _snap.origen || 'metricas', items: allItems.length,
+    metrics: Object.assign({}, prev && prev.metrics, JSON.parse(JSON.stringify(itemMetrics || {}))),   // las que se borraron al iniciar el Refresh total y aún no volvieron, se conservan
+    extra: extra,
+    thermo: window._seoThermo || (prev && prev.thermo) || null,
+    // si durante el Refresh total algún análisis todavía no terminó, se conserva el anterior
+    srv: vivo(typeof _mlSrv !== 'undefined' ? _mlSrv : null) || (prev && prev.srv) || null,
+    sug: vivo(typeof _sugPrecioCache !== 'undefined' ? _sugPrecioCache : null) || (prev && prev.sug) || null,
+    ptw: vivo(typeof _ptwCache !== 'undefined' ? _ptwCache : null) || (prev && prev.ptw) || null,
+    ads: (typeof _aiqSeo !== 'undefined' && _aiqSeo.dat) || (prev && prev.ads) || null
+  };
+  if (prev && prev.origen === 'refresh' && d.origen !== 'refresh') d.ultRefresh = prev.ts; else if (d.origen === 'refresh') d.ultRefresh = d.ts; else d.ultRefresh = prev && prev.ultRefresh || null;
+  await _snapPut(d);
+  _snap.cargado = d; _snap.error = null;
+  snapEstadoUI();
+}
+
+// Restaura la foto sobre las publicaciones cargadas (se llama cada vez que se recarga allItems)
+async function snapAplicar() {
+  try {
+    if (_snap.cargado === undefined || _snap.uid !== _snapClave()) { _snap.uid = _snapClave(); _snap.cargado = null; _snap.aplicadoA = null; _snap.metricasAplicadas = false; _snap.globalAplicado = false; _snap.cargado = await _snapGet(); }
+  } catch (e) { _snap.error = e.message; return; }
+  var d = _snap.cargado;
+  // Publicidad y escenarios de ML no dependen de las publicaciones: se restauran apenas se lee la foto,
+  // así al abrir el Analizador SEO no se vuelven a pedir (quedan fijos hasta el próximo refresh)
+  if (d && !_snap.globalAplicado) {
+    _snap.globalAplicado = true;
+    try {
+      if (d.srv && (!_mlSrv || !_mlSrv.ts || _mlSrv.ts < d.srv.ts)) _mlSrv = d.srv;
+      if (d.sug && (!_sugPrecioCache || !_sugPrecioCache.ts || _sugPrecioCache.ts < d.sug.ts)) _sugPrecioCache = d.sug;
+      if (d.ptw && (!_ptwCache || !_ptwCache.ts || _ptwCache.ts < d.ptw.ts)) _ptwCache = d.ptw;
+    } catch (e) {}
+    try { if (d.ads && (!_aiqSeo.ts || _aiqSeo.ts < d.ads.ts)) _aiqSeoAplicar(d.ads); } catch (e) {}
+  }
+  if (!d || !Array.isArray(allItems) || !allItems.length || _snap.aplicadoA === allItems) { snapEstadoUI(); return; }
+  _snap.aplicadoA = allItems;
+  var primera = !_snap.metricasAplicadas;
+  // 1) Visitas / ventas / conversión (solo al abrir: después mandan las cargas nuevas)
+  if (primera && d.metrics) { Object.keys(d.metrics).forEach(function (id) { itemMetrics[id] = d.metrics[id]; }); _snap.metricasAplicadas = true; }
+  // 2) Fechas, tiempo de disponibilidad y descuentos
+  if (d.extra) allItems.forEach(function (i) {
+    var e = d.extra[i.id]; if (!e) return;
+    if (e.lu && !i.last_updated) i.last_updated = e.lu;
+    if (e.st && !(i.sale_terms && i.sale_terms.length)) i.sale_terms = e.st;
+    // el descuento solo se restaura si el precio no cambió desde el refresh
+    if (e.rp && !(+i._regularPrice > 0) && (+i.price === e.rp || +i.price === e.pp)) { i._regularPrice = e.rp; i.price = e.pp; }
+  });
+  // 3) Termómetro + posición SEO
+  if (d.thermo && (primera || !window._seoThermo)) window._seoThermo = d.thermo;
+  try { if (typeof _calcSeoRanking === 'function') _calcSeoRanking(); } catch (e) {}
+  // refrescar pantallas
+  try { seoInvalidateScenarioCounts(); } catch (e) {}
+  var act = function (id) { var s = document.getElementById('section-' + id); return s && s.classList.contains('active'); };
+  try { if (act('seo')) { renderScenarioChips(); renderSEOTable(); } } catch (e) {}
+  try { if (act('publicaciones') && typeof renderPubs === 'function') renderPubs(); } catch (e) {}
+  try { if (typeof renderDashFunnel === 'function') renderDashFunnel(); } catch (e) {}
+  snapEstadoUI();
+}
+function snapEstadoUI() {
+  var el = document.getElementById('seo-snap-estado'); if (!el) return;
+  var d = _snap.cargado;
+  if (!d) { el.innerHTML = _snap.error ? '⚠ No se pudo leer la última foto guardada: ' + _aiqEsc(_snap.error) : '💾 Todavía no hay datos guardados: tocá 🔄 Refresh total y quedan fijos al volver a abrir el panel.'; return; }
+  var f = function (ts) { return new Date(ts).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); };
+  el.innerHTML = '💾 Mostrando los datos guardados del ' + (d.origen === 'refresh' ? '🔄 Refresh total' : '📊 Cargar métricas') + ' del <b>' + f(d.ts) + '</b>' +
+    (d.origen !== 'refresh' && d.ultRefresh ? ' (último Refresh total: ' + f(d.ultRefresh) + ')' : '') +
+    ': visitas, ventas, descuentos, posición SEO, escenarios de ML y publicidad. Quedan fijos hasta el próximo Refresh total o Cargar métricas.';
 }
 
 
@@ -11710,6 +11992,7 @@ async function seoMLServerSync(force){
   cache.ts=Date.now();
   _mlSrv=cache;
   try{ localStorage.setItem('mlp_srv_esc_v1', JSON.stringify(cache)); }catch(e){}
+  try{ snapProgramar(); }catch(e){}   // v301
   try{ seoInvalidateScenarioCounts(); renderScenarioChips(); }catch(e){}
   return cache;
 }
@@ -11784,6 +12067,7 @@ async function seoLazyAnalizar(tipo){
     }
     cache.ts=Date.now();
     try{ localStorage.setItem(tipo==='precio'?'mlp_sug_precio_v1':'mlp_ptw_v1', JSON.stringify(cache)); }catch(e){}
+    try{ snapProgramar(); }catch(e){}   // v301
     setP('✓ Listo: '+hechos+' analizadas'+(marcadas?' · '+marcadas+' requieren acción':' · todo en orden'));
     seoInvalidateScenarioCounts();
     renderScenarioChips();
@@ -11948,9 +12232,8 @@ function renderScenarioChips(){
       ${sc.emoji} ${sc.label} ${counter}
     </div>`;
   }).join('');
+  cont.innerHTML = html;   // v301: el botón Limpiar escenario se movió debajo de todas las filas
   try{ _aiqSeoRenderChips(counts); }catch(e){ console.warn('[SEO publicidad] chips', e.message); }   // v300
-  cont.innerHTML = html
-    + `<button class="btn btn-ghost btn-xs" onclick="seoSetScenario(null)" id="seo-scenario-clear" style="font-size:11px;${_seoActiveScenario?'':'display:none'}">✕ Limpiar escenario</button>`;
 }
 
 // Activar un escenario (o desactivarlo si pasás null o el mismo key dos veces)
@@ -12033,6 +12316,7 @@ function seoSetScenario(key){
           <span style="color:var(--text2)">${sc.actionSecondary}</span>
         </div>
       </div>
+      ${_seoUmbralHtml(key)}
       ${orderPills}
       ${key==='ml_elegible_catalogo' ? `<div style="margin-top:9px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <input id="seo-eleg-id" type="text" placeholder="MLA… ¿por qué es / no es elegible?" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:11.5px;background:var(--card);color:var(--text);width:250px">
@@ -13022,10 +13306,12 @@ function renderSEOTable(){
   let items = seoGetFilteredItems();
 
   // 2. ORDENAR (multi-sort tiene prioridad sobre el sort simple por click en header)
+  try{ _aiqSeoThPintar(); }catch(e){}   // v301: encabezado Publicidad con selector
   if(_seoMultiSort && _seoMultiSort.length){
     items.sort(_seoMultiSortCompare);
   } else if(seoState.sortCol){
     items.sort((a,b)=>{
+      if(seoState.sortCol==='ads') return _aiqSeoCmp(a,b,seoState.sortDir);   // v301
       let va=0, vb=0;
       const ma = itemMetrics[a.id], mb = itemMetrics[b.id];
       if(seoState.sortCol==='seo')      { va=seoScore(a.title);          vb=seoScore(b.title); }
@@ -13277,7 +13563,7 @@ function renderSEOTable(){
           return `<div style="display:flex;flex-direction:column;align-items:flex-start;gap:2px">${html}${moreSpan}</div>`;
         })()}
       </td>
-      <td style="text-align:center;padding:6px 6px;min-width:104px">${_aiqSeoCelda(item)}</td>
+      <td style="text-align:center;padding:6px 5px;min-width:104px;max-width:118px;width:118px">${_aiqSeoCelda(item)}</td>
       <td style="max-width:160px"><div style="display:flex;flex-wrap:wrap;gap:3px">
         ${tI.map(i=>`<span class="badge bg-amber" style="font-size:9px">${i}</span>`).join('')}
         ${ch.map(p=>`<span class="badge ${p.sev===2?'bg-red':'bg-amber'}" style="font-size:9px">${p.label}</span>`).join('')}
@@ -13903,6 +14189,7 @@ async function loadSEOMetricsFull(){
 // ── Cargar métricas reales (visitas 7d) para la tabla SEO ───
 async function loadSEOMetrics(){
   const btn = document.getElementById('seo-metrics-btn');
+  snapArmar(window._aiqSeoForzar ? 'refresh' : 'metricas');   // v301: este refresh reemplaza la foto guardada
   if(btn){ btn.disabled=true; btn.textContent='⏳ Sincronizando...'; }
 
   // v130: PASO 1 — Sync con KV ANTES de cargar de ML.
@@ -13963,7 +14250,8 @@ async function loadSEOMetrics(){
     if(btn){ btn.disabled=false; btn.textContent='📊 Métricas ✓'; }
     console.log('[SEO] Métricas completas para', ids.length, 'ítems');
     // v300: datos publicitarios (caché 3 h; el Refresh total los fuerza)
-    aiqSeoCargar(!!window._aiqSeoForzar).catch(e=>console.warn('[SEO publicidad]', e.message)).finally(()=>{ window._aiqSeoForzar=false; });
+    aiqSeoCargar(!!window._aiqSeoForzar).catch(e=>console.warn('[SEO publicidad]', e.message)).finally(()=>{ window._aiqSeoForzar=false; snapProgramar(); });
+    snapProgramar();
 
     // v201: después de las visitas, cargar fechas + tiempo disponib + descuentos
     // (usa las métricas recién cargadas para priorizar los más visitados).
@@ -14047,6 +14335,7 @@ function seoThermoLoadCache(){
     // v203: restaurar SIEMPRE el termómetro guardado (fueguito/ranking) aunque
     // sea viejo, para que quede visible entre PCs. Se refresca al cargar métricas.
     window._seoThermo = d.items;
+    try{ _calcSeoRanking(); }catch(e){}   // v301: sin esto la posición SEO quedaba vacía al reabrir
     const horas = Math.round((Date.now()-d.ts)/3600000);
     console.log('[SEOThermo] Cache cargado:', Object.keys(d.items).length, 'items (hace '+horas+'h)');
   } catch(e){ /* ignore */ }
@@ -14261,6 +14550,7 @@ function seoThermoRecalcAll(){
   // entre todas tus publicaciones que ayuda a saber cuáles son tus mejores
   // performers vs cuáles necesitan trabajo.
   _calcSeoRanking();
+  try{ snapProgramar(); }catch(e){}   // v301
   // v124: Tomar snapshot predictivo para validación posterior. Se ejecuta
   // después del ranking para que tenga la posición disponible.
   if(typeof predTakeSnapshot === 'function') predTakeSnapshot();
@@ -30973,7 +31263,7 @@ function showSection(id){
   if(id==='publicaciones') renderPubs();
   if(id==='seo'){
     renderSEOSection(); updateMetricsTimestamp(); renderScenarioChips();
-    try{ aiqSeoCargar(false); }catch(e){}   // v300: usa la caché si tiene menos de 3 h
+    try{ snapAplicar().then(()=>aiqSeoCargar(false)); }catch(e){}   // v301: foto guardada + publicidad (sin vencimiento)
     // v204: espejar los widgets del Resumen General (por si ya estaban renderizados)
     try{ _dashMirror('dash-top-pubs','seo-top-pubs'); _dashMirror('dash-last50','seo-last50'); _dashMirror('dash-most-visited','seo-most-visited'); }catch(e){}
   }
