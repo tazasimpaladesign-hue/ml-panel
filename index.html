@@ -857,7 +857,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v306 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v307 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -3425,6 +3425,8 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <label style="font-size:12px;cursor:pointer"><input type="checkbox" class="wi-st" value="under_review"> En revisión</label>
       <label style="font-size:12px;cursor:pointer"><input type="checkbox" class="wi-st" value="inactive"> Inactivas</label>
       <button class="btn btn-primary btn-sm" onclick="wiLoadAll()">🔄 Cargar publicaciones de ML y productos de Woo</button>
+      <button class="btn btn-ghost btn-xs" onclick="wiS._forceWoo=true;wiLoadAll()" title="La lista de Woo se reutiliza 20 minutos para no saturar el hosting. Esto la vuelve a leer completa.">↻ releer Woo</button>
+      <button class="btn btn-ghost btn-xs" onclick="wiS.cancel=true">⏹</button>
       <span id="wi-load-prog" style="font-size:11.5px;color:var(--text3)"></span>
     </div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:12px 0 8px">
@@ -54337,6 +54339,18 @@ var wiS = { inited:false, status:null, ml:[], woo:[], wooById:{}, links:{ items:
 
 function wiEsc(t){ return String(t==null?'':t).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
 function wiNorm(s){ return String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,' ').trim(); }
+// v307: el hosting de Woo corta con 429 si se le piden muchas páginas seguidas.
+// Se espera (con cuenta regresiva) y se reintenta lo mismo, sin perder lo avanzado.
+function wiSleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
+function wiIs429(d){ return d && d.error && /429|503|demasiadas|Too Many/i.test(String(d.error)+' '+String(d.message||'')); }
+async function wiApiPaced(path, body, onWait){
+  var waits=[30,60,90,120,180];
+  for(var k=0;;k++){
+    var d=await wiApi(path, body);
+    if(!wiIs429(d) || k>=waits.length || wiS.cancel) return d;
+    for(var t=waits[k]; t>0 && !wiS.cancel; t--){ if(onWait) onWait(t, k+1); await wiSleep(1000); }
+  }
+}
 function wiMoney(v){ return v==null||v===''?'—':'$'+Math.round(+v||0).toLocaleString('es-AR'); }
 async function wiApi(path, body){
   var r = await fetch(WORKER+path, { method: body?'POST':'GET', headers: Object.assign({ Authorization:'Bearer '+token }, body?{'Content-Type':'application/json'}:{}), body: body?JSON.stringify(body):undefined });
@@ -54428,14 +54442,24 @@ async function wiLoadAll(){
       prog('Leyendo publicaciones de ML: '+Math.min(i+20,ids.length)+' / '+ids.length);
     }
     // 3) productos de Woo
+    // v307: se reutiliza la lista de Woo si se leyó hace menos de 20 min (evita
+    // repetir ~30 consultas al hosting). Para forzar, usar "releer Woo".
     var woo=[], page=1, tp=1;
-    do{
-      var w = await wiApi('/wsync/woo-products?page='+page);
-      if(w.error) throw new Error(w.message||w.error);
-      woo = woo.concat(w.items||[]); tp = w.total_pages||1;
-      prog('Leyendo productos de Woo: '+woo.length+(w.total?' de '+w.total:''));
-      page++;
-    } while(page<=tp && !wiS.cancel);
+    if(!wiS._forceWoo && wiS._wooAt && (Date.now()-wiS._wooAt) < 20*60000 && wiS.woo.length){
+      woo = wiS.woo.slice();
+      prog('Productos de Woo: usando la lectura de hace '+Math.round((Date.now()-wiS._wooAt)/60000)+' min ('+woo.length+')');
+    } else {
+      do{
+        var w = await wiApiPaced('/wsync/woo-products?page='+page, null, function(t, n){ prog('El servidor de la tienda pidió una pausa (límite de solicitudes). Reintento '+n+' en '+t+' s… — ya leídos '+woo.length+' productos'); });
+        if(w.error) throw new Error((w.message||w.error)+' — leídos '+woo.length+' productos hasta ahora');
+        woo = woo.concat(w.items||[]); tp = w.total_pages||1;
+        prog('Leyendo productos de Woo: '+woo.length+(w.total?' de '+w.total:''));
+        page++;
+        if(page<=tp) await wiSleep(1200);   // pausa entre páginas para no saturar el hosting
+      } while(page<=tp && !wiS.cancel);
+      if(!wiS.cancel) wiS._wooAt = Date.now();
+    }
+    wiS._forceWoo = false;
     // 4) vínculos
     var l = await wiApi('/wsync/links');
     if(l.error) throw new Error(l.message||l.error);
@@ -54640,11 +54664,12 @@ async function wiRun(){
     if(j.kind==='link'){
       var wid=wiS.choice[it.id];
       if(usedWoo[wid]){ res.skip++; continue; } usedWoo[wid]=1;
-      d=await wiApi('/wsync/link', { ml_item_id:it.id, woo_id:+wid, stock_source:src, apply_dims:true, run_id:run_id });
+      d=await wiApiPaced('/wsync/link', { ml_item_id:it.id, woo_id:+wid, stock_source:src, apply_dims:true, run_id:run_id }, function(t,n){ if(bar) bar.innerHTML='El servidor de la tienda pidió una pausa. Reintento '+n+' en '+t+' s… ('+(i+1)+' / '+jobs.length+')'; });
     } else {
       var title = (typeof wooCleanTitle==='function') ? (wooCleanTitle(it.title)||it.title) : it.title;
-      d=await wiApi('/wsync/import', { ml_item_id:it.id, title:title, pct:pct, disc:disc, status:stat, categories:cats, run_id:run_id });
+      d=await wiApiPaced('/wsync/import', { ml_item_id:it.id, title:title, pct:pct, disc:disc, status:stat, categories:cats, run_id:run_id }, function(t,n){ if(bar) bar.innerHTML='El servidor de la tienda pidió una pausa. Reintento '+n+' en '+t+' s… ('+(i+1)+' / '+jobs.length+')'; });
     }
+    await wiSleep(800);
     if(d.error){ res.err++; errs.push(it.id+': '+(d.message||d.error)); }
     else if(d.skipped) res.skip++; else res.ok++;
     if(d.ok || d.skipped) wiS.sel.delete(it.id);
@@ -54652,8 +54677,7 @@ async function wiRun(){
   document.getElementById('wi-run-stop').style.display='none';
   wiS.running=false;
   var l=await wiApi('/wsync/links'); if(!l.error){ wiSetLinks(l); }
-  var w2=[], page=1, tp=1; do{ var w=await wiApi('/wsync/woo-products?page='+page); if(w.error) break; w2=w2.concat(w.items||[]); tp=w.total_pages||1; page++; } while(page<=tp);
-  if(w2.length){ wiS.woo=w2; wiS.wooById={}; w2.forEach(function(x){ wiS.wooById[x.id]=x; }); }
+  // v307: no se vuelve a leer todo Woo (ahorra ~30 consultas al hosting); alcanza con los vínculos
   wiClassify(); wiRenderRows(); wiStatusLoad();
   if(bar) bar.innerHTML=(wiS.cancel?'⏹ Detenido. ':'✓ Terminado. ')+res.ok+' hechas · '+res.skip+' ya estaban · '+res.err+' con error'+(errs.length?'<div style="color:#b91c1c;font-size:11px;margin-top:4px">'+errs.slice(0,8).map(wiEsc).join('<br>')+'</div>':'')+
     (wiS.cancel?'<div style="font-size:11px;margin-top:3px">Para reanudar, volvé a tocar «Vincular / crear seleccionadas»: lo ya hecho se saltea.</div>':'');
