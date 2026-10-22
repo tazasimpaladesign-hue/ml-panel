@@ -857,7 +857,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v308 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v309 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -54369,9 +54369,10 @@ function wiNorm(s){ return String(s||'').toLowerCase().normalize('NFD').replace(
 // v307: el hosting de Woo corta con 429 si se le piden muchas páginas seguidas.
 // Se espera (con cuenta regresiva) y se reintenta lo mismo, sin perder lo avanzado.
 function wiSleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
-function wiIs429(d){ return d && d.error && /429|503|demasiadas|Too Many/i.test(String(d.error)+' '+String(d.message||'')); }
+// v309: cortes temporales del servidor de la tienda: 429 (demasiadas), 5xx y 52x de Cloudflare (servidor no responde)
+function wiIs429(d){ return d && d.error && /HTTP (429|5\d\d)\b|demasiadas|Too Many|Failed to fetch|NetworkError/i.test(String(d.error)+' '+String(d.message||'')); }
 async function wiApiPaced(path, body, onWait){
-  var waits=[30,60,90,120,180];
+  var waits=[30,60,90,120,180,300,300];
   for(var k=0;;k++){
     var d=await wiApi(path, body);
     if(!wiIs429(d) || k>=waits.length || wiS.cancel) return d;
@@ -54472,21 +54473,26 @@ async function wiLoadAll(){
     // v307: se reutiliza la lista de Woo si se leyó hace menos de 20 min (evita
     // repetir ~30 consultas al hosting). Para forzar, usar "releer Woo".
     var woo=[], page=1, tp=1;
-    if(!wiS._forceWoo && wiS._wooAt && (Date.now()-wiS._wooAt) < 20*60000 && wiS.woo.length){
+    // v309: si una lectura anterior se cortó, se retoma desde la página donde quedó
+    var force = !!wiS._forceWoo; wiS._forceWoo = false;     // se consume ya: un corte no debe repetir la lectura completa
+    var parcial = wiS._wooPartial && (Date.now()-wiS._wooPartial.t) < 60*60000 ? wiS._wooPartial : null;
+    if(force) parcial = null;
+    if(parcial){ woo=parcial.woo.slice(); page=parcial.page; tp=parcial.tp; prog('Retomando la lectura de Woo desde el producto '+woo.length+'…'); }
+    if(!parcial && !force && wiS._wooAt && (Date.now()-wiS._wooAt) < 20*60000 && wiS.woo.length){
       woo = wiS.woo.slice();
       prog('Productos de Woo: usando la lectura de hace '+Math.round((Date.now()-wiS._wooAt)/60000)+' min ('+woo.length+')');
-    } else {
+    } else if(!parcial || page<=tp) {
       do{
-        var w = await wiApiPaced('/wsync/woo-products?page='+page, null, function(t, n){ prog('El servidor de la tienda pidió una pausa (límite de solicitudes). Reintento '+n+' en '+t+' s… — ya leídos '+woo.length+' productos'); });
-        if(w.error) throw new Error((w.message||w.error)+' — leídos '+woo.length+' productos hasta ahora');
+        var w = await wiApiPaced('/wsync/woo-products?page='+page, null, function(t, n){ prog('⏳ El servidor de la tienda no respondió o pidió una pausa. Espero y reintento ('+n+') en '+t+' s… — ya leídos '+woo.length+' productos (no se pierden)'); });
+        if(w.error){ wiS._wooPartial={ woo:woo, page:page, tp:tp, t:Date.now() }; throw new Error((w.message||w.error)+' — leídos '+woo.length+' productos. Volvé a tocar «Cargar…» más tarde: sigue desde ahí.'); }
         woo = woo.concat(w.items||[]); tp = w.total_pages||1;
         prog('Leyendo productos de Woo: '+woo.length+(w.total?' de '+w.total:''));
         page++;
         if(page<=tp) await wiSleep(1200);   // pausa entre páginas para no saturar el hosting
       } while(page<=tp && !wiS.cancel);
-      if(!wiS.cancel) wiS._wooAt = Date.now();
+      if(!wiS.cancel){ wiS._wooAt = Date.now(); wiS._wooPartial = null; }
+      else wiS._wooPartial={ woo:woo, page:page, tp:tp, t:Date.now() };
     }
-    wiS._forceWoo = false;
     // 4) vínculos
     var l = await wiApi('/wsync/links');
     if(l.error) throw new Error(l.message||l.error);
