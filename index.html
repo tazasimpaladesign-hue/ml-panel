@@ -857,7 +857,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v310 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v311 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -54418,7 +54418,7 @@ function wiSlim(it){
     variations:(it.variations||[]).map(function(v){ return { id:v.id, attribute_combinations:(v.attribute_combinations||[]).map(function(c){ return { id:c.id, name:c.name, value_name:c.value_name }; }), attributes:(v.attributes||[]).filter(function(a){ return a.id==='SELLER_SKU'; }).map(function(a){ return { id:a.id, value_name:a.value_name }; }) }; }) };
 }
 var _wiSnapT=null;
-function wiSnapSave(){
+function wiSnapSave(){ return; // v311: la lista ya no se guarda (al recuperarla, la pestaña se caía)
   clearTimeout(_wiSnapT);
   _wiSnapT=setTimeout(async function(){
     try{
@@ -54455,7 +54455,9 @@ async function wiImgRestore(){
 // ── init / pestañas / estado ────────────────────────────────────────────────
 function wiInit(){
   if(!wiS.inited){ wiS.inited=true; }
-  wiStatusLoad().then(function(){ wiCatTreeInit(); wiSnapRestore(); });
+  // v311: borrar la lista guardada por v310 (ocupa lugar y ya no se usa)
+  wiImgDb().then(function(db){ try{ db.transaction('h','readwrite').objectStore('h').delete('snapshot'); }catch(e){} }).catch(function(){});
+  wiStatusLoad().then(function(){ wiCatTreeInit(); });
 }
 function wiTab(t){
   ['una','todas','vinc','sync','hist'].forEach(function(k){
@@ -54634,16 +54636,21 @@ function wiClassify(){
     r.text = r.text.map(function(t){ var f=freq[t.id]||1; return { id:t.id, s:t.s/Math.sqrt(Math.max(1,f/3)), raw:t.s, f:f }; }).sort(function(a,b){ return b.s-a.s; });
     r.sugs = r.text.filter(function(x){ return x.s>=0.33; }).slice(0,6).map(function(x){ return { p:wiS.wooById[x.id], s:x.s, why:'título '+Math.round(x.s*100)+'%' }; });
   });
-  // pareja mutua por título: la mejor publicación de ese producto de Woo es esta, y viceversa
-  var bestMlForWoo={};
-  wiS.rows.forEach(function(r){ if(r.group==='nueva' && r.text && r.text[0]){ var t=r.text[0]; if(!bestMlForWoo[t.id] || bestMlForWoo[t.id].s<t.s) bestMlForWoo[t.id]={ ml:r.id, s:t.s }; } });
+  // v311 · pareja automática por título (puntaje sin castigo), con ventaja por los DOS lados:
+  //   · ese producto de Woo es claramente el mejor para la publicación, y
+  //   · la publicación es claramente la mejor para ese producto (le gana a las demás que lo comparten)
+  var porWoo={};
+  wiS.rows.forEach(function(r){ if(r.group!=='nueva' || !r.text) return; r.text.forEach(function(t){ (porWoo[t.id]=porWoo[t.id]||[]).push({ ml:r.id, s:t.raw }); }); });
+  Object.keys(porWoo).forEach(function(k){ porWoo[k].sort(function(a,b){ return b.s-a.s; }); });
   var usados={};
   wiS.rows.forEach(function(r){ if(r.group==='coincidencia') usados[r.cands[0].p.id]=1; });
   wiS.rows.forEach(function(r){
     if(r.group!=='nueva') return;
-    var t=r.text||[], a=t[0], b=t[1];
-    if(a && a.s>=0.55 && (!b || a.s-b.s>=0.12) && bestMlForWoo[a.id] && bestMlForWoo[a.id].ml===r.id && !usados[a.id]){
-      r.group='auto'; r.auto={ id:a.id, why:'título '+Math.round(a.s*100)+'%' }; usados[a.id]=1;
+    var t=(r.text||[]).slice().sort(function(x,y){ return y.raw-x.raw; }), a=t[0], b=t[1];
+    var lw=a && porWoo[a.id], w1=lw&&lw[0], w2=lw&&lw[1];
+    if(a && a.raw>=0.55 && (!b || a.raw-b.raw>=0.12) && w1 && w1.ml===r.id && (!w2 || w1.s-w2.s>=0.12) && !usados[a.id]){
+      r.group='auto'; r.auto={ id:a.id, why:'título '+Math.round(a.raw*100)+'%' }; usados[a.id]=1;
+      if(!r.sugs.some(function(x){ return x.p && x.p.id===a.id; })) r.sugs.unshift({ p:wiS.wooById[a.id], s:a.raw, why:'título '+Math.round(a.raw*100)+'%' });
     } else if(r.sugs.length) r.group='sugerencia';
   });
   if(wiS.img) wiApplyImageMatches(usados);
@@ -54750,7 +54757,7 @@ function wiApplyImageMatches(usados){
     r.sugs = r.sugs.slice(0,6);
     if(!foto) return;
     if(r.group==='auto'){
-      if(r.auto.id===a.id) r.auto.why += ' + misma foto';
+      if(r.auto.id===a.id){ r.auto.why += ' + misma foto'; r.porFoto=true; }
       else if(!usados[a.id]){
         // la foto idéntica pesa más que el título: se corrige la pareja
         var viejo=wiS.wooById[r.auto.id];
@@ -54793,61 +54800,82 @@ function wiThumb(src, size, title){
   size=size||56;
   return '<div style="width:'+size+'px;height:'+size+'px;border-radius:7px;overflow:hidden;background:var(--bg4);flex-shrink:0;border:1px solid var(--border)"'+(title?' title="'+wiEsc(title)+'"':'')+'>'+(src?'<img src="'+wiEsc(String(src).replace(/^http:\/\//,'https://'))+'" style="width:100%;height:100%;object-fit:cover" loading="lazy" onerror="this.style.display=\'none\'">':'')+'</div>';
 }
+function wiRowHtml(r){
+  var T=86, TS=52;
+  var gb={ vinculada:['#dcfce7','#166534','🔗 Vinculada'], coincidencia:['#dbeafe','#1e40af','🎯 SKU / código'], auto:['#ccfbf1','#115e59','🤖 Automática'], sugerencia:['#fef3c7','#92400e','💡 Revisar'], nueva:['#f3e8ff','#6b21a8','🆕 Nueva'], ignorada:['#e5e7eb','#374151','🚫 No importar'] };
+  var it=r.it, b=gb[r.group];
+  var pic=(it.pictures&&it.pictures[0]&&(it.pictures[0].secure_url||it.pictures[0].url))||it.thumbnail||'';
+  var dimsTxt = wiMlDims(it);
+  var woo='';
+  if(r.group==='vinculada'){ var wp=wiS.wooById[r.link.woo_id]; woo='<div style="display:flex;gap:10px;align-items:center">'+wiThumb(wp&&wp.img||r.link.woo_thumb,T)+'<div><div style="font-size:13.5px"><b>#'+r.link.woo_id+'</b> '+wiEsc(wp?wp.name:(r.link.woo_title||''))+'</div><div style="font-size:11.5px;color:var(--text3)">'+wiEsc(r.link.state)+(r.link.note?' · '+wiEsc(r.link.note):'')+'</div></div></div>'; }
+  else if(r.group==='ignorada'){ woo='<span style="font-size:12.5px;color:var(--text3)">Marcada como no importar</span> <a href="#" onclick="wiUnignore(\''+it.id+'\');return false" style="font-size:12.5px">deshacer</a>'; }
+  else {
+    var ch=wiS.choice[it.id]||'';
+    var all=r.cands.map(function(c){ return { p:c.p, why:c.why, k:'🎯' }; });
+    if(r.auto && wiS.wooById[r.auto.id] && !all.some(function(x){ return x.p.id===r.auto.id; })) all.push({ p:wiS.wooById[r.auto.id], why:r.auto.why, k:'🤖' });
+    r.sugs.forEach(function(c){ if(c.p && !all.some(function(x){ return x.p.id===c.p.id; })) all.push({ p:c.p, why:c.why, k:/foto/.test(c.why)?'📸':'💡' }); });
+    if(ch && ch!=='new' && !all.some(function(x){ return String(x.p.id)===ch; }) && wiS.wooById[ch]) all.unshift({ p:wiS.wooById[ch], why:'elegido a mano', k:'🔎' });
+    var cp = ch && ch!=='new' && wiS.wooById[ch];
+    var otras = all.filter(function(c){ return String(c.p.id)!==ch; }).slice(0,6);
+    woo='<div style="display:flex;gap:10px;align-items:flex-start">'+
+      (cp?wiThumb(cp.img,T,cp.name):ch==='new'?'<div style="width:'+T+'px;height:'+T+'px;border-radius:8px;background:#f3e8ff;color:#6b21a8;display:flex;align-items:center;justify-content:center;font-size:30px;flex-shrink:0">🆕</div>':'<div style="width:'+T+'px;height:'+T+'px;border-radius:8px;border:2px dashed var(--border2);display:flex;align-items:center;justify-content:center;font-size:24px;color:var(--text3);flex-shrink:0">?</div>')+
+      '<div style="flex:1;min-width:0"><div style="display:flex;gap:4px;align-items:center"><select onchange="wiChoose(\''+it.id+'\',this.value)" style="font-size:12.5px;flex:1;min-width:0;padding:5px">'+
+        '<option value=""'+(ch===''?' selected':'')+'>— elegir —</option><option value="new"'+(ch==='new'?' selected':'')+'>🆕 Crear producto nuevo en Woo</option>'+
+        all.map(function(c){ return '<option value="'+c.p.id+'"'+(ch===String(c.p.id)?' selected':'')+'>'+c.k+' #'+c.p.id+' '+wiEsc(c.p.name.slice(0,50))+' ('+wiEsc(c.why)+')</option>'; }).join('')+
+      '</select><button class="btn btn-ghost btn-xs" onclick="wiSearchOpen(\''+it.id+'\')" title="Buscar en Woo por nombre, SKU o ID">🔎</button></div>'+
+      (cp?'<div style="font-size:13px;font-weight:600;margin-top:3px;line-height:1.3">'+wiEsc(cp.name)+'</div><div style="font-size:11.5px;color:var(--text3);margin-top:1px">#'+cp.id+' · SKU '+wiEsc(cp.sku||'—')+' · '+(cp.type==='variable'?'variable':'simple')+' · stock '+(cp.stock==null?'sin gestión':cp.stock)+'</div>':'')+
+      (otras.length?'<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">'+otras.map(function(c){
+        return '<div onclick="wiChoose(\''+it.id+'\',\''+c.p.id+'\')" title="Elegir: #'+c.p.id+' '+wiEsc(c.p.name)+' ('+wiEsc(c.why)+')" style="cursor:pointer;display:flex;gap:5px;align-items:center;border:1px solid var(--border);border-radius:8px;padding:3px 7px 3px 3px;background:var(--bg3);max-width:220px">'+wiThumb(c.p.img,TS)+'<div style="font-size:10.5px;line-height:1.25;overflow:hidden"><div style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;max-width:155px">'+wiEsc(c.p.name)+'</div><div style="color:var(--text3)">'+c.k+' '+wiEsc(c.why)+'</div></div></div>';
+      }).join('')+'</div>':'')+
+    '</div></div>';
+  }
+  return '<tr style="'+(r.group==='auto'?'background:#f0fdfa':'')+'"><td><input type="checkbox" style="width:17px;height:17px" '+(wiS.sel.has(it.id)?'checked':'')+' onchange="wiSelToggle(\''+it.id+'\',this.checked)" '+(r.group==='vinculada'?'disabled':'')+'></td>'+
+    '<td style="min-width:320px"><div style="display:flex;gap:10px;align-items:center;justify-content:flex-end">'+
+      '<div style="min-width:0;text-align:right"><div style="font-size:13.5px;font-weight:600;line-height:1.3">'+wiEsc(it.title)+'</div><div style="font-size:11.5px;color:var(--text3);font-family:var(--mono);margin-top:2px">'+it.id+(r.sku?' · SKU '+wiEsc(r.sku):'')+'</div><div style="font-size:11.5px;color:var(--text3)">'+wiEsc(it.status)+(it.date_created?' · creada '+new Date(it.date_created).toLocaleDateString('es-AR'):'')+((it.variations||[]).length?' · '+it.variations.length+' variantes':'')+(dimsTxt?'':' · <span style="color:#b45309" title="La publicación no tiene medidas/peso de paquete en ML">⚠ sin medidas</span>')+'</div></div>'+
+      wiThumb(pic,T)+'</div></td>'+
+    '<td style="text-align:right;font-size:13.5px;font-weight:600;white-space:nowrap">'+wiMoney(it.price)+'</td><td style="text-align:center;font-size:13.5px;font-weight:600">'+(it.available_quantity||0)+'</td>'+
+    '<td style="border-left:3px solid #c4b5fd;min-width:440px">'+woo+'</td>'+
+    '<td><span style="font-size:11px;font-weight:700;padding:3px 8px;border-radius:9px;background:'+b[0]+';color:'+b[1]+';white-space:nowrap">'+b[2]+'</span>'+(r.group==='auto'&&r.auto?'<div style="font-size:10.5px;color:#0f766e;margin-top:3px">'+(r.porFoto?'📸 ':'')+wiEsc(r.auto.why)+'</div>':'')+'</td></tr>';
+}
+var WI_CHUNK=150, _wiObs=null;
 function wiRenderRows(){
   var w=document.getElementById('wi-rows'); if(!w) return;
   var cnt={ all:wiS.rows.length, vinculada:0, coincidencia:0, auto:0, sugerencia:0, nueva:0, ignorada:0, foto:0, sel:wiS.sel.size };
   wiS.rows.forEach(function(r){ cnt[r.group]++; if(r.porFoto) cnt.foto++; });
   Object.keys(cnt).forEach(function(k){ var e=document.getElementById('wi-cnt-'+k); if(e) e.textContent=cnt[k]; });
+  if(_wiObs){ _wiObs.disconnect(); _wiObs=null; }
   if(!wiS.rows.length){ w.innerHTML='<div style="text-align:center;padding:26px;color:var(--text3);font-size:12px">Tocá «Cargar publicaciones de ML y productos de Woo».</div>'; wiSelInfo(); return; }
   var list=wiRowsFiltered();
-  var T=86, TS=52;   // tamaños de miniatura
-  var gb={ vinculada:['#dcfce7','#166534','🔗 Vinculada'], coincidencia:['#dbeafe','#1e40af','🎯 SKU / código'], auto:['#ccfbf1','#115e59','🤖 Automática'], sugerencia:['#fef3c7','#92400e','💡 Revisar'], nueva:['#f3e8ff','#6b21a8','🆕 Nueva'], ignorada:['#e5e7eb','#374151','🚫 No importar'] };
+  wiS._list=list; wiS._shown=Math.min(list.length, Math.max(WI_CHUNK, wiS._keepShown||0)); wiS._keepShown=0;
   var th='style="cursor:pointer;user-select:none;white-space:nowrap"';
   w.innerHTML='<div class="tw"><table style="width:100%"><thead><tr><th style="width:30px"><input type="checkbox" onchange="wiSelAll(this.checked)" title="Tildar / destildar todas las de la vista"></th>'+
-    '<th '+th+' onclick="wiSortBy(\'date\')" style="text-align:right">📦 Publicación de Mercado Libre<span style="font-weight:400">'+wiSortArrow('date')+'</span></th>'+
-    '<th style="min-width:420px">🛒 Producto en Woo</th>'+
-    '<th '+th+' onclick="wiSortBy(\'price\')">💲 Precio'+wiSortArrow('price')+'</th><th '+th+' onclick="wiSortBy(\'stock\')">📊 Stock'+wiSortArrow('stock')+'</th><th>🎨 Var.</th><th>📐 Medidas</th><th>🏷️ Grupo</th></tr></thead><tbody>'+
-    list.map(function(r){
-      var it=r.it, b=gb[r.group];
-      var pic=(it.pictures&&it.pictures[0]&&(it.pictures[0].secure_url||it.pictures[0].url))||it.thumbnail||'';
-      var dimsTxt = wiMlDims(it);
-      var woo='';
-      if(r.group==='vinculada'){ var wp=wiS.wooById[r.link.woo_id]; woo='<div style="display:flex;gap:10px;align-items:center">'+wiThumb(wp&&wp.img||r.link.woo_thumb,T)+'<div><div style="font-size:13.5px"><b>#'+r.link.woo_id+'</b> '+wiEsc(wp?wp.name:(r.link.woo_title||''))+'</div><div style="font-size:11.5px;color:var(--text3)">'+wiEsc(r.link.state)+(r.link.note?' · '+wiEsc(r.link.note):'')+'</div></div></div>'; }
-      else if(r.group==='ignorada'){ woo='<span style="font-size:12.5px;color:var(--text3)">Marcada como no importar</span> <a href="#" onclick="wiUnignore(\''+it.id+'\');return false" style="font-size:12.5px">deshacer</a>'; }
-      else {
-        var ch=wiS.choice[it.id]||'';
-        var all=r.cands.map(function(c){ return { p:c.p, why:c.why, k:'🎯' }; });
-        if(r.auto && wiS.wooById[r.auto.id] && !all.some(function(x){ return x.p.id===r.auto.id; })) all.push({ p:wiS.wooById[r.auto.id], why:r.auto.why, k:'🤖' });
-        r.sugs.forEach(function(c){ if(c.p && !all.some(function(x){ return x.p.id===c.p.id; })) all.push({ p:c.p, why:c.why, k:/foto/.test(c.why)?'📸':'💡' }); });
-        if(ch && ch!=='new' && !all.some(function(x){ return String(x.p.id)===ch; }) && wiS.wooById[ch]) all.unshift({ p:wiS.wooById[ch], why:'elegido a mano', k:'🔎' });
-        var cp = ch && ch!=='new' && wiS.wooById[ch];
-        var otras = all.filter(function(c){ return String(c.p.id)!==ch; }).slice(0,6);
-        woo='<div style="display:flex;gap:10px;align-items:flex-start">'+
-          (cp?wiThumb(cp.img,T,cp.name):ch==='new'?'<div style="width:'+T+'px;height:'+T+'px;border-radius:8px;background:#f3e8ff;color:#6b21a8;display:flex;align-items:center;justify-content:center;font-size:30px;flex-shrink:0">🆕</div>':'<div style="width:'+T+'px;height:'+T+'px;border-radius:8px;border:2px dashed var(--border2);display:flex;align-items:center;justify-content:center;font-size:24px;color:var(--text3);flex-shrink:0">?</div>')+
-          '<div style="flex:1;min-width:0"><div style="display:flex;gap:4px;align-items:center"><select onchange="wiChoose(\''+it.id+'\',this.value)" style="font-size:12.5px;flex:1;min-width:0;padding:5px">'+
-            '<option value=""'+(ch===''?' selected':'')+'>— elegir —</option><option value="new"'+(ch==='new'?' selected':'')+'>🆕 Crear producto nuevo en Woo</option>'+
-            all.map(function(c){ return '<option value="'+c.p.id+'"'+(ch===String(c.p.id)?' selected':'')+'>'+c.k+' #'+c.p.id+' '+wiEsc(c.p.name.slice(0,50))+' ('+wiEsc(c.why)+')</option>'; }).join('')+
-          '</select><button class="btn btn-ghost btn-xs" onclick="wiSearchOpen(\''+it.id+'\')" title="Buscar en Woo por nombre, SKU o ID">🔎</button></div>'+
-          (cp?'<div style="font-size:13px;font-weight:600;margin-top:3px;line-height:1.3">'+wiEsc(cp.name)+'</div><div style="font-size:11.5px;color:var(--text3);margin-top:1px">#'+cp.id+' · SKU '+wiEsc(cp.sku||'—')+' · '+(cp.type==='variable'?'variable':'simple')+' · stock '+(cp.stock==null?'sin gestión':cp.stock)+'</div>':'')+
-          (otras.length?'<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">'+otras.map(function(c){
-            return '<div onclick="wiChoose(\''+it.id+'\',\''+c.p.id+'\')" title="Elegir: #'+c.p.id+' '+wiEsc(c.p.name)+' ('+wiEsc(c.why)+')" style="cursor:pointer;display:flex;gap:5px;align-items:center;border:1px solid var(--border);border-radius:8px;padding:3px 7px 3px 3px;background:var(--bg3);max-width:210px">'+wiThumb(c.p.img,TS)+'<div style="font-size:10.5px;line-height:1.25;overflow:hidden"><div style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;max-width:145px">'+wiEsc(c.p.name)+'</div><div style="color:var(--text3)">'+c.k+' '+wiEsc(c.why)+'</div></div></div>';
-          }).join('')+'</div>':'')+
-        '</div></div>';
-      }
-      return '<tr style="content-visibility:auto;contain-intrinsic-size:auto 120px;'+(r.group==='auto'?'background:#f0fdfa':'')+'"><td><input type="checkbox" style="width:17px;height:17px" '+(wiS.sel.has(it.id)?'checked':'')+' onchange="wiSelToggle(\''+it.id+'\',this.checked)" '+(r.group==='vinculada'?'disabled':'')+'></td>'+
-        '<td style="min-width:300px"><div style="display:flex;gap:10px;align-items:center;justify-content:flex-end">'+
-          '<div style="min-width:0;text-align:right"><div style="font-size:13.5px;font-weight:600;line-height:1.3">'+wiEsc(it.title)+'</div><div style="font-size:11.5px;color:var(--text3);font-family:var(--mono);margin-top:2px">'+it.id+(r.sku?' · SKU '+wiEsc(r.sku):'')+'</div><div style="font-size:11.5px;color:var(--text3)">'+wiEsc(it.status)+(it.date_created?' · creada '+new Date(it.date_created).toLocaleDateString('es-AR'):'')+'</div></div>'+
-          wiThumb(pic,T)+'</div></td>'+
-        '<td style="border-left:3px solid #e9d5ff">'+woo+'</td>'+
-        '<td style="text-align:right;font-size:13.5px;font-weight:600;white-space:nowrap">'+wiMoney(it.price)+'</td><td style="text-align:center;font-size:13.5px;font-weight:600">'+(it.available_quantity||0)+'</td>'+
-        '<td style="text-align:center;font-size:13px">'+((it.variations||[]).length||'—')+'</td>'+
-        '<td style="text-align:center;font-size:12px">'+(dimsTxt?'<span style="color:#16a34a">✓ '+dimsTxt+'</span>':'<span style="color:#b45309" title="La publicación no tiene medidas/peso de paquete en ML">⚠ faltan</span>')+'</td>'+
-        '<td><span style="font-size:11px;font-weight:700;padding:3px 8px;border-radius:9px;background:'+b[0]+';color:'+b[1]+';white-space:nowrap">'+b[2]+'</span>'+(r.group==='auto'&&r.auto?'<div style="font-size:10.5px;color:#0f766e;margin-top:3px">'+(r.porFoto?'📸 ':'')+wiEsc(r.auto.why)+'</div>':'')+'</td></tr>';
-    }).join('')+'</tbody></table></div>'+
-    '<div style="padding-top:8px;font-size:12px;color:var(--text3)">'+list.length+' publicaciones en la vista</div>';
+    '<th '+th+' onclick="wiSortBy(\'date\')"><div style="text-align:right">📦 Publicación de Mercado Libre<span style="font-weight:400">'+wiSortArrow('date')+'</span></div></th>'+
+    '<th '+th+' onclick="wiSortBy(\'price\')">💲 Precio'+wiSortArrow('price')+'</th><th '+th+' onclick="wiSortBy(\'stock\')">📊 Stock'+wiSortArrow('stock')+'</th>'+
+    '<th style="border-left:3px solid #c4b5fd">🛒 Producto en Woo</th><th>🏷️ Grupo</th></tr></thead><tbody id="wi-tbody">'+
+    list.slice(0, wiS._shown).map(wiRowHtml).join('')+'</tbody></table></div>'+
+    '<div id="wi-more" style="padding:10px 0;font-size:12px;color:var(--text3);text-align:center"></div>';
+  wiMoreInfo();
+  wiWatchMore();
   wiSelInfo();
 }
-// v308: aplicar una misma elección a todas las de la vista (filtro + búsqueda)
+function wiMoreInfo(){
+  var m=document.getElementById('wi-more'); if(!m) return;
+  var tot=(wiS._list||[]).length;
+  m.innerHTML = wiS._shown<tot ? '⬇️ Mostrando '+wiS._shown+' de '+tot+' — bajá para ver más · <a href="#" onclick="wiShowMore();return false">mostrar más</a>' : tot+' publicaciones en la vista';
+}
+function wiShowMore(){
+  var tb=document.getElementById('wi-tbody'), list=wiS._list||[];
+  if(!tb || wiS._shown>=list.length) return;
+  var next=list.slice(wiS._shown, wiS._shown+WI_CHUNK);
+  tb.insertAdjacentHTML('beforeend', next.map(wiRowHtml).join(''));
+  wiS._shown+=next.length;
+  wiMoreInfo();
+}
+function wiWatchMore(){
+  var m=document.getElementById('wi-more'); if(!m || !('IntersectionObserver' in window)) return;
+  _wiObs=new IntersectionObserver(function(es){ if(es.some(function(e){ return e.isIntersecting; })) wiShowMore(); }, { rootMargin:'600px' });
+  _wiObs.observe(m);
+}
 function wiBulkChoice(kind){
   var list=wiS.rows.filter(function(r){ return wiS.sel.has(r.id) && r.group!=='vinculada' && r.group!=='ignorada'; });
   if(!list.length){ showToast('Primero tildá las publicaciones a las que querés aplicar la opción','warn'); return; }
@@ -54862,9 +54890,10 @@ function wiBulkChoice(kind){
     else if(kind==='clear'){ wiS.choice[r.id]=''; wiS.userChoice[r.id]=1; n++; }
   });
   showToast((kind==='new'?'🆕 Crear nuevo':kind==='best'?'✅ Mejor opción':'↺ Sin elección')+' en '+n+' publicación(es) tildada(s)', 'info');
-  wiSnapSave(); wiRenderRows();
+  wiKeepRender();
 }
-function wiChoose(id, v){ wiS.choice[id]=v; wiS.userChoice=wiS.userChoice||{}; wiS.userChoice[id]=1; wiSnapSave(); wiRenderRows(); }
+function wiChoose(id, v){ wiS.choice[id]=v; wiS.userChoice=wiS.userChoice||{}; wiS.userChoice[id]=1; wiKeepRender(); }
+function wiKeepRender(){ var y=window.scrollY, c=document.getElementById('content'), cy=c?c.scrollTop:0; wiS._keepShown=wiS._shown||0; wiRenderRows(); window.scrollTo(0,y); if(c) c.scrollTop=cy; }
 function wiSelToggle(id, on){ if(on) wiS.sel.add(id); else wiS.sel.delete(id); wiSelInfo(); var e=document.getElementById('wi-cnt-sel'); if(e) e.textContent=wiS.sel.size; }
 function wiSelPage(on){ var list=wiRowsFiltered().slice((wiS.page-1)*wiS.perPage, wiS.page*wiS.perPage); list.forEach(function(r){ if(r.group==='vinculada') return; if(on) wiS.sel.add(r.id); else wiS.sel.delete(r.id); }); wiRenderRows(); }
 function wiSelAll(on){ wiRowsFiltered().forEach(function(r){ if(r.group==='vinculada') return; if(on) wiS.sel.add(r.id); else wiS.sel.delete(r.id); }); wiRenderRows(); }
