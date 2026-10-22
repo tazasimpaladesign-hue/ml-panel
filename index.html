@@ -857,7 +857,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v305 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v306 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -3321,6 +3321,18 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
 
 <div id="section-woo-import" class="section fade-in">
+  <!-- v306: conexión + pestañas -->
+  <div class="card mb" style="padding:10px 14px">
+    <div id="wi-conn" style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;font-size:12px"></div>
+  </div>
+  <div class="tabs" style="margin-bottom:12px;flex-wrap:wrap">
+    <button class="tab active" id="wi-tab-una" onclick="wiTab('una')">1 · Importar una publicación</button>
+    <button class="tab" id="wi-tab-todas" onclick="wiTab('todas')">2 · Importar y vincular todas</button>
+    <button class="tab" id="wi-tab-vinc" onclick="wiTab('vinc')">3 · Productos vinculados</button>
+    <button class="tab" id="wi-tab-sync" onclick="wiTab('sync')">4 · Sincronización de stock</button>
+    <button class="tab" id="wi-tab-hist" onclick="wiTab('hist')">5 · Historial</button>
+  </div>
+  <div id="wi-pane-una">
   <div class="card mb">
     <div class="card-hd" style="flex-wrap:wrap;gap:8px">
       <div style="flex:1;min-width:0">
@@ -3399,6 +3411,86 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         </div>
       </div>
     </div>
+  </div>
+  </div><!-- /wi-pane-una -->
+
+  <!-- 2 · IMPORTAR Y VINCULAR TODAS -->
+  <div id="wi-pane-todas" class="card" style="display:none">
+    <div class="card-title" style="margin-bottom:4px">Importar y vincular todas las publicaciones</div>
+    <div style="font-size:11.5px;color:var(--text3);line-height:1.5;margin-bottom:10px">Trae todas las publicaciones de tu cuenta de ML y todos los productos de tu tienda Woo, y los cruza. <b>🎯 Coincidencia</b>: el producto de Woo tiene guardado el ID de ML, el mismo SKU o el mismo código universal. <b>💡 Revisar</b>: sólo el título se parece; nunca se vincula solo, elegís vos. <b>🆕 Nueva</b>: no hay nada parecido y se puede crear en Woo. Los SKU actuales no se modifican.</div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <span style="font-size:11px;font-weight:700;color:var(--text2)">Estados:</span>
+      <label style="font-size:12px;cursor:pointer"><input type="checkbox" class="wi-st" value="active" checked> Activas</label>
+      <label style="font-size:12px;cursor:pointer"><input type="checkbox" class="wi-st" value="paused" checked> Pausadas</label>
+      <label style="font-size:12px;cursor:pointer"><input type="checkbox" class="wi-st" value="under_review"> En revisión</label>
+      <label style="font-size:12px;cursor:pointer"><input type="checkbox" class="wi-st" value="inactive"> Inactivas</label>
+      <button class="btn btn-primary btn-sm" onclick="wiLoadAll()">🔄 Cargar publicaciones de ML y productos de Woo</button>
+      <span id="wi-load-prog" style="font-size:11.5px;color:var(--text3)"></span>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:12px 0 8px">
+      <div class="chips" style="margin:0;gap:5px">
+        <div class="chip wi-chip" data-f="all" onclick="wiFilter('all')" style="font-size:11px;background:var(--accent);color:#fff;border-color:var(--accent)">Todas <b id="wi-cnt-all">0</b></div>
+        <div class="chip wi-chip" data-f="coincidencia" onclick="wiFilter('coincidencia')" style="font-size:11px">🎯 Coincidencias <b id="wi-cnt-coincidencia">0</b></div>
+        <div class="chip wi-chip" data-f="sugerencia" onclick="wiFilter('sugerencia')" style="font-size:11px">💡 Revisar <b id="wi-cnt-sugerencia">0</b></div>
+        <div class="chip wi-chip" data-f="nueva" onclick="wiFilter('nueva')" style="font-size:11px">🆕 Nuevas <b id="wi-cnt-nueva">0</b></div>
+        <div class="chip wi-chip" data-f="vinculada" onclick="wiFilter('vinculada')" style="font-size:11px">🔗 Vinculadas <b id="wi-cnt-vinculada">0</b></div>
+        <div class="chip wi-chip" data-f="ignorada" onclick="wiFilter('ignorada')" style="font-size:11px">🚫 No importar <b id="wi-cnt-ignorada">0</b></div>
+      </div>
+      <input type="text" placeholder="🔍 Título, SKU o ID" oninput="wiS.q=this.value;wiS.page=1;wiRenderRows()" style="font-size:12px;padding:5px 9px;max-width:220px">
+      <button class="btn btn-ghost btn-xs" onclick="wiSelAll(true)">☑ Seleccionar las de la vista</button>
+      <button class="btn btn-ghost btn-xs" onclick="wiSelAll(false)">☐ Quitar</button>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:7px 10px">
+      <span id="wi-sel-info" style="font-size:12px"></span>
+      <button class="btn btn-sm" style="background:#16a34a;color:#fff;margin-left:auto" onclick="wiRunConfirm()">✅ Vincular / crear seleccionadas…</button>
+      <button class="btn btn-ghost btn-sm" onclick="wiIgnoreSel()">🚫 No importar</button>
+      <button class="btn btn-ghost btn-xs" id="wi-run-stop" style="display:none" onclick="wiS.cancel=true">⏹ Detener</button>
+    </div>
+    <div id="wi-run-prog" style="font-size:12px;margin-bottom:8px"></div>
+    <div id="wi-rows"></div>
+  </div>
+
+  <!-- 3 · VINCULADOS -->
+  <div id="wi-pane-vinc" class="card" style="display:none">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+      <div class="card-title" style="margin:0">Productos vinculados</div>
+      <div class="chips" style="margin:0 0 0 8px;gap:5px">
+        <div class="chip wi-lchip" data-f="all" onclick="wiLFilter('all')" style="font-size:11px;background:var(--accent);color:#fff;border-color:var(--accent)">Todos</div>
+        <div class="chip wi-lchip" data-f="sincronizado" onclick="wiLFilter('sincronizado')" style="font-size:11px">Sincronizados</div>
+        <div class="chip wi-lchip" data-f="vinculado" onclick="wiLFilter('vinculado')" style="font-size:11px">Sin sincronizar aún</div>
+        <div class="chip wi-lchip" data-f="revisar" onclick="wiLFilter('revisar')" style="font-size:11px">Requieren revisión</div>
+        <div class="chip wi-lchip" data-f="error" onclick="wiLFilter('error')" style="font-size:11px">Con error</div>
+        <div class="chip wi-lchip" data-f="pausado" onclick="wiLFilter('pausado')" style="font-size:11px">Pausados</div>
+      </div>
+      <input type="text" placeholder="🔍 Buscar" oninput="wiS.lq=this.value;wiLinksRender()" style="font-size:12px;padding:5px 9px;max-width:200px;margin-left:auto">
+      <button class="btn btn-sm" style="background:#eff6ff;color:#1d4ed8;border:1px solid #93c5fd" onclick="wiUpdOpen()">🔄 Actualizar desde ML (<span id="wi-lsel-n">0</span>)…</button>
+      <button class="btn btn-ghost btn-xs" onclick="wiLinksLoad()">↻</button>
+    </div>
+    <div id="wi-links"></div>
+  </div>
+
+  <!-- 4 · SINCRONIZACIÓN -->
+  <div id="wi-pane-sync" class="card" style="display:none">
+    <div class="card-title" style="margin-bottom:10px">Sincronización de stock compartido</div>
+    <div id="wi-sync"></div>
+  </div>
+
+  <!-- 5 · HISTORIAL -->
+  <div id="wi-pane-hist" class="card" style="display:none">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+      <div class="card-title" style="margin:0">Historial</div>
+      <div class="chips" style="margin:0 0 0 8px;gap:5px">
+        <div class="chip wi-hchip" data-k="" onclick="wiLogLoad('')" style="font-size:11px">Todo</div>
+        <div class="chip wi-hchip" data-k="import" onclick="wiLogLoad('import')" style="font-size:11px">Importaciones</div>
+        <div class="chip wi-hchip" data-k="link" onclick="wiLogLoad('link')" style="font-size:11px">Vínculos</div>
+        <div class="chip wi-hchip" data-k="stock" onclick="wiLogLoad('stock')" style="font-size:11px">Stock</div>
+        <div class="chip wi-hchip" data-k="sim" onclick="wiLogLoad('sim')" style="font-size:11px">Simulaciones</div>
+        <div class="chip wi-hchip" data-k="error" onclick="wiLogLoad('error')" style="font-size:11px">Errores</div>
+        <div class="chip wi-hchip" data-k="update" onclick="wiLogLoad('update')" style="font-size:11px">Actualizaciones</div>
+      </div>
+      <button class="btn btn-ghost btn-xs" style="margin-left:auto" onclick="wiLogLoad()">↻</button>
+    </div>
+    <div id="wi-log"></div>
   </div>
 </div>
 
@@ -32104,7 +32196,7 @@ const titles={
   repricing:['💲 Precios automáticos','Repricing dinámico basado en competencia'],
   reglas:['⚙️ Reglas automáticas','Automatizaciones de precios y respuestas'],
   alertas:['🔔 Alertas','Centro de notificaciones'],
-  'woo-import':['&#x1F6D2; Importar a WooCommerce','Trae tus publicaciones de ML a tu tienda propia'],
+  'woo-import':['🛒 Importar a WooCommerce','Trae tus publicaciones de ML a tu tienda propia'],
   'whatsapp':['💬 WhatsApp Business','Notificaciones automáticas y alertas al móvil'],
   'woo-seo':['🟣 SEO Tienda Woo','Analizador SEO de tus productos en tiendaimpala.com.ar'],
   'facebook-mp':['🛒 Face Marketplace','Publicador individual asistido — cuenta personal, moderado a mano'],
@@ -32176,6 +32268,7 @@ function showSection(id){
   if(id==='perso-wa') persoInit();
   if(id==='cta') ctaInit();
   if(id==='proveedores') provInit();
+  if(id==='woo-import' && typeof wiInit==='function') wiInit();
   if(id==='respaldo-cuenta' && typeof rcInit==='function') rcInit();
 }
 
@@ -39188,6 +39281,8 @@ async function publishToWoo() {
     _wooImportHistory.unshift({ itemId: item.itemId, title: finalTitle, price: price, wc_id: wc_id, editUrl: editUrl, date: new Date().toLocaleString('es-AR') });
     _renderWooHistory();
     showToast('Creado en Woo como BORRADOR (ID #' + wc_id + ')', 'success');
+    // v306: queda vinculado para la sincronización de stock (y con medidas/peso de ML)
+    try { if (typeof wiAutoLink === 'function') wiAutoLink(item.itemId, wc_id); } catch (e) {}
 
     var ctr = document.getElementById('woo-preview-container');
     if (ctr) {
@@ -54220,6 +54315,569 @@ async function rcXlsxFill(z, sheetName, firstRow, colIdx, rows){
     w.add(n, data, { deflate:true });
   }
   return new Blob([await w.toBlob().arrayBuffer()],{ type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
+
+</script>
+<script>
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v306 · IMPORTAR A WOO — importación masiva, vínculo y stock compartido
+// ───────────────────────────────────────────────────────────────────────────
+// El motor está en el Worker (/wsync/*, base D1). El panel:
+//   · lista TODAS las publicaciones de la cuenta de ML conectada y TODOS los
+//     productos de la tienda Woo del Worker, y los cruza:
+//       vinculada · coincidencia (ID de ML guardado en Woo / SKU / código
+//       universal) · sugerencia por título (nunca automática) · nueva
+//   · vincula o crea en bloque con confirmación, progreso y reanudación
+//   · administra la sincronización (simulación / real, 1–2 por día)
+// ═══════════════════════════════════════════════════════════════════════════
+var wiS = { inited:false, status:null, ml:[], woo:[], wooById:{}, links:{ items:[], units:[] }, linkByMl:{}, linkByWoo:{},
+  rows:[], choice:{}, sel:new Set(), filter:'all', q:'', page:1, perPage:40, cats:null, running:false, cancel:false,
+  lsel:new Set(), lq:'', lfilter:'all', logKind:'' };
+
+function wiEsc(t){ return String(t==null?'':t).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function wiNorm(s){ return String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,' ').trim(); }
+function wiMoney(v){ return v==null||v===''?'—':'$'+Math.round(+v||0).toLocaleString('es-AR'); }
+async function wiApi(path, body){
+  var r = await fetch(WORKER+path, { method: body?'POST':'GET', headers: Object.assign({ Authorization:'Bearer '+token }, body?{'Content-Type':'application/json'}:{}), body: body?JSON.stringify(body):undefined });
+  if(r.status===401 && typeof tryRefreshToken==='function' && await tryRefreshToken()) return wiApi(path, body);
+  var d = {}; try{ d = await r.json(); }catch(e){ d = { error:'Respuesta inválida del Worker (HTTP '+r.status+'). ¿Está desplegado el Worker v140?' }; }
+  if(r.status===404 && !d.error) d.error = 'El Worker no tiene esta función: desplegá el Worker v140';
+  return d;
+}
+var WI_M = {
+  box:'background:#fff;border-radius:14px;max-width:560px;width:100%;max-height:90vh;overflow:auto;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.3);color:#1e293b',
+  title:'font-size:16px;font-weight:800;color:#1e293b;margin-bottom:4px', sub:'font-size:12px;color:#64748b;margin-bottom:14px;line-height:1.45',
+  warn:'background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:10px;margin-bottom:12px;font-size:11.5px;color:#92400e;line-height:1.45',
+  info:'background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:10px;margin-bottom:12px;font-size:11.5px;color:#1e40af;line-height:1.45',
+  label:'font-size:12px;font-weight:600;color:#334155;display:block;margin-bottom:5px',
+  input:'width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:8px;font-size:13px;background:#fff;color:#1e293b;box-sizing:border-box',
+  cancel:'padding:10px 14px;border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:9px;font-weight:600;cursor:pointer'
+};
+function wiGo(id, label, bg, onclick, disabled){ return '<button id="'+id+'"'+(disabled?' disabled':'')+' onclick="'+onclick+'" style="flex:1;padding:10px;border:none;background:'+bg+';color:#fff;border-radius:9px;font-weight:700;cursor:pointer'+(disabled?';opacity:.5':'')+'">'+label+'</button>'; }
+function wiModal(html, wide){
+  var m=document.getElementById('wi-modal');
+  if(html==null){ if(m) m.remove(); return; }
+  if(!m){ m=document.createElement('div'); m.id='wi-modal'; document.body.appendChild(m); }
+  m.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
+  m.innerHTML='<div style="'+WI_M.box+(wide?';max-width:860px':'')+'">'+html+'</div>';
+}
+
+// ── init / pestañas / estado ────────────────────────────────────────────────
+function wiInit(){
+  if(!wiS.inited){ wiS.inited=true; }
+  wiStatusLoad();
+}
+function wiTab(t){
+  ['una','todas','vinc','sync','hist'].forEach(function(k){
+    var b=document.getElementById('wi-tab-'+k), p=document.getElementById('wi-pane-'+k);
+    if(b) b.classList.toggle('active', k===t); if(p) p.style.display = k===t?'':'none';
+  });
+  if(t==='vinc') wiLinksLoad();
+  if(t==='sync') wiSyncRender();
+  if(t==='hist') wiLogLoad();
+}
+async function wiStatusLoad(){
+  var el=document.getElementById('wi-conn'); if(!el) return;
+  el.innerHTML='<span style="color:var(--text3)">Verificando conexión…</span>';
+  var s = await wiApi('/wsync/status');
+  wiS.status = s;
+  var nick = (typeof userData!=='undefined' && userData && userData.nickname) || '—';
+  var ok = function(b){ return b?'<span style="color:#16a34a;font-weight:700">✓</span>':'<span style="color:#dc2626;font-weight:700">✕</span>'; };
+  if(s.error && !s.d1 && s.d1!==false){ el.innerHTML='<span style="color:#b91c1c">'+wiEsc(s.message||s.error)+'</span>'; return; }
+  var st = s.settings||{};
+  el.innerHTML =
+    '<span>'+ok(!!token)+' ML: <b>'+wiEsc(nick)+'</b>'+(typeof userId!=='undefined'&&userId?' #'+userId:'')+'</span>'+
+    '<span>'+ok(s.woo_ok)+' Woo: <b>'+wiEsc(s.woo_url||'sin configurar')+'</b></span>'+
+    '<span>'+ok(s.d1)+' Base D1: <b>'+wiEsc(s.d1_binding||'no vinculada')+'</b></span>'+
+    (s.d1 ? '<span>🔗 Vinculadas: <b>'+(Object.keys(s.counts||{}).reduce(function(a,k){ return a+(k!=='ignorado'?s.counts[k]:0); },0))+'</b></span>'+
+      '<span>🔄 Sincronización: <b style="color:'+(st.enabled?'#16a34a':'#92400e')+'">'+(st.enabled?'activa':'pausada')+'</b> · '+(st.mode==='real'?'<b style="color:#16a34a">real</b>':'<b style="color:#2563eb">simulación</b>')+' · '+(st.hours||[]).map(function(h){ return String(h).padStart(2,'0')+':00'; }).join(' y ')+'</span>' : '')+
+    (s.error ? '<span style="color:#b91c1c">'+wiEsc(s.message||s.error)+'</span>' : '');
+  if(!s.d1){
+    el.innerHTML += '<div style="width:100%;font-size:11.5px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 10px;margin-top:6px">Para vincular y sincronizar falta conectar una base <b>D1</b> al Worker: Cloudflare → Workers & Pages → tu Worker → Configuración → Vinculaciones → Agregar → <b>Base de datos D1</b> → nombre de variable <b>SYNC_DB</b> (elegí la base existente o creá una nueva) → Guardar. Las tablas se crean solas.</div>';
+  }
+}
+
+// ═══ IMPORTAR Y VINCULAR TODAS ════════════════════════════════════════════
+async function wiLoadAll(){
+  if(wiS.running) return;
+  if(!token){ showToast('Conectá Mercado Libre','error'); return; }
+  var sts = Array.prototype.slice.call(document.querySelectorAll('.wi-st:checked')).map(function(c){ return c.value; });
+  if(!sts.length){ showToast('Elegí al menos un estado','warn'); return; }
+  wiS.running=true; wiS.cancel=false;
+  var prog=function(t){ var e=document.getElementById('wi-load-prog'); if(e) e.textContent=t; };
+  try{
+    // 1) IDs de ML (scan con scroll por estado)
+    var me = userId || (await mlGet('/users/me')).id;
+    var ids=[], seen={};
+    for(var s=0;s<sts.length;s++){
+      var scroll=null, guard=0, got=0;
+      do{
+        var d = await mlGet('/users/'+me+'/items/search?status='+sts[s]+'&search_type=scan&limit=100'+(scroll?'&scroll_id='+encodeURIComponent(scroll):''));
+        scroll = d.scroll_id||scroll; var res=d.results||[];
+        res.forEach(function(id){ if(!seen[id]){ seen[id]=1; ids.push(id); } got++; });
+        prog('Listando publicaciones ('+sts[s]+'): '+got+(d.paging&&d.paging.total!=null?' de '+d.paging.total:''));
+        if(!res.length) break;
+      } while(++guard<500 && !wiS.cancel);
+    }
+    // 2) detalle (de a 20, con atributos completos)
+    var ml=[];
+    for(var i=0;i<ids.length && !wiS.cancel;i+=20){
+      var arr = await mlGet('/items?ids='+ids.slice(i,i+20).join(',')+'&include_attributes=all');
+      (Array.isArray(arr)?arr:[]).forEach(function(x){ if(x&&x.code===200&&x.body) ml.push(x.body); });
+      prog('Leyendo publicaciones de ML: '+Math.min(i+20,ids.length)+' / '+ids.length);
+    }
+    // 3) productos de Woo
+    var woo=[], page=1, tp=1;
+    do{
+      var w = await wiApi('/wsync/woo-products?page='+page);
+      if(w.error) throw new Error(w.message||w.error);
+      woo = woo.concat(w.items||[]); tp = w.total_pages||1;
+      prog('Leyendo productos de Woo: '+woo.length+(w.total?' de '+w.total:''));
+      page++;
+    } while(page<=tp && !wiS.cancel);
+    // 4) vínculos
+    var l = await wiApi('/wsync/links');
+    if(l.error) throw new Error(l.message||l.error);
+    wiS.ml=ml; wiS.woo=woo; wiS.wooById={}; woo.forEach(function(p){ wiS.wooById[p.id]=p; });
+    wiSetLinks(l);
+    wiClassify();
+    prog('✓ '+ml.length+' publicaciones de ML · '+woo.length+' productos de Woo · '+(l.items||[]).filter(function(x){return x.woo_id;}).length+' vinculadas');
+    wiRenderRows();
+  }catch(e){ prog('✕ '+e.message); showToast('Importar a Woo: '+e.message,'error'); }
+  finally{ wiS.running=false; }
+}
+function wiSetLinks(l){
+  wiS.links = { items:l.items||[], units:l.units||[] };
+  wiS.linkByMl={}; wiS.linkByWoo={};
+  wiS.links.items.forEach(function(x){ wiS.linkByMl[x.ml_item_id]=x; if(x.woo_id) wiS.linkByWoo[x.woo_id]=x; });
+}
+function wiMlSku(it){ var a=(it.attributes||[]).find(function(x){ return x.id==='SELLER_SKU'; }); return (a&&a.value_name)||it.seller_custom_field||''; }
+function wiMlGtin(it){ var a=(it.attributes||[]).find(function(x){ return x.id==='GTIN'; }); return a&&a.value_name||''; }
+function wiMlDims(it){
+  var has=function(id){ return (it.attributes||[]).some(function(a){ return a.id===id && (a.value_struct||a.value_name); }); };
+  if(has('SELLER_PACKAGE_WEIGHT') && has('SELLER_PACKAGE_LENGTH')) return 'paquete';
+  if(it.shipping && typeof it.shipping.dimensions==='string' && /x/.test(it.shipping.dimensions)) return 'envío';
+  return '';
+}
+function wiTokens(s){ return wiNorm(s).split(' ').filter(function(w){ return w.length>2 && ['para','con','los','las','del','por','una','uno'].indexOf(w)<0; }); }
+function wiSim(a, b){ var A=new Set(wiTokens(a)), B=new Set(wiTokens(b)); if(!A.size||!B.size) return 0; var n=0; A.forEach(function(x){ if(B.has(x)) n++; }); return n/Math.min(A.size,B.size); }
+function wiClassify(){
+  var bySku={}, byGtin={}, byMl={};
+  wiS.woo.forEach(function(p){
+    if(p.sku) (bySku[p.sku.toLowerCase()]=bySku[p.sku.toLowerCase()]||[]).push(p);
+    if(p.gtin) (byGtin[String(p.gtin)]=byGtin[String(p.gtin)]||[]).push(p);
+    if(p.ml_item_id) (byMl[String(p.ml_item_id).toUpperCase()]=byMl[String(p.ml_item_id).toUpperCase()]||[]).push(p);
+  });
+  var libres = wiS.woo.filter(function(p){ return !wiS.linkByWoo[p.id]; });
+  wiS.rows = wiS.ml.map(function(it){
+    var row = { it:it, id:it.id, sku:wiMlSku(it), cands:[], sugs:[], group:'nueva', link:wiS.linkByMl[it.id]||null };
+    if(row.link && row.link.state==='ignorado') row.group='ignorada';
+    else if(row.link && row.link.woo_id && row.link.state!=='creando') row.group='vinculada';
+    else {
+      var add=function(list, why){ (list||[]).forEach(function(p){ if(wiS.linkByWoo[p.id] && wiS.linkByWoo[p.id].ml_item_id!==it.id) return; if(!row.cands.some(function(c){ return c.p.id===p.id; })) row.cands.push({ p:p, why:why }); }); };
+      add(byMl[it.id], 'ID de ML guardado en Woo');
+      var skus=[row.sku].concat((it.variations||[]).map(function(v){ var a=(v.attributes||[]).find(function(x){return x.id==='SELLER_SKU';}); return a&&a.value_name; })).filter(Boolean);
+      skus.forEach(function(s){ add(bySku[String(s).toLowerCase()], 'mismo SKU ('+s+')'); });
+      var g=wiMlGtin(it); if(g) add(byGtin[g], 'mismo código universal');
+      if(row.cands.length) row.group='coincidencia';
+      else {
+        row.sugs = libres.map(function(p){ return { p:p, s:wiSim(it.title, p.name) }; }).filter(function(x){ return x.s>=0.5; }).sort(function(a,b){ return b.s-a.s; }).slice(0,3);
+        row.group = row.sugs.length ? 'sugerencia' : 'nueva';
+      }
+    }
+    // elección por defecto (la sugerencia por título NUNCA se elige sola)
+    if(wiS.choice[it.id]==null){
+      wiS.choice[it.id] = row.group==='coincidencia' ? String(row.cands[0].p.id) : row.group==='nueva' ? 'new' : '';
+    }
+    return row;
+  });
+}
+function wiFilter(f){ wiS.filter=f; wiS.page=1; wiRenderRows();
+  document.querySelectorAll('.wi-chip').forEach(function(c){ var on=c.getAttribute('data-f')===f; c.style.background=on?'var(--accent)':''; c.style.color=on?'#fff':''; c.style.borderColor=on?'var(--accent)':''; }); }
+function wiRowsFiltered(){
+  var q=wiNorm(wiS.q);
+  return wiS.rows.filter(function(r){
+    if(wiS.filter!=='all' && r.group!==wiS.filter) return false;
+    if(q && wiNorm(r.it.title+' '+r.id+' '+r.sku).indexOf(q)<0) return false;
+    return true;
+  });
+}
+function wiRenderRows(){
+  var w=document.getElementById('wi-rows'); if(!w) return;
+  var cnt={ all:wiS.rows.length, vinculada:0, coincidencia:0, sugerencia:0, nueva:0, ignorada:0 };
+  wiS.rows.forEach(function(r){ cnt[r.group]++; });
+  Object.keys(cnt).forEach(function(k){ var e=document.getElementById('wi-cnt-'+k); if(e) e.textContent=cnt[k]; });
+  if(!wiS.rows.length){ w.innerHTML='<div style="text-align:center;padding:26px;color:var(--text3);font-size:12px">Tocá «Cargar publicaciones de ML y productos de Woo».</div>'; wiSelInfo(); return; }
+  var list=wiRowsFiltered(), pages=Math.max(1,Math.ceil(list.length/wiS.perPage)); wiS.page=Math.min(wiS.page,pages);
+  var pg=list.slice((wiS.page-1)*wiS.perPage, wiS.page*wiS.perPage);
+  var gb={ vinculada:['#dcfce7','#166534','🔗 Vinculada'], coincidencia:['#dbeafe','#1e40af','🎯 Coincidencia'], sugerencia:['#fef3c7','#92400e','💡 Revisar'], nueva:['#f3e8ff','#6b21a8','🆕 Nueva'], ignorada:['#e5e7eb','#374151','🚫 No importar'] };
+  w.innerHTML='<div class="tw"><table style="width:100%"><thead><tr><th style="width:26px"><input type="checkbox" onchange="wiSelPage(this.checked)" title="Seleccionar las de esta página"></th><th>Publicación de ML</th><th style="text-align:right">Precio</th><th>Stock</th><th>Var.</th><th>Medidas</th><th>Grupo</th><th style="min-width:280px">Producto en Woo</th></tr></thead><tbody>'+
+    pg.map(function(r){
+      var it=r.it, b=gb[r.group];
+      var pic=(it.pictures&&it.pictures[0]&&(it.pictures[0].secure_url||it.pictures[0].url))||it.thumbnail||'';
+      var dimsTxt = wiMlDims(it);
+      var woo='';
+      if(r.group==='vinculada'){ var wp=wiS.wooById[r.link.woo_id]; woo='<div style="font-size:11.5px"><b>#'+r.link.woo_id+'</b> '+wiEsc(wp?wp.name:(r.link.woo_title||''))+'</div><div style="font-size:10px;color:var(--text3)">'+wiEsc(r.link.state)+(r.link.note?' · '+wiEsc(r.link.note):'')+'</div>'; }
+      else if(r.group==='ignorada'){ woo='<span style="font-size:11px;color:var(--text3)">Marcada como no importar</span> <a href="#" onclick="wiUnignore(\''+it.id+'\');return false" style="font-size:11px">deshacer</a>'; }
+      else {
+        var ch=wiS.choice[it.id]||'';
+        var opts='<option value=""'+(ch===''?' selected':'')+'>— elegir —</option><option value="new"'+(ch==='new'?' selected':'')+'>🆕 Crear producto nuevo en Woo</option>';
+        r.cands.forEach(function(c){ opts+='<option value="'+c.p.id+'"'+(ch===String(c.p.id)?' selected':'')+'>🎯 #'+c.p.id+' '+wiEsc(c.p.name.slice(0,48))+' ('+wiEsc(c.why)+')</option>'; });
+        r.sugs.forEach(function(c){ opts+='<option value="'+c.p.id+'"'+(ch===String(c.p.id)?' selected':'')+'>💡 #'+c.p.id+' '+wiEsc(c.p.name.slice(0,48))+' — título parecido '+Math.round(c.s*100)+'%</option>'; });
+        if(ch && ch!=='new' && !r.cands.concat(r.sugs).some(function(c){ return String(c.p.id)===ch; })){ var mp=wiS.wooById[ch]; opts+='<option value="'+ch+'" selected>🔎 #'+ch+' '+wiEsc(mp?mp.name.slice(0,48):'')+'</option>'; }
+        woo='<div style="display:flex;gap:4px;align-items:center"><select onchange="wiChoose(\''+it.id+'\',this.value)" style="font-size:11.5px;max-width:300px;flex:1">'+opts+'</select>'+
+          '<button class="btn btn-ghost btn-xs" onclick="wiSearchOpen(\''+it.id+'\')" title="Buscar el producto en Woo por nombre, SKU o ID">🔎</button></div>';
+        var cp = ch && ch!=='new' && wiS.wooById[ch]; if(cp) woo+='<div style="font-size:10px;color:var(--text3);margin-top:2px">SKU Woo: '+wiEsc(cp.sku||'—')+' · '+(cp.type==='variable'?'variable':'simple')+' · stock '+(cp.stock==null?'sin gestión':cp.stock)+'</div>';
+      }
+      return '<tr><td><input type="checkbox" '+(wiS.sel.has(it.id)?'checked':'')+' onchange="wiSelToggle(\''+it.id+'\',this.checked)" '+(r.group==='vinculada'?'disabled':'')+'></td>'+
+        '<td style="min-width:220px"><div style="display:flex;gap:8px;align-items:center"><div style="width:38px;height:38px;border-radius:5px;overflow:hidden;background:var(--bg4);flex-shrink:0">'+(pic?'<img src="'+wiEsc(pic)+'" style="width:100%;height:100%;object-fit:cover" loading="lazy">':'')+'</div>'+
+          '<div style="min-width:0"><div style="font-size:12px;font-weight:500;line-height:1.3">'+wiEsc(it.title)+'</div><div style="font-size:10px;color:var(--text3);font-family:var(--mono)">'+it.id+(r.sku?' · SKU '+wiEsc(r.sku):'')+' · '+wiEsc(it.status)+'</div></div></div></td>'+
+        '<td style="text-align:right;font-size:12px">'+wiMoney(it.price)+'</td><td style="text-align:center;font-size:12px">'+(it.available_quantity||0)+'</td>'+
+        '<td style="text-align:center;font-size:12px">'+((it.variations||[]).length||'—')+'</td>'+
+        '<td style="text-align:center;font-size:10.5px">'+(dimsTxt?'<span style="color:#16a34a">✓ '+dimsTxt+'</span>':'<span style="color:#b45309" title="La publicación no tiene medidas/peso de paquete en ML">⚠ faltan</span>')+'</td>'+
+        '<td><span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:9px;background:'+b[0]+';color:'+b[1]+';white-space:nowrap">'+b[2]+'</span></td>'+
+        '<td>'+woo+'</td></tr>';
+    }).join('')+'</tbody></table></div>'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;padding-top:8px;font-size:11.5px;color:var(--text3)"><span>'+list.length+' en la vista</span>'+
+    (pages>1?'<div style="display:flex;gap:4px"><button class="btn btn-ghost btn-xs" '+(wiS.page<=1?'disabled':'')+' onclick="wiS.page--;wiRenderRows()">← Ant</button><span style="padding:3px 6px">'+wiS.page+' / '+pages+'</span><button class="btn btn-ghost btn-xs" '+(wiS.page>=pages?'disabled':'')+' onclick="wiS.page++;wiRenderRows()">Sig →</button></div>':'')+'</div>';
+  wiSelInfo();
+}
+function wiChoose(id, v){ wiS.choice[id]=v; if(v) wiS.sel.add(id); wiRenderRows(); }
+function wiSelToggle(id, on){ if(on) wiS.sel.add(id); else wiS.sel.delete(id); wiSelInfo(); }
+function wiSelPage(on){ var list=wiRowsFiltered().slice((wiS.page-1)*wiS.perPage, wiS.page*wiS.perPage); list.forEach(function(r){ if(r.group==='vinculada') return; if(on) wiS.sel.add(r.id); else wiS.sel.delete(r.id); }); wiRenderRows(); }
+function wiSelAll(on){ wiRowsFiltered().forEach(function(r){ if(r.group==='vinculada') return; if(on) wiS.sel.add(r.id); else wiS.sel.delete(r.id); }); wiRenderRows(); }
+function wiPlan(){
+  var link=[], create=[], undecided=[];
+  wiS.rows.forEach(function(r){
+    if(!wiS.sel.has(r.id) || r.group==='vinculada' || r.group==='ignorada') return;
+    var ch=wiS.choice[r.id]||'';
+    if(ch==='new') create.push(r); else if(ch) link.push(r); else undecided.push(r);
+  });
+  return { link:link, create:create, undecided:undecided };
+}
+function wiSelInfo(){
+  var e=document.getElementById('wi-sel-info'); if(!e) return;
+  var p=wiPlan();
+  e.innerHTML='Seleccionadas: <b>'+wiS.sel.size+'</b> · vincular <b>'+p.link.length+'</b> · crear <b>'+p.create.length+'</b>'+(p.undecided.length?' · <span style="color:#92400e">sin decidir '+p.undecided.length+'</span>':'');
+}
+function wiSearchOpen(mlId){
+  var r=wiS.rows.find(function(x){ return x.id===mlId; });
+  wiModal('<div style="'+WI_M.title+'">🔎 Buscar en Woo</div><div style="'+WI_M.sub+'">Para <b>'+wiEsc(r?r.it.title:mlId)+'</b> ('+mlId+'). Buscá por nombre, SKU o ID del producto de Woo.</div>'+
+    '<input id="wi-srch" style="'+WI_M.input+';margin-bottom:10px" placeholder="ej: river, IMP-TZA-1880, 1234" oninput="wiSearchRun(\''+mlId+'\')">'+
+    '<div id="wi-srch-res" style="max-height:320px;overflow:auto;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc"></div>'+
+    '<div style="display:flex;gap:8px;margin-top:12px"><button onclick="wiModal(null)" style="'+WI_M.cancel+';flex:1">Cerrar</button></div>');
+  var i=document.getElementById('wi-srch'); if(i){ i.value=(r?wiTokens(r.it.title).slice(0,2).join(' '):''); i.focus(); wiSearchRun(mlId); }
+}
+function wiSearchRun(mlId){
+  var q=wiNorm(document.getElementById('wi-srch').value), out=document.getElementById('wi-srch-res');
+  var res = wiS.woo.filter(function(p){ if(!q) return true; var h=wiNorm(p.name+' '+(p.sku||'')+' '+p.id); return q.split(' ').every(function(t){ return h.indexOf(t)>=0; }); }).slice(0,40);
+  out.innerHTML = res.map(function(p){
+    var used = wiS.linkByWoo[p.id] && wiS.linkByWoo[p.id].ml_item_id!==mlId;
+    return '<div style="display:flex;gap:8px;align-items:center;padding:6px 10px;border-bottom:1px solid #e2e8f0;font-size:12px;color:#1e293b">'+
+      (p.img?'<img src="'+wiEsc(p.img)+'" style="width:34px;height:34px;object-fit:cover;border-radius:5px">':'<div style="width:34px"></div>')+
+      '<div style="flex:1;min-width:0"><div style="font-weight:600">'+wiEsc(p.name)+'</div><div style="font-size:10.5px;color:#64748b">#'+p.id+' · SKU '+wiEsc(p.sku||'—')+' · '+p.type+' · '+p.status+'</div></div>'+
+      (used?'<span style="font-size:10.5px;color:#b91c1c">ya vinculado a '+wiS.linkByWoo[p.id].ml_item_id+'</span>':'<button onclick="wiChoose(\''+mlId+'\',\''+p.id+'\');wiModal(null)" style="padding:6px 10px;border:none;background:#2563eb;color:#fff;border-radius:7px;font-weight:700;cursor:pointer;font-size:11.5px">Elegir</button>')+'</div>';
+  }).join('') || '<div style="padding:14px;font-size:12px;color:#64748b">Sin resultados</div>';
+}
+async function wiUnignore(id){ await wiApi('/wsync/unlink', { ml_item_id:id }); var l=await wiApi('/wsync/links'); wiSetLinks(l); wiS.choice[id]=null; wiClassify(); wiRenderRows(); }
+async function wiIgnoreSel(){
+  var ids=Array.from(wiS.sel).filter(function(id){ var r=wiS.rows.find(function(x){ return x.id===id; }); return r && r.group!=='vinculada'; });
+  if(!ids.length){ showToast('Seleccioná publicaciones','warn'); return; }
+  if(!confirm('¿Marcar '+ids.length+' publicación(es) como "no importar"? No se crean ni se vinculan (se puede deshacer).')) return;
+  for(var i=0;i<ids.length;i++){ var r=wiS.rows.find(function(x){ return x.id===ids[i]; }); await wiApi('/wsync/item', { ml_item_id:ids[i], ignore:true, title:r?r.it.title:'' }); }
+  var l=await wiApi('/wsync/links'); wiSetLinks(l); ids.forEach(function(id){ wiS.sel.delete(id); }); wiClassify(); wiRenderRows();
+}
+async function wiCatsLoad(){
+  if(wiS.cats) return wiS.cats;
+  var d=await wiApi('/wsync/woo-categories'); wiS.cats = d.categories||[]; return wiS.cats;
+}
+// Confirmación con simulación (no escribe nada hasta "Ejecutar")
+async function wiRunConfirm(){
+  if(wiS.status && !wiS.status.d1){ showToast('Primero conectá la base D1 al Worker (ver aviso arriba)','error'); return; }
+  var p=wiPlan();
+  if(!p.link.length && !p.create.length){ showToast(p.undecided.length?'Elegí en la columna "Producto en Woo" qué hacer con las seleccionadas':'Seleccioná publicaciones','warn'); return; }
+  var cats = p.create.length ? await wiCatsLoad() : [];
+  var mPct = (document.getElementById('woo-margin')||{}).value||'', dPct=(document.getElementById('woo-discount')||{}).value||'0';
+  var dupWoo={}; p.link.forEach(function(r){ var k=wiS.choice[r.id]; dupWoo[k]=(dupWoo[k]||0)+1; });
+  var dups=Object.keys(dupWoo).filter(function(k){ return dupWoo[k]>1; });
+  var sinMedidas = p.link.concat(p.create).filter(function(r){ return !wiMlDims(r.it); }).length;
+  var varMismatch = p.link.filter(function(r){ var w=wiS.wooById[wiS.choice[r.id]]; return w && ((r.it.variations||[]).length>0) !== (w.type==='variable'); }).length;
+  var ex=function(list){ return list.slice(0,6).map(function(r){ var w=wiS.wooById[wiS.choice[r.id]]; return '<div style="font-size:11.5px;padding:3px 0;border-bottom:1px solid #e2e8f0">'+wiEsc(r.it.title.slice(0,60))+(w?' <span style="color:#64748b">→ #'+w.id+' '+wiEsc(w.name.slice(0,40))+'</span>':'')+'</div>'; }).join('')+(list.length>6?'<div style="font-size:11px;color:#64748b;padding-top:4px">… y '+(list.length-6)+' más</div>':''); };
+  wiModal('<div style="'+WI_M.title+'">✅ Confirmar importación y vínculos</div>'+
+    '<div style="'+WI_M.sub+'">Simulación de lo que se va a hacer en tu tienda <b>'+wiEsc((wiS.status&&wiS.status.woo_url)||'')+'</b>. Nada se modifica hasta tocar <b>Ejecutar</b>.</div>'+
+    (p.link.length?'<div style="font-size:13px;font-weight:700;margin-bottom:4px">🔗 Vincular '+p.link.length+' con productos existentes</div><div style="font-size:11.5px;color:#64748b;margin-bottom:6px">No se cambian sus SKU, nombres ni precios. Se guarda el ID de ML dentro del producto Woo y se ponen las <b>medidas y el peso de ML</b>.</div>'+ex(p.link)+
+      '<label style="'+WI_M.label+';margin-top:10px">Stock inicial del stock compartido</label><select id="wi-src" style="'+WI_M.input+';margin-bottom:12px"><option value="ml">Tomar el stock de Mercado Libre (recomendado)</option><option value="woo">Tomar el stock de WooCommerce</option></select>':'')+
+    (p.create.length?'<div style="font-size:13px;font-weight:700;margin:6px 0 4px">🆕 Crear '+p.create.length+' producto(s) en Woo</div><div style="font-size:11.5px;color:#64748b;margin-bottom:6px">Con fotos, descripción, atributos, variantes, stock, medidas y peso de ML. SKU: el de ML o, si no tiene, el número de publicación.</div>'+ex(p.create)+
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px">'+
+        '<label style="'+WI_M.label+'">Margen sobre ML (%)<input id="wi-pct" type="number" value="'+wiEsc(mPct)+'" placeholder="0" style="'+WI_M.input+';margin-top:4px"></label>'+
+        '<label style="'+WI_M.label+'">Descuento (%)<input id="wi-disc" type="number" value="'+wiEsc(dPct)+'" style="'+WI_M.input+';margin-top:4px"></label>'+
+        '<label style="'+WI_M.label+'">Estado<select id="wi-status" style="'+WI_M.input+';margin-top:4px"><option value="draft">Borrador</option><option value="publish">Publicado</option></select></label></div>'+
+      '<label style="'+WI_M.label+';margin-top:8px">Categorías de Woo (opcional)</label><div style="max-height:110px;overflow:auto;border:1px solid #e2e8f0;border-radius:8px;padding:6px 8px;background:#f8fafc;margin-bottom:12px">'+
+        (cats.length?cats.map(function(c){ return '<label style="display:inline-flex;gap:4px;align-items:center;margin:2px 10px 2px 0;font-size:11.5px;color:#1e293b;cursor:pointer"><input type="checkbox" class="wi-cat" value="'+c.id+'"> '+wiEsc(c.name)+'</label>'; }).join(''):'<span style="font-size:11.5px;color:#64748b">No se pudieron leer las categorías</span>')+'</div>':'')+
+    (dups.length?'<div style="'+WI_M.warn+'">⚠ '+dups.length+' producto(s) de Woo están elegidos para más de una publicación: sólo se vincula la primera.</div>':'')+
+    (varMismatch?'<div style="'+WI_M.warn+'">⚠ '+varMismatch+' vínculo(s) entre un producto con variantes y uno sin variantes: quedan en "requiere revisión" sin sincronizar.</div>':'')+
+    (sinMedidas?'<div style="'+WI_M.warn+'">⚠ '+sinMedidas+' publicación(es) no tienen medidas/peso de paquete en ML: en Woo quedan como están.</div>':'')+
+    '<div style="'+WI_M.info+'">La sincronización de stock no arranca sola: se activa en la pestaña «Sincronización».</div>'+
+    '<div style="display:flex;gap:8px"><button onclick="wiModal(null)" style="'+WI_M.cancel+'">Cancelar</button>'+wiGo('wi-go','Ejecutar ('+(p.link.length+p.create.length)+')','#16a34a','wiRun()',false)+'</div>');
+}
+async function wiRun(){
+  var p=wiPlan();
+  var src=(document.getElementById('wi-src')||{}).value||'ml';
+  var pct=(document.getElementById('wi-pct')||{}).value||0, disc=(document.getElementById('wi-disc')||{}).value||0, stat=(document.getElementById('wi-status')||{}).value||'draft';
+  var cats=Array.prototype.slice.call(document.querySelectorAll('.wi-cat:checked')).map(function(c){ return +c.value; });
+  wiModal(null);
+  var jobs=p.link.map(function(r){ return { r:r, kind:'link' }; }).concat(p.create.map(function(r){ return { r:r, kind:'create' }; }));
+  var usedWoo={}; var run_id='imp-'+Date.now().toString(36);
+  wiS.running=true; wiS.cancel=false;
+  var bar=document.getElementById('wi-run-prog'), res={ ok:0, err:0, skip:0 }, errs=[];
+  document.getElementById('wi-run-stop').style.display='';
+  for(var i=0;i<jobs.length;i++){
+    if(wiS.cancel){ break; }
+    var j=jobs[i], it=j.r.it;
+    if(bar) bar.innerHTML='Procesando '+(i+1)+' / '+jobs.length+': '+wiEsc(it.title.slice(0,60))+' · ✓ '+res.ok+' · ✕ '+res.err;
+    var d;
+    if(j.kind==='link'){
+      var wid=wiS.choice[it.id];
+      if(usedWoo[wid]){ res.skip++; continue; } usedWoo[wid]=1;
+      d=await wiApi('/wsync/link', { ml_item_id:it.id, woo_id:+wid, stock_source:src, apply_dims:true, run_id:run_id });
+    } else {
+      var title = (typeof wooCleanTitle==='function') ? (wooCleanTitle(it.title)||it.title) : it.title;
+      d=await wiApi('/wsync/import', { ml_item_id:it.id, title:title, pct:pct, disc:disc, status:stat, categories:cats, run_id:run_id });
+    }
+    if(d.error){ res.err++; errs.push(it.id+': '+(d.message||d.error)); }
+    else if(d.skipped) res.skip++; else res.ok++;
+    if(d.ok || d.skipped) wiS.sel.delete(it.id);
+  }
+  document.getElementById('wi-run-stop').style.display='none';
+  wiS.running=false;
+  var l=await wiApi('/wsync/links'); if(!l.error){ wiSetLinks(l); }
+  var w2=[], page=1, tp=1; do{ var w=await wiApi('/wsync/woo-products?page='+page); if(w.error) break; w2=w2.concat(w.items||[]); tp=w.total_pages||1; page++; } while(page<=tp);
+  if(w2.length){ wiS.woo=w2; wiS.wooById={}; w2.forEach(function(x){ wiS.wooById[x.id]=x; }); }
+  wiClassify(); wiRenderRows(); wiStatusLoad();
+  if(bar) bar.innerHTML=(wiS.cancel?'⏹ Detenido. ':'✓ Terminado. ')+res.ok+' hechas · '+res.skip+' ya estaban · '+res.err+' con error'+(errs.length?'<div style="color:#b91c1c;font-size:11px;margin-top:4px">'+errs.slice(0,8).map(wiEsc).join('<br>')+'</div>':'')+
+    (wiS.cancel?'<div style="font-size:11px;margin-top:3px">Para reanudar, volvé a tocar «Vincular / crear seleccionadas»: lo ya hecho se saltea.</div>':'');
+}
+
+// ═══ VINCULADAS ══════════════════════════════════════════════════════════
+async function wiLinksLoad(){
+  var w=document.getElementById('wi-links'); if(!w) return;
+  w.innerHTML='<div style="padding:16px;color:var(--text3);font-size:12px">Cargando…</div>';
+  var l=await wiApi('/wsync/links');
+  if(l.error){ w.innerHTML='<div style="padding:14px;color:#b91c1c;font-size:12px">'+wiEsc(l.message||l.error)+'</div>'; return; }
+  wiSetLinks(l); wiLinksRender();
+}
+function wiLinksRender(){
+  var w=document.getElementById('wi-links'); if(!w) return;
+  var units={}; wiS.links.units.forEach(function(u){ (units[u.ml_item_id]=units[u.ml_item_id]||[]).push(u); });
+  var q=wiNorm(wiS.lq);
+  var items=wiS.links.items.filter(function(x){ return x.state!=='ignorado' && x.woo_id; }).filter(function(x){
+    if(wiS.lfilter!=='all' && x.state!==wiS.lfilter) return false;
+    return !q || wiNorm(x.ml_item_id+' '+(x.ml_title||'')+' '+(x.woo_title||'')+' '+(x.ml_sku||'')+' '+(x.woo_sku||'')).indexOf(q)>=0;
+  });
+  var stB={ vinculado:['#dbeafe','#1e40af','Vinculado'], sincronizado:['#dcfce7','#166534','Sincronizado'], revisar:['#fef3c7','#92400e','Requiere revisión'], error:['#fee2e2','#991b1b','Error'], pausado:['#e5e7eb','#374151','Pausado'], creando:['#f3e8ff','#6b21a8','Pendiente'] };
+  var base=(wiS.status&&wiS.status.woo_url)?'https://'+wiS.status.woo_url:'';
+  w.innerHTML = !items.length ? '<div style="padding:20px;text-align:center;color:var(--text3);font-size:12px">Sin productos vinculados'+(wiS.lfilter!=='all'?' con este estado':'')+'.</div>' :
+    '<div class="tw"><table style="width:100%"><thead><tr><th style="width:26px"><input type="checkbox" onchange="wiLSelAll(this.checked)"></th><th>Mercado Libre</th><th>WooCommerce</th><th>Stock (común · ML · Woo)</th><th>Estado</th><th>Última sincronización</th><th style="text-align:center">Acciones</th></tr></thead><tbody>'+
+    items.map(function(x){
+      var b=stB[x.state]||['#e5e7eb','#374151',x.state];
+      var us=(units[x.ml_item_id]||[]).map(function(u){ return '<div style="font-size:11px;white-space:nowrap">'+(u.label?'<span style="color:var(--text3)">'+wiEsc(u.label)+':</span> ':'')+'<b>'+(u.master==null?'—':u.master)+'</b> · ML '+(u.ml_last==null?'—':u.ml_last)+' · Woo '+(u.woo_last==null?'s/g':u.woo_last)+'</div>'; }).join('') || '<span style="font-size:11px;color:var(--text3)">—</span>';
+      return '<tr><td><input type="checkbox" '+(wiS.lsel.has(x.ml_item_id)?'checked':'')+' onchange="wiLSel(\''+x.ml_item_id+'\',this.checked)"></td>'+
+        '<td style="min-width:180px"><div style="font-size:12px;font-weight:500">'+wiEsc(x.ml_title||'')+'</div><div style="font-size:10px;color:var(--text3);font-family:var(--mono)">'+x.ml_item_id+(x.ml_sku?' · SKU '+wiEsc(x.ml_sku):'')+(x.logistic==='fulfillment'?' · <b>Full</b>':'')+'</div></td>'+
+        '<td style="min-width:170px"><div style="font-size:12px">'+(base?'<a href="'+base+'/wp-admin/post.php?post='+x.woo_id+'&action=edit" target="_blank" rel="noopener">#'+x.woo_id+'</a>':'#'+x.woo_id)+' '+wiEsc(x.woo_title||'')+'</div><div style="font-size:10px;color:var(--text3);font-family:var(--mono)">SKU '+wiEsc(x.woo_sku||'—')+' · '+wiEsc(x.kind||'')+'</div></td>'+
+        '<td>'+us+'</td>'+
+        '<td><span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:9px;background:'+b[0]+';color:'+b[1]+'">'+b[2]+'</span>'+(x.note||x.last_result&&x.state!=='sincronizado'?'<div style="font-size:9.5px;color:var(--text3);max-width:220px">'+wiEsc(x.note||x.last_result||'')+'</div>':'')+'</td>'+
+        '<td style="font-size:10.5px;color:var(--text3);white-space:nowrap">'+(x.last_sync?new Date(x.last_sync).toLocaleString('es-AR'):'—')+'</td>'+
+        '<td style="text-align:center;white-space:nowrap">'+
+          (x.state==='revisar'?'<button class="btn btn-ghost btn-xs" onclick="wiReview(\''+x.ml_item_id+'\')" title="Emparejar variantes">🧩</button> ':'')+
+          '<button class="btn btn-ghost btn-xs" onclick="wiToggleSync(\''+x.ml_item_id+'\','+(x.sync_on?0:1)+')" title="'+(x.sync_on?'Pausar sincronización de este producto':'Reanudar')+'">'+(x.sync_on?'⏸':'▶')+'</button> '+
+          '<button class="btn btn-ghost btn-xs" onclick="wiUpdOpen([\''+x.ml_item_id+'\'])" title="Actualizar datos de Woo desde ML">🔄</button> '+
+          '<button class="btn btn-ghost btn-xs" onclick="wiUnlink(\''+x.ml_item_id+'\')" title="Desvincular" style="color:#dc2626">✕</button>'+
+        '</td></tr>';
+    }).join('')+'</tbody></table></div>';
+  var c=document.getElementById('wi-lsel-n'); if(c) c.textContent=wiS.lsel.size;
+}
+function wiLSel(id,on){ if(on) wiS.lsel.add(id); else wiS.lsel.delete(id); var c=document.getElementById('wi-lsel-n'); if(c) c.textContent=wiS.lsel.size; }
+function wiLSelAll(on){ wiS.links.items.forEach(function(x){ if(x.woo_id && x.state!=='ignorado'){ if(on) wiS.lsel.add(x.ml_item_id); else wiS.lsel.delete(x.ml_item_id); } }); wiLinksRender(); }
+function wiLFilter(f){ wiS.lfilter=f; wiLinksRender(); document.querySelectorAll('.wi-lchip').forEach(function(c){ var on=c.getAttribute('data-f')===f; c.style.background=on?'var(--accent)':''; c.style.color=on?'#fff':''; c.style.borderColor=on?'var(--accent)':''; }); }
+async function wiToggleSync(id, on){ var d=await wiApi('/wsync/item', { ml_item_id:id, sync_on:!!on }); if(d.error) showToast(d.error,'error'); await wiLinksLoad(); }
+async function wiUnlink(id){
+  if(!confirm('¿Desvincular '+id+'? Deja de sincronizarse. No se borra nada en ML ni en Woo.')) return;
+  var d=await wiApi('/wsync/unlink', { ml_item_id:id, remove_meta:true }); if(d.error) showToast(d.error,'error'); wiS.lsel.delete(id); await wiLinksLoad(); wiStatusLoad();
+}
+async function wiReview(id){
+  var x=wiS.linkByMl[id]; if(!x) return;
+  wiModal('<div style="'+WI_M.title+'">🧩 Emparejar variantes</div><div style="'+WI_M.sub+'">Cargando…</div>', true);
+  var it=await mlGet('/items/'+id+'?include_attributes=all');
+  var wp=await wiApi('/wsync/woo-product?id='+x.woo_id);
+  if(wp.error){ wiModal('<div style="'+WI_M.title+'">Error</div><div style="'+WI_M.sub+'">'+wiEsc(wp.error)+'</div><button onclick="wiModal(null)" style="'+WI_M.cancel+'">Cerrar</button>'); return; }
+  var mv=it.variations||[], wv=wp.variations||[];
+  var body;
+  if(!mv.length || wp.product.type!=='variable'){
+    body='<div style="'+WI_M.warn+'">'+wiEsc(x.note||'')+'<br><br>Una publicación con variantes sólo se puede sincronizar con un producto <b>variable</b> de Woo (y una sin variantes con uno simple). Opciones: desvincular y crear el producto nuevo desde «Importar todas», o convertir el producto en Woo y volver a vincular.</div>'+
+      '<div style="display:flex;gap:8px"><button onclick="wiModal(null)" style="'+WI_M.cancel+'">Cerrar</button>'+wiGo('wi-go','Desvincular','#dc2626','wiModal(null);wiUnlink(\''+id+'\')',false)+'</div>';
+  } else {
+    var unitsByMl={}; wiS.links.units.filter(function(u){ return u.ml_item_id===id; }).forEach(function(u){ unitsByMl[u.ml_var_id]=u.woo_var_id; });
+    body='<div style="'+WI_M.sub+'">Elegí la variación de Woo que corresponde a cada variante de ML. Las que dejes vacías no se sincronizan.</div>'+
+      mv.map(function(v){
+        var cur=unitsByMl[String(v.id)];
+        return '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:center;margin-bottom:6px;font-size:12px"><div>'+wiEsc((v.attribute_combinations||[]).map(function(a){ return a.value_name; }).join(' / '))+' <span style="color:#64748b">(ML '+v.id+' · stock '+v.available_quantity+')</span></div>'+
+          '<select class="wi-vmap" data-ml="'+v.id+'" style="'+WI_M.input+'"><option value="">— no sincronizar —</option>'+wv.map(function(w){ return '<option value="'+w.id+'"'+(cur===w.id?' selected':'')+'>'+wiEsc((w.attributes||[]).map(function(a){ return a.option; }).join(' / '))+' · SKU '+wiEsc(w.sku||'—')+' · stock '+(w.manage_stock?w.stock_quantity:'s/g')+'</option>'; }).join('')+'</select></div>';
+      }).join('')+
+      '<div style="display:flex;gap:8px;margin-top:10px"><button onclick="wiModal(null)" style="'+WI_M.cancel+'">Cancelar</button>'+wiGo('wi-go','Guardar emparejamiento','#16a34a','wiReviewSave(\''+id+'\','+x.woo_id+')',false)+'</div>';
+  }
+  wiModal('<div style="'+WI_M.title+'">🧩 Revisar vínculo · '+wiEsc(id)+'</div>'+body, true);
+}
+async function wiReviewSave(id, wooId){
+  var map={}; document.querySelectorAll('.wi-vmap').forEach(function(s){ if(s.value) map[s.getAttribute('data-ml')]=s.value; });
+  var vals=Object.values(map); if(new Set(vals).size!==vals.length){ showToast('Hay una variación de Woo elegida dos veces','warn'); return; }
+  var d=await wiApi('/wsync/link', { ml_item_id:id, woo_id:wooId, var_map:map, apply_dims:true, stock_source:'ml' });
+  wiModal(null);
+  if(d.error) showToast(d.error,'error'); else showToast(d.state==='vinculado'?'✓ Variantes emparejadas':'Guardado, pero quedan variantes sin pareja','info');
+  await wiLinksLoad();
+}
+
+// ── Actualizar datos de Woo desde ML (sólo con botón) ───────────────────────
+function wiUpdOpen(ids){
+  ids = ids || Array.from(wiS.lsel);
+  if(!ids.length){ showToast('Seleccioná productos vinculados','warn'); return; }
+  wiS._updIds = ids;
+  var cb=function(id,label,sub,checked){ return '<label style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;cursor:pointer;color:#1e293b"><input type="checkbox" id="'+id+'"'+(checked?' checked':'')+' style="margin-top:3px"><div><div style="font-size:12.5px;font-weight:600">'+label+'</div>'+(sub?'<div style="font-size:11px;color:#64748b">'+sub+'</div>':'')+'</div></label>'; };
+  wiModal('<div style="'+WI_M.title+'">🔄 Actualizar desde Mercado Libre</div><div style="'+WI_M.sub+'">'+ids.length+' producto(s) vinculado(s). Elegí qué copiar de ML a Woo. Primero se muestra la vista previa.</div>'+
+    cb('wu-price','Precio','Precio de ML + porcentaje, redondeado a múltiplo de $10 (misma fórmula que el importador).',true)+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0 0 6px 26px"><label style="'+WI_M.label+'">Porcentaje sobre ML (%)<input id="wu-pct" type="number" value="'+wiEsc((document.getElementById('woo-margin')||{}).value||'0')+'" style="'+WI_M.input+';margin-top:4px"></label><label style="'+WI_M.label+'">Descuento (%)<input id="wu-disc" type="number" value="0" style="'+WI_M.input+';margin-top:4px"></label></div>'+
+    cb('wu-dims','Medidas y peso','Las del paquete en ML (Mercado Envíos).',false)+
+    cb('wu-images','Fotos','Reemplaza las fotos de Woo por las de ML (Woo las vuelve a descargar).',false)+
+    cb('wu-attrs','Atributos','Marca, modelo, material, etc. Las variaciones no se tocan.',false)+
+    cb('wu-desc','Descripción','⚠ Reemplaza la descripción de Woo: si las tenés optimizadas para SEO, dejala sin tildar.',false)+
+    '<div id="wu-prev" style="margin-top:10px"></div>'+
+    '<div style="display:flex;gap:8px;margin-top:12px"><button onclick="wiModal(null)" style="'+WI_M.cancel+'">Cancelar</button>'+
+      '<button onclick="wiUpdRun(true)" style="padding:10px 14px;border:1px solid #2563eb;background:#eff6ff;color:#1d4ed8;border-radius:9px;font-weight:700;cursor:pointer">👁 Vista previa</button>'+
+      wiGo('wu-go','Aplicar en Woo','#16a34a','wiUpdRun(false)',true)+'</div>', true);
+}
+function wiUpdFields(){
+  var f={};
+  if(document.getElementById('wu-price').checked) f.price={ pct:+(document.getElementById('wu-pct').value||0), disc:+(document.getElementById('wu-disc').value||0) };
+  if(document.getElementById('wu-dims').checked) f.dims=true;
+  if(document.getElementById('wu-images').checked) f.images=true;
+  if(document.getElementById('wu-attrs').checked) f.attributes=true;
+  if(document.getElementById('wu-desc').checked) f.description=true;
+  return f;
+}
+async function wiUpdRun(sim){
+  var f=wiUpdFields(); if(!Object.keys(f).length){ showToast('Elegí al menos un dato','warn'); return; }
+  var ids=wiS._updIds||[], out=document.getElementById('wu-prev'), rows=[], errs=0;
+  if(!sim && !confirm('¿Aplicar los cambios en '+ids.length+' producto(s) de Woo?')) return;
+  var go=document.getElementById('wu-go'); if(go){ go.disabled=true; go.style.opacity='.5'; }
+  for(var i=0;i<ids.length;i++){
+    out.innerHTML='<div style="font-size:12px;color:#64748b">'+(sim?'Calculando':'Aplicando')+' '+(i+1)+' / '+ids.length+'…</div>';
+    var d=await wiApi('/wsync/update', { ml_item_id:ids[i], fields:f, simulate:sim });
+    if(d.error){ errs++; rows.push('<tr><td style="padding:4px 6px">'+ids[i]+'</td><td colspan="3" style="color:#b91c1c;padding:4px 6px">'+wiEsc(d.error)+'</td></tr>'); continue; }
+    (d.diff||[]).forEach(function(x){ rows.push('<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:4px 6px;font-family:var(--mono);font-size:10.5px">'+ids[i]+'</td><td style="padding:4px 6px">'+wiEsc(x.campo)+'</td><td style="padding:4px 6px;color:#94a3b8">'+wiEsc(x.antes)+'</td><td style="padding:4px 6px;font-weight:700">'+wiEsc(x.despues)+'</td></tr>'); });
+    if(!(d.diff||[]).length) rows.push('<tr><td style="padding:4px 6px">'+ids[i]+'</td><td colspan="3" style="padding:4px 6px;color:#64748b">sin cambios</td></tr>');
+  }
+  out.innerHTML='<div style="font-size:12px;font-weight:700;margin-bottom:4px">'+(sim?'Vista previa (no se aplicó nada)':'✓ Aplicado'+(errs?' con '+errs+' error(es)':''))+'</div><div style="max-height:260px;overflow:auto;border:1px solid #e2e8f0;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:11.5px;color:#1e293b"><thead><tr style="background:#f1f5f9"><th style="text-align:left;padding:4px 6px">ML</th><th style="text-align:left;padding:4px 6px">Dato</th><th style="text-align:left;padding:4px 6px">Antes (Woo)</th><th style="text-align:left;padding:4px 6px">Después</th></tr></thead><tbody>'+rows.join('')+'</tbody></table></div>';
+  if(go && sim){ go.disabled=false; go.style.opacity='1'; }
+  if(!sim) wiLinksLoad();
+}
+
+// ═══ SINCRONIZACIÓN ═══════════════════════════════════════════════════════
+function wiSyncRender(){
+  var el=document.getElementById('wi-sync'); if(!el) return;
+  var s=wiS.status||{}, st=s.settings||{};
+  if(!s.d1){ el.innerHTML='<div style="font-size:12px;color:#92400e">Falta conectar la base D1 al Worker (ver aviso arriba).</div>'; return; }
+  var hours=st.hours||[];
+  var opt=function(sel){ var o='<option value="">—</option>'; for(var h=0;h<24;h++) o+='<option value="'+h+'"'+(sel===h?' selected':'')+'>'+String(h).padStart(2,'0')+':00</option>'; return o; };
+  var lr=s.last_run, job=s.job;
+  el.innerHTML=
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px">'+
+      '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:12px">'+
+        '<div style="font-size:12px;font-weight:700;margin-bottom:8px">Estado</div>'+
+        '<label style="display:flex;gap:8px;align-items:center;font-size:12.5px;cursor:pointer;margin-bottom:8px"><input type="checkbox" id="wis-en" '+(st.enabled?'checked':'')+'> Sincronización programada activa</label>'+
+        '<div style="font-size:12px;margin-bottom:4px">Modo: '+(st.mode==='real'?'<b style="color:#16a34a">REAL</b> (escribe en ML y Woo)':'<b style="color:#2563eb">SIMULACIÓN</b> (sólo informa)')+'</div>'+
+        (st.mode==='real'?'<button class="btn btn-ghost btn-xs" onclick="wiModeSet(\'simulacion\')">Volver a simulación</button>':'<button class="btn btn-xs" style="background:#16a34a;color:#fff" onclick="wiModeReal()">Activar modo real…</button>')+
+      '</div>'+
+      '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:12px">'+
+        '<div style="font-size:12px;font-weight:700;margin-bottom:8px">Horarios (hora Argentina)</div>'+
+        '<div style="display:flex;gap:8px;align-items:center;font-size:12px">1ª <select id="wis-h1">'+opt(hours[0])+'</select> 2ª <select id="wis-h2">'+opt(hours[1])+'</select></div>'+
+        '<div style="font-size:10.5px;color:var(--text3);margin-top:6px">Una o dos corridas por día. Los avisos de venta siguen funcionando igual.</div>'+
+      '</div>'+
+      '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:12px">'+
+        '<div style="font-size:12px;font-weight:700;margin-bottom:8px">Seguridad</div>'+
+        '<label style="font-size:12px">Reserva de unidades <input id="wis-res" type="number" min="0" max="50" value="'+(st.reserve||0)+'" style="width:60px;font-size:12px;padding:3px 6px"></label>'+
+        '<div style="font-size:10.5px;color:var(--text3);margin-top:4px">Publica N unidades menos en cada plataforma para cubrir ventas entre corridas.</div>'+
+        '<label style="font-size:12px;display:block;margin-top:8px">Llamadas por tanda <input id="wis-bud" type="number" min="20" max="900" value="'+(st.budget||40)+'" style="width:70px;font-size:12px;padding:3px 6px"></label>'+
+        '<div style="font-size:10.5px;color:var(--text3);margin-top:4px">40 sirve para el plan gratuito de Cloudflare. Con plan pago podés subirlo (más rápido).</div>'+
+      '</div>'+
+    '</div>'+
+    '<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn btn-primary btn-sm" onclick="wiSyncSave()">💾 Guardar ajustes</button>'+
+      '<button class="btn btn-ghost btn-sm" onclick="wiSyncNow(true)" style="border:1px solid #2563eb;color:#2563eb">🧪 Simular ahora</button>'+
+      (st.mode==='real'?'<button class="btn btn-sm" onclick="wiSyncNow(false)" style="background:#16a34a;color:#fff">🔄 Sincronizar ahora</button>':'')+
+      '<button class="btn btn-ghost btn-sm" id="wis-stop" style="display:none" onclick="wiS.cancel=true">⏹ Detener</button></div>'+
+    '<div id="wis-prog" style="font-size:12px;margin-top:10px"></div>'+
+    '<div style="font-size:11.5px;color:var(--text2);margin-top:12px;line-height:1.55">'+
+      (lr?'<b>Última corrida programada:</b> '+(lr.finished?new Date(lr.finished).toLocaleString('es-AR'):'—')+' · '+(lr.simulate?'simulación':'real')+' · '+(lr.totals?lr.totals.units+' unidades, '+lr.totals.changed+' con cambios, '+lr.totals.writes_ml+' escrituras en ML, '+lr.totals.writes_woo+' en Woo, '+lr.totals.errors+' errores':'')+(lr.error?' · <span style="color:#b91c1c">'+wiEsc(lr.error)+'</span>':'')+'<br>':'')+
+      (job&&!job.done?'<b>En curso:</b> '+wiEsc(job.run_id)+' (avanza en tandas cada 5 minutos)<br>':'')+
+    '</div>'+
+    '<div style="font-size:11px;color:var(--text3);margin-top:10px;line-height:1.55;background:var(--bg3);border-radius:8px;padding:9px 11px"><b>Cómo funciona:</b> en cada corrida se lee el stock actual de cada producto vinculado en ML y en Woo, se suman los movimientos de los dos lados desde la corrida anterior (ventas, cancelaciones, devoluciones, cambios manuales) sobre un stock común, y se escribe el resultado en ambas plataformas. Las variantes se sincronizan cada una con su par. Las publicaciones en <b>Full</b> sólo copian de ML a Woo. Entre una corrida y la siguiente el stock no se actualiza: si las últimas unidades se venden en las dos plataformas en ese intervalo puede haber una sobreventa (para eso sirve la reserva).</div>';
+}
+async function wiSyncSave(){
+  var h=[document.getElementById('wis-h1').value, document.getElementById('wis-h2').value].filter(function(x){ return x!==''; }).map(Number);
+  var en=document.getElementById('wis-en').checked;
+  if(en && !h.length){ showToast('Elegí al menos un horario','warn'); return; }
+  var d=await wiApi('/wsync/settings', { enabled:en, hours:h, reserve:+document.getElementById('wis-res').value||0, budget:+document.getElementById('wis-bud').value||40 });
+  if(d.error){ showToast(d.error,'error'); return; }
+  showToast('✓ Ajustes de sincronización guardados','success'); await wiStatusLoad(); wiSyncRender();
+}
+async function wiModeSet(m){ var d=await wiApi('/wsync/settings', { mode:m }); if(d.error) showToast(d.error,'error'); await wiStatusLoad(); wiSyncRender(); }
+function wiModeReal(){
+  wiModal('<div style="'+WI_M.title+'">Activar sincronización REAL</div><div style="'+WI_M.sub+'">A partir de ahora las corridas (programadas o manuales) <b>escriben el stock</b> en Mercado Libre y en WooCommerce para todos los productos vinculados.</div>'+
+    '<div style="'+WI_M.warn+'">Recomendado: corré antes una <b>simulación</b> y revisá el historial. En la primera corrida real, el stock inicial elegido al vincular (por defecto el de ML) se copia a la otra plataforma.</div>'+
+    '<label style="'+WI_M.label+'">Para confirmar escribí ACTIVAR</label><input id="wi-act" style="'+WI_M.input+';margin-bottom:14px" oninput="var b=document.getElementById(\'wi-go\');var ok=this.value.trim().toUpperCase()===\'ACTIVAR\';b.disabled=!ok;b.style.opacity=ok?1:.5">'+
+    '<div style="display:flex;gap:8px"><button onclick="wiModal(null)" style="'+WI_M.cancel+'">Cancelar</button>'+wiGo('wi-go','Activar modo real','#16a34a','wiModal(null);wiModeSet(\'real\')',true)+'</div>');
+}
+async function wiSyncNow(sim){
+  if(!sim && !confirm('¿Sincronizar ahora el stock de todos los productos vinculados (escribe en ML y Woo)?')) return;
+  var prog=document.getElementById('wis-prog'), stop=document.getElementById('wis-stop');
+  wiS.cancel=false; if(stop) stop.style.display='';
+  var cursor=0, run_id=null, tot={ units:0, changed:0, writes_ml:0, writes_woo:0, errors:0 }, n=0;
+  try{
+    while(!wiS.cancel){
+      var d=await wiApi('/wsync/run', { simulate:sim, cursor:cursor, run_id:run_id, totals:tot });
+      if(d.error) throw new Error(d.message||d.error);
+      run_id=d.run_id; cursor=d.cursor; n++;
+      Object.keys(tot).forEach(function(k){ tot[k]+=(d.stats&&d.stats[k])||0; });
+      prog.innerHTML=(sim?'🧪 Simulando':'🔄 Sincronizando')+'… tanda '+n+' · '+tot.units+' unidades revisadas · '+tot.changed+' con movimientos'+(sim?'':' · '+tot.writes_ml+' escrituras ML · '+tot.writes_woo+' Woo')+' · '+tot.errors+' errores';
+      if(d.done) break;
+    }
+    prog.innerHTML='<b>'+(wiS.cancel?'⏹ Detenido':'✓ Terminado')+'</b> · '+tot.units+' unidades · '+tot.changed+' con movimientos'+(sim?' (simulación: no se escribió nada)':' · '+tot.writes_ml+' escrituras en ML · '+tot.writes_woo+' en Woo')+' · '+tot.errors+' errores · <a href="#" onclick="wiTab(\'hist\');return false">ver detalle en el historial</a>';
+  }catch(e){ prog.innerHTML='<span style="color:#b91c1c">✕ '+wiEsc(e.message)+'</span>'; }
+  finally{ if(stop) stop.style.display='none'; }
+}
+
+// ═══ HISTORIAL ════════════════════════════════════════════════════════════
+async function wiLogLoad(kind){
+  if(kind!=null) wiS.logKind=kind;
+  var el=document.getElementById('wi-log'); if(!el) return;
+  document.querySelectorAll('.wi-hchip').forEach(function(c){ var on=c.getAttribute('data-k')===wiS.logKind; c.style.background=on?'var(--accent)':''; c.style.color=on?'#fff':''; c.style.borderColor=on?'var(--accent)':''; });
+  el.innerHTML='<div style="padding:12px;color:var(--text3);font-size:12px">Cargando…</div>';
+  var d=await wiApi('/wsync/log?limit=400'+(wiS.logKind?'&kind='+wiS.logKind:''));
+  if(d.error){ el.innerHTML='<div style="padding:12px;color:#b91c1c;font-size:12px">'+wiEsc(d.message||d.error)+'</div>'; return; }
+  var K={ import:'🆕 Importación', link:'🔗 Vínculo', stock:'🔄 Stock', sim:'🧪 Simulación', error:'✕ Error', update:'✏️ Actualización', unlink:'⛓ Desvínculo', config:'⚙️ Ajustes', run:'▶ Corrida', item:'⏸ Producto' };
+  el.innerHTML=!(d.log||[]).length?'<div style="padding:16px;color:var(--text3);font-size:12px;text-align:center">Sin registros.</div>':
+    '<div class="tw" style="max-height:520px;overflow:auto"><table style="width:100%"><thead><tr><th>Fecha</th><th>Tipo</th><th>ML</th><th>Woo</th><th>Detalle</th></tr></thead><tbody>'+
+    d.log.map(function(l){ var err=l.kind==='error'||/ERROR/.test(l.msg||''); return '<tr><td style="font-size:10.5px;white-space:nowrap;color:var(--text3)">'+new Date(l.ts).toLocaleString('es-AR')+'</td><td style="font-size:11px;white-space:nowrap">'+(K[l.kind]||l.kind)+'</td><td style="font-size:10.5px;font-family:var(--mono)">'+wiEsc(l.ml_item_id||'')+'</td><td style="font-size:10.5px">'+(l.woo_id?'#'+l.woo_id:'')+'</td><td style="font-size:11.5px;'+(err?'color:#b91c1c':'')+'">'+wiEsc(l.msg)+'</td></tr>'; }).join('')+'</tbody></table></div>';
+}
+
+// Después de importar UNA publicación con el importador individual, se vincula
+// para que también quede sincronizada (si el Worker tiene la base D1).
+async function wiAutoLink(mlId, wooId){
+  try{
+    if(!mlId || !wooId) return;
+    var id=String(mlId).toUpperCase(); if(!/^MLA/.test(id)) id='MLA'+id;
+    var d=await wiApi('/wsync/link', { ml_item_id:id, woo_id:wooId, stock_source:'ml', apply_dims:true });
+    if(d.ok) showToast(d.state==='vinculado'?'🔗 Vinculado para sincronizar stock (medidas y peso de ML aplicados)':'🔗 Vinculado: requiere revisión de variantes','info');
+  }catch(e){}
 }
 
 </script>
