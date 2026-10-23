@@ -857,7 +857,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v312 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v313 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -3337,6 +3337,10 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     #section-woo-import .wi-cat-lbl.woo-cat-chip input{display:inline-block!important}
     #section-woo-import .wi-cat-lbl.woo-cat-chip.selected{color:#7c3aed;font-weight:700}
     #section-woo-import .wi-bulk .btn{font-weight:700}
+    #section-woo-import{min-width:0;max-width:100%} #section-woo-import>.card,#wi-pane-vinc{min-width:0;max-width:100%}
+    #main:has(#section-woo-import.active){min-width:0} #wi-links{max-width:100%;overflow-x:auto} #wi-links>.tw{overflow:visible}
+    #wi-ltools select,#wi-lauto select{width:auto!important;display:inline-block!important}
+    #wi-modal select{width:auto!important;display:inline-block!important}
   </style>
   <!-- v306: conexión + pestañas -->
   <div class="card mb" style="padding:10px 14px">
@@ -3483,20 +3487,8 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 
   <!-- 3 · VINCULADOS -->
   <div id="wi-pane-vinc" class="card" style="display:none">
-    <div class="wi-head" style="background:linear-gradient(135deg,#059669,#10b981)"><div class="e">🔗</div><div><div class="t">Productos vinculados</div><div class="s">Cada publicación de ML con su producto de Woo: stock común, estado de la sincronización y actualización de datos desde ML con un botón.</div></div></div>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
-      <div class="chips" style="margin:0 0 0 8px;gap:5px">
-        <div class="chip wi-lchip" data-f="all" onclick="wiLFilter('all')" style="font-size:11px;background:var(--accent);color:#fff;border-color:var(--accent)">Todos</div>
-        <div class="chip wi-lchip" data-f="sincronizado" onclick="wiLFilter('sincronizado')" style="font-size:11px">Sincronizados</div>
-        <div class="chip wi-lchip" data-f="vinculado" onclick="wiLFilter('vinculado')" style="font-size:11px">Sin sincronizar aún</div>
-        <div class="chip wi-lchip" data-f="revisar" onclick="wiLFilter('revisar')" style="font-size:11px">Requieren revisión</div>
-        <div class="chip wi-lchip" data-f="error" onclick="wiLFilter('error')" style="font-size:11px">Con error</div>
-        <div class="chip wi-lchip" data-f="pausado" onclick="wiLFilter('pausado')" style="font-size:11px">Pausados</div>
-      </div>
-      <input type="text" placeholder="🔍 Buscar" oninput="wiS.lq=this.value;wiLinksRender()" style="font-size:12px;padding:5px 9px;max-width:200px;margin-left:auto">
-      <button class="btn btn-sm" style="background:#eff6ff;color:#1d4ed8;border:1px solid #93c5fd" onclick="wiUpdOpen()">🔄 Actualizar desde ML (<span id="wi-lsel-n">0</span>)…</button>
-      <button class="btn btn-ghost btn-xs" onclick="wiLinksLoad()">↻</button>
-    </div>
+    <div class="wi-head" style="background:linear-gradient(135deg,#059669,#10b981)"><div class="e">🔗</div><div><div class="t">Productos vinculados</div><div class="s">Cada publicación de ML con su producto de Woo: stock común, precios de las dos plataformas, regla de precio de cada producto, filtros por precio, stock y fecha, y actualización desde ML.</div></div></div>
+    <div id="wi-ltools"></div>
     <div id="wi-links"></div>
   </div>
 
@@ -3526,6 +3518,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <div class="chip wi-hchip" data-k="update" onclick="wiLogLoad('update')" style="font-size:11px">Actualizaciones</div>
         <div class="chip wi-hchip" data-k="precio" onclick="wiLogLoad('precio')" style="font-size:11px">💲 Precio</div>
         <div class="chip wi-hchip" data-k="sim-precio" onclick="wiLogLoad('sim-precio')" style="font-size:11px">🧪 Simulación de precio</div>
+        <div class="chip wi-hchip" data-k="regla" onclick="wiLogLoad('regla')" style="font-size:11px">🏷️ Reglas</div>
       </div>
       <button class="btn btn-ghost btn-xs" style="margin-left:auto" onclick="wiLogLoad()">↻</button>
     </div>
@@ -54374,7 +54367,7 @@ async function rcXlsxFill(z, sheetName, firstRow, colIdx, rows){
 // ═══════════════════════════════════════════════════════════════════════════
 var wiS = { inited:false, status:null, ml:[], woo:[], wooById:{}, links:{ items:[], units:[] }, linkByMl:{}, linkByWoo:{},
   rows:[], choice:{}, sel:new Set(), filter:'all', q:'', page:1, perPage:40, cats:null, running:false, cancel:false,
-  lsel:new Set(), lq:'', lfilter:'all', logKind:'' };
+  lsel:new Set(), lq:'', lfilter:'all', logKind:'', lrule:'', lsort:null, ladv:{}, lshow:300 };
 
 function wiEsc(t){ return String(t==null?'':t).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
 function wiNorm(s){ return String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,' ').trim(); }
@@ -55084,8 +55077,9 @@ async function wiLinksLoad(){
   w.innerHTML='<div style="padding:16px;color:var(--text3);font-size:12px">Cargando…</div>';
   var l=await wiApi('/wsync/links');
   if(l.error){ w.innerHTML='<div style="padding:14px;color:#b91c1c;font-size:12px">'+wiEsc(l.message||l.error)+'</div>'; return; }
-  wiSetLinks(l); wiLinksRender();
+  wiSetLinks(l); wiLToolsRender(); wiLinksRender();
   wiThumbsBackfill();
+  wiLPricesAuto();
 }
 function wiMlThumb(id){ var it=wiS.ml.find(function(x){ return x.id===id; }); return it ? (it.thumbnail||(it.pictures&&it.pictures[0]&&it.pictures[0].secure_url)) : null; }
 // v308: completa las miniaturas de vínculos hechos antes de v308 (una sola vez)
@@ -55114,40 +55108,357 @@ async function wiThumbsBackfill(){
   }catch(e){ console.warn('[wi] miniaturas', e.message); }
 }
 
+// ═══ v313 · PRODUCTOS VINCULADOS: precios, reglas propias, filtros avanzados ═══
+function wiLStock(x){
+  if(x.ml_stock!=null) return +x.ml_stock;   // leído de ML (más reciente)
+  var us=(wiS._lunits&&wiS._lunits[x.ml_item_id])||[], n=0, any=false;
+  us.forEach(function(u){ if(u.ml_last!=null){ n+=+u.ml_last||0; any=true; } });
+  return any ? n : (x.ml_stock!=null ? +x.ml_stock : null);
+}
+function wiLRule(x){ if(!x.rule) return null; try{ var r=JSON.parse(x.rule); return r&&r.rule?r:null; }catch(e){ return null; } }
+function wiLGen(){ var s=(wiS.status&&wiS.status.price_settings)||null; return s; }
+// regla efectiva: { r, own } o null
+function wiLEff(x){
+  var r=wiLRule(x); if(r) return { r:r, own:true };
+  var g=wiLGen(); if(g && g.general_on!==false) return { r:g, own:false };
+  return null;
+}
+function wiRuleLabel(r){
+  if(!r) return '';
+  var pct=+r.pct||0, disc=+r.disc||0;
+  var pp = pct>0 ? '+'+pct+'% que ML' : pct<0 ? '−'+Math.abs(pct)+'% que ML' : '= que ML';
+  var t = r.rule==='igual' ? '= que ML' : r.rule==='porcentaje' ? pp : pp+' · tachado −'+disc+'%';
+  return t + (r.base==='lleno' ? ' (precio lleno)' : '');
+}
+function wiRoundLabel(r){ return { '10':'redondeo $10', '100':'redondeo $100', '99':'terminado en 99' }[String(r&&r.round)]||'sin redondeo'; }
+function wiRuleKind(r){ if(!r) return ''; if(r.rule==='tachado') return 'tachado'; var p=+r.pct||0; if(r.rule==='igual'||p===0) return 'igual'; return p>0?'mas':'menos'; }
+function wiLItems(){
+  var units={}; wiS.links.units.forEach(function(u){ (units[u.ml_item_id]=units[u.ml_item_id]||[]).push(u); }); wiS._lunits=units;
+  var q=wiNorm(wiS.lq), a=wiS.ladv||{}, rf=wiS.lrule||'';
+  var num=function(v){ return v===''||v==null||isNaN(+v) ? null : +v; };
+  var pmin=num(a.pmin), pmax=num(a.pmax), smin=num(a.smin), smax=num(a.smax);
+  var dfrom=a.dfrom?new Date(a.dfrom+'T00:00:00').getTime():null, dto=a.dto?new Date(a.dto+'T23:59:59').getTime():null;
+  var list=wiS.links.items.filter(function(x){ return x.state!=='ignorado' && x.woo_id; }).filter(function(x){
+    if(wiS.lfilter!=='all' && x.state!==wiS.lfilter) return false;
+    if(q && wiNorm(x.ml_item_id+' '+(x.ml_title||'')+' '+(x.woo_title||'')+' '+(x.ml_sku||'')+' '+(x.woo_sku||'')+' '+x.woo_id).indexOf(q)<0) return false;
+    if(pmin!=null||pmax!=null){ if(x.ml_price==null) return false; if(pmin!=null && x.ml_price<pmin) return false; if(pmax!=null && x.ml_price>pmax) return false; }
+    if(smin!=null||smax!=null){ var st=wiLStock(x); if(st==null) return false; if(smin!=null && st<smin) return false; if(smax!=null && st>smax) return false; }
+    if(dfrom!=null||dto!=null){ if(!x.ml_created) return false; var t=new Date(x.ml_created).getTime(); if(dfrom!=null && t<dfrom) return false; if(dto!=null && t>dto) return false; }
+    if(rf){
+      var own=wiLRule(x);
+      if(rf==='own' && !own) return false;
+      if(rf==='none' && own) return false;
+      if(rf==='pausado' && x.price_on!==0) return false;
+      if(['igual','mas','menos','tachado'].indexOf(rf)>=0 && (!own || wiRuleKind(own)!==rf)) return false;
+    }
+    return true;
+  });
+  var so=wiS.lsort;
+  if(so && so.col){
+    var val=function(x){ return so.col==='ml_price'?x.ml_price : so.col==='woo_price'?(x.woo_sale||x.woo_price) : so.col==='stock'?wiLStock(x) : so.col==='created'?(x.ml_created?new Date(x.ml_created).getTime():null) : null; };
+    list.sort(function(A,B){ var a=val(A), b=val(B); if(a==null&&b==null) return 0; if(a==null) return 1; if(b==null) return -1; return (a-b)*so.dir; });
+  }
+  return list;
+}
+function wiLSortBy(col){ var so=wiS.lsort; wiS.lsort = so&&so.col===col ? { col:col, dir:-so.dir } : { col:col, dir:-1 }; wiLinksRender(); }
+function wiLSortArrow(col){ var so=wiS.lsort; return so&&so.col===col ? (so.dir<0?' ▼':' ▲') : ' ↕'; }
+function wiLAdvSet(k, v){ wiS.ladv=wiS.ladv||{}; wiS.ladv[k]=v; wiS.lshow=300; clearTimeout(wiS._ladvT); wiS._ladvT=setTimeout(wiLinksRender, 250); wiLAdvBadge(); }
+function wiLAdvClear(){ wiS.ladv={}; document.querySelectorAll('#wi-ladv input').forEach(function(i){ i.value=''; }); wiLAdvBadge(); wiLinksRender(); }
+function wiLAdvBadge(){ var n=Object.keys(wiS.ladv||{}).filter(function(k){ return wiS.ladv[k]!==''&&wiS.ladv[k]!=null; }).length; var b=document.getElementById('wi-ladv-badge'); if(b){ b.textContent=n; b.style.display=n?'':'none'; } }
+function wiLAdvToggle(){ var p=document.getElementById('wi-ladv'); if(p) p.style.display=p.style.display==='none'?'':'none'; }
+function wiLSearch(v){ wiS.lq=v; wiS.lshow=300; clearTimeout(wiS._lqT); wiS._lqT=setTimeout(wiLinksRender, 200); }
+
+// barra superior (se dibuja una vez; la tabla se redibuja aparte para no perder el foco del buscador)
+function wiLToolsRender(){
+  var el=document.getElementById('wi-ltools'); if(!el) return;
+  var a=wiS.ladv||{};
+  var chip=function(f,t){ var on=wiS.lfilter===f; return '<div class="chip wi-lchip" data-f="'+f+'" onclick="wiLFilter(\''+f+'\')" style="font-size:11px'+(on?';background:var(--accent);color:#fff;border-color:var(--accent)':'')+'">'+t+'</div>'; };
+  var inp=function(id,k,type,ph){ return '<input type="'+type+'" id="'+id+'" placeholder="'+ph+'" value="'+wiEsc(a[k]||'')+'" oninput="wiLAdvSet(\''+k+'\',this.value)" style="width:100%;font-size:11.5px;padding:5px 7px">'; };
+  var row=function(lbl,i1,i2){ return '<div style="display:flex;align-items:center;gap:7px"><label style="font-size:11px;color:var(--text2);flex:0 0 150px">'+lbl+'</label>'+i1+'<span style="color:var(--text3);font-size:11px">&ndash;</span>'+i2+'</div>'; };
+  el.innerHTML=
+    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'+
+      '<div class="chips" style="margin:0;gap:5px">'+chip('all','Todos')+chip('sincronizado','Sincronizados')+chip('vinculado','Sin sincronizar aún')+chip('revisar','Requieren revisión')+chip('error','Con error')+chip('pausado','Pausados')+'</div>'+
+      '<select id="wi-lrule" onchange="wiS.lrule=this.value;wiS.lshow=300;wiLinksRender()" title="Filtrar por regla de precio" style="font-size:12px;padding:5px 7px;max-width:210px">'+
+        [['','🏷️ Regla: todas'],['own','Con regla propia'],['none','Sin regla propia'],['igual','= que ML'],['mas','Más caro que ML (+%)'],['menos','Más barato que ML (−%)'],['tachado','Con precio tachado'],['pausado','💲 Precio pausado']].map(function(o){ return '<option value="'+o[0]+'"'+(wiS.lrule===o[0]?' selected':'')+'>'+o[1]+'</option>'; }).join('')+'</select>'+
+      '<button class="btn btn-ghost btn-sm" onclick="wiLAdvToggle()" style="position:relative;white-space:nowrap">🔧 Filtros avanzados<span id="wi-ladv-badge" style="display:none;position:absolute;top:-7px;right:-7px;min-width:17px;height:17px;line-height:17px;padding:0 4px;border-radius:9px;background:var(--accent);color:#fff;font-size:10px;font-weight:700;text-align:center"></span></button>'+
+      '<div style="display:flex;align-items:center;gap:6px;margin-left:auto"><input type="text" id="wi-lq" placeholder="🔍 Buscar título, SKU o ID" value="'+wiEsc(wiS.lq||'')+'" oninput="wiLSearch(this.value)" style="font-size:12px;padding:5px 9px;width:210px">'+
+        '<span id="wi-lcount" title="Productos que se ven con los filtros actuales" style="font-size:11.5px;font-weight:700;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;border-radius:9px;padding:3px 9px;white-space:nowrap"></span></div>'+
+      '<button class="btn btn-sm" style="background:#eff6ff;color:#1d4ed8;border:1px solid #93c5fd" onclick="wiUpdOpen()">🔄 Actualizar desde ML (<span id="wi-lsel-n">0</span>)…</button>'+
+      '<button class="btn btn-ghost btn-xs" onclick="wiLinksLoad()" title="Recargar la lista">↻</button>'+
+    '</div>'+
+    '<div id="wi-ladv" style="display:none;margin:0 0 12px 0;background:linear-gradient(180deg,var(--bg2) 0%,var(--bg) 100%);border:1px solid var(--border);border-radius:10px;padding:14px 16px;box-shadow:0 4px 14px rgba(0,0,0,.07)">'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><div style="font-size:12.5px;font-weight:700;display:flex;gap:6px;align-items:center"><span style="font-size:14px">🔧</span> Filtros avanzados por rango <span style="font-weight:400;font-size:11px;color:var(--text3)">(datos de Mercado Libre)</span></div><button class="btn btn-ghost btn-xs" onclick="wiLAdvClear()">✕ Limpiar</button></div>'+
+      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:9px 22px">'+
+        row('💲 Precio en ML ($)', inp('wi-la-pmin','pmin','number','mín'), inp('wi-la-pmax','pmax','number','máx'))+
+        row('📦 Stock en ML', inp('wi-la-smin','smin','number','mín'), inp('wi-la-smax','smax','number','máx'))+
+        row('📅 Creada en ML', inp('wi-la-dfrom','dfrom','date','desde'), inp('wi-la-dto','dto','date','hasta'))+
+      '</div><div id="wi-ladv-note" style="font-size:10.5px;color:var(--text3);margin-top:8px"></div></div>'+
+    '<div id="wi-lauto"></div>'+
+    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px;padding:9px 12px;border-radius:10px;background:#fdf2f8;border:1px solid #fbcfe8">'+
+      '<b style="font-size:12.5px;color:#be185d">🏷️ Regla de precio propia para:</b>'+
+      '<button class="btn btn-sm" style="background:#db2777;color:#fff" onclick="wiRuleOpen(\'filt\')">los filtrados (<span id="wi-lr-filt">0</span>)…</button>'+
+      '<button class="btn btn-sm" style="background:#fff;color:#be185d;border:1px solid #f9a8d4" onclick="wiRuleOpen(\'sel\')">los tildados (<span id="wi-lr-sel">0</span>)…</button>'+
+      '<span style="font-size:11px;color:#9d174d">Cada producto puede tener su regla (ej. −10% que ML). Tiene prioridad sobre la regla general de la herramienta 5.</span>'+
+      '<span style="margin-left:auto;display:flex;gap:8px;align-items:center"><span id="wi-lp-info" style="font-size:11px;color:var(--text3)"></span><button class="btn btn-ghost btn-xs" onclick="wiLPricesRefresh(false)" title="Volver a leer precio, stock y fecha de ML y el precio de Woo de todos los vinculados">↻ Leer precios y stock</button></span>'+
+    '</div>'+
+    '<div id="wi-lp-prog"></div>';
+  wiLAdvBadge(); wiLAutoRender();
+}
+// automatización programada (la misma de la herramienta 5)
+function wiLAutoRender(){
+  var el=document.getElementById('wi-lauto'); if(!el) return;
+  var s=wiS.status||{}, st=s.price_settings;
+  if(!st){ el.innerHTML='<div style="font-size:11.5px;color:#92400e;margin-bottom:10px">Para precios y reglas hace falta el Worker v146.</div>'; return; }
+  var hours=st.hours||[];
+  var opt=function(sel){ var o='<option value="">—</option>'; for(var h=0;h<24;h++) o+='<option value="'+h+'"'+(sel===h?' selected':'')+'>'+String(h).padStart(2,'0')+':00</option>'; return o; };
+  el.innerHTML='<div style="display:flex;gap:10px 14px;align-items:center;flex-wrap:wrap;margin:0 0 10px;padding:9px 12px;border-radius:10px;background:#f0f9ff;border:1px solid #bae6fd;font-size:12px">'+
+    '<b style="color:#0369a1">⏰ Precio automático</b>'+
+    '<label style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="wil-en" '+(st.enabled?'checked':'')+' style="width:auto"> activo</label>'+
+    '<span>1ª <select id="wil-h1" style="font-size:12px;padding:3px 5px">'+opt(hours[0])+'</select> 2ª <select id="wil-h2" style="font-size:12px;padding:3px 5px">'+opt(hours[1])+'</select></span>'+
+    '<span>Modo: '+(st.mode==='real'?'<b style="color:#16a34a">REAL</b> <a href="#" onclick="wiPModeSet(\'simulacion\');return false" style="font-size:11px">volver a simulación</a>':'<b style="color:#2563eb">SIMULACIÓN</b> <a href="#" onclick="wiPModeReal();return false" style="font-size:11px">activar real…</a>')+'</span>'+
+    '<label style="display:flex;gap:6px;align-items:center;cursor:pointer" title="Si lo destildás, la corrida automática sólo toca los productos con regla propia"><input type="checkbox" id="wil-gen" '+(st.general_on!==false?'checked':'')+' style="width:auto"> los sin regla propia usan la general (<b>'+wiEsc(wiRuleLabel(st))+'</b>)</label>'+
+    '<button class="btn btn-xs" style="background:#0284c7;color:#fff" onclick="wiLAutoSave()">💾 Guardar</button>'+
+    '<span style="font-size:10.5px;color:var(--text3);flex-basis:100%">Corre 2 veces por día (la misma programación de la herramienta 5). Si cambia el precio en ML, en la próxima corrida Woo se recalcula con la regla de cada producto: la regla propia gana y la general no la pisa.</span>'+
+  '</div>';
+}
+async function wiLAutoSave(){
+  var g=function(id){ return document.getElementById(id); };
+  var h=[g('wil-h1').value, g('wil-h2').value].filter(function(x){ return x!==''; }).map(Number);
+  var en=g('wil-en').checked;
+  if(en && !h.length){ showToast('Elegí al menos un horario','warn'); return; }
+  var d=await wiApi('/wsync/price-settings', { enabled:en, hours:h, general_on:g('wil-gen').checked });
+  if(d.error){ showToast(d.message||d.error,'error'); return; }
+  showToast('✓ Precio automático guardado'+(en?' · '+h.map(function(x){ return String(x).padStart(2,'0')+':00'; }).join(' y '):' (pausado)'),'success');
+  await wiStatusLoad(); wiLAutoRender(); wiLinksRender();
+}
+
 function wiLinksRender(){
   var w=document.getElementById('wi-links'); if(!w) return;
-  var units={}; wiS.links.units.forEach(function(u){ (units[u.ml_item_id]=units[u.ml_item_id]||[]).push(u); });
-  var q=wiNorm(wiS.lq);
-  var items=wiS.links.items.filter(function(x){ return x.state!=='ignorado' && x.woo_id; }).filter(function(x){
-    if(wiS.lfilter!=='all' && x.state!==wiS.lfilter) return false;
-    return !q || wiNorm(x.ml_item_id+' '+(x.ml_title||'')+' '+(x.woo_title||'')+' '+(x.ml_sku||'')+' '+(x.woo_sku||'')).indexOf(q)>=0;
-  });
+  if(!document.getElementById('wi-lcount')) wiLToolsRender();
+  var items=wiLItems();
+  var units=wiS._lunits||{};
+  var cnt=document.getElementById('wi-lcount'); if(cnt) cnt.textContent=items.length+' producto'+(items.length===1?'':'s');
+  var cf=document.getElementById('wi-lr-filt'); if(cf) cf.textContent=items.length;
+  var cs=document.getElementById('wi-lr-sel'); if(cs) cs.textContent=wiS.lsel.size;
+  var all=wiS.links.items.filter(function(x){ return x.woo_id && x.state!=='ignorado'; });
+  var sinP=all.filter(function(x){ return !x.prices_at; }).length;
+  var info=document.getElementById('wi-lp-info');
+  if(info){ var last=all.reduce(function(m,x){ return x.prices_at&&x.prices_at>m?x.prices_at:m; },''); info.innerHTML=(sinP?'<span style="color:#b45309">'+sinP+' sin precio leído</span> · ':'')+(last?'precios al '+new Date(last).toLocaleString('es-AR',{ day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }):''); }
+  var note=document.getElementById('wi-ladv-note'); if(note) note.textContent=sinP?'Los '+sinP+' productos sin precio/stock/fecha leídos de ML no aparecen cuando filtrás por rango. Tocá «↻ Leer precios y stock».':'';
   var stB={ vinculado:['#dbeafe','#1e40af','Vinculado'], sincronizado:['#dcfce7','#166534','Sincronizado'], revisar:['#fef3c7','#92400e','Requiere revisión'], error:['#fee2e2','#991b1b','Error'], pausado:['#e5e7eb','#374151','Pausado'], creando:['#f3e8ff','#6b21a8','Pendiente'] };
   var base=(wiS.status&&wiS.status.woo_url)?'https://'+wiS.status.woo_url:'';
-  w.innerHTML = !items.length ? '<div style="padding:20px;text-align:center;color:var(--text3);font-size:12px">Sin productos vinculados'+(wiS.lfilter!=='all'?' con este estado':'')+'.</div>' :
-    '<div class="tw"><table style="width:100%"><thead><tr><th style="width:26px"><input type="checkbox" onchange="wiLSelAll(this.checked)"></th><th>Mercado Libre</th><th>WooCommerce</th><th>Stock (común · ML · Woo)</th><th>Estado</th><th>Última sincronización</th><th style="text-align:center">Acciones</th></tr></thead><tbody>'+
-    items.map(function(x){
+  var shown=items.slice(0, wiS.lshow||300);
+  var th=function(col,t){ return '<th style="cursor:pointer;white-space:nowrap;text-align:right" onclick="wiLSortBy(\''+col+'\')" title="Ordenar">'+t+wiLSortArrow(col)+'</th>'; };
+  var allSel=items.length && items.every(function(x){ return wiS.lsel.has(x.ml_item_id); });
+  w.innerHTML = !items.length ? '<div style="padding:20px;text-align:center;color:var(--text3);font-size:12px">Sin productos vinculados con estos filtros.</div>' :
+    '<div class="tw"><table style="width:100%"><thead><tr><th style="width:26px"><input type="checkbox" '+(allSel?'checked':'')+' title="Tildar / destildar los filtrados" onchange="wiLSelAll(this.checked)"></th><th style="cursor:pointer" onclick="wiLSortBy(\'created\')" title="Ordenar por fecha de creación en ML">Mercado Libre'+wiLSortArrow('created')+'</th><th>WooCommerce</th>'+th('stock','Stock (común · ML · Woo)').replace('text-align:right','text-align:left')+th('ml_price','💲 Precio ML')+th('woo_price','🛒 Precio Woo')+'<th>Estado</th><th>Regla</th><th>Última sincronización</th><th style="text-align:center">Acciones</th></tr></thead><tbody>'+
+    shown.map(function(x){
       var b=stB[x.state]||['#e5e7eb','#374151',x.state];
-      var us=(units[x.ml_item_id]||[]).map(function(u){ return '<div style="font-size:11px;white-space:nowrap">'+(u.label?'<span style="color:var(--text3)">'+wiEsc(u.label)+':</span> ':'')+'<b>'+(u.master==null?'—':u.master)+'</b> · ML '+(u.ml_last==null?'—':u.ml_last)+' · Woo '+(u.woo_last==null?'s/g':u.woo_last)+'</div>'; }).join('') || '<span style="font-size:11px;color:var(--text3)">—</span>';
-      return '<tr><td><input type="checkbox" '+(wiS.lsel.has(x.ml_item_id)?'checked':'')+' onchange="wiLSel(\''+x.ml_item_id+'\',this.checked)"></td>'+
-        '<td style="min-width:220px"><div style="display:flex;gap:9px;align-items:center">'+wiThumb(x.ml_thumb||wiMlThumb(x.ml_item_id),54)+'<div><div style="font-size:12px;font-weight:500">'+wiEsc(x.ml_title||'')+'</div><div style="font-size:10px;color:var(--text3);font-family:var(--mono)">'+x.ml_item_id+(x.ml_sku?' · SKU '+wiEsc(x.ml_sku):'')+(x.logistic==='fulfillment'?' · <b>Full</b>':'')+'</div></div></div></td>'+
-        '<td style="min-width:220px"><div style="display:flex;gap:9px;align-items:center">'+wiThumb(x.woo_thumb||(wiS.wooById[x.woo_id]&&wiS.wooById[x.woo_id].img),54)+'<div><div style="font-size:12px">'+(base?'<a href="'+base+'/wp-admin/post.php?post='+x.woo_id+'&action=edit" target="_blank" rel="noopener">#'+x.woo_id+'</a>':'#'+x.woo_id)+' '+wiEsc(x.woo_title||'')+'</div><div style="font-size:10px;color:var(--text3);font-family:var(--mono)">SKU '+wiEsc(x.woo_sku||'—')+' · '+wiEsc(x.kind||'')+'</div></div></div></td>'+
+      var us=(units[x.ml_item_id]||[]).map(function(u){ return '<div style="font-size:11px;white-space:nowrap">'+(u.label?'<span style="color:var(--text3)">'+wiEsc(u.label)+':</span> ':'')+'<b>'+(u.master==null?'—':u.master)+'</b> · ML '+(u.ml_last==null?'—':u.ml_last)+' · Woo '+(u.woo_last==null?'s/g':u.woo_last)+'</div>'; }).join('') || '<span style="font-size:11px;color:var(--text3)">'+(x.ml_stock!=null?'ML '+x.ml_stock:'—')+'</span>';
+      var id=x.ml_item_id;
+      var pen='<button class="btn btn-ghost btn-xs" style="padding:1px 5px;font-size:11px" onclick="wiPriceEdit(\''+id+'\',\'%T\')" title="Cambiar precio">✏️</button>';
+      var mlP = x.ml_price==null ? '<span style="color:var(--text3);font-size:11px">sin leer</span>' :
+        '<div style="font-weight:700;font-size:13px">'+wiMoney(x.ml_price)+'</div>'+(x.ml_full&&x.ml_full>x.ml_price?'<div style="font-size:10.5px;color:var(--text3);text-decoration:line-through">'+wiMoney(x.ml_full)+'</div>':'');
+      var wp=x.woo_price, wsale=x.woo_sale, pref=(x.woo_nvar>1?'<span style="font-size:10px;color:var(--text3)">desde </span>':'');
+      var dif=function(v){ if(!(x.ml_price>0)||!(v>0)) return ''; var d=Math.round((v/x.ml_price-1)*1000)/10; return '<div style="font-size:10px;color:'+(d>0?'#b45309':d<0?'#15803d':'#64748b')+'">'+(d===0?'= ML':(d>0?'+':'')+d+'% vs ML')+'</div>'; };
+      var wooP = wp==null ? '<span style="color:var(--text3);font-size:11px">sin leer</span>' :
+        (wsale? '<div style="font-size:10.5px;color:var(--text3);text-decoration:line-through">'+wiMoney(wp)+'</div><div style="font-weight:700;font-size:13px;color:#be185d">'+pref+wiMoney(wsale)+'</div>'+dif(wsale)
+              : '<div style="font-weight:700;font-size:13px">'+pref+wiMoney(wp)+'</div>'+dif(wp));
+      var own=wiLRule(x), g=wiLGen();
+      var rl = x.price_on===0 ? '<span style="font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:9px;background:#e5e7eb;color:#374151">💲 pausado</span>'
+        : own ? '<span style="font-size:11px;font-weight:700;padding:3px 8px;border-radius:9px;background:#fce7f3;color:#9d174d;white-space:nowrap">'+wiEsc(wiRuleLabel(own))+'</span><div style="font-size:9.5px;color:var(--text3);margin-top:2px">'+wiRoundLabel(own)+'</div>'
+        : (g&&g.general_on!==false ? '<span style="font-size:10.5px;padding:2px 7px;border-radius:9px;background:#f1f5f9;color:#475569;white-space:nowrap">Sin regla propia</span><div style="font-size:9.5px;color:var(--text3);margin-top:2px">usa la general: '+wiEsc(wiRuleLabel(g))+'</div>'
+                                   : '<span style="font-size:10.5px;padding:2px 7px;border-radius:9px;background:#fef2f2;color:#b91c1c;white-space:nowrap">Sin regla</span><div style="font-size:9.5px;color:var(--text3);margin-top:2px">el precio no se sincroniza</div>');
+      return '<tr><td><input type="checkbox" '+(wiS.lsel.has(id)?'checked':'')+' onchange="wiLSel(\''+id+'\',this.checked)"></td>'+
+        '<td style="min-width:220px"><div style="display:flex;gap:9px;align-items:center">'+wiThumb(x.ml_thumb||wiMlThumb(id),54)+'<div><div style="font-size:12px;font-weight:500">'+wiEsc(x.ml_title||'')+'</div><div style="font-size:10px;color:var(--text3);font-family:var(--mono)">'+id+(x.ml_sku?' · SKU '+wiEsc(x.ml_sku):'')+(x.logistic==='fulfillment'?' · <b>Full</b>':'')+'</div>'+(x.ml_created?'<div style="font-size:10px;color:var(--text3)">creada '+new Date(x.ml_created).toLocaleDateString('es-AR')+'</div>':'')+'</div></div></td>'+
+        '<td style="min-width:200px"><div style="display:flex;gap:9px;align-items:center">'+wiThumb(x.woo_thumb||(wiS.wooById[x.woo_id]&&wiS.wooById[x.woo_id].img),54)+'<div><div style="font-size:12px">'+(base?'<a href="'+base+'/wp-admin/post.php?post='+x.woo_id+'&action=edit" target="_blank" rel="noopener">#'+x.woo_id+'</a>':'#'+x.woo_id)+' '+wiEsc(x.woo_title||'')+'</div><div style="font-size:10px;color:var(--text3);font-family:var(--mono)">SKU '+wiEsc(x.woo_sku||'—')+' · '+wiEsc(x.kind||'')+'</div></div></div></td>'+
         '<td>'+us+'</td>'+
-        '<td><span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:9px;background:'+b[0]+';color:'+b[1]+'">'+b[2]+'</span>'+(x.note||x.last_result&&x.state!=='sincronizado'?'<div style="font-size:9.5px;color:var(--text3);max-width:220px">'+wiEsc(x.note||x.last_result||'')+'</div>':'')+'</td>'+
+        '<td style="text-align:right;white-space:nowrap"><div style="display:flex;gap:4px;align-items:center;justify-content:flex-end"><div>'+mlP+'</div>'+pen.replace('%T','ml')+'</div></td>'+
+        '<td style="text-align:right;white-space:nowrap"><div style="display:flex;gap:4px;align-items:center;justify-content:flex-end"><div>'+wooP+'</div>'+pen.replace('%T','woo')+'</div></td>'+
+        '<td><span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:9px;background:'+b[0]+';color:'+b[1]+'">'+b[2]+'</span>'+(x.note||x.last_result&&x.state!=='sincronizado'?'<div style="font-size:9.5px;color:var(--text3);max-width:200px">'+wiEsc(x.note||x.last_result||'')+'</div>':'')+'</td>'+
+        '<td style="cursor:pointer;min-width:120px" onclick="wiRuleOpen(\'one\',\''+id+'\')" title="Cambiar la regla de precio de este producto">'+rl+'</td>'+
         '<td style="font-size:10.5px;color:var(--text3);white-space:nowrap">'+(x.last_sync?new Date(x.last_sync).toLocaleString('es-AR'):'—')+'</td>'+
         '<td style="text-align:center;white-space:nowrap">'+
-          (x.state==='revisar'?'<button class="btn btn-ghost btn-xs" onclick="wiReview(\''+x.ml_item_id+'\')" title="Emparejar variantes">🧩</button> ':'')+
-          '<button class="btn btn-ghost btn-xs" onclick="wiToggleSync(\''+x.ml_item_id+'\','+(x.sync_on?0:1)+')" title="'+(x.sync_on?'Pausar sincronización de este producto':'Reanudar')+'">'+(x.sync_on?'⏸':'▶')+'</button> '+
-          '<button class="btn btn-ghost btn-xs" onclick="wiTogglePrice(\''+x.ml_item_id+'\','+(x.price_on===0?1:0)+')" title="'+(x.price_on===0?'Precio: pausado. Tocá para reanudar la sincronización de precio':'Precio: se sincroniza. Tocá para pausarlo sólo en este producto')+'" style="'+(x.price_on===0?'opacity:.45;text-decoration:line-through':'')+'">💲</button> '+
-          '<button class="btn btn-ghost btn-xs" onclick="wiUpdOpen([\''+x.ml_item_id+'\'])" title="Actualizar datos de Woo desde ML">🔄</button> '+
-          '<button class="btn btn-ghost btn-xs" onclick="wiUnlink(\''+x.ml_item_id+'\')" title="Desvincular" style="color:#dc2626">✕</button>'+
+          (x.state==='revisar'?'<button class="btn btn-ghost btn-xs" onclick="wiReview(\''+id+'\')" title="Emparejar variantes">🧩</button> ':'')+
+          '<button class="btn btn-ghost btn-xs" onclick="wiToggleSync(\''+id+'\','+(x.sync_on?0:1)+')" title="'+(x.sync_on?'Pausar sincronización de este producto':'Reanudar')+'">'+(x.sync_on?'⏸':'▶')+'</button> '+
+          '<button class="btn btn-ghost btn-xs" onclick="wiTogglePrice(\''+id+'\','+(x.price_on===0?1:0)+')" title="'+(x.price_on===0?'Precio: pausado. Tocá para reanudar la sincronización de precio':'Precio: se sincroniza. Tocá para pausarlo sólo en este producto')+'" style="'+(x.price_on===0?'opacity:.45;text-decoration:line-through':'')+'">💲</button> '+
+          '<button class="btn btn-ghost btn-xs" onclick="wiUpdOpen([\''+id+'\'])" title="Actualizar datos de Woo desde ML">🔄</button> '+
+          '<button class="btn btn-ghost btn-xs" onclick="wiUnlink(\''+id+'\')" title="Desvincular" style="color:#dc2626">✕</button>'+
         '</td></tr>';
-    }).join('')+'</tbody></table></div>';
+    }).join('')+'</tbody></table></div>'+
+    (items.length>shown.length?'<div style="text-align:center;padding:12px"><button class="btn btn-ghost btn-sm" onclick="wiS.lshow=(wiS.lshow||300)+300;wiLinksRender()">Mostrar 300 más ('+(items.length-shown.length)+' restantes)</button></div>':'');
   var c=document.getElementById('wi-lsel-n'); if(c) c.textContent=wiS.lsel.size;
 }
-function wiLSel(id,on){ if(on) wiS.lsel.add(id); else wiS.lsel.delete(id); var c=document.getElementById('wi-lsel-n'); if(c) c.textContent=wiS.lsel.size; }
-function wiLSelAll(on){ wiS.links.items.forEach(function(x){ if(x.woo_id && x.state!=='ignorado'){ if(on) wiS.lsel.add(x.ml_item_id); else wiS.lsel.delete(x.ml_item_id); } }); wiLinksRender(); }
-function wiLFilter(f){ wiS.lfilter=f; wiLinksRender(); document.querySelectorAll('.wi-lchip').forEach(function(c){ var on=c.getAttribute('data-f')===f; c.style.background=on?'var(--accent)':''; c.style.color=on?'#fff':''; c.style.borderColor=on?'var(--accent)':''; }); }
+
+// ── leer precios/stock/fecha (sólo lectura) ──
+async function wiLPricesAuto(){
+  if(wiS._lpAuto || wiS.lprunning) return;
+  if(!(wiS.status&&wiS.status.price_settings)) return;
+  var falt=wiS.links.items.filter(function(x){ return x.woo_id && x.state!=='ignorado' && !x.prices_at; }).map(function(x){ return x.ml_item_id; });
+  if(!falt.length) return;
+  wiS._lpAuto=true; wiLPricesRefresh(falt);
+}
+async function wiLPricesRefresh(ids){
+  if(wiS.lprunning){ showToast('Ya se están leyendo los precios','warn'); return; }
+  var prog=function(h){ var e=document.getElementById('wi-lp-prog'); if(e) e.innerHTML=h; };
+  wiS.lprunning=true; var n=0, tot=0, errs=0;
+  var total = ids ? ids.length : wiS.links.items.filter(function(x){ return x.woo_id && x.state!=='ignorado'; }).length;
+  try{
+    var groups = ids ? [] : [null];
+    if(ids) for(var i=0;i<ids.length;i+=150) groups.push(ids.slice(i,i+150));
+    for(var g=0; g<groups.length; g++){
+      var cursor=0;
+      while(true){
+        var d=await wiApiPaced('/wsync/prices-refresh', { cursor:cursor, ids:groups[g] }, function(t){ prog(wiProgBox('⏳ Pausa pedida por la tienda','Reintento en '+t+' s…', null, '#d97706')); });
+        if(d.error) throw new Error(d.message||d.error);
+        tot+=(d.stats&&d.stats.items)||0; errs+=(d.stats&&d.stats.errors)||0; cursor=d.cursor; n++;
+        var pc=Math.min(100, tot/Math.max(1,total)*100), tx=tot+' / '+total+' productos leídos (precio, stock y fecha de ML; precio de Woo)';
+        prog(wiProgBox('💲 Leyendo precios y stock', tx, pc, '#059669')); wiFloat('lprecios','💲 Leyendo precios y stock', tx, pc, '#059669');
+        if(d.done) break;
+      }
+    }
+    var l=await wiApi('/wsync/links'); if(!l.error) wiSetLinks(l);
+    prog(''); wiLinksRender();
+    wiFloatEnd('lprecios', '✅ Precios y stock leídos: '+tot+' productos'+(errs?' · '+errs+' con error':''), errs?'warn':'success');
+  }catch(e){ prog('<div style="color:#b91c1c;font-size:12px;margin-bottom:8px">✕ '+wiEsc(e.message)+'</div>'); wiFloatEnd('lprecios','Leer precios: '+e.message,'error'); }
+  finally{ wiS.lprunning=false; if(_wiFloat.lprecios) wiFloatEnd('lprecios'); }
+}
+
+// ── editar el precio de UN producto (ML o Woo) ──
+function wiPriceEdit(id, target){
+  var x=wiS.linkByMl[id]; if(!x) return;
+  var eff=wiLEff(x);
+  if(target==='ml'){
+    wiModal('<div style="'+WI_M.title+'">💲 Precio en Mercado Libre</div><div style="'+WI_M.sub+'"><b>'+wiEsc(x.ml_title||id)+'</b> ('+id+')</div>'+
+      '<label style="'+WI_M.label+'">Nuevo precio en ML ($)</label><input id="wpe-p" type="number" min="1" step="1" value="'+(x.ml_price||'')+'" style="'+WI_M.input+';margin-bottom:10px;font-size:16px;font-weight:700" oninput="wiPriceEditPrev(\''+id+'\')">'+
+      '<div style="font-size:11px;color:#64748b;margin-bottom:10px">Se cambia en la publicación de ML (si tiene variantes, en todas).</div>'+
+      (eff && x.price_on!==0 ? '<label style="display:flex;gap:8px;align-items:flex-start;font-size:12.5px;color:#1e293b;cursor:pointer;margin-bottom:6px"><input type="checkbox" id="wpe-rc" checked style="width:auto;margin-top:2px" onchange="wiPriceEditPrev(\''+id+'\')"><span>Recalcular también el precio de Woo con '+(eff.own?'su regla':'la regla general')+' (<b>'+wiEsc(wiRuleLabel(eff.r))+'</b>)</span></label><div id="wpe-prev" style="font-size:12px;color:#be185d;margin:0 0 12px 26px"></div>'
+                             : '<div style="'+WI_M.warn+'">Este producto no tiene regla de precio activa: el precio de Woo no se toca.</div>')+
+      '<div style="display:flex;gap:8px"><button onclick="wiModal(null)" style="'+WI_M.cancel+'">Cancelar</button>'+wiGo('wpe-go','Guardar en ML','#2563eb','wiPriceEditSave(\''+id+'\',\'ml\')',false)+'</div>');
+  } else {
+    wiModal('<div style="'+WI_M.title+'">🛒 Precio en WooCommerce</div><div style="'+WI_M.sub+'"><b>'+wiEsc(x.woo_title||'')+'</b> (#'+x.woo_id+')'+(x.woo_nvar>0?' · se aplica a todas sus variantes vinculadas':'')+'</div>'+
+      '<label style="'+WI_M.label+'">Precio normal ($)</label><input id="wpe-p" type="number" min="1" step="1" value="'+(x.woo_price||'')+'" style="'+WI_M.input+';margin-bottom:10px;font-size:16px;font-weight:700">'+
+      '<label style="'+WI_M.label+'">Precio rebajado ($) <span style="font-weight:400;color:#64748b">— vacío = sin rebaja</span></label><input id="wpe-s" type="number" min="0" step="1" value="'+(x.woo_sale||'')+'" style="'+WI_M.input+';margin-bottom:10px">'+
+      (eff && x.price_on!==0 ? '<div style="'+WI_M.warn+'">Este producto tiene regla de precio (<b>'+wiEsc(wiRuleLabel(eff.r))+'</b>): la próxima sincronización de precio lo vuelve a calcular desde ML. Para que quede fijo, pausá su precio con 💲.</div>':'')+
+      '<div style="display:flex;gap:8px"><button onclick="wiModal(null)" style="'+WI_M.cancel+'">Cancelar</button>'+wiGo('wpe-go','Guardar en Woo','#db2777','wiPriceEditSave(\''+id+'\',\'woo\')',false)+'</div>');
+  }
+  var i=document.getElementById('wpe-p'); if(i){ i.focus(); i.select(); }
+  wiPriceEditPrev(id);
+}
+function wiPriceEditPrev(id){
+  var el=document.getElementById('wpe-prev'); if(!el) return;
+  var x=wiS.linkByMl[id], eff=wiLEff(x), rc=document.getElementById('wpe-rc');
+  if(!eff || !rc || !rc.checked){ el.textContent=''; return; }
+  var p=+document.getElementById('wpe-p').value||0; var t=wiPTarget(p, Math.max(p, x.ml_full||0), eff.r);
+  el.innerHTML = t ? 'Woo quedaría en '+(t.sale?'<s>'+wiMoney(t.regular)+'</s> <b>'+wiMoney(t.sale)+'</b>':'<b>'+wiMoney(t.regular)+'</b>') : '';
+}
+async function wiPriceEditSave(id, target){
+  var p=+document.getElementById('wpe-p').value||0; if(!(p>0)){ showToast('Poné un precio válido','warn'); return; }
+  var body={ ml_item_id:id, target:target, price:p };
+  if(target==='ml'){ var rc=document.getElementById('wpe-rc'); body.recalc_woo=!!(rc&&rc.checked); }
+  else { var sv=document.getElementById('wpe-s').value; body.sale=sv===''?'':+sv; if(body.sale && body.sale>=p){ showToast('El precio rebajado tiene que ser menor que el normal','warn'); return; } }
+  var b=document.getElementById('wpe-go'); if(b){ b.disabled=true; b.textContent='Guardando…'; }
+  var d=await wiApi('/wsync/set-price', body);
+  if(d.error){ showToast((target==='ml'?'ML: ':'Woo: ')+(d.message||d.error),'error'); if(b){ b.disabled=false; b.textContent='Reintentar'; } return; }
+  wiModal(null);
+  showToast(target==='ml' ? '✓ Precio en ML: '+wiMoney(p)+(body.recalc_woo?(d.woo_writes?' · Woo recalculado con la regla':d.woo_note?' · '+d.woo_note:' · Woo ya estaba bien'):'') : '✓ Precio en Woo: '+wiMoney(p)+(body.sale?' (rebajado '+wiMoney(body.sale)+')':''),'success');
+  var l=await wiApi('/wsync/links'); if(!l.error) wiSetLinks(l);
+  wiLinksRender();
+}
+
+// ── asignar regla propia (a uno, a los filtrados o a los tildados) ──
+function wiRuleIds(scope, id){
+  if(scope==='one') return [id];
+  if(scope==='sel') return Array.from(wiS.lsel).filter(function(k){ var x=wiS.linkByMl[k]; return x && x.woo_id; });
+  return wiLItems().map(function(x){ return x.ml_item_id; });
+}
+function wiRuleOpen(scope, id){
+  var ids=wiRuleIds(scope, id);
+  if(!ids.length){ showToast(scope==='sel'?'Tildá productos en la lista':'No hay productos con estos filtros','warn'); return; }
+  wiS._rule={ scope:scope, ids:ids };
+  var x0=wiS.linkByMl[ids[0]], cur=(scope==='one'&&x0)?wiLRule(x0):null;
+  var r=cur||{ rule:'porcentaje', pct:0, disc:0, base:'actual', round:'100' };
+  var nOwn=ids.filter(function(k){ return wiS.linkByMl[k] && wiLRule(wiS.linkByMl[k]); }).length;
+  var rad=function(name,val,curv,label,sub){ return '<label style="display:flex;gap:8px;align-items:flex-start;font-size:12.5px;color:#1e293b;cursor:pointer;margin-bottom:6px;text-align:left"><input type="radio" name="'+name+'" value="'+val+'" '+(curv===val?'checked':'')+' onchange="wiRulePrev()" style="margin-top:2px;width:auto;flex:none"><span><b>'+label+'</b>'+(sub?'<br><span style="font-size:11px;color:#64748b">'+sub+'</span>':'')+'</span></label>'; };
+  var inp='width:80px;font-size:13px;padding:5px 7px;border:1px solid #cbd5e1;border-radius:7px;background:#fff;color:#1e293b';
+  var titulo = scope==='one' ? '<b>'+wiEsc((x0&&x0.ml_title)||ids[0])+'</b>' : '<b>'+ids.length+'</b> producto'+(ids.length===1?'':'s')+' '+(scope==='sel'?'tildados':'filtrados')+(nOwn?' ('+nOwn+' ya tienen regla propia: se reemplaza)':'');
+  wiModal('<div style="'+WI_M.title+'">🏷️ Regla de precio propia</div><div style="'+WI_M.sub+'">Para '+titulo+'. El precio de Woo se calcula desde el de ML con esta regla, con prioridad sobre la regla general.</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;margin-bottom:8px">'+
+      '<div>'+rad('wr-mode','set','set','Usar esta regla','')+rad('wr-mode','del','','Quitar regla propia','Vuelve a la regla general (herramienta 5)')+'</div>'+
+      '<div id="wr-ex" style="background:#fdf2f8;border:1px dashed #f9a8d4;border-radius:9px;padding:8px 10px;font-size:12px;color:#1e293b"></div>'+
+    '</div>'+
+    '<div id="wr-body" style="border-top:1px solid #e2e8f0;padding-top:10px">'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px">'+
+        '<div>'+rad('wr-rule','igual',r.rule,'= que ML','Mismo precio')+rad('wr-rule','porcentaje',r.rule,'Porcentaje sobre ML','+ más caro · − más barato')+rad('wr-rule','tachado',r.rule,'Con precio tachado','Normal tachado + rebajado')+'</div>'+
+        '<div style="font-size:12.5px;color:#1e293b">'+
+          '<div id="wr-pct-row" style="margin-bottom:8px">% sobre ML <input id="wr-pct" type="number" step="0.5" min="-90" max="500" value="'+(r.pct||0)+'" oninput="wiRulePrev()" style="'+inp+'"> <span style="font-size:10.5px;color:#64748b">ej. −10 · +5</span></div>'+
+          '<div id="wr-disc-row" style="margin-bottom:8px">Descuento tachado <input id="wr-disc" type="number" step="1" min="0" max="90" value="'+(r.disc||0)+'" oninput="wiRulePrev()" style="'+inp+'"> %</div>'+
+          '<div style="margin-bottom:8px">Precio de ML: <select id="wr-base" onchange="wiRulePrev()" style="font-size:12px;padding:4px"><option value="actual"'+(r.base!=='lleno'?' selected':'')+'>actual</option><option value="lleno"'+(r.base==='lleno'?' selected':'')+'>lleno (sin promo)</option></select></div>'+
+          '<div>Redondeo: <select id="wr-round" onchange="wiRulePrev()" style="font-size:12px;padding:4px"><option value="none"'+(r.round==='none'?' selected':'')+'>sin</option><option value="10"'+(r.round==='10'?' selected':'')+'>$10</option><option value="100"'+(r.round==='100'?' selected':'')+'>$100</option><option value="99"'+(r.round==='99'?' selected':'')+'>terminado en 99</option></select></div>'+
+        '</div>'+
+      '</div>'+
+    '</div>'+
+    '<label style="display:flex;gap:8px;align-items:flex-start;font-size:12.5px;color:#1e293b;cursor:pointer;margin:12px 0 6px;text-align:left"><input type="checkbox" id="wr-now" onchange="wiRulePrev()" style="width:auto;margin-top:2px"><span><b>Aplicar ya en Woo</b> a '+(ids.length===1?'este producto':'estos '+ids.length+' productos')+'<br><span style="font-size:11px;color:#64748b">Si no, se aplica en la próxima corrida automática (si está activa y en modo real).</span></span></label>'+
+    '<div id="wr-conf" style="display:none;margin:0 0 10px 26px"><label style="'+WI_M.label+'">Para confirmar escribí APLICAR</label><input id="wr-ok" style="'+WI_M.input+'" oninput="wiRulePrev()"></div>'+
+    '<div style="display:flex;gap:8px;margin-top:6px"><button onclick="wiModal(null)" style="'+WI_M.cancel+'">Cancelar</button>'+wiGo('wr-go','Guardar regla','#db2777','wiRuleSave()',false)+'</div>', true);
+  wiRulePrev();
+}
+function wiRuleForm(){
+  return { rule:(document.querySelector('input[name=wr-rule]:checked')||{}).value||'igual', pct:+document.getElementById('wr-pct').value||0, disc:+document.getElementById('wr-disc').value||0, base:document.getElementById('wr-base').value, round:document.getElementById('wr-round').value };
+}
+function wiRulePrev(){
+  var del=((document.querySelector('input[name=wr-mode]:checked')||{}).value==='del');
+  var r=wiRuleForm();
+  document.getElementById('wr-body').style.opacity=del?.35:1; document.getElementById('wr-body').style.pointerEvents=del?'none':'';
+  document.getElementById('wr-pct-row').style.display=r.rule==='igual'?'none':'';
+  document.getElementById('wr-disc-row').style.display=r.rule==='tachado'?'':'none';
+  var now=document.getElementById('wr-now').checked, ok=String(document.getElementById('wr-ok').value).trim().toUpperCase()==='APLICAR';
+  document.getElementById('wr-conf').style.display=now?'':'none';
+  var b=document.getElementById('wr-go'); b.textContent=(del?'Quitar regla':'Guardar regla')+(now?' y aplicar en Woo':''); b.disabled=now&&!ok; b.style.opacity=b.disabled?.5:1;
+  var ex=document.getElementById('wr-ex');
+  var x=wiS.linkByMl[wiS._rule.ids[0]]||{}, ml=x.ml_price||10000;
+  var rr = del ? ((wiLGen()&&wiLGen().general_on!==false)?wiLGen():null) : r;
+  if(!rr){ ex.innerHTML='<b>Sin regla</b><br><span style="color:#64748b">el precio de Woo no se sincroniza</span>'; return; }
+  var t=wiPTarget(ml, Math.max(ml, x.ml_full||0), rr);
+  ex.innerHTML='<div style="font-weight:800;color:#9d174d;margin-bottom:3px">'+wiEsc(wiRuleLabel(rr))+(del?' <span style="font-weight:400;color:#64748b">(general)</span>':'')+'</div>'+
+    '<div>Ej.'+(x.ml_price?'':' con')+' ML '+wiMoney(ml)+' → Woo '+(t?(t.sale?'<s>'+wiMoney(t.regular)+'</s> <b>'+wiMoney(t.sale)+'</b>':'<b>'+wiMoney(t.regular)+'</b>'):'—')+'</div>';
+}
+async function wiRuleSave(){
+  var del=((document.querySelector('input[name=wr-mode]:checked')||{}).value==='del');
+  var r=del?null:wiRuleForm();
+  if(r && r.rule==='tachado' && !(r.disc>0)){ showToast('Poné el % de descuento del tachado','warn'); return; }
+  var now=document.getElementById('wr-now').checked;
+  var ids=wiS._rule.ids.slice();
+  wiModal(null);
+  var d=await wiApi('/wsync/rule', { ids:ids, rule:r });
+  if(d.error){ showToast(d.message||d.error,'error'); return; }
+  (wiS.links.items||[]).forEach(function(x){ if(ids.indexOf(x.ml_item_id)>=0) x.rule=r?JSON.stringify(d.rule||r):null; });
+  wiLinksRender();
+  if(!now){ showToast('🏷️ '+(r?'Regla «'+wiRuleLabel(d.rule||r)+'»':'Regla propia quitada')+' en '+ids.length+' producto(s)','success'); return; }
+  // aplicar ya
+  var res={ items:0, writes:0, errors:0 }, run_id='prule-'+Date.now().toString(36);
+  try{
+    for(var i=0;i<ids.length;i+=30){
+      var cursor=0, slice=ids.slice(i,i+30);
+      while(true){
+        var tx=Math.min(ids.length,i+30)+' / '+ids.length+' · '+res.writes+' precios cambiados en Woo';
+        wiFloat('regla','🏷️ Aplicando regla en Woo', tx, i/ids.length*100, '#db2777');
+        var e=document.getElementById('wi-lp-prog'); if(e) e.innerHTML=wiProgBox('🏷️ Aplicando regla en Woo', tx, i/ids.length*100, '#db2777');
+        var q=await wiApiPaced('/wsync/price-run', { ids:slice, simulate:false, confirm:'APLICAR', run_id:run_id, cursor:cursor, quiet:i>0||cursor>0, total:ids.length }, function(t){ wiFloat('regla','⏳ Pausa pedida por la tienda','Reintento en '+t+' s', i/ids.length*100, '#d97706'); });
+        if(q.error) throw new Error(q.message||q.error);
+        ['items','writes','errors'].forEach(function(k){ res[k]+=(q.stats&&q.stats[k])||0; });
+        cursor=q.cursor; if(q.done) break;
+      }
+    }
+    var e2=document.getElementById('wi-lp-prog'); if(e2) e2.innerHTML='';
+    wiFloatEnd('regla', '✅ Regla aplicada: '+res.writes+' precio(s) cambiados en Woo de '+res.items+' producto(s)'+(res.errors?' · '+res.errors+' con error':''), res.errors?'warn':'success');
+  }catch(err){ wiFloatEnd('regla','Aplicar regla: '+err.message,'error'); var e3=document.getElementById('wi-lp-prog'); if(e3) e3.innerHTML=''; }
+  finally{ if(_wiFloat.regla) wiFloatEnd('regla'); var l=await wiApi('/wsync/links'); if(!l.error){ wiSetLinks(l); wiLinksRender(); } }
+}
+
+function wiLSel(id,on){ if(on) wiS.lsel.add(id); else wiS.lsel.delete(id); var c=document.getElementById('wi-lsel-n'); if(c) c.textContent=wiS.lsel.size; var c2=document.getElementById('wi-lr-sel'); if(c2) c2.textContent=wiS.lsel.size; }
+function wiLSelAll(on){ wiLItems().forEach(function(x){ if(on) wiS.lsel.add(x.ml_item_id); else wiS.lsel.delete(x.ml_item_id); }); wiLinksRender(); }
+function wiLFilter(f){ wiS.lfilter=f; wiS.lshow=300; wiLinksRender(); document.querySelectorAll('.wi-lchip').forEach(function(c){ var on=c.getAttribute('data-f')===f; c.style.background=on?'var(--accent)':''; c.style.color=on?'#fff':''; c.style.borderColor=on?'var(--accent)':''; }); }
 async function wiTogglePrice(id, on){ var d=await wiApi('/wsync/item', { ml_item_id:id, price_on:!!on }); if(d.error) showToast(d.error,'error'); else showToast(on?'💲 Precio: vuelve a sincronizarse en este producto':'💲 Precio pausado en este producto (el stock sigue)','info'); await wiLinksLoad(); }
 async function wiToggleSync(id, on){ var d=await wiApi('/wsync/item', { ml_item_id:id, sync_on:!!on }); if(d.error) showToast(d.error,'error'); await wiLinksLoad(); }
 async function wiUnlink(id){
@@ -55314,7 +55625,7 @@ async function wiLogLoad(kind){
   el.innerHTML='<div style="padding:12px;color:var(--text3);font-size:12px">Cargando…</div>';
   var d=await wiApi('/wsync/log?limit=400'+(wiS.logKind?'&kind='+wiS.logKind:''));
   if(d.error){ el.innerHTML='<div style="padding:12px;color:#b91c1c;font-size:12px">'+wiEsc(d.message||d.error)+'</div>'; return; }
-  var K={ import:'🆕 Importación', link:'🔗 Vínculo', stock:'🔄 Stock', sim:'🧪 Simulación', error:'✕ Error', update:'✏️ Actualización', unlink:'⛓ Desvínculo', config:'⚙️ Ajustes', run:'▶ Corrida', item:'⏸ Producto', precio:'💲 Precio', 'sim-precio':'🧪 Simulación de precio' };
+  var K={ import:'🆕 Importación', link:'🔗 Vínculo', stock:'🔄 Stock', sim:'🧪 Simulación', error:'✕ Error', update:'✏️ Actualización', unlink:'⛓ Desvínculo', config:'⚙️ Ajustes', run:'▶ Corrida', item:'⏸ Producto', precio:'💲 Precio', 'sim-precio':'🧪 Simulación de precio', regla:'🏷️ Regla' };
   el.innerHTML=!(d.log||[]).length?'<div style="padding:16px;color:var(--text3);font-size:12px;text-align:center">Sin registros.</div>':
     '<div class="tw" style="max-height:520px;overflow:auto"><table style="width:100%"><thead><tr><th>Fecha</th><th>Tipo</th><th>ML</th><th>Woo</th><th>Detalle</th></tr></thead><tbody>'+
     d.log.map(function(l){ var err=l.kind==='error'||/ERROR/.test(l.msg||''); return '<tr><td style="font-size:10.5px;white-space:nowrap;color:var(--text3)">'+new Date(l.ts).toLocaleString('es-AR')+'</td><td style="font-size:11px;white-space:nowrap">'+(K[l.kind]||l.kind)+'</td><td style="font-size:10.5px;font-family:var(--mono)">'+wiEsc(l.ml_item_id||'')+'</td><td style="font-size:10.5px">'+(l.woo_id?'#'+l.woo_id:'')+'</td><td style="font-size:11.5px;'+(err?'color:#b91c1c':'')+'">'+wiEsc(l.msg)+'</td></tr>'; }).join('')+'</tbody></table></div>';
@@ -55435,7 +55746,7 @@ function wiPForm(){
   var rule=(document.querySelector('input[name=wip-rule]:checked')||{}).value||'igual';
   return { enabled:g('wip-en').checked, rule:rule, pct:+g('wip-pct').value||0, disc:+g('wip-disc').value||0,
     base:(document.querySelector('input[name=wip-base]:checked')||{}).value||'actual', round:g('wip-round').value,
-    hours:[g('wip-h1').value, g('wip-h2').value].filter(function(x){ return x!==''; }).map(Number), budget:+g('wip-bud').value||40 };
+    hours:[g('wip-h1').value, g('wip-h2').value].filter(function(x){ return x!==''; }).map(Number), budget:+g('wip-bud').value||40, general_on:g('wip-gen')?g('wip-gen').checked:true };
 }
 function wiPPreview(){
   var el=document.getElementById('wip-prev'); if(!el) return;
@@ -55503,7 +55814,8 @@ function wiPriceRender(){
       '</div>'+
       '<div style="'+card+'">'+
         '<div style="font-size:12px;font-weight:700;margin-bottom:8px">Alcance</div>'+
-        '<div style="font-size:12px;line-height:1.55">Todos los productos vinculados'+(nOff?' menos <b>'+nOff+'</b> con el precio pausado':'')+'.<br><span style="font-size:10.5px;color:var(--text3)">Para excluir uno, tocá 💲 en «3 · Productos vinculados». Sólo cambia el precio en Woo: <b>nunca toca el precio de ML</b>.</span></div>'+
+        '<label style="display:flex;gap:8px;align-items:flex-start;font-size:12px;cursor:pointer;margin-bottom:6px;text-align:left"><input type="checkbox" id="wip-gen" '+(st.general_on!==false?'checked':'')+' style="width:auto;flex:none;margin-top:2px"><span>Aplicar esta regla general a los productos <b>sin regla propia</b></span></label>'+
+        '<div style="font-size:12px;line-height:1.55">Los productos con <b>regla propia</b> (columna «Regla» en «3 · Productos vinculados») usan la suya: tiene prioridad y esta herramienta no la pisa.'+(nOff?' <b>'+nOff+'</b> con el precio pausado no se tocan.':'')+'<br><span style="font-size:10.5px;color:var(--text3)">Sólo cambia el precio en Woo: <b>nunca toca el precio de ML</b>.</span></div>'+
       '</div>'+
     '</div>'+
     '<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn btn-primary btn-sm" onclick="wiPriceSave()">💾 Guardar ajustes</button>'+
@@ -55527,7 +55839,7 @@ async function wiPriceSave(){
   if(d.error){ showToast(d.message||d.error,'error'); return; }
   showToast('✓ Ajustes de precio guardados','success'); await wiStatusLoad(); wiPriceRender();
 }
-async function wiPModeSet(m){ var d=await wiApi('/wsync/price-settings', { mode:m }); if(d.error) showToast(d.error,'error'); await wiStatusLoad(); wiPriceRender(); }
+async function wiPModeSet(m){ var d=await wiApi('/wsync/price-settings', { mode:m }); if(d.error) showToast(d.error,'error'); await wiStatusLoad(); wiPriceRender(); wiLAutoRender(); }
 function wiPModeReal(){
   wiModal('<div style="'+WI_M.title+'">Activar sincronización de precio REAL</div><div style="'+WI_M.sub+'">A partir de ahora las corridas (programadas o manuales) <b>cambian el precio en WooCommerce</b> de todos los productos vinculados según la regla guardada. El precio de Mercado Libre no se toca.</div>'+
     '<div style="'+WI_M.warn+'">Antes guardá la regla y corré una <b>simulación</b>: en el historial (filtro «Simulación de precio») ves producto por producto cómo quedaría.</div>'+
