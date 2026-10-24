@@ -869,7 +869,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v316 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v317 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -4949,7 +4949,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
       <button class="btn btn-ghost btn-sm" onclick="ctaBulkProducto()" title="Asignar un producto del catálogo a todas">🛒 Producto</button>
       <button class="btn btn-ghost btn-sm" onclick="ctaBulkProvincia()" title="Asignar provincia a todas las seleccionadas">📍 Provincia</button>
       <button class="btn btn-ghost btn-sm" onclick="ctaBulkEnrich()" title="Traer monto neto + nombre real de las ML seleccionadas">💰 Montos netos</button>
-      <button class="btn btn-ghost btn-sm" onclick="ctaBulkFactura()" title="Adjuntar la factura en Mercado Libre, revisar cuáles ya la tienen o marcar a mano">🧾 Factura</button>
+      <button class="btn btn-ghost btn-sm" onclick="ctaBulkFactura()" title="Marcar/desmarcar color de factura">🧾 Factura</button>
       <button class="btn btn-ghost btn-sm" onclick="ctaBulkColor(event)" title="Color de resaltado para las seleccionadas">🎨 Color</button>
       <button class="btn btn-sm" style="background:#ef4444;color:#fff" onclick="ctaBulkDelete()">🗑️ Eliminar</button>
       <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="ctaClearSel()">✕ Limpiar</button>
@@ -41841,7 +41841,7 @@ async function wseoImportExcel(file){
         await _wseoPersistLocal(c.id, c.body);
         ok++;
       }catch(e){ console.warn('[wseo import]',c.id,e.message); err++; }
-      await new Promise(res=>setTimeout(res,150)); // suave con la API
+      await new Promise(res=>setTimeout(res,800)); // v317: pausado, como en Importar a Woo
     }
     wseoRenderTable();
     if(st) st.textContent='✓ '+ok+' actualizados'+(err?' · '+err+' con error':'');
@@ -56404,12 +56404,7 @@ function _aiqAdBtns(itemId){
   var b=function(st, ic, t, col){ return '<button type="button" onclick="event.stopPropagation();seoAdAction(\''+itemId+'\',\''+st+'\')" title="'+t+'" style="flex:1;border:1px solid '+col+'55;background:'+col+'14;color:'+col+';border-radius:6px;padding:3px 0;font-size:12px;cursor:pointer;line-height:1.1">'+ic+'</button>'; };
   return '<div style="display:flex;gap:3px;margin-top:5px" id="seo-adb-'+itemId+'">'+b('active','▶','Activar el anuncio de esta publicación','#16a34a')+b('paused','⏸','Pausar el anuncio de esta publicación','#d97706')+b('idle','🗑','Quitar la publicación de la publicidad (sale de la campaña)','#dc2626')+'</div>';
 }
-var _aiqSeoCeldaOrig = window._aiqSeoCelda;
-window._aiqSeoCelda = function(item){
-  var base = _aiqSeoCeldaOrig ? _aiqSeoCeldaOrig(item) : '—';
-  base = String(base).replace('Informativo: el panel no cambia anuncios.', 'Con los botones de abajo podés activar, pausar o quitar el anuncio.');
-  return base + _aiqAdBtns(item.id);
-};
+// v317: ML no acepta cambiar el estado del anuncio desde la API para esta cuenta → sin botones (la celda queda como antes)
 async function seoAdAction(itemId, status){
   var L={ active:['▶ Activar','activar'], paused:['⏸ Pausar','pausar'], idle:['🗑 Quitar de la publicidad','quitar de la publicidad'] }[status];
   if(status==='idle' && !confirm('🗑 ¿Quitar '+itemId+' de la publicidad?\n\nEl anuncio sale de la campaña (deja de mostrarse y de gastar). Después lo podés volver a activar.')) return;
@@ -56426,86 +56421,30 @@ async function seoAdAction(itemId, status){
   finally{ if(box) box.style.opacity='1'; }
 }
 
-// ── 5) Cuenta Impala · Factura: adjuntar el PDF a la venta en Mercado Libre ──
-function _ctaOrderId(op){ return String(op && op.id || '').replace(/^ml_/, '').replace(/[^0-9]/g, ''); }
-function ctaBulkFactura(){
-  var sel=_ctaSelectedOps(), mls=sel.filter(function(x){ return x.op.src==='ml' && _ctaOrderId(x.op); });
-  var old=document.getElementById('cta-fac-modal'); if(old) old.remove();
-  var m=document.createElement('div'); m.id='cta-fac-modal';
-  m.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
-  var one=mls.length===1 ? mls[0].op : null;
-  var btn='padding:11px 14px;border-radius:9px;font-weight:700;cursor:pointer;font-size:13px;border:none;width:100%;text-align:left';
-  m.innerHTML='<div style="background:#fff;color:#0f172a;border-radius:14px;max-width:520px;width:100%;padding:20px 22px;box-shadow:0 20px 60px rgba(0,0,0,.35)">'+
-    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div style="font-size:17px;font-weight:800">🧾 Factura</div><button onclick="document.getElementById(\'cta-fac-modal\').remove()" style="border:1px solid #e2e8f0;background:#fff;border-radius:7px;padding:4px 10px;cursor:pointer">✕</button></div>'+
-    '<div style="font-size:12.5px;color:#64748b;margin-bottom:14px">'+sel.length+' venta(s) seleccionada(s)'+(mls.length?' · '+mls.length+' de Mercado Libre':'')+'.</div>'+
-    // adjuntar
-    '<div style="border:1px solid #bfdbfe;background:#eff6ff;border-radius:11px;padding:12px 14px;margin-bottom:10px">'+
-      '<div style="font-size:13.5px;font-weight:800;color:#1e40af;margin-bottom:4px">📎 Adjuntar la factura en Mercado Libre</div>'+
-      (one ? '<div style="font-size:12px;color:#334155;margin-bottom:8px">Venta <b>#'+_ctaOrderId(one)+'</b>'+(one.cliente?' · '+String(one.cliente).replace(/</g,'&lt;'):'')+'. Elegí el PDF de la factura (máx. 1 MB): se sube a la operación en ML y la fecha queda en <b style="color:#15803d">verde</b>.</div>'+
-               '<input type="file" id="cta-fac-file" accept="application/pdf,.pdf,.xml" style="width:100%;font-size:12.5px;margin-bottom:8px;background:#fff">'+
-               '<button id="cta-fac-up" onclick="ctaFacturaUpload()" style="'+btn+';background:#2563eb;color:#fff;text-align:center">⬆ Subir a Mercado Libre</button>'
-             : '<div style="font-size:12px;color:#334155">Seleccioná <b>una sola venta de Mercado Libre</b> para adjuntarle su factura (PDF).</div>')+
-      '<div id="cta-fac-msg" style="font-size:12px;margin-top:6px"></div>'+
-    '</div>'+
-    // revisar
-    '<button '+(mls.length?'':'disabled')+' onclick="ctaFacturaCheck()" style="'+btn+';background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;margin-bottom:10px;'+(mls.length?'':'opacity:.5')+'">🔍 Revisar en Mercado Libre cuáles ya tienen factura ('+mls.length+') <span style="font-weight:400;font-size:11.5px;display:block;margin-top:2px">Las que tienen la factura cargada quedan en verde.</span></button>'+
-    // manual
-    '<div style="font-size:12px;font-weight:700;color:#64748b;margin:4px 0 6px">Marcar a mano (sólo en el panel)</div>'+
-    '<div style="display:flex;gap:8px">'+
-      '<button onclick="_ctaFacMark(\'f\')" style="flex:1;padding:9px;border-radius:8px;border:1px solid #bbf7d0;background:#dcfce7;color:#166534;font-weight:700;cursor:pointer">✓ Facturada</button>'+
-      '<button onclick="_ctaFacMark(\'r\')" style="flex:1;padding:9px;border-radius:8px;border:1px solid #fecaca;background:#fef2f2;color:#991b1b;font-weight:700;cursor:pointer">Falta facturar</button>'+
-      '<button onclick="_ctaFacMark(\'n\')" style="flex:1;padding:9px;border-radius:8px;border:1px solid #e2e8f0;background:#fff;color:#334155;font-weight:700;cursor:pointer">Sin marca</button>'+
-    '</div>'+
-    '<div style="font-size:11px;color:#94a3b8;margin-top:12px;line-height:1.5">Mercado Libre no emite la factura por la API en Argentina: la generás como siempre (AFIP / tu facturador) y desde acá la adjuntás a la venta.</div>'+
-  '</div>';
-  document.body.appendChild(m);
-}
-function _ctaFacMark(c, list){
-  (list||_ctaSelectedOps()).forEach(function(x){ var op=x.op;
-    if(c==='r'){ op.faltaFactura=true; delete op.facturada; delete op.facturaColor; }
-    else if(c==='f'){ op.facturada=true; delete op.faltaFactura; delete op.facturaColor; }
-    else { delete op.facturada; delete op.faltaFactura; delete op.facturaColor; }
-    op.manualEdit=true; _ctaState.dirty.add(x.ym);
-  });
-  ctaFlushDirty(); ctaRenderTable();
-  if(!list){ var m=document.getElementById('cta-fac-modal'); if(m) m.remove(); }
-}
-async function ctaFacturaUpload(){
-  var f=(document.getElementById('cta-fac-file')||{}).files; f=f&&f[0];
-  var msg=function(h,c){ var e=document.getElementById('cta-fac-msg'); if(e){ e.innerHTML=h; e.style.color=c||'#334155'; } };
-  if(!f){ msg('Elegí el archivo PDF de la factura.','#b45309'); return; }
-  if(f.size>1024*1024){ msg('El archivo pesa '+(f.size/1048576).toFixed(2)+' MB: Mercado Libre acepta hasta 1 MB.','#b91c1c'); return; }
-  var x=_ctaSelectedOps().filter(function(y){ return y.op.src==='ml'; })[0]; if(!x) return;
-  var b=document.getElementById('cta-fac-up'); if(b){ b.disabled=true; b.textContent='⏳ Subiendo…'; }
-  try{
-    var buf=new Uint8Array(await f.arrayBuffer()), bin=''; for(var i=0;i<buf.length;i+=8192) bin+=String.fromCharCode.apply(null, buf.subarray(i,i+8192));
-    var r=await fetch(WORKER+'/api/cta/invoice-upload', { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify({ order_id:_ctaOrderId(x.op), filename:f.name, b64:btoa(bin) }) });
-    var d=await r.json().catch(function(){ return { ok:false, error:'HTTP '+r.status }; });
-    if(d.ok){
-      x.op.facturaML={ pack:d.pack, ids:d.ids||[], fecha:new Date().toISOString() };
-      _ctaFacMark('f', [x]);
-      msg(d.already?'✓ La venta ya tenía una factura en Mercado Libre. Quedó marcada en verde.':'✅ Factura adjuntada en Mercado Libre y marcada en verde.','#15803d');
-      showToast('🧾 Factura adjuntada a la venta #'+_ctaOrderId(x.op)+' en Mercado Libre','success');
-      setTimeout(function(){ var m=document.getElementById('cta-fac-modal'); if(m) m.remove(); }, 1400);
-    } else { msg('✕ '+(d.error||'No se pudo subir'),'#b91c1c'); if(b){ b.disabled=false; b.textContent='⬆ Reintentar'; } }
-  }catch(e){ msg('✕ '+e.message,'#b91c1c'); if(b){ b.disabled=false; b.textContent='⬆ Reintentar'; } }
-}
-async function ctaFacturaCheck(){
-  var mls=_ctaSelectedOps().filter(function(x){ return x.op.src==='ml' && _ctaOrderId(x.op); });
-  var msg=function(h,c){ var e=document.getElementById('cta-fac-msg'); if(e){ e.innerHTML=h; e.style.color=c||'#334155'; } };
-  var con=[], sin=0, err=0;
-  for(var i=0;i<mls.length;i+=15){
-    msg('⏳ Revisando en Mercado Libre… '+Math.min(mls.length,i+15)+' / '+mls.length);
-    var part=mls.slice(i,i+15);
-    try{
-      var r=await fetch(WORKER+'/api/cta/invoice-check', { method:'POST', headers:{ Authorization:'Bearer '+token, 'Content-Type':'application/json' }, body: JSON.stringify({ ids: part.map(function(x){ return _ctaOrderId(x.op); }) }) });
-      var d=await r.json();
-      part.forEach(function(x){ var q=d.results&&d.results[_ctaOrderId(x.op)]; if(!q||q.error){ err++; return; } if(q.has){ con.push(x); x.op.facturaML={ pack:q.pack, ids:q.docs.map(function(z){ return z.id; }), fecha:(q.docs[0]||{}).date }; } else sin++; });
-    }catch(e){ err+=part.length; }
-  }
-  if(con.length) _ctaFacMark('f', con);
-  msg('✓ '+con.length+' con factura en ML (marcadas en verde) · '+sin+' sin factura'+(err?' · '+err+' no se pudieron revisar':''), con.length?'#15803d':'#334155');
-}
+// ── 5) Cuenta Impala · Factura: v317 vuelve al marcado de antes (ML no emite facturas por API) ──
+
+// ── 6) v317 · llamadas del panel a la tienda Woo: si la tienda pide pausa o corta la
+// respuesta, esperar y reintentar (como en «Importar a Woo»). No se reintenta lo que crea.
+(function(){
+  if(window._wooRetryOn) return; window._wooRetryOn=true;
+  var raw=window.fetch.bind(window);
+  var esWoo=function(u){ return typeof WORKER!=='undefined' && u.indexOf(WORKER)===0 && /^\/(woo\/(products|check)|api\/woo\/)/.test(u.slice(WORKER.length)); };
+  window.fetch=async function(input, init){
+    var u=typeof input==='string'?input:(input&&input.url)||'';
+    var m=String((init&&init.method)||(input&&input.method)||'GET').toUpperCase();
+    if(!esWoo(u) || m==='POST') return raw(input, init);
+    var waits=[8,20,45];
+    for(var k=0;;k++){
+      var r=null, txt='';
+      try{ r=await raw(input, init); txt=await r.clone().text(); }catch(e){ r=null; }
+      var cort = !r || r.status===429 || r.status===502 || r.status===503 || r.status===504 || (r.status>=520&&r.status<=524) ||
+        (r.status>=500 && /Unexpected end|respuesta vacía|cortada|retry/i.test(txt)) || (r.ok && !txt.trim());
+      if(!cort || k>=waits.length) return r || raw(input, init);
+      if(typeof showToast==='function') showToast('⏳ La tienda pidió una pausa: reintento en '+waits[k]+' s…','warn');
+      await new Promise(function(res){ setTimeout(res, waits[k]*1000); });
+    }
+  };
+})();
 
 </script>
 </body>
