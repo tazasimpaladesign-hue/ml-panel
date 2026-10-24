@@ -655,6 +655,18 @@ input::placeholder,textarea::placeholder{color:#6b7280}
   user-select: none;
 }
 .task-note:active { cursor: grabbing; transform: scale(1.03); box-shadow: 0 8px 24px rgba(0,0,0,.28); }
+/* v315: notas plegadas = botones con el título */
+.task-note.task-folded { width:auto; min-width:150px; max-width:280px; min-height:0; padding:10px 14px; flex-direction:row; align-items:center; gap:8px; cursor:pointer; border-radius:10px; }
+.task-note.task-folded:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(0,0,0,.22); }
+.note-fold-ic { font-size:12px; color:#555; flex:none; }
+.note-fold-title { font-size:13.5px; font-weight:700; color:#1a1a2e; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.task-note.done-note .note-fold-title { text-decoration: line-through; color:#777; }
+.task-note.task-open { width:280px; }
+.note-open-hd { display:flex; gap:6px; align-items:flex-start; }
+.note-title { flex:1; font-size:14.5px; font-weight:800; color:#1a1a2e; outline:none; cursor:text; min-height:1em; word-break:break-word; }
+.note-title:empty:before { content: attr(data-ph); color:#999; font-weight:600; }
+.note-fold-btn { background:rgba(0,0,0,.06); border:none; border-radius:6px; cursor:pointer; font-size:13px; padding:2px 7px; color:#444; flex:none; }
+.note-fold-btn:hover { background:rgba(0,0,0,.14); }
 .task-note.dragging { opacity: .55; transform: rotate(2deg); }
 .task-note.done-note { opacity: .65; }
 .task-note.done-note .note-text { text-decoration: line-through; color: #888; }
@@ -857,7 +869,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v314 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v315 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -3329,6 +3341,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     #wi-tab-vinc.active{background:#059669!important;color:#fff!important;border-color:#059669} #wi-tab-sync.active{background:#ea580c!important;color:#fff!important;border-color:#ea580c}
     #wi-tab-hist.active{background:#0891b2!important;color:#fff!important;border-color:#0891b2}
     #wi-tab-precio{color:#db2777!important} #wi-tab-precio.active{background:#db2777!important;color:#fff!important;border-color:#db2777}
+    #wi-tab-dup{color:#d97706!important} #wi-tab-dup.active{background:#d97706!important;color:#fff!important;border-color:#d97706}
     #section-woo-import .wi-head{display:flex;gap:14px;align-items:center;padding:14px 18px;border-radius:13px;margin-bottom:14px;color:#fff;box-shadow:0 6px 18px rgba(0,0,0,.08)}
     #section-woo-import .wi-head .e{font-size:30px;line-height:1}
     #section-woo-import .wi-head .t{font-size:19px;font-weight:800;letter-spacing:.2px}
@@ -3353,6 +3366,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <button class="tab" id="wi-tab-sync" onclick="wiTab('sync')">📦 4 · Sincronización de stock</button>
     <button class="tab" id="wi-tab-precio" onclick="wiTab('precio')">💲 5 · Sincronización de precio</button>
     <button class="tab" id="wi-tab-hist" onclick="wiTab('hist')">📜 6 · Historial</button>
+    <button class="tab" id="wi-tab-dup" onclick="wiTab('dup')">🧹 7 · Duplicados en Woo</button>
   </div>
   <div id="wi-pane-una">
 <div class="wi-head" style="background:linear-gradient(135deg,#2563eb,#3b82f6)"><div class="e">📥</div><div><div class="t">Importar una publicación</div><div class="s">Pegá el número o el link de una publicación de ML. Se crea en Woo con fotos, descripción, medidas y peso de ML, y queda vinculada para sincronizar el stock.</div></div></div>
@@ -3504,6 +3518,12 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     <div id="wi-price"></div>
   </div>
 
+  <!-- 7 · DUPLICADOS (v315) -->
+  <div id="wi-pane-dup" class="card" style="display:none">
+    <div class="wi-head" style="background:linear-gradient(135deg,#d97706,#f59e0b)"><div class="e">🧹</div><div><div class="t">Duplicados en Woo</div><div class="s">Encuentra productos repetidos en tu tienda (mismo SKU, título igual o casi igual, misma foto). Vos elegís cuáles mandar a la papelera, pasar a borrador o eliminar. Los vinculados a ML nunca se tocan.</div></div></div>
+    <div id="wi-dup"></div>
+  </div>
+
   <!-- 6 · HISTORIAL -->
   <div id="wi-pane-hist" class="card" style="display:none">
     <div class="wi-head" style="background:linear-gradient(135deg,#0891b2,#06b6d4)"><div class="e">📜</div><div><div class="t">Historial</div><div class="s">Todo lo que pasó: importaciones, vínculos, movimientos de stock, simulaciones, actualizaciones y errores.</div></div></div>
@@ -3519,6 +3539,8 @@ input::placeholder,textarea::placeholder{color:#6b7280}
         <div class="chip wi-hchip" data-k="precio" onclick="wiLogLoad('precio')" style="font-size:11px">💲 Precio</div>
         <div class="chip wi-hchip" data-k="sim-precio" onclick="wiLogLoad('sim-precio')" style="font-size:11px">🧪 Simulación de precio</div>
         <div class="chip wi-hchip" data-k="regla" onclick="wiLogLoad('regla')" style="font-size:11px">🏷️ Reglas</div>
+        <div class="chip wi-hchip" data-k="item" onclick="wiLogLoad('item')" style="font-size:11px">⏸ Productos / estado ML</div>
+        <div class="chip wi-hchip" data-k="duplicado" onclick="wiLogLoad('duplicado')" style="font-size:11px">🧹 Duplicados</div>
       </div>
       <button class="btn btn-ghost btn-xs" style="margin-left:auto" onclick="wiLogLoad()">↻</button>
     </div>
@@ -3988,14 +4010,20 @@ input::placeholder,textarea::placeholder{color:#6b7280}
     </div>
     <span class="badge bg-amber" id="task-count-pending" style="font-size:11px;padding:4px 10px">0 pendientes</span>
     <span class="badge bg-green" id="task-count-done"    style="font-size:11px;padding:4px 10px">0 listas</span>
+    <button class="btn btn-ghost btn-sm" onclick="noteToggleAll(true)" title="Desplegar todas las notas">▾ Desplegar todas</button>
+    <button class="btn btn-ghost btn-sm" onclick="noteToggleAll(false)" title="Plegar todas las notas">▴ Plegar todas</button>
     <button class="btn btn-ghost btn-sm" onclick="fetchBackup()" title="Sincronizar desde la nube">&#x21BB; Sincronizar</button>
   </div>
 
   <!-- Barra de nueva nota -->
   <div class="card" style="padding:12px 16px;margin-bottom:12px">
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <input type="text" id="task-new-title"
+        placeholder="Título de la nota"
+        style="flex:0 1 240px;min-width:150px;font-size:13px;font-weight:700"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('task-new-input').focus();}">
       <input type="text" id="task-new-input"
-        placeholder="Nueva nota... (Enter para agregar)"
+        placeholder="Contenido... (Enter para agregar)"
         style="flex:1;min-width:180px;font-size:13px"
         onkeydown="if(event.key==='Enter')addTask()">
       <div style="display:flex;gap:5px;align-items:center">
@@ -40330,9 +40358,11 @@ function addTask() {
   var inp  = document.getElementById('task-new-input');
   if (!inp) return;
   var text = inp.value.trim();
-  if (!text) { showToast('Escribí el texto de la nota', 'warn'); return; }
-  _tasks.unshift({ id: _taskId(), text: text, checked: false, color: _newColor, date: _taskDateAR(), order: Date.now() });
-  inp.value = '';
+  var tin = document.getElementById('task-new-title');
+  var title = tin ? tin.value.trim() : '';
+  if (!text && !title) { showToast('Escribí el título o el texto de la nota', 'warn'); return; }
+  _tasks.unshift({ id: _taskId(), title: title, text: text, checked: false, color: _newColor, date: _taskDateAR(), order: Date.now() });
+  inp.value = ''; if (tin) tin.value = '';
   _renderBoard();
   pushFullBackup();
 }
@@ -40348,6 +40378,24 @@ function toggleTask(id) {
 }
 
 // ── deleteTask ────────────────────────────────────────────────────────────────
+// v315: notas plegadas con título (las viejas sin título muestran el comienzo del texto)
+var _noteOpen = {};
+function _noteTitle(t){
+  if (t.title) return t.title;
+  var tx = String(t.text || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  return tx.length > 42 ? tx.slice(0, 40) + '…' : (tx || 'Sin título');
+}
+function btEscNote(x){ return String(x==null?'':x).replace(/[&<>"]/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function toggleNoteOpen(id){ _noteOpen[id] = !_noteOpen[id]; _renderBoard(); }
+function noteToggleAll(open){ _tasks.forEach(function(t){ _noteOpen[t.id] = !!open; }); _renderBoard(); }
+function saveTaskTitle(id, el){
+  var t = _tasks.find(function(x){ return x.id===id; });
+  if(!t) return;
+  var v = (el.textContent||'').trim();
+  if(v === (t.title||'')) return;
+  t.title = v;
+  pushFullBackup();
+}
 function saveTaskEdit(id, el){
   var t = _tasks.find(function(x){ return x.id===id; });
   if(!t) return;
@@ -40407,10 +40455,21 @@ function _renderBoard() {
     var dateStr = t.date || '';
     if (t.checked && t.doneDate) dateStr += ' ✓ ' + t.doneDate;
 
-    return '<div class="task-note' + doneClass + '" id="note-' + t.id + '"'
+    if (!_noteOpen[t.id]) {
+      return '<div class="task-note task-folded' + doneClass + '" id="note-' + t.id + '"'
+           + ' style="background:' + bg + '" draggable="true"'
+           + ' ondragstart="noteDragStart(event,\'' + t.id + '\')"'
+           + ' ondragend="noteDragEnd(event)"'
+           + ' onclick="toggleNoteOpen(\'' + t.id + '\')" title="Clic para desplegar">'
+           + '<span class="note-fold-ic">▸</span>'
+           + '<span class="note-fold-title">' + (t.checked ? '✓ ' : '') + btEscNote(_noteTitle(t)) + '</span>'
+           + '</div>';
+    }
+    return '<div class="task-note task-open' + doneClass + '" id="note-' + t.id + '"'
          + ' style="background:' + bg + '" draggable="true"'
          + ' ondragstart="noteDragStart(event,\'' + t.id + '\')"'
          + ' ondragend="noteDragEnd(event)">'
+         + '<div class="note-open-hd"><div class="note-title" contenteditable="true" spellcheck="false" onblur="saveTaskTitle(\'' + t.id + '\',this)" onclick="this.focus()" title="Clic para editar el título" data-ph="Título">' + btEscNote(t.title || '') + '</div><button class="note-fold-btn" onclick="toggleNoteOpen(\'' + t.id + '\')" title="Plegar">▴</button></div>'
          + '<div class="note-color-bar">' + dots + '</div>'
          + '<div class="note-text" contenteditable="true" spellcheck="false"'
          + ' onblur="saveTaskEdit(\'' + t.id + '\',this)"'
@@ -54502,13 +54561,14 @@ function wiInit(){
   wiStatusLoad().then(function(){ wiCatTreeInit(); });
 }
 function wiTab(t){
-  ['una','todas','vinc','sync','precio','hist'].forEach(function(k){
+  ['una','todas','vinc','sync','precio','hist','dup'].forEach(function(k){
     var b=document.getElementById('wi-tab-'+k), p=document.getElementById('wi-pane-'+k);
     if(b) b.classList.toggle('active', k===t); if(p) p.style.display = k===t?'':'none';
   });
   if(t==='vinc') wiLinksLoad();
   if(t==='sync') wiSyncRender();
   if(t==='precio') wiPriceRender();
+  if(t==='dup') wiDupRender();
   if(t==='hist') wiLogLoad();
 }
 async function wiStatusLoad(){
@@ -55140,7 +55200,8 @@ function wiLItems(){
   var pmin=num(a.pmin), pmax=num(a.pmax), smin=num(a.smin), smax=num(a.smax);
   var dfrom=a.dfrom?new Date(a.dfrom+'T00:00:00').getTime():null, dto=a.dto?new Date(a.dto+'T23:59:59').getTime():null;
   var list=wiS.links.items.filter(function(x){ return x.state!=='ignorado' && x.woo_id; }).filter(function(x){
-    if(wiS.lfilter!=='all' && x.state!==wiS.lfilter) return false;
+    if(wiS.lfilter.indexOf('ml:')===0){ if((x.ml_status||'')!==wiS.lfilter.slice(3)) return false; }
+    else if(wiS.lfilter!=='all' && x.state!==wiS.lfilter) return false;
     if(q && wiNorm(x.ml_item_id+' '+(x.ml_title||'')+' '+(x.woo_title||'')+' '+(x.ml_sku||'')+' '+(x.woo_sku||'')+' '+x.woo_id).indexOf(q)<0) return false;
     if(pmin!=null||pmax!=null){ if(x.ml_price==null) return false; if(pmin!=null && x.ml_price<pmin) return false; if(pmax!=null && x.ml_price>pmax) return false; }
     if(smin!=null||smax!=null){ var st=wiLStock(x); if(st==null) return false; if(smin!=null && st<smin) return false; if(smax!=null && st>smax) return false; }
@@ -55203,7 +55264,7 @@ function wiLToolsRender(){
         '<button class="wil-btn" onclick="wiLAdvToggle()" style="position:relative;background:#fff;color:#334155;border:1px solid var(--border)">🔧 Filtros avanzados<span id="wi-ladv-badge" class="wil-badge" style="display:none"></span></button>'+
         '<button class="wil-btn" onclick="wiLinksLoad()" title="Recargar la lista" style="background:#fff;color:#334155;border:1px solid var(--border)">↻</button>'+
       '</div>'+
-      '<div class="wil-row"><span class="wil-lbl">Estado</span>'+chip('all','Todos')+chip('sincronizado','✅ Sincronizados')+chip('vinculado','🔗 Vinculados (falta sincronizar)')+chip('revisar','🧩 Requieren revisión')+chip('error','✕ Con error')+chip('pausado','⏸ Pausados')+'</div>'+
+      '<div class="wil-row"><span class="wil-lbl">Estado</span>'+chip('all','Todos')+chip('sincronizado','✅ Sincronizados')+chip('vinculado','🔗 Vinculados (falta sincronizar)')+chip('revisar','🧩 Requieren revisión')+chip('error','✕ Con error')+chip('pausado','⏸ Pausados')+'<span class="wil-lbl" style="margin-left:8px">En ML</span>'+chip('ml:activa','🟢 Activas')+chip('ml:pausada','⏸ Pausadas')+chip('ml:eliminada','🗑 Eliminadas')+'</div>'+
       '<div id="wi-ladv" style="display:none;margin-top:12px;padding-top:12px;border-top:1px dashed var(--border)">'+
         '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><div style="font-size:13.5px;font-weight:800">🔧 Filtros avanzados por rango <span style="font-weight:400;font-size:12px;color:var(--text3)">(datos de Mercado Libre)</span></div><button class="wil-btn" onclick="wiLAdvClear()" style="background:#fff;color:#b91c1c;border:1px solid #fecaca;padding:6px 11px!important">✕ Limpiar filtros</button></div>'+
         '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:10px 24px">'+
@@ -55215,7 +55276,7 @@ function wiLToolsRender(){
     // 2 · acciones
     '<div class="wil-card" style="background:linear-gradient(180deg,#f0fdf4,#fff);border-color:#bbf7d0">'+
       '<div class="wil-row" style="margin-bottom:10px"><span class="wil-lbl" style="color:#047857">⚡ Acciones</span><span style="font-size:13px;color:#065f46">☑ <b id="wi-lsel-n2">0</b> tildados · <b id="wi-lr-filt">0</b> filtrados</span>'+
-        '<span style="margin-left:auto;display:flex;gap:10px;align-items:center"><span id="wi-lp-info" style="font-size:12px;color:var(--text3)"></span><button class="wil-btn" onclick="wiLPricesRefresh(false)" title="Volver a leer precio, stock y fecha de ML y el precio de Woo de todos los vinculados" style="background:#fff;color:#047857;border:1px solid #a7f3d0;padding:7px 12px!important">↻ Leer precios y stock</button></span></div>'+
+        '<span style="margin-left:auto;display:flex;gap:10px;align-items:center"><span id="wi-lp-info" style="font-size:12px;color:var(--text3)"></span><button class="wil-btn" onclick="wiLPricesRefresh(false)" title="Lee de Mercado Libre precio, stock, fecha de creación y estado (activa, pausada, eliminada). No consulta a la tienda Woo, así que es rápido." style="background:#fff;color:#047857;border:1px solid #a7f3d0;padding:7px 12px!important">↻ Leer datos de ML</button></span></div>'+
       '<div class="wil-row">'+
         '<button class="wil-btn" onclick="wiLSyncOpen()" style="background:#059669;color:#fff;border:none;font-size:14px!important;padding:11px 18px!important;box-shadow:0 3px 10px rgba(5,150,105,.3)">🔄 Sincronizar stock y precio (<span id="wi-lsync-n">0</span>)</button>'+
         '<button class="wil-btn" onclick="wiRuleOpen(\'sel\')" style="background:#db2777;color:#fff;border:none">🏷️ Regla a los tildados (<span id="wi-lr-sel">0</span>)</button>'+
@@ -55340,7 +55401,7 @@ function wiLinksRender(){
         '<div style="font-weight:700;font-size:13px">'+wiMoney(x.ml_price)+'</div>'+(x.ml_full&&x.ml_full>x.ml_price?'<div style="font-size:10.5px;color:var(--text3);text-decoration:line-through">'+wiMoney(x.ml_full)+'</div>':'');
       var wp=x.woo_price, wsale=x.woo_sale, pref=(x.woo_nvar>1?'<span style="font-size:10px;color:var(--text3)">desde </span>':'');
       var dif=function(v){ if(!(x.ml_price>0)||!(v>0)) return ''; var d=Math.round((v/x.ml_price-1)*1000)/10; return '<div style="font-size:10px;color:'+(d>0?'#b45309':d<0?'#15803d':'#64748b')+'">'+(d===0?'= ML':(d>0?'+':'')+d+'% vs ML')+'</div>'; };
-      var wooP = wp==null ? '<span style="color:var(--text3);font-size:11px">sin leer</span>' :
+      var wooP = wp==null ? '<span style="color:var(--text3);font-size:11px" title="Se completa al sincronizar o al cargar Woo en la herramienta 2">—</span>' :
         (wsale? '<div style="font-size:10.5px;color:var(--text3);text-decoration:line-through">'+wiMoney(wp)+'</div><div style="font-weight:700;font-size:13px;color:#be185d">'+pref+wiMoney(wsale)+'</div>'+dif(wsale)
               : '<div style="font-weight:700;font-size:13px">'+pref+wiMoney(wp)+'</div>'+dif(wp));
       var own=wiLRule(x), g=wiLGen();
@@ -55354,7 +55415,7 @@ function wiLinksRender(){
         '<td>'+us+'</td>'+
         '<td style="text-align:right;white-space:nowrap"><div style="display:flex;gap:4px;align-items:center;justify-content:flex-end"><div>'+mlP+'</div>'+pen.replace('%T','ml')+'</div></td>'+
         '<td style="text-align:right;white-space:nowrap"><div style="display:flex;gap:4px;align-items:center;justify-content:flex-end"><div>'+wooP+'</div>'+pen.replace('%T','woo')+'</div></td>'+
-        '<td><span style="font-size:11px;font-weight:700;padding:3px 9px;border-radius:9px;background:'+b[0]+';color:'+b[1]+';white-space:nowrap">'+(x.state==='sincronizado'?'✅ ':'')+b[2]+'</span>'+(x.state==='sincronizado'&&x.last_sync?'<div style="font-size:10px;color:#166534;margin-top:2px;white-space:nowrap">'+new Date(x.last_sync).toLocaleString('es-AR',{ day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit' })+'</div>':(x.state==='vinculado'?'<div style="font-size:9.5px;color:var(--text3);margin-top:2px;white-space:nowrap">'+(x.stock_at&&!x.price_at?'falta el precio':!x.stock_at&&x.price_at?'falta el stock':'falta stock y precio')+'</div>':''))+(x.note||x.last_result&&x.last_result!=='ok'&&x.state!=='sincronizado'?'<div style="font-size:9.5px;color:var(--text3);max-width:200px">'+wiEsc(x.note||x.last_result||'')+'</div>':'')+'</td>'+
+        '<td><span style="font-size:11px;font-weight:700;padding:3px 9px;border-radius:9px;background:'+b[0]+';color:'+b[1]+';white-space:nowrap">'+(x.state==='sincronizado'?'✅ ':'')+b[2]+'</span>'+(x.state==='sincronizado'&&x.last_sync?'<div style="font-size:10px;color:#166534;margin-top:2px;white-space:nowrap">'+new Date(x.last_sync).toLocaleString('es-AR',{ day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit' })+'</div>':(x.state==='vinculado'?'<div style="font-size:9.5px;color:var(--text3);margin-top:2px;white-space:nowrap">'+(x.stock_at&&!x.price_at?'falta el precio':!x.stock_at&&x.price_at?'falta el stock':'falta stock y precio')+'</div>':''))+(function(){ var M={ activa:['🟢 Activa en ML','#15803d'], pausada:['⏸ Pausada en ML','#b45309'], eliminada:['🗑 Eliminada en ML'+(x.woo_draft?' · Woo en borrador':''),'#b91c1c'], finalizada:['⛔ Finalizada en ML','#6b7280'], revision:['🔎 En revisión en ML','#b45309'], inactiva:['⚪ Inactiva en ML','#6b7280'] }[x.ml_status]; return M?'<div style="font-size:10.5px;font-weight:700;color:'+M[1]+';margin-top:3px;white-space:nowrap">'+M[0]+'</div>':''; })()+(x.note||x.last_result&&x.last_result!=='ok'&&x.state!=='sincronizado'?'<div style="font-size:9.5px;color:var(--text3);max-width:200px">'+wiEsc(x.note||x.last_result||'')+'</div>':'')+'</td>'+
         '<td style="cursor:pointer;min-width:120px" onclick="wiRuleOpen(\'one\',\''+id+'\')" title="Cambiar la regla de precio de este producto">'+rl+'</td>'+
         '<td style="font-size:10.5px;color:var(--text3);white-space:nowrap">'+(x.last_sync?new Date(x.last_sync).toLocaleString('es-AR'):'—')+'</td>'+
         '<td style="text-align:center;white-space:nowrap">'+
@@ -55373,7 +55434,10 @@ function wiLinksRender(){
 async function wiLPricesAuto(){
   if(wiS._lpAuto || wiS.lprunning) return;
   if(!(wiS.status&&wiS.status.price_settings)) return;
-  var falt=wiS.links.items.filter(function(x){ return x.woo_id && x.state!=='ignorado' && !x.prices_at; }).map(function(x){ return x.ml_item_id; });
+  var act=wiS.links.items.filter(function(x){ return x.woo_id && x.state!=='ignorado'; });
+  var last=act.reduce(function(m,x){ return x.prices_at&&x.prices_at>m?x.prices_at:m; },'');
+  if(act.length && (!last || Date.now()-new Date(last).getTime() > 3*3600e3)){ wiS._lpAuto=true; wiLPricesRefresh(false); return; }   // sólo ML: rápido
+  var falt=act.filter(function(x){ return !x.prices_at || !x.ml_status; }).map(function(x){ return x.ml_item_id; });
   if(!falt.length) return;
   wiS._lpAuto=true; wiLPricesRefresh(falt);
 }
@@ -55391,14 +55455,15 @@ async function wiLPricesRefresh(ids){
         var d=await wiApiPaced('/wsync/prices-refresh', { cursor:cursor, ids:groups[g] }, function(t){ prog(wiProgBox('⏳ Pausa pedida por la tienda','Reintento en '+t+' s…', null, '#d97706')); });
         if(d.error) throw new Error(d.message||d.error);
         tot+=(d.stats&&d.stats.items)||0; errs+=(d.stats&&d.stats.errors)||0; cursor=d.cursor; n++;
-        var pc=Math.min(100, tot/Math.max(1,total)*100), tx=tot+' / '+total+' productos leídos (precio, stock y fecha de ML; precio de Woo)';
-        prog(wiProgBox('💲 Leyendo precios y stock', tx, pc, '#059669')); wiFloat('lprecios','💲 Leyendo precios y stock', tx, pc, '#059669');
+        var pc=Math.min(100, tot/Math.max(1,total)*100), tx=tot+' / '+total+' publicaciones leídas (precio, stock, fecha y estado en ML)';
+        prog(wiProgBox('↻ Leyendo datos de ML', tx, pc, '#059669')); wiFloat('lprecios','↻ Leyendo datos de ML', tx, pc, '#059669');
         if(d.done) break;
       }
     }
     var l=await wiApi('/wsync/links'); if(!l.error) wiSetLinks(l);
     prog(''); wiLinksRender();
-    wiFloatEnd('lprecios', '✅ Precios y stock leídos: '+tot+' productos'+(errs?' · '+errs+' con error':''), errs?'warn':'success');
+    var elim=wiS.links.items.filter(function(x){ return x.ml_status==='eliminada'; }).length;
+    wiFloatEnd('lprecios', '✅ Datos de ML leídos: '+tot+' publicaciones'+(elim?' · '+elim+' eliminadas en ML (Woo en borrador)':'')+(errs?' · '+errs+' con error':''), errs?'warn':'success');
   }catch(e){ prog('<div style="color:#b91c1c;font-size:12px;margin-bottom:8px">✕ '+wiEsc(e.message)+'</div>'); wiFloatEnd('lprecios','Leer precios: '+e.message,'error'); }
   finally{ wiS.lprunning=false; if(_wiFloat.lprecios) wiFloatEnd('lprecios'); }
 }
@@ -55705,7 +55770,7 @@ async function wiLogLoad(kind){
   el.innerHTML='<div style="padding:12px;color:var(--text3);font-size:12px">Cargando…</div>';
   var d=await wiApi('/wsync/log?limit=400'+(wiS.logKind?'&kind='+wiS.logKind:''));
   if(d.error){ el.innerHTML='<div style="padding:12px;color:#b91c1c;font-size:12px">'+wiEsc(d.message||d.error)+'</div>'; return; }
-  var K={ import:'🆕 Importación', link:'🔗 Vínculo', stock:'🔄 Stock', sim:'🧪 Simulación', error:'✕ Error', update:'✏️ Actualización', unlink:'⛓ Desvínculo', config:'⚙️ Ajustes', run:'▶ Corrida', item:'⏸ Producto', precio:'💲 Precio', 'sim-precio':'🧪 Simulación de precio', regla:'🏷️ Regla' };
+  var K={ import:'🆕 Importación', link:'🔗 Vínculo', stock:'🔄 Stock', sim:'🧪 Simulación', error:'✕ Error', update:'✏️ Actualización', unlink:'⛓ Desvínculo', config:'⚙️ Ajustes', run:'▶ Corrida', item:'⏸ Producto', precio:'💲 Precio', 'sim-precio':'🧪 Simulación de precio', regla:'🏷️ Regla', duplicado:'🧹 Duplicados' };
   el.innerHTML=!(d.log||[]).length?'<div style="padding:16px;color:var(--text3);font-size:12px;text-align:center">Sin registros.</div>':
     '<div class="tw" style="max-height:520px;overflow:auto"><table style="width:100%"><thead><tr><th>Fecha</th><th>Tipo</th><th>ML</th><th>Woo</th><th>Detalle</th></tr></thead><tbody>'+
     d.log.map(function(l){ var err=l.kind==='error'||/ERROR/.test(l.msg||''); return '<tr><td style="font-size:10.5px;white-space:nowrap;color:var(--text3)">'+new Date(l.ts).toLocaleString('es-AR')+'</td><td style="font-size:11px;white-space:nowrap">'+(K[l.kind]||l.kind)+'</td><td style="font-size:10.5px;font-family:var(--mono)">'+wiEsc(l.ml_item_id||'')+'</td><td style="font-size:10.5px">'+(l.woo_id?'#'+l.woo_id:'')+'</td><td style="font-size:11.5px;'+(err?'color:#b91c1c':'')+'">'+wiEsc(l.msg)+'</td></tr>'; }).join('')+'</tbody></table></div>';
@@ -55947,6 +56012,196 @@ async function wiPriceNow(sim){
     wiFloatEnd('precio', (wiS.pcancel?'⏹ Precios detenido: ':sim?'✅ Simulación de precios terminada: ':'✅ Precios sincronizados: ')+tot.items+' productos · '+tot.changed+' con precio distinto · '+tot.errors+' errores', tot.errors?'warn':'success');
   }catch(e){ prog('<span style="color:#b91c1c">✕ '+wiEsc(e.message)+'</span>'); wiFloatEnd('precio', 'Sincronización de precio: '+e.message, 'error'); }
   finally{ wiS.prunning=false; stop(false); if(_wiFloat.precio) wiFloatEnd('precio'); wiStatusLoad(); }
+}
+
+
+// ═══ v315 · 7 · DUPLICADOS EN WOO ════════════════════════════════════════════
+// Busca productos repetidos en la tienda: mismo SKU, título idéntico o casi igual,
+// y (opcional) misma foto. No borra nada solo: vos tildás y elegís papelera,
+// borrador o eliminar definitivamente. Los productos vinculados a ML no se tocan.
+var wiD = { groups:[], sel:new Set(), opt:{ sku:true, same:true, near:true, foto:false, thr:85, drafts:true }, img:null, running:false };
+function wiDupRender(){
+  var el=document.getElementById('wi-dup'); if(!el) return;
+  var n=wiS.woo.length, o=wiD.opt;
+  var cb=function(k,t,sub){ return '<label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;cursor:pointer;text-align:left"><input type="checkbox" '+(o[k]?'checked':'')+' onchange="wiD.opt.'+k+'=this.checked" style="width:auto;flex:none;margin-top:3px;transform:scale(1.15)"><span><b>'+t+'</b>'+(sub?'<br><span style="font-size:11.5px;color:var(--text3)">'+sub+'</span>':'')+'</span></label>'; };
+  el.innerHTML=
+    '<div style="background:var(--bg2,#fff);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:12px">'+
+      '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'+
+        '<span style="font-size:13.5px">'+(n?'📦 <b>'+n+'</b> productos de Woo leídos'+(wiS._wooAt?' <span style="color:var(--text3);font-size:12px">(hace '+Math.max(1,Math.round((Date.now()-wiS._wooAt)/60000))+' min)</span>':''):'Primero hay que leer los productos de tu tienda Woo.')+'</span>'+
+        '<button class="btn btn-sm" style="background:#fff;color:#b45309;border:1px solid #fcd34d;font-weight:700;padding:8px 14px" onclick="wiDupLoadWoo('+(n?'true':'false')+')">📥 '+(n?'Volver a leer Woo':'Leer productos de Woo')+'</button>'+
+      '</div>'+
+      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px 18px;margin-bottom:12px">'+
+        cb('sku','🏷️ Mismo SKU','El SKU repetido es el caso más claro.')+
+        cb('same','📝 Título idéntico','Mismas palabras, sin importar mayúsculas, tildes ni orden.')+
+        '<div>'+cb('near','≈ Título casi igual','Comparten casi todas las palabras y los mismos números (ej. 11oz ≠ 15oz).')+
+          '<div style="margin:6px 0 0 26px;font-size:12.5px">Parecido mínimo <input type="number" min="60" max="99" value="'+o.thr+'" onchange="wiD.opt.thr=Math.max(60,Math.min(99,+this.value||85))" style="width:70px;font-size:13px;padding:4px 6px;display:inline-block"> %</div></div>'+
+        cb('foto','🖼️ Misma foto','Compara las fotos principales (la primera vez tarda unos minutos; después queda guardado).')+
+        cb('drafts','📝 Incluir borradores y privados','')+
+      '</div>'+
+      '<button class="btn" style="background:#d97706;color:#fff;font-weight:800;font-size:14px;padding:11px 20px;border-radius:10px" onclick="wiDupFind()"'+(n?'':' disabled')+'>🔍 Buscar duplicados</button>'+
+      '<span id="wi-dup-prog" style="margin-left:12px;font-size:12.5px;color:var(--text2)"></span>'+
+    '</div>'+
+    '<div id="wi-dup-bar"></div><div id="wi-dup-res"></div>';
+  wiDupResults();
+}
+async function wiDupLoadWoo(force){
+  if(wiD.running||wiS.running){ showToast('Ya hay una lectura en curso','warn'); return; }
+  wiD.running=true; var woo=[], page=1, tp=1, prog=function(t){ var e=document.getElementById('wi-dup-prog'); if(e) e.textContent=t; wiFloat('dupload','📥 Leyendo productos de Woo', t, tp>1?Math.min(100,(page-1)/tp*100):null, '#d97706'); };
+  var parcial = !force && wiS._wooPartial && (Date.now()-wiS._wooPartial.t) < 60*60000 ? wiS._wooPartial : null;
+  if(parcial){ woo=parcial.woo.slice(); page=parcial.page; tp=parcial.tp; }
+  try{
+    do{
+      var w=await wiApiPaced('/wsync/woo-products?page='+page, null, function(t){ prog('⏳ La tienda pidió una pausa: reintento en '+t+' s (ya leídos '+woo.length+')'); });
+      if(w.error){ wiS._wooPartial={ woo:woo, page:page, tp:tp, t:Date.now() }; throw new Error((w.message||w.error)+' — leídos '+woo.length+'. Volvé a tocar el botón: sigue desde ahí.'); }
+      woo=woo.concat(w.items||[]); tp=w.total_pages||1;
+      prog('Leyendo productos de Woo: '+woo.length+(w.total?' de '+w.total:''));
+      page++; if(page<=tp) await wiSleep(1200);
+    } while(page<=tp);
+    wiS.woo=woo; wiS.wooById={}; woo.forEach(function(p){ wiS.wooById[p.id]=p; }); wiS._wooAt=Date.now(); wiS._wooPartial=null;
+    var l=await wiApi('/wsync/links'); if(!l.error) wiSetLinks(l);
+    if(wiS.ml.length) wiClassify();
+    wiFloatEnd('dupload','✅ '+woo.length+' productos de Woo leídos');
+    wiDupRender();
+  }catch(e){ wiFloatEnd('dupload','Leer Woo: '+e.message,'error'); var p=document.getElementById('wi-dup-prog'); if(p) p.textContent='✕ '+e.message; }
+  finally{ wiD.running=false; if(_wiFloat.dupload) wiFloatEnd('dupload'); }
+}
+function wiDupTokens(name){
+  var n=wiNorm(name), toks=n.split(' ').filter(function(w){ return w && !WI_STOP[w]; });
+  var digits=toks.filter(function(w){ return /\d/.test(w); }).sort().join(' ');
+  return { set:new Set(toks), key:toks.slice().sort().join(' '), digits:digits };
+}
+async function wiDupFind(){
+  if(wiD.running){ return; }
+  var o=wiD.opt;
+  if(!o.sku && !o.same && !o.near && !o.foto){ showToast('Elegí al menos un criterio','warn'); return; }
+  var list=wiS.woo.filter(function(p){ return p.status!=='trash' && (o.drafts || p.status==='publish'); });
+  var N=list.length, parent=new Array(N), why={};
+  for(var i=0;i<N;i++) parent[i]=i;
+  var find=function(x){ while(parent[x]!==x){ parent[x]=parent[parent[x]]; x=parent[x]; } return x; };
+  var join=function(a,b,r){ var A=find(a), B=find(b); if(A!==B) parent[A]=B; var k=Math.min(a,b)+'|'+Math.max(a,b); (why[k]=why[k]||{})[r]=1; };
+  var reasons={};   // por índice: motivos
+  var mark=function(a,b,r){ join(a,b,r); (reasons[a]=reasons[a]||{})[r]=1; (reasons[b]=reasons[b]||{})[r]=1; };
+  var prog=function(t){ var e=document.getElementById('wi-dup-prog'); if(e) e.textContent=t; };
+  wiD.running=true;
+  try{
+    if(o.sku){ var bs={}; list.forEach(function(p,i){ var s=String(p.sku||'').trim().toLowerCase(); if(s) (bs[s]=bs[s]||[]).push(i); }); Object.keys(bs).forEach(function(k){ var g=bs[k]; for(var j=1;j<g.length;j++) mark(g[0],g[j],'sku'); }); }
+    var T=list.map(function(p){ return wiDupTokens(p.name); });
+    if(o.same){ var bt={}; T.forEach(function(t,i){ if(t.set.size) (bt[t.key]=bt[t.key]||[]).push(i); }); Object.keys(bt).forEach(function(k){ var g=bt[k]; for(var j=1;j<g.length;j++) mark(g[0],g[j],'same'); }); }
+    if(o.near){
+      prog('Comparando títulos…'); await wiSleep(30);
+      var thr=o.thr/100, inv={};
+      T.forEach(function(t,i){ t.set.forEach(function(w){ (inv[w]=inv[w]||[]).push(i); }); });
+      for(var a=0;a<N;a++){
+        var ta=T[a]; if(ta.set.size<2) continue;
+        var cnt={};
+        ta.set.forEach(function(w){ var L=inv[w]; if(L.length>400) return; for(var q=0;q<L.length;q++){ var b=L[q]; if(b>a) cnt[b]=(cnt[b]||0)+1; } });
+        for(var bk in cnt){ var b=+bk, tb=T[b]; if(tb.set.size<2 || ta.digits!==tb.digits) continue; var inter=cnt[bk], uni=ta.set.size+tb.set.size-inter; if(inter/uni>=thr && ta.key!==tb.key) mark(a,b,'near:'+Math.round(inter/uni*100)); }
+        if(a%300===0){ prog('Comparando títulos… '+a+' / '+N); await wiSleep(0); }
+      }
+    }
+    if(o.foto){
+      var con=list.map(function(p,i){ return { i:i, url:p.img }; }).filter(function(x){ return x.url; });
+      var vec={}, k=0, done=0;
+      try{ await rcGetImgTicket(true); }catch(e){}
+      async function wk(){ while(k<con.length){ var j=con[k++]; var v=await wiImgVec('woo', j.url); if(v) vec[j.i]=v; done++; if(done%20===0||done===con.length){ var tx='🖼️ Fotos: '+done+' / '+con.length; prog(tx); wiFloat('dupfoto','🖼️ Comparando fotos de Woo', tx, done/con.length*100, '#d97706'); } } }
+      await Promise.all([wk(),wk(),wk(),wk()]);
+      wiFloatEnd('dupfoto');
+      var ks=Object.keys(vec).map(Number);
+      for(var x=0;x<ks.length;x++){ var va=vec[ks[x]]; for(var y=x+1;y<ks.length;y++){ var vb=vec[ks[y]]; if(wiHam(va,vb)>6) continue; if(wiMad(va,vb)<=6) mark(ks[x],ks[y],'foto'); } if(x%200===0) await wiSleep(0); }
+    }
+    var groups={};
+    for(var z=0;z<N;z++){ if(!reasons[z]) continue; var r=find(z); (groups[r]=groups[r]||[]).push(z); }
+    wiD.groups=Object.keys(groups).map(function(r){
+      var idx=groups[r], why={};
+      idx.forEach(function(i){ Object.keys(reasons[i]).forEach(function(k){ var kk=k.indexOf('near:')===0?'near':k; why[kk]=Math.max(why[kk]||0, k.indexOf('near:')===0?+k.slice(5):1); }); });
+      var items=idx.map(function(i){ return list[i]; });
+      // sugerido conservar: vinculado a ML > publicado > con stock > el más viejo
+      var score=function(p){ return (wiS.linkByWoo[p.id]?1000:0)+(p.status==='publish'?100:0)+((+p.stock||0)>0?10:0); };
+      items.sort(function(A,B){ return score(B)-score(A) || A.id-B.id; });
+      return { items:items, why:why, keep:items[0].id };
+    }).filter(function(g){ return g.items.length>1; }).sort(function(A,B){ return B.items.length-A.items.length; });
+    wiD.sel=new Set(); wiD._searched=true;
+    prog('✓ '+wiD.groups.length+' grupos de posibles duplicados ('+wiD.groups.reduce(function(s,g){ return s+g.items.length; },0)+' productos)');
+    wiDupResults();
+  }catch(e){ prog('✕ '+e.message); }
+  finally{ wiD.running=false; if(_wiFloat.dupfoto) wiFloatEnd('dupfoto'); }
+}
+function wiDupWhy(w){
+  var out=[];
+  if(w.sku) out.push(['🏷️ Mismo SKU','#fee2e2','#991b1b']);
+  if(w.foto) out.push(['🖼️ Misma foto','#ede9fe','#5b21b6']);
+  if(w.same) out.push(['📝 Título idéntico','#fef3c7','#92400e']);
+  if(w.near) out.push(['≈ Título '+w.near+'% igual','#e0f2fe','#075985']);
+  return out.map(function(x){ return '<span style="font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:9px;background:'+x[1]+';color:'+x[2]+'">'+x[0]+'</span>'; }).join(' ');
+}
+function wiDupResults(){
+  var el=document.getElementById('wi-dup-res'), bar=document.getElementById('wi-dup-bar'); if(!el) return;
+  var base=(wiS.status&&wiS.status.woo_url)?'https://'+wiS.status.woo_url:'';
+  if(!wiD.groups.length){ el.innerHTML=wiS.woo.length&&wiD._searched?'<div style="padding:24px;text-align:center;color:var(--text3);font-size:13px">No se encontraron duplicados con estos criterios. 🎉</div>':''; if(bar) bar.innerHTML=''; return; }
+  var ns=wiD.sel.size;
+  if(bar) bar.innerHTML='<div style="position:sticky;top:0;z-index:5;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 14px;margin-bottom:12px;border-radius:12px;background:#fffbeb;border:1px solid #fcd34d;box-shadow:0 2px 8px rgba(0,0,0,.05)">'+
+    '<b style="font-size:13.5px;color:#92400e">☑ <span id="wi-dup-n">'+ns+'</span> tildados</b>'+
+    '<button class="btn btn-sm" style="background:#fff;color:#92400e;border:1px solid #fcd34d;font-weight:700" onclick="wiDupSelSuggested()" title="Tilda en cada grupo todos menos el sugerido para conservar (nunca los vinculados)">☑ Tildar los sugeridos para borrar</button>'+
+    '<button class="btn btn-sm" style="background:#fff;color:#475569;border:1px solid var(--border)" onclick="wiD.sel.clear();wiDupResults()">Destildar</button>'+
+    '<span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">'+
+      '<button class="btn btn-sm" style="background:#475569;color:#fff;font-weight:700;padding:8px 13px" onclick="wiDupAsk(\'draft\')">📝 Pasar a borrador</button>'+
+      '<button class="btn btn-sm" style="background:#d97706;color:#fff;font-weight:700;padding:8px 13px" onclick="wiDupAsk(\'trash\')">🗑 Enviar a la papelera</button>'+
+      '<button class="btn btn-sm" style="background:#dc2626;color:#fff;font-weight:700;padding:8px 13px" onclick="wiDupAsk(\'force\')">❌ Eliminar definitivamente</button></span></div>';
+  el.innerHTML=wiD.groups.map(function(g,gi){
+    return '<div style="border:1px solid var(--border);border-radius:12px;margin-bottom:12px;overflow:hidden;background:var(--bg2,#fff)">'+
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:9px 14px;background:var(--bg3);border-bottom:1px solid var(--border)"><b style="font-size:13px">Grupo '+(gi+1)+' · '+g.items.length+' productos</b> '+wiDupWhy(g.why)+'</div>'+
+      g.items.map(function(p){
+        var lk=wiS.linkByWoo[p.id], keep=p.id===g.keep, st={ publish:['#dcfce7','#166534','Publicado'], draft:['#e5e7eb','#374151','Borrador'], private:['#fef3c7','#92400e','Privado'], pending:['#e0f2fe','#075985','Pendiente'] }[p.status]||['#e5e7eb','#374151',p.status];
+        return '<div style="display:flex;gap:12px;align-items:center;padding:9px 14px;border-bottom:1px solid var(--border);'+(keep?'background:#f0fdf4':'')+'">'+
+          '<input type="checkbox" '+(lk?'disabled title="Vinculado a ML: no se puede borrar desde acá"':'')+(wiD.sel.has(p.id)?' checked':'')+' onchange="wiDupSel('+p.id+',this.checked)" style="width:auto;transform:scale(1.25)">'+
+          wiThumb(p.img,64)+
+          '<div style="flex:1;min-width:0"><div style="font-size:13.5px;font-weight:600">'+wiEsc(p.name)+'</div>'+
+            '<div style="font-size:11.5px;color:var(--text3);font-family:var(--mono);margin-top:2px">'+(base?'<a href="'+base+'/wp-admin/post.php?post='+p.id+'&action=edit" target="_blank" rel="noopener">#'+p.id+'</a>':'#'+p.id)+' · SKU '+wiEsc(p.sku||'—')+' · '+wiEsc(p.type||'')+(p.created?' · creado '+new Date(p.created).toLocaleDateString('es-AR'):'')+'</div></div>'+
+          '<div style="text-align:right;white-space:nowrap;font-size:13px"><b>'+(p.price?wiMoney(p.price):'—')+'</b><div style="font-size:11.5px;color:var(--text3)">stock '+(p.stock==null?'—':p.stock)+'</div></div>'+
+          '<span style="font-size:11px;font-weight:700;padding:3px 9px;border-radius:9px;background:'+st[0]+';color:'+st[1]+'">'+st[2]+'</span>'+
+          (lk?'<span style="font-size:11px;font-weight:700;padding:3px 9px;border-radius:9px;background:#d1fae5;color:#065f46" title="Vinculado: no se puede borrar">🔗 '+lk.ml_item_id+'</span>':'')+
+          (keep?'<span style="font-size:11px;font-weight:800;padding:3px 9px;border-radius:9px;background:#16a34a;color:#fff">⭐ Conservar</span>':'')+
+          (lk?'':'<button class="btn btn-ghost btn-xs" title="Enviar a la papelera" onclick="wiDupAsk(\'trash\',['+p.id+'])" style="font-size:15px">🗑</button>')+
+        '</div>';
+      }).join('')+'</div>';
+  }).join('');
+}
+function wiDupSel(id,on){ if(on) wiD.sel.add(id); else wiD.sel.delete(id); var e=document.getElementById('wi-dup-n'); if(e) e.textContent=wiD.sel.size; }
+function wiDupSelSuggested(){ wiD.groups.forEach(function(g){ g.items.forEach(function(p){ if(p.id!==g.keep && !wiS.linkByWoo[p.id]) wiD.sel.add(p.id); }); }); wiDupResults(); }
+function wiDupAsk(mode, ids){
+  ids = ids || Array.from(wiD.sel);
+  ids = ids.filter(function(id){ return !wiS.linkByWoo[id]; });
+  if(!ids.length){ showToast('Tildá los productos duplicados','warn'); return; }
+  var T={ trash:['🗑 Enviar a la papelera','Quedan en la papelera de WordPress 30 días: se pueden restaurar desde Productos → Papelera.','#d97706',''],
+          draft:['📝 Pasar a borrador','Dejan de verse en la tienda pero no se borran.','#475569',''],
+          force:['❌ Eliminar definitivamente','Se borran para siempre (con sus variaciones). No se puede deshacer.','#dc2626','ELIMINAR'] }[mode];
+  wiS._dup={ mode:mode, ids:ids };
+  var names=ids.slice(0,8).map(function(id){ var p=wiS.wooById[id]; return '<li>#'+id+' '+wiEsc(p?p.name:'')+'</li>'; }).join('')+(ids.length>8?'<li>… y '+(ids.length-8)+' más</li>':'');
+  wiModal('<div style="'+WI_M.title+'">'+T[0]+'</div><div style="'+WI_M.sub+'"><b>'+ids.length+'</b> producto'+(ids.length===1?'':'s')+' de Woo. '+T[1]+'</div>'+
+    '<ul style="font-size:12.5px;color:#1e293b;margin:0 0 12px 18px;padding:0;line-height:1.6">'+names+'</ul>'+
+    (T[3]?'<label style="'+WI_M.label+'">Para confirmar escribí ELIMINAR</label><input id="wd-ok" style="'+WI_M.input+';margin-bottom:14px" oninput="var b=document.getElementById(\'wd-go\');var ok=this.value.trim().toUpperCase()===\'ELIMINAR\';b.disabled=!ok;b.style.opacity=ok?1:.5">':'')+
+    '<div style="display:flex;gap:8px"><button onclick="wiModal(null)" style="'+WI_M.cancel+'">Cancelar</button>'+wiGo('wd-go',T[0]+' ('+ids.length+')',T[2],'wiDupRun()',!!T[3])+'</div>');
+}
+async function wiDupRun(){
+  var mode=wiS._dup.mode, ids=wiS._dup.ids.slice(); wiModal(null);
+  var step=mode==='trash'?10:50, ok=[], fail=[], skip=[];
+  try{
+    for(var i=0;i<ids.length;i+=step){
+      var tx=Math.min(ids.length,i+step)+' / '+ids.length; wiFloat('dup','🧹 Duplicados en Woo', tx, i/ids.length*100, '#d97706');
+      var d=await wiApiPaced('/wsync/woo-remove', { ids:ids.slice(i,i+step), mode:mode }, function(t){ wiFloat('dup','⏳ Pausa pedida por la tienda','Reintento en '+t+' s', i/ids.length*100, '#d97706'); });
+      if(d.error && !d.done) throw new Error(d.message||d.error);
+      ok=ok.concat(d.done||[]); fail=fail.concat(d.failed||[]); skip=skip.concat(d.skipped_linked||[]);
+      if(i+step<ids.length) await wiSleep(800);
+    }
+  }catch(e){ showToast('Duplicados: '+e.message,'error'); }
+  var okS=new Set(ok);
+  if(mode==='draft') wiS.woo.forEach(function(p){ if(okS.has(p.id)) p.status='draft'; });
+  else { wiS.woo=wiS.woo.filter(function(p){ return !okS.has(p.id); }); ok.forEach(function(id){ delete wiS.wooById[id]; }); }
+  ok.forEach(function(id){ wiD.sel.delete(id); });
+  wiD.groups.forEach(function(g){ if(mode!=='draft') g.items=g.items.filter(function(p){ return !okS.has(p.id); }); });
+  wiD.groups=wiD.groups.filter(function(g){ return g.items.length>1; });
+  wiDupResults();
+  wiFloatEnd('dup', (fail.length?'⚠ ':'✅ ')+ok.length+' producto(s) '+{ trash:'enviados a la papelera', draft:'pasados a borrador', force:'eliminados definitivamente' }[mode]+(fail.length?' · '+fail.length+' con error':'')+(skip.length?' · '+skip.length+' vinculados no se tocaron':''), fail.length?'warn':'success');
 }
 
 </script>
