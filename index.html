@@ -869,7 +869,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v317 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v318 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -54448,7 +54448,8 @@ async function wiApiPaced(path, body, onWait){
   for(var k=0;;k++){
     var d=await wiApi(path, body);
     if(!wiIs429(d) || k>=waits.length || wiS.cancel) return d;
-    for(var t=waits[k]; t>0 && !wiS.cancel; t--){ if(onWait) onWait(t, k+1); await wiSleep(1000); }
+    var fin=Date.now()+waits[k]*1000;
+    while(!wiS.cancel){ var t=Math.ceil((fin-Date.now())/1000); if(t<=0) break; if(onWait) onWait(t, k+1); await wiSleep(Math.min(1000, fin-Date.now())); }
   }
 }
 // v312 · progreso destacado (en la herramienta) + aviso flotante visible en todo el panel
@@ -54462,27 +54463,31 @@ function wiProgBox(title, text, pct, color){
     '<div style="font-size:12.5px;margin:6px 0 8px;color:#1e293b">'+text+'</div>'+bar+
     '<div style="font-size:10.5px;color:#64748b;margin-top:6px">Podés cambiar de herramienta o de sección: sigue trabajando en segundo plano (el avance queda visible abajo a la izquierda) y te aviso abajo a la derecha cuando termine. No cierres ni recargues esta pestaña del navegador.</div></div>';
 }
-function wiFloat(key, title, text, pct, color){
-  _wiFloat[key]={ title:title, text:text, pct:pct, color:color||'#2563eb' };
+function wiFloat(key, title, text, pct, color, section){
+  var prev=_wiFloat[key]||{};
+  _wiFloat[key]={ title:title, text:text, pct:pct, color:color||'#2563eb', section:section||prev.section||(/^(dupload|dupfoto|dup|run|load|img|stock|precio|lprecios|lsync|regla)$/.test(key)?'woo-import':null), t0:prev.t0||Date.now() };
   wiFloatPaint();
 }
 function wiFloatEnd(key, msg, type){
   delete _wiFloat[key]; wiFloatPaint();
   if(msg && typeof showToast==='function') showToast(msg, type||'success');
 }
+// v318: cada proceso en su propia tarjeta, una al lado de la otra (no se enciman)
 function wiFloatPaint(){
   var el=document.getElementById('wi-float');
   var keys=Object.keys(_wiFloat);
   if(!keys.length){ if(el) el.remove(); return; }
-  if(!el){ el=document.createElement('div'); el.id='wi-float'; el.title='Volver a Importar a Woo'; el.onclick=function(){ try{ showSection('woo-import'); }catch(e){} }; document.body.appendChild(el); }
+  if(!el){ el=document.createElement('div'); el.id='wi-float'; document.body.appendChild(el); }
   el.innerHTML=keys.map(function(k){ var f=_wiFloat[k];
-    return '<div style="display:flex;gap:9px;align-items:center"><span class="wi-spin" style="border-top-color:'+f.color+';width:16px;height:16px"></span><div style="min-width:0;flex:1"><div style="font-weight:800;font-size:12.5px;color:'+f.color+'">'+f.title+(f.pct!=null?' · '+Math.round(f.pct)+'%':'')+'</div><div style="font-size:11px;color:#334155;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+f.text+'</div>'+
-      '<div class="wi-pbar" style="height:5px;margin-top:4px"><div class="wi-pbar-in'+(f.pct==null?' wi-pbar-ind':'')+'" style="'+(f.pct!=null?'width:'+Math.max(2,f.pct)+'%;':'')+'background:'+f.color+'"></div></div></div></div>'; }).join('<div style="height:8px"></div>');
+    return '<div class="wi-fcard" style="border-color:'+f.color+'" title="'+(f.section?'Ir a la sección':'')+'" onclick="'+(f.section?'try{showSection(\''+f.section+'\')}catch(e){}':'')+'">'+
+      '<div style="display:flex;gap:9px;align-items:center"><span class="wi-spin" style="border-top-color:'+f.color+';width:16px;height:16px"></span><div style="min-width:0;flex:1"><div style="font-weight:800;font-size:12.5px;color:'+f.color+';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+f.title+(f.pct!=null?' · '+Math.round(f.pct)+'%':'')+'</div><div style="font-size:11px;color:#334155;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+f.text+'</div>'+
+      '<div class="wi-pbar" style="height:5px;margin-top:4px"><div class="wi-pbar-in'+(f.pct==null?' wi-pbar-ind':'')+'" style="'+(f.pct!=null?'width:'+Math.max(2,f.pct)+'%;':'')+'background:'+f.color+'"></div></div></div></div></div>'; }).join('');
 }
 (function(){ if(document.getElementById('wi-float-css')) return; var st=document.createElement('style'); st.id='wi-float-css';
-  st.textContent='#wi-float{position:fixed;left:266px;bottom:18px;z-index:9998;width:330px;max-width:calc(100vw - 36px);background:#fff;border:2px solid #2563eb;border-radius:13px;padding:11px 13px;box-shadow:0 12px 32px rgba(15,23,42,.25);cursor:pointer;animation:wiPulse 2s infinite}'+
+  st.textContent='#wi-float{position:fixed;left:266px;right:300px;bottom:18px;z-index:9998;display:flex;flex-wrap:wrap-reverse;gap:10px;align-items:flex-end;pointer-events:none}'+
+  '.wi-fcard{pointer-events:auto;width:300px;max-width:calc(100vw - 36px);background:#fff;border:2px solid #2563eb;border-radius:13px;padding:10px 12px;box-shadow:0 12px 32px rgba(15,23,42,.25);cursor:pointer;animation:wiPulse 2s infinite}'+
   '@keyframes wiPulse{0%,100%{box-shadow:0 12px 32px rgba(15,23,42,.25),0 0 0 0 rgba(37,99,235,.35)}50%{box-shadow:0 12px 32px rgba(15,23,42,.25),0 0 0 7px rgba(37,99,235,0)}}'+
-  '@media(max-width:900px){#wi-float{left:18px}}'+
+  '@media(max-width:900px){#wi-float{left:18px;right:18px}}'+
   '.wi-pbox{border:2px solid;border-radius:12px;padding:12px 14px;background:#fff;margin:6px 0 10px}'+
   '.wi-pbar{height:9px;background:#e2e8f0;border-radius:6px;overflow:hidden;position:relative}'+
   '.wi-pbar-in{height:100%;border-radius:6px;transition:width .4s;background-image:linear-gradient(45deg,rgba(255,255,255,.25) 25%,transparent 25%,transparent 50%,rgba(255,255,255,.25) 50%,rgba(255,255,255,.25) 75%,transparent 75%);background-size:18px 18px;animation:wiStripe .8s linear infinite}'+
@@ -54492,7 +54497,10 @@ function wiFloatPaint(){
   (document.head||document.documentElement).appendChild(st); })();
 function wiMoney(v){ return v==null||v===''?'—':'$'+Math.round(+v||0).toLocaleString('es-AR'); }
 async function wiApi(path, body){
-  var r = await fetch(WORKER+path, { method: body?'POST':'GET', headers: Object.assign({ Authorization:'Bearer '+token }, body?{'Content-Type':'application/json'}:{}), body: body?JSON.stringify(body):undefined });
+  var ac = (typeof AbortController!=='undefined') ? new AbortController() : null, tmo = ac ? setTimeout(function(){ ac.abort(); }, 180000) : null, r;
+  try{ r = await fetch(WORKER+path, { method: body?'POST':'GET', headers: Object.assign({ Authorization:'Bearer '+token }, body?{'Content-Type':'application/json'}:{}), body: body?JSON.stringify(body):undefined, signal: ac?ac.signal:undefined }); }
+  catch(e){ return { error: (e && e.name==='AbortError') ? 'HTTP 504 · el Worker no respondió en 3 minutos' : 'Failed to fetch: '+(e&&e.message||'') }; }
+  finally{ if(tmo) clearTimeout(tmo); }
   if(r.status===401 && typeof tryRefreshToken==='function' && await tryRefreshToken()) return wiApi(path, body);
   var d = {}; try{ d = await r.json(); }catch(e){ d = { error:'Respuesta inválida del Worker (HTTP '+r.status+'). ¿Está desplegado el Worker v140?' }; }
   if(r.status===404 && !d.error) d.error = 'El Worker no tiene esta función: desplegá el Worker v140';
@@ -56374,7 +56382,7 @@ async function wseoLoad(refresh){
         if(!fallo) break;
         if(intento>=4){ throw new Error((d&&d.error)||('la tienda no respondió (HTTP '+(r?r.status:'—')+')')); }
         var w=[20,45,90,150][intento++];
-        for(var k=w;k>0;k--){ say('⏳ La tienda pidió una pausa: reintento '+intento+' en '+k+' s… (ya leídos '+prods.length+(total?' de '+total:'')+', no se pierden)','#b45309'); if(typeof wiFloat==='function') wiFloat('wseo','🛍️ SEO tienda Woo','Pausa de la tienda: reintento en '+k+' s · '+prods.length+(total?' de '+total:''), total?prods.length/total*100:null, '#d97706'); await new Promise(function(res){ setTimeout(res,1000); }); }
+        var _fin=Date.now()+w*1000; while(true){ var k=Math.ceil((_fin-Date.now())/1000); if(k<=0) break; say('⏳ La tienda pidió una pausa: reintento '+intento+' en '+k+' s… (ya leídos '+prods.length+(total?' de '+total:'')+', no se pierden)','#b45309'); if(typeof wiFloat==='function') wiFloat('wseo','🛍️ SEO tienda Woo','Pausa de la tienda: reintento en '+k+' s · '+prods.length+(total?' de '+total:''), total?prods.length/total*100:null, '#d97706'); await new Promise(function(res){ setTimeout(res,Math.min(1000,_fin-Date.now())); }); }
       }
       if(d.error) throw new Error(d.error+(d.detail?' · '+d.detail:''));
       prods=prods.concat(d.products||[]); tp=d.totalPages||1; total=d.total||total;
@@ -56444,6 +56452,125 @@ async function seoAdAction(itemId, status){
       await new Promise(function(res){ setTimeout(res, waits[k]*1000); });
     }
   };
+})();
+
+</script>
+<script>
+// ═══════════════════════════════════════════════════════════════════════════════
+// v318 · procesos en segundo plano con tarjeta flotante + carga automática al abrir
+// ═══════════════════════════════════════════════════════════════════════════════
+function _bgSleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
+// Un proceso = una tarjeta flotante abajo (una al lado de la otra). Se puede seguir trabajando.
+function bgJob(key, title, color, section){
+  return {
+    up: function(text, pct){ if(typeof wiFloat==='function') wiFloat(key, title, text, pct==null?null:pct, color||'#2563eb', section||null); },
+    end: function(msg, type){ if(typeof wiFloatEnd==='function') wiFloatEnd(key, msg, type); else if(msg && typeof showToast==='function') showToast(msg, type||'success'); }
+  };
+}
+function _bgPct(t){ var m=String(t||'').match(/(\d+)\s*\/\s*(\d+)/); return m && +m[2] ? Math.min(100, +m[1] / +m[2] * 100) : null; }
+// Envuelve una función masiva existente: copia lo que muestra su texto de avance a una tarjeta flotante.
+function _bgWrap(name, title, color, section, progId, opts){
+  opts = opts || {};
+  var orig = window[name]; if(typeof orig !== 'function' || orig._bg) return;
+  var w = async function(){
+    var key = name + '-' + Date.now(), job = null, obs = null, last = '';
+    var mirror = function(){ var el = document.getElementById(progId); if(!el) return; var t = (el.textContent || '').replace(/\s+/g, ' ').trim(); if(!t || t === last) return; last = t; if(!job){ job = bgJob(key, title, color, section); } job.up(t.slice(0, 140), _bgPct(t)); };
+    var attach = function(){ var el = document.getElementById(progId); if(el && !obs){ obs = new MutationObserver(mirror); obs.observe(el, { childList:true, characterData:true, subtree:true }); } };
+    var iv = setInterval(function(){ attach(); mirror(); }, 400); attach();
+    if(opts.before) try{ opts.before(); }catch(e){}
+    try { return await orig.apply(this, arguments); }
+    finally {
+      clearInterval(iv); if(obs) obs.disconnect(); mirror();
+      if(job) job.end(opts.silentEnd ? null : (title + ': ' + (last || 'terminado')).slice(0, 180), /⚠|fall|error|✗|✕/i.test(last) ? 'warn' : 'success');
+    }
+  };
+  w._bg = true; window[name] = w;
+}
+
+// ── Analizador SEO · Descuento masivo: se cierra la ventana y sigue en una tarjeta ──
+window._descmAplicar = async function(){
+  var pct = +(document.getElementById('descm-pct-num') || {}).value || 5;
+  var dias = +(document.getElementById('descm-dias') || {}).value || 14;
+  var items = (_descMasivoItems || []).slice();
+  if(!items.length) return;
+  if(!confirm('¿Aplicar '+pct+'% de descuento a '+items.length+' publicaciones? Esto es un cambio real en ML.\n\nSigue en segundo plano: podés seguir trabajando en otras secciones.')) return;
+  _descmCerrar();
+  var job = bgJob('descm-' + Date.now(), '🏷️ Descuento masivo ' + pct + '%', '#16a34a', 'seo');
+  var ok = 0, fail = 0, errores = [];
+  for(var i = 0; i < items.length; i++){
+    var it = items[i];
+    job.up((i + 1) + ' / ' + items.length + ' · ✓ ' + ok + (fail ? ' · ✗ ' + fail : '') + ' · ' + String(it.title || it.id).slice(0, 40), i / items.length * 100);
+    try { await aplicarDescuentoItem(it.id, pct, dias); ok++; }
+    catch(e){ fail++; errores.push((it.title || it.id).slice(0, 30) + ': ' + e.message); }
+    await _bgSleep(350);
+  }
+  if(errores.length) console.warn('[descMasivo] errores:', errores);
+  job.end(ok > 0 ? '✓ Descuento ' + pct + '% aplicado a ' + ok + ' publicaciones' + (fail ? ' (' + fail + ' fallaron: ' + String(errores[0] || '').slice(0, 80) + ')' : '') : 'No se pudo aplicar el descuento a ninguna (' + fail + ' fallaron)', fail ? (ok ? 'warn' : 'error') : 'success');
+  if(typeof renderSEOTable === 'function') renderSEOTable();
+};
+
+// ── Analizador SEO · Pausar / Eliminar seleccionadas: la ventana se oculta y sigue en una tarjeta ──
+(function(){
+  var hide = function(){ var m = document.getElementById('seo-bulk-modal'); if(m) m.style.display = 'none'; };
+  _bgWrap('seoBulkPauseRun', '⏸ Pausando publicaciones', '#d97706', 'seo', 'seo-bulk-prog', { before: hide, silentEnd: true });
+  _bgWrap('seoBulkDeleteRun', '🗑️ Eliminando publicaciones', '#dc2626', 'seo', 'seo-bulk-prog', { before: hide, silentEnd: true });
+  var origRes = window._seoBulkResult;
+  if(typeof origRes === 'function') window._seoBulkResult = function(titulo, nOk, failed, verbo){
+    if(!failed || !failed.length){ _seoBulkModal(null); if(typeof showToast === 'function') showToast(titulo + ': ' + nOk + ' ' + verbo + (nOk !== 1 ? 's' : '') + ' en Mercado Libre', 'success'); return; }
+    return origRes.apply(this, arguments);   // con errores: se muestra el detalle al terminar
+  };
+  // Edición masiva (ya corrían en segundo plano; ahora además se ve el avance en una tarjeta)
+  _bgWrap('bulkSetStatus', '✏️ Edición masiva · estado', '#7c3aed', 'bulk', 'bulk-status-result');
+  _bgWrap('bulkUpdatePrices', '✏️ Edición masiva · precios', '#7c3aed', 'bulk', 'bulk-price-result');
+  _bgWrap('bulkUpdateAvailability', '✏️ Edición masiva · disponibilidad', '#7c3aed', 'bulk', 'bulk-avail-result');
+  _bgWrap('bulkUpdateStock', '✏️ Edición masiva · stock', '#7c3aed', 'bulk', 'bulk-stock-result');
+})();
+
+// ── Carga automática al abrir el panel (después de la carga inicial, en orden) ──
+// 1) Cuenta Impala · 2) Economía · 3) Web Tienda Impala · 4) Analizador SEO: Refresh total
+// El Refresh total se hace como mucho cada 6 h (para no gastar consultas de Cloudflare de más).
+var AUTO_SEO_REFRESH_H = 6;
+(function(){
+  if(window._autoLoadOn) return; window._autoLoadOn = true;
+  var listo = function(){ try{ return typeof token !== 'undefined' && token && typeof allItems !== 'undefined' && allItems.length > 0; }catch(e){ return false; } };
+  async function correr(){
+    var t0 = Date.now();
+    while(!listo()){ if(Date.now() - t0 > 6 * 60000) return; await _bgSleep(2000); }
+    await _bgSleep(8000);   // dejar terminar la carga inicial (lo que se ve en la consola) sin tocar nada
+    var job = bgJob('autoload', '🔄 Carga automática', '#0891b2', null), hechos = [];
+    var paso = async function(nombre, fn, i, n){
+      job.up(nombre + '…', i / n * 100);
+      try{ await fn(); hechos.push('✓ ' + nombre); }
+      catch(e){ hechos.push('✕ ' + nombre); console.warn('[auto] ' + nombre, e && e.message); }
+    };
+    var pasos = [
+      ['Cuenta Impala', async function(){ if(typeof ctaInit === 'function' && !(typeof _ctaState !== 'undefined' && _ctaState.boot)) await ctaInit(); }],
+      ['Economía', async function(){
+        if(typeof _ecoDolarLoad !== 'function') return;
+        _ecoDolarLoad(); _ecoInflLoad(); _ecoState.gastos.length || (_ecoState.gastos = _ecoLoad()); _ecoPintarVaciasGris(); ecoRender();
+        await Promise.all([_ecoSyncDown(), _ecoDolarFetch(), _ecoInflFetch()].map(function(p){ return Promise.resolve(p).catch(function(){}); }));
+      }],
+      ['Web Tienda Impala', async function(){
+        if(typeof wooSeoInit !== 'function') return;
+        await wooSeoInit();
+        if(typeof _pollWooNotifications === 'function') try{ _pollWooNotifications(); }catch(e){}
+        if(typeof _wooSilentSyncPending === 'function') try{ _wooSilentSyncPending(); }catch(e){}
+        var viejo = !_wseoLoaded || !_wseoCachedAt || (Date.now() - _wseoCachedAt) > (typeof WSEO_CACHE_TTL_MS !== 'undefined' ? WSEO_CACHE_TTL_MS : 24 * 3600e3);
+        if(viejo && typeof wseoLoad === 'function') await wseoLoad(_wseoLoaded);   // lectura pausada de la tienda
+      }],
+      ['Analizador SEO · Refresh total', async function(){
+        var k = 'auto_seo_refresh_t', ult = 0; try{ ult = +localStorage.getItem(k) || 0; }catch(e){}
+        if(Date.now() - ult < AUTO_SEO_REFRESH_H * 3600e3){ hechos.push('(Refresh total hecho hace ' + Math.round((Date.now() - ult) / 3600e3 * 10) / 10 + ' h: se repite cada ' + AUTO_SEO_REFRESH_H + ' h)'); return; }
+        if(typeof loadSEOMetricsFull !== 'function') return;
+        try{ localStorage.setItem(k, String(Date.now())); }catch(e){}
+        await loadSEOMetricsFull();
+      }],
+    ];
+    for(var i = 0; i < pasos.length; i++) await paso(pasos[i][0], pasos[i][1], i, pasos.length);
+    job.end('🔄 Carga automática lista: ' + hechos.filter(function(h){ return h.charAt(0) === '✓'; }).length + ' de ' + pasos.length + ' secciones actualizadas', hechos.some(function(h){ return h.charAt(0) === '✕'; }) ? 'warn' : 'success');
+    console.log('[auto] carga automática:', hechos.join(' · '));
+  }
+  if(document.readyState === 'complete') setTimeout(correr, 1000); else window.addEventListener('load', function(){ setTimeout(correr, 1000); });
 })();
 
 </script>
