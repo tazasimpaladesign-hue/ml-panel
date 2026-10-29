@@ -869,7 +869,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v319 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v320 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -30411,23 +30411,33 @@ async function ctaEnrichWooNet() {
 // v182: marca operaciones ML como canceladas. Resta del saldo (monto a 0),
 // repone el stock (revierte el descuento si lo había) y las muestra tachadas.
 function _ctaMarcarCanceladas(idsCancel) {
-  if (!idsCancel || !idsCancel.size) return;
-  let chg = false, catChg = false;
-  Object.values(_ctaState.chunks).forEach(ch => (ch || []).forEach(op => {
-    if (!idsCancel.has(op.id) || op.cancelada) return;
-    // reponer stock (si esta venta había descontado)
-    if (op._stockApplied) { if (_ctaAplicarStock(op, -1)) catChg = true; }
-    op.cancelada = true;
-    op._montoOrig = op.monto;       // guardamos el original por si querés verlo
-    op.monto = 0;                    // sale del saldo
-    op.estado = 'cancelada';
-    op.rowColorManual = '#6b7280';   // gris
-    op.manualEdit = true;
-    _ctaState.dirty.add(op.fecha.slice(0, 7));
-    chg = true;
-  }));
+  // v320: la venta ML cancelada se QUITA de la cuenta (no queda en el listado ni cambia
+  // totales, provincias, unidades…) y, si había descontado stock, se repone. Antes quedaba
+  // en gris y, con la siguiente venta nueva, el stock se volvía a descontar.
+  // El borrado viaja a la nube como baja: no revive en la otra PC.
+  // También limpia las canceladas que quedaron en gris de versiones anteriores.
+  let catChg = false, n = 0;
+  Object.keys(_ctaState.chunks).forEach(ym => {
+    const ch = _ctaState.chunks[ym] || [];
+    const quedan = ch.filter(op => {
+      if (!op) return true;
+      const esML = op.src === 'ml' || String(op.id || '').indexOf('ml_') === 0;
+      const canc = (idsCancel && idsCancel.has(op.id)) || (op.cancelada && esML);
+      if (!canc) return true;
+      if (op._stockApplied) { if (_ctaAplicarStock(op, -1)) catChg = true; }
+      if (_ctaState.selected) _ctaState.selected.delete(op.id);
+      n++; return false;
+    });
+    if (quedan.length !== ch.length) { _ctaState.chunks[ym] = quedan; ctaMarkDirty(ym); }
+  });
   if (catChg) _ctaPersistCatalogo();
-  if (chg) ctaFlushDirty();
+  if (n) {
+    ctaFlushDirty();
+    console.log('[cta v320] ' + n + ' venta(s) ML cancelada(s) quitada(s) de la cuenta' + (catChg ? ' · stock repuesto' : ''));
+    if (typeof showToast === 'function') showToast('↩️ ' + n + ' venta' + (n > 1 ? 's' : '') + ' de Mercado Libre cancelada' + (n > 1 ? 's' : '') + ': quitada' + (n > 1 ? 's' : '') + ' de Cuenta Impala' + (catChg ? ' y stock repuesto' : ''), 'info');
+    if (typeof ctaRenderAll === 'function' && _ctaState.boot) { try { ctaRenderAll(); } catch (e) {} }
+  }
+  return n;
 }
 
 // WA: apenas ingresa el pedido aparece como operación (origen WA)
@@ -30497,11 +30507,17 @@ async function ctaSyncML() {
   if (typeof allOrders === 'undefined' || !Array.isArray(allOrders) || !allOrders.length) return 0;
   let nuevos = 0;
   // v182: detectar órdenes canceladas que YA están en la cuenta para marcarlas
-  const canceladasIds = new Set();
+  const canceladasIds = new Set(), mesesCanc = new Set();
   for (const o of allOrders) {
     if (o && o.id && String(o.status || '').toLowerCase() === 'cancelled') {
       canceladasIds.add('ml_' + o.id);
+      // v320: cargar también el mes de esa venta (si no estaba cargado no se encontraba)
+      const dc = new Date(o.date_closed || o.date_created || 0);
+      if (!isNaN(dc) && dc.getTime() >= CTA_SYNC_DESDE_TS) mesesCanc.add(dc.toISOString().slice(0, 7));
     }
+  }
+  for (const ym of mesesCanc) {
+    if (!_ctaState.loaded.has(ym)) { try { await _ctaFetchChunk(ym); } catch (e) {} }
   }
   _ctaMarcarCanceladas(canceladasIds);
 
@@ -31707,6 +31723,7 @@ function _ctaAplicarStock(op, signo) {
   // Las anteriores ya están contabilizadas en tu Excel y se ignoran.
   if (signo > 0) {
     if (op._stockApplied) return false;        // ya aplicada
+    if (op.cancelada) return false;            // v320: una venta cancelada nunca descuenta stock
     if ((op.fecha || '') < CTA_STOCK_DESDE) { op._stockApplied = true; return false; } // pre-corte: marcar como contabilizada SIN tocar stock
     const ch = ctaAplicarStockOp(op, 1);
     if (ch) op._stockApplied = true;
@@ -54444,8 +54461,10 @@ function wiSleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
 // v309: cortes temporales del servidor de la tienda: 429 (demasiadas), 5xx y 52x de Cloudflare (servidor no responde)
 function wiIs429(d){ return d && d.error && /HTTP (429|5\d\d)\b|demasiadas|Too Many|Failed to fetch|NetworkError/i.test(String(d.error)+' '+String(d.message||'')); }
 async function wiApiPaced(path, body, onWait){
-  var waits=[30,60,90,120,180,300,300];
+  // v320: el Worker ya reintenta cada consulta a la tienda; acá esperas cortas (antes 30 s … 5 min)
+  var waits=[8,20,40,60,90,120];
   for(var k=0;;k++){
+    if(typeof _wooYield==='function') await _wooYield();   // una edición puntual pasa primero
     var d=await wiApi(path, body);
     if(!wiIs429(d) || k>=waits.length || wiS.cancel) return d;
     var fin=Date.now()+waits[k]*1000;
@@ -56381,7 +56400,7 @@ async function wseoLoad(refresh){
         var fallo = !r || !d || (d.error && (d.retry || (r && (r.status===429 || r.status>=500))));
         if(!fallo) break;
         if(intento>=4){ throw new Error((d&&d.error)||('la tienda no respondió (HTTP '+(r?r.status:'—')+')')); }
-        var w=[20,45,90,150][intento++];
+        var w=[10,25,45,75][intento++];   // v320: antes 20/45/90/150 s (encima de los reintentos del Worker)
         var _fin=Date.now()+w*1000; while(true){ var k=Math.ceil((_fin-Date.now())/1000); if(k<=0) break; say('⏳ La tienda pidió una pausa: reintento '+intento+' en '+k+' s… (ya leídos '+prods.length+(total?' de '+total:'')+', no se pierden)','#b45309'); if(typeof wiFloat==='function') wiFloat('wseo','🛍️ SEO tienda Woo','Pausa de la tienda: reintento en '+k+' s · '+prods.length+(total?' de '+total:''), total?prods.length/total*100:null, '#d97706'); await new Promise(function(res){ setTimeout(res,Math.min(1000,_fin-Date.now())); }); }
       }
       if(d.error) throw new Error(d.error+(d.detail?' · '+d.detail:''));
@@ -56431,8 +56450,14 @@ async function seoAdAction(itemId, status){
 
 // ── 5) Cuenta Impala · Factura: v317 vuelve al marcado de antes (ML no emite facturas por API) ──
 
-// ── 6) v317 · llamadas del panel a la tienda Woo: si la tienda pide pausa o corta la
-// respuesta, esperar y reintentar (como en «Importar a Woo»). No se reintenta lo que crea.
+// ── 6) v320 · llamadas del panel a la tienda Woo: UN solo nivel de reintentos.
+// Antes se apilaban tres esperas (Worker 5/12/25 s + panel 8/20/45 s + cada herramienta
+// hasta 5 min) → una acción mínima podía tardar minutos. Ahora el Worker espera y reintenta
+// (3/8/15 s, ritmo adaptativo) y acá sólo se repite UNA vez si la respuesta no llegó.
+// Además: las lecturas largas (páginas de productos) ceden el paso a una edición puntual
+// (pausar, cambiar precio…) para que no quede detrás de una carga masiva.
+window._wooEditing = 0;
+async function _wooYield(){ var t0 = Date.now(); while(window._wooEditing > 0 && Date.now() - t0 < 60000) await new Promise(function(r){ setTimeout(r, 300); }); }
 (function(){
   if(window._wooRetryOn) return; window._wooRetryOn=true;
   var raw=window.fetch.bind(window);
@@ -56441,15 +56466,23 @@ async function seoAdAction(itemId, status){
     var u=typeof input==='string'?input:(input&&input.url)||'';
     var m=String((init&&init.method)||(input&&input.method)||'GET').toUpperCase();
     if(!esWoo(u) || m==='POST') return raw(input, init);
-    var waits=[8,20,45];
-    for(var k=0;;k++){
-      var r=null, txt='';
-      try{ r=await raw(input, init); txt=await r.clone().text(); }catch(e){ r=null; }
-      var cort = !r || r.status===429 || r.status===502 || r.status===503 || r.status===504 || (r.status>=520&&r.status<=524) ||
-        (r.status>=500 && /Unexpected end|respuesta vacía|cortada|retry/i.test(txt)) || (r.ok && !txt.trim());
-      if(!cort || k>=waits.length) return r || raw(input, init);
-      if(typeof showToast==='function') showToast('⏳ La tienda pidió una pausa: reintento en '+waits[k]+' s…','warn');
-      await new Promise(function(res){ setTimeout(res, waits[k]*1000); });
+    var edit = m!=='GET';
+    if(!edit && /[?&](page|all)=/.test(u)) await _wooYield();
+    if(edit) window._wooEditing++;
+    var key='woo-retry-'+Date.now()+'-'+Math.random().toString(36).slice(2,6), avisado=false;
+    try{
+      for(var k=0;;k++){
+        var r=null, txt='';
+        try{ r=await raw(input, init); txt=await r.clone().text(); }catch(e){ r=null; }
+        var cort = !r || (r.ok && !txt.trim() && !edit);
+        if(!cort) return r;
+        if(k>=1){ if(r) return r; throw new TypeError('Failed to fetch: la tienda no respondió'); }
+        avisado=true; if(typeof wiFloat==='function') wiFloat(key,'⏳ Tienda Woo','Sin respuesta: reintento en 4 s…', null, '#d97706');
+        await new Promise(function(res){ setTimeout(res, 4000); });
+      }
+    } finally {
+      if(edit) window._wooEditing--;
+      if(avisado && typeof wiFloatEnd==='function') wiFloatEnd(key);
     }
   };
 })();
@@ -56572,6 +56605,131 @@ var AUTO_SEO_REFRESH_H = 6;
   }
   if(document.readyState === 'complete') setTimeout(correr, 1000); else window.addEventListener('load', function(){ setTimeout(correr, 1000); });
 })();
+
+</script>
+<script>
+// ═══════════════════════════════════════════════════════════════════════════════
+// v320 · Cuenta Impala: ventas ML canceladas · Economía: selector de mes · Publicidad: ¿Dónde va tu inversión?
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── Cuenta Impala: los meses que se cargan después también se limpian de ventas ML canceladas ──
+(function(){
+  var orig = window._ctaFetchChunk; if (typeof orig !== 'function' || orig._v320) return;
+  var w = async function(ym){
+    var r = await orig.apply(this, arguments);
+    try{
+      var ch = _ctaState.chunks[ym] || [];
+      if (ch.some(function(op){ return op && op.cancelada && (op.src === 'ml' || String(op.id || '').indexOf('ml_') === 0); }))
+        _ctaMarcarCanceladas(new Set());
+    }catch(e){ console.warn('[cta v320] limpieza canceladas', e && e.message); }
+    return r;
+  };
+  w._v320 = true; window._ctaFetchChunk = w;
+})();
+
+// ── Economía · resumen de tarjeta: selector de mes que abre en el mes elegido ──
+// Al desplegarlo se ve el mes actual arriba y los que siguen debajo; los anteriores
+// siguen ahí, scrolleando hacia arriba.
+function _ecoMesPick(){
+  var body = document.getElementById('eco-res-body'); if(!body) return;
+  var sel = body.querySelector('select[onchange*="_ecoResSetMes"]'); if(!sel) return;
+  var opts = Array.prototype.map.call(sel.options, function(o){ return { v:o.value, t:o.textContent, s:o.selected }; });
+  var cur = opts.filter(function(o){ return o.s; })[0] || opts[0]; if(!cur) return;
+  var hoy = (typeof _ecoYmHoy === 'function') ? _ecoYmHoy() : '';
+  var wrap = document.createElement('div');
+  wrap.className = 'eco-mp'; wrap.style.cssText = 'position:relative;display:inline-block';
+  var btn = document.createElement('button');
+  btn.type = 'button'; btn.setAttribute('style', sel.getAttribute('style') || '');
+  btn.style.cursor = 'pointer'; btn.style.minWidth = '128px'; btn.style.textAlign = 'left';
+  btn.innerHTML = cur.t + ' <span style="float:right;margin-left:10px;opacity:.6">▾</span>';
+  var list = document.createElement('div');
+  list.style.cssText = 'display:none;position:absolute;z-index:20;top:100%;right:0;margin-top:4px;min-width:170px;max-height:264px;overflow-y:auto;background:'+_ECO_MODAL_BG+';border:1px solid '+_ECO_BRD+';border-radius:10px;box-shadow:0 12px 30px rgba(15,23,42,.22);padding:4px 0';
+  list.innerHTML = opts.map(function(o){
+    var pasado = hoy && o.v < hoy, esHoy = o.v === hoy;
+    return '<div data-v="'+o.v+'" style="padding:8px 14px;font-size:13px;cursor:pointer;white-space:nowrap;'+
+      (o.s ? 'background:#ede9fe;color:#5b21b6;font-weight:800;' : 'color:'+(pasado ? _ECO_TXT3 : _ECO_TXT)+';font-weight:'+(esHoy ? '700' : '500')+';')+'">'+
+      o.t + (esHoy ? ' <span style="font-size:10.5px;color:#7c3aed;font-weight:600">· mes actual</span>' : '') + '</div>';
+  }).join('');
+  list.addEventListener('mouseover', function(e){ var d = e.target.closest('[data-v]'); if(d && d.style.fontWeight !== '800') d.style.background = '#f5f3ff'; });
+  list.addEventListener('mouseout', function(e){ var d = e.target.closest('[data-v]'); if(d && d.style.fontWeight !== '800') d.style.background = ''; });
+  list.addEventListener('click', function(e){ var d = e.target.closest('[data-v]'); if(!d) return; cerrar(); if(d.getAttribute('data-v') !== cur.v) _ecoResSetMes(d.getAttribute('data-v')); });
+  var fuera = function(e){ if(!wrap.contains(e.target)) cerrar(); };
+  var esc = function(e){ if(e.key === 'Escape') cerrar(); };
+  function cerrar(){ list.style.display = 'none'; document.removeEventListener('mousedown', fuera, true); document.removeEventListener('keydown', esc, true); }
+  btn.addEventListener('click', function(){
+    if(list.style.display === 'block'){ cerrar(); return; }
+    list.style.display = 'block';
+    var s = list.querySelector('[data-v="'+cur.v+'"]');
+    list.scrollTop = s ? Math.max(0, s.offsetTop - 4) : 0;   // el mes elegido arriba, los siguientes debajo
+    document.addEventListener('mousedown', fuera, true); document.addEventListener('keydown', esc, true);
+  });
+  wrap.appendChild(btn); wrap.appendChild(list);
+  sel.parentNode.replaceChild(wrap, sel);
+}
+(function(){
+  var orig = window._ecoResRender; if(typeof orig !== 'function' || orig._v320) return;
+  var w = function(){ var r = orig.apply(this, arguments); try{ _ecoMesPick(); }catch(e){ console.warn('[eco v320] selector de mes', e && e.message); } return r; };
+  w._v320 = true; window._ecoResRender = w;
+})();
+
+// ── Publicidad · ¿Dónde va tu inversión?: un bloque por estado, hacia abajo, con sus publicaciones ──
+window.aiqRenderInversion = function(){
+  var el = document.getElementById('aiq-inv'); var D = _aiqRk.datos;
+  if (!el) return;
+  if (!D || !D.items) { el.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:10px 0">Se completa cuando carga el ranking por publicación.</div>'; return; }
+  var grupos = [
+    { k:'bien',    ic:'🚀', t:'Rinde',           s:'Escalar / Mantener',            col:'#16a34a', cl:['escalar','mantener'] },
+    { k:'mejorar', ic:'🛠️', t:'A mejorar',       s:'Optimizar',                     col:'#eab308', cl:['optimizar'] },
+    { k:'revisar', ic:'🔍', t:'Sin conclusión',  s:'Revisar / pocos datos',         col:'#94a3b8', cl:['revisar','sin_datos'] },
+    { k:'pierde',  ic:'🔻', t:'Pierde plata',    s:'Reducir / Pausar / Retirar',    col:'#dc2626', cl:['reducir','pausar','retirar'] },
+    { k:'fuera',   ic:'💤', t:'Fuera de campaña', s:'gasto anterior del período',   col:'#cbd5e1', cl:[] }
+  ];
+  var tot = 0, por = {};
+  D.items.forEach(function(i){
+    var c = i.cost || 0; if (!c) return; tot += c;
+    var k = i.reco && i.reco.clave;
+    var g = i.estado === 'idle' ? grupos[4] : grupos.filter(function(x){ return x.cl.indexOf(k) >= 0; })[0]; if (!g) return;
+    var p = por[g.k] = por[g.k] || { c:0, n:0, rev:0, items:[] };
+    p.c += c; p.n++; p.rev += (i.rev || 0); p.items.push(i);
+  });
+  if (!tot) { el.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:10px 0">Sin inversión registrada en el período.</div>'; return; }
+  var mlUrl = function(id){ var m = String(id || '').match(/^([A-Z]{3})(\d+)$/); return m ? 'https://articulo.mercadolibre.com.ar/' + m[1] + '-' + m[2] : ''; };
+  var barra = grupos.map(function(g){ var p = por[g.k]; if (!p) return ''; return '<div title="' + _aiqEsc(g.t + ': ' + aiqPesos(p.c)) + '" style="width:' + (p.c / tot * 100) + '%;background:' + g.col + '"></div>'; }).join('');
+  var filas = grupos.map(function(g){
+    var p = por[g.k] || { c:0, n:0, rev:0, items:[] };
+    var pct = p.c / tot * 100;
+    var roas = p.c > 0 && p.rev > 0 ? p.rev / p.c : null;
+    var tops = p.items.slice().sort(function(a, b){ return (b.cost || 0) - (a.cost || 0); }).slice(0, 4);
+    var pubs = tops.length ? tops.map(function(i){
+      var u = mlUrl(i.id), share = p.c ? Math.round((i.cost || 0) / p.c * 100) : 0;
+      return '<' + (u ? 'a href="' + u + '" target="_blank" rel="noopener"' : 'div') + ' title="' + _aiqEsc((i.titulo || i.id) + ' · ' + share + '% de la inversión de este estado') + '" style="display:flex;gap:8px;align-items:center;min-width:0;padding:5px 6px;border-radius:8px;border:1px solid var(--border);background:transparent;text-decoration:none;color:inherit">' +
+        '<div style="flex-shrink:0;width:34px;height:34px;border-radius:6px;overflow:hidden;background:var(--bg4);border:1px solid var(--border)">' +
+          (i.thumb ? '<img src="' + _aiqEsc(i.thumb) + '" alt="" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display=\'none\'">' : '<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:15px">☕</div>') + '</div>' +
+        '<div style="min-width:0;flex:1"><div style="font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + _aiqEsc(i.titulo || i.id) + '</div>' +
+        '<div style="font-size:10px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">inv. <b style="color:var(--text)">' + aiqPesos(i.cost) + '</b> · ROAS ' + aiqX(i.roas) + ' · ' + (i.ventas || 0) + ' v.</div></div>' +
+      '</' + (u ? 'a' : 'div') + '>';
+    }).join('') + (p.n > tops.length ? '<div style="font-size:10.5px;color:var(--text3);align-self:center;padding:0 4px">+' + (p.n - tops.length) + ((p.n - tops.length) === 1 ? ' publicación más' : ' publicaciones más') + '</div>' : '')
+      : '<div style="font-size:11px;color:var(--text3);align-self:center">Ninguna publicación en este estado.</div>';
+    return '<div class="aiq-inv-row" style="display:grid;grid-template-columns:minmax(220px,280px) 1fr;gap:12px;align-items:stretch;padding:10px 0;border-bottom:1px solid var(--border)' + (p.n ? '' : ';opacity:.55') + '">' +
+      '<div style="border-left:5px solid ' + g.col + ';padding-left:10px;display:flex;flex-direction:column;justify-content:center;gap:3px">' +
+        '<div style="display:flex;align-items:center;gap:6px"><span style="font-size:16px">' + g.ic + '</span><b style="font-size:12.5px">' + g.t + '</b><span style="font-size:10.5px;color:var(--text3)">· ' + p.n + ' publ.</span></div>' +
+        '<div style="font-size:10.5px;color:var(--text3)">' + g.s + '</div>' +
+        '<div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:18px;font-weight:800;color:' + (g.k === 'fuera' ? 'var(--text2,#64748b)' : g.col) + '">' + aiqPesos(p.c) + '</span><span style="font-size:12px;font-weight:700;color:var(--text3)">' + Math.round(pct) + '%</span>' + (roas != null ? '<span style="font-size:10.5px;color:var(--text3)">· ROAS ' + aiqX(roas) + '</span>' : '') + '</div>' +
+        '<div style="height:8px;background:var(--bg3,#eef1f5);border-radius:5px;overflow:hidden"><div style="height:100%;width:' + Math.max(pct > 0 ? 2 : 0, pct) + '%;background:' + g.col + ';border-radius:5px"></div></div>' +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:6px;align-content:center">' + pubs + '</div>' +
+    '</div>';
+  }).join('');
+  var pierde = por.pierde ? por.pierde.c : 0;
+  el.innerHTML = '<div style="display:flex;height:14px;border-radius:7px;overflow:hidden;margin:8px 0 4px;background:var(--bg3,#eef1f5)">' + barra + '</div>' +
+    '<div style="font-size:10.5px;color:var(--text3);margin-bottom:2px">' + _aiqFmtF(D.desde) + ' – ' + _aiqFmtF(D.hasta) + ' · inversión total <b style="color:var(--text)">' + aiqPesos(tot) + '</b> · al costado de cada estado, las publicaciones donde más se invirtió (clic: abre en Mercado Libre)</div>' +
+    filas +
+    (pierde ? '<div style="font-size:11px;color:#dc2626;margin-top:6px"><b>' + aiqPesos(pierde) + '</b> fueron a publicaciones que hoy pierden plata (detalle en el Ranking).</div>' : '');
+};
+(function(){ if(document.getElementById('aiq-inv-css')) return; var st = document.createElement('style'); st.id = 'aiq-inv-css';
+  st.textContent = '@media(max-width:760px){.aiq-inv-row{grid-template-columns:1fr !important}}';
+  (document.head || document.documentElement).appendChild(st); })();
+try{ if (typeof _aiqRk !== 'undefined' && _aiqRk.datos) aiqRenderInversion(); }catch(e){}
 
 </script>
 </body>
