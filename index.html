@@ -873,7 +873,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v322 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v323 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -6413,8 +6413,11 @@ async function loadItemsFast(){
     const results=await Promise.all(chunks.map(chunk=>
       mlGet('/items?ids='+chunk.join(',')+'&include_attributes=all&attributes=id,title,price,status,sub_status,available_quantity,sold_quantity,thumbnail,pictures,category_id,listing_type_id,permalink,seller_custom_field,video_id,attributes,tags,shipping,catalog_listing,catalog_product_id,variations,health,date_created&_nocache='+nc)
     ));
-    allItems=[];
-    results.forEach(r=>{ r.forEach(x=>{if(x.code===200)allItems.push(x.body);}); });
+    // v323: si ML rechaza un lote (403/401…) no se rompe la carga ni se vacía la lista
+    const _fast=[]; let _fastFail=0;
+    results.forEach(r=>{ if(Array.isArray(r)) r.forEach(x=>{if(x && x.code===200)_fast.push(x.body);}); else _fastFail++; });
+    if(_fast.length || !allItems.length) allItems=_fast;
+    if(_fastFail) console.warn('[loadItemsFast] '+_fastFail+' lote(s) rechazados por ML', results.find(r=>!Array.isArray(r)));
     _updateItemsUI();
     // refreshHealthScores movido a loadItemsFull (se ejecuta cuando ya están TODOS los items)
   }catch(e){console.warn('[loadItemsFast]',e);}
@@ -6634,8 +6637,9 @@ async function loadItemsFull(){
     // Para 2386 items (120 chunks de 20) pasa de ~40s a ~8s.
     // Quitado _nocache para aprovechar el HTTP cache del Worker (datos a <1h son válidos).
     const CHUNK_SIZE = 20;
-    const PARALLEL = 5;
+    const PARALLEL = 4;   // v323: 4 en paralelo (antes 5)
     const chunks = [];
+    const _mlFail = [];   // v323: lotes que ML rechazó
     for(let i=0;i<allIds.length;i+=CHUNK_SIZE){
       chunks.push(allIds.slice(i, i+CHUNK_SIZE));
     }
@@ -6648,11 +6652,31 @@ async function loadItemsFull(){
           return r || [];
         }catch(e){ return []; }
       }));
-      results.forEach(r => { r.forEach(x=>{if(x.code===200)full.push(x.body);}); });
+      results.forEach((r,k) => { if(Array.isArray(r)) r.forEach(x=>{if(x && x.code===200)full.push(x.body);}); else _mlFail.push({ chunk:batch[k], err:r }); });
       // Pausa breve cada 5 batches (25 reqs) para no saturar ML
       if(i>0 && (i/PARALLEL)%5===0) await new Promise(r=>setTimeout(r,80));
     }
-    allItems=full;_updateItemsUI();
+    // v323: lotes rechazados → renovar el acceso y reintentar una vez; si siguen fallando,
+    // se conservan los datos anteriores de esas publicaciones (la lista no queda incompleta)
+    if(_mlFail.length){
+      const msg = (_mlFail[0].err && (_mlFail[0].err.message || _mlFail[0].err.error || _mlFail[0].err.status)) || 'sin detalle';
+      console.warn('[loadItemsFull] ML rechazó '+_mlFail.length+' lote(s):', _mlFail[0].err);
+      try{ if(typeof tryRefreshToken==='function') await tryRefreshToken(); }catch(e){}
+      const quedan=[];
+      for(const f of _mlFail){
+        await new Promise(r=>setTimeout(r,600));
+        let r2=null; try{ r2=await mlGet('/items?ids='+f.chunk.join(',')+'&include_attributes=all'); }catch(e){}
+        if(Array.isArray(r2)) r2.forEach(x=>{ if(x && x.code===200) full.push(x.body); }); else quedan.push(f);
+      }
+      if(quedan.length){
+        const prev=new Map((allItems||[]).map(i=>[i.id,i])); let kept=0;
+        quedan.forEach(f=>f.chunk.forEach(id=>{ if(prev.has(id)){ full.push(prev.get(id)); kept++; } }));
+        const n=quedan.reduce((a,f)=>a+f.chunk.length,0);
+        if(typeof showToast==='function') showToast('⚠ Mercado Libre no dejó actualizar '+n+' publicaciones ('+String(msg).slice(0,80)+'). '+(kept?'Se muestran con los datos anteriores. ':'')+'Si se repite, cerrá sesión y volvé a entrar.','warn');
+      }
+    }
+    if(full.length || !allItems.length) allItems=full;
+    _updateItemsUI();
     // Actualizar health scores con datos recién bajados de ML
     refreshHealthScores();
     console.log('[loadItemsFull]',allItems.length);
@@ -56817,7 +56841,7 @@ function _wjApplyLocal(applied){
       if(patch.regular_price!==undefined || patch.sale_price!==undefined){ var reg=+p.regular_price||0, sal=p.sale_price; p.price = (sal!=null && sal>0 && sal<reg) ? sal : reg; }
     }
   });
-  if(applied && applied.length && typeof _wseoScheduleCacheSave==='function') _wseoScheduleCacheSave();
+  if(applied && applied.length) window._wjCacheDirty=true;   // v323: se guarda una sola vez al terminar el trabajo
 }
 
 // Procesa un trabajo hasta terminarlo (o hasta que se cancele)
@@ -56856,6 +56880,7 @@ async function wjRun(job){
         : '⏳ El panel dejó de seguirlo; quedan '+j.pending+' pendientes que el Worker continúa solo';
       wiFloatEnd(key, msg, fin2 ? (j.fail?'warn':'success') : 'warn');
     }
+    if(window._wjCacheDirty && typeof _wseoScheduleCacheSave==='function'){ window._wjCacheDirty=false; _wseoScheduleCacheSave(); }   // v323
     if(fin2) wjShowResult(j.id, true);
   }
   return j;
@@ -57777,7 +57802,7 @@ function borrarMsjs(){
     var b=document.createElement('button');
     b.id='borrar-msjs-btn'; b.type='button'; b.innerHTML='<span style="font-size:14px;line-height:1;vertical-align:-2px;margin-right:5px">🧹</span>Borrar Mensajes';   // v322
     b.title='Quita todos los avisos de abajo a la derecha (no borra datos ni frena procesos)';
-    b.setAttribute('style', 'display:block;margin:6px 10px 0;padding:7px 12px;background:var(--bg4);border:1px solid var(--border2);border-radius:var(--rs);font-size:11px;color:var(--text2);cursor:pointer;width:calc(100% - 20px);text-align:center');
+    b.setAttribute('style', 'display:flex;align-items:center;justify-content:flex-start;gap:0;margin:6px 10px 0;padding:7px 12px;background:var(--bg4);border:1px solid var(--border2);border-radius:var(--rs);font-size:11.5px;font-weight:600;color:#fff;cursor:pointer;width:calc(100% - 20px);text-align:left');   // v323: blanco y a la izquierda
     b.onclick=function(e){ e.preventDefault(); borrarMsjs(); };
     cs.insertAdjacentElement('afterend', b);
   }
@@ -57858,6 +57883,124 @@ function pcHistEmoji(id, v){
   if(_pcLock.histId===id) pcEmojiSet(v||'');
   pcRenderHistory();
 }
+</script>
+<script>
+// ═══════════════════════════════════════════════════════════════════════════════
+// v323 · Herramienta 3: sincronizar en segundo plano y sin perder productos por pausas de la tienda
+//        · Cuenta Impala: comparación con el período anterior (meses que no estaban cargados)
+//        · Consumo KV: desglose real por tipo de dato y por ruta
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── 1) Sincronizar stock y precio (herramienta 3) ──
+// Antes: lotes de 20 y, si la tienda limitaba (HTTP 429) más allá de los reintentos del Worker,
+// el producto quedaba en «Error» y no se volvía a intentar. Ahora:
+//   · lotes de 10 con una pausa entre lotes,
+//   · al terminar una vuelta, los que quedaron con error TEMPORAL (429 / 5xx / sin respuesta)
+//     se reintentan solos después de esperar (30 s, 1, 2 y 4 min; hasta 5 vueltas),
+//   · los errores permanentes no se repiten y quedan en Historial,
+//   · todo se ve en la tarjeta de abajo a la izquierda: podés seguir usando el panel.
+var WI_LS_TEMP = /HTTP (429|5\d\d)|limit[oó]|reintent|no respond|cortad|timeout|52\d/i;
+function _wiLsCard(t, estado, color){
+  var proc=t.hechos, tot=t.total, pct=tot?Math.min(100, proc/tot*100):0;
+  if(typeof _wiFloatHtml!=='undefined') _wiFloatHtml.lsync='<div style="font-size:11px;color:#334155;line-height:1.5;margin-top:2px">'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;column-gap:10px">'+
+      '<span>Procesados: <b>'+proc+' / '+tot+'</b></span><span>Vuelta: <b>'+t.ronda+'</b></span>'+
+      '<span>Stock: <b>'+t.writes_ml+'</b> ML · <b>'+t.writes_woo+'</b> Woo</span><span>Precio: <b>'+t.writes+'</b> en Woo</span>'+
+      '<span style="color:'+(t.reintentar?'#b45309':'#64748b')+'">Para reintentar: <b>'+t.reintentar+'</b></span><span style="color:'+(t.perm?'#b91c1c':'#64748b')+'">Con error: <b>'+t.perm+'</b></span>'+
+    '</div><div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:'+(/pausa|espera/i.test(estado)?'#b45309':'#475569')+'">Estado: '+wiEsc(estado)+'</div></div>';
+  wiFloat('lsync', '🔄 SINCRONIZAR STOCK Y PRECIO', estado, pct, color||(/pausa|espera/i.test(estado)?'#d97706':'#059669'), 'woo-import');
+}
+window.wiLSyncRun = async function(){
+  var ids=(wiS._lsync||[]).slice(); wiModal(null);
+  if(!ids.length) return;
+  if(wiS.lsyncing){ showToast('Ya hay una sincronización en curso (abajo a la izquierda)','warn'); return; }
+  wiS.lsyncing=true;
+  var prog=document.getElementById('wi-lp-prog'); if(prog) prog.innerHTML='';
+  var t={ total:ids.length, hechos:0, ronda:1, writes_ml:0, writes_woo:0, writes:0, errors:0, reintentar:0, perm:0 };
+  var run_id='sel-'+Date.now().toString(36), SL=10, pend=ids.slice(), ESPERAS=[30,60,120,240], cortado=null;
+  try{
+    while(pend.length){
+      for(var i=0;i<pend.length;i+=SL){
+        var slice=pend.slice(i,i+SL), cursor=0;
+        _wiLsCard(t, '📦 stock · lote '+(Math.floor(i/SL)+1)+' de '+Math.ceil(pend.length/SL));
+        while(true){
+          var d=await wiApiPaced('/wsync/run', { ids:slice, simulate:false, confirm:'SINCRONIZAR', run_id:run_id, cursor:cursor, quiet:t.hechos>0||cursor>0, total:ids.length }, function(s){ _wiLsCard(t, '⏳ Pausa pedida por la tienda: sigo en '+s+' s'); });
+          if(d.error) throw new Error(d.message||d.error);
+          t.writes_ml+=(d.stats&&d.stats.writes_ml)||0; t.writes_woo+=(d.stats&&d.stats.writes_woo)||0;
+          cursor=d.cursor; if(d.done) break;
+        }
+        _wiLsCard(t, '💲 precio · lote '+(Math.floor(i/SL)+1)+' de '+Math.ceil(pend.length/SL)); cursor=0;
+        while(true){
+          var q=await wiApiPaced('/wsync/price-run', { ids:slice, simulate:false, confirm:'APLICAR', fallback:'igual', run_id:run_id, cursor:cursor, quiet:true, total:ids.length }, function(s){ _wiLsCard(t, '⏳ Pausa pedida por la tienda: sigo en '+s+' s'); });
+          if(q.error) throw new Error(q.message||q.error);
+          t.writes+=(q.stats&&q.stats.writes)||0;
+          cursor=q.cursor; if(q.done) break;
+        }
+        if(t.ronda===1) t.hechos=Math.min(t.total, t.hechos+slice.length);
+        if(i+SL<pend.length) await new Promise(function(r){ setTimeout(r, 1500); });   // respiro para la tienda
+      }
+      // ¿quiénes quedaron con error? temporales → otra vuelta; permanentes → quedan en Historial
+      var l=await wiApi('/wsync/links'); if(!l.error){ wiSetLinks(l); try{ wiLinksRender(); }catch(e){} }
+      var temp=[], perm=[];
+      ids.forEach(function(k){ var x=wiS.linkByMl[k]; if(x && x.state==='error'){ if(WI_LS_TEMP.test(x.last_result||'')) temp.push(k); else perm.push(k); } });
+      t.reintentar=temp.length; t.perm=perm.length;
+      pend=temp;
+      if(!pend.length) break;
+      if(t.ronda>=ESPERAS.length+1){ cortado='quedaron '+pend.length+' con la tienda limitando: probá de nuevo más tarde'; break; }
+      var w=ESPERAS[t.ronda-1], fin=Date.now()+w*1000;
+      while(Date.now()<fin){ _wiLsCard(t, '⏳ Pausa: la tienda limitó '+pend.length+' producto(s); reintento en '+Math.ceil((fin-Date.now())/1000)+' s'); await new Promise(function(r){ setTimeout(r, 1000); }); }
+      t.ronda++;
+    }
+    var okN=ids.filter(function(k){ var x=wiS.linkByMl[k]; return x && x.state!=='error'; }).length;
+    wiFloatEnd('lsync', (t.perm||cortado?'⚠ ':'✅ ')+'Sincronización terminada: '+okN+' de '+ids.length+' bien · stock: '+t.writes_ml+' cambios en ML y '+t.writes_woo+' en Woo · precio: '+t.writes+' en Woo'+(t.perm?' · '+t.perm+' con error (ver Historial)':'')+(cortado?' · '+cortado:''), (t.perm||cortado)?'warn':'success');
+  }catch(err){ wiFloatEnd('lsync','Sincronizar: '+err.message,'error'); }
+  finally{ wiS.lsyncing=false; if(_wiFloat.lsync) wiFloatEnd('lsync'); try{ var l2=await wiApi('/wsync/links'); if(!l2.error){ wiSetLinks(l2); wiLinksRender(); } wiStatusLoad(); }catch(e){} }
+};
+
+// ── 2) Cuenta Impala: la línea punteada del período anterior necesita esos meses cargados ──
+var _ctaCmpTried = {};
+async function _ctaCmpEnsure(){
+  var modo=(document.getElementById('cta-cmp-modo')||{}).value||'off';
+  if(modo==='off' || typeof _ctaPeriodoRango!=='function' || typeof _ctaPeriodoAnterior!=='function') return;
+  var pr=_ctaPeriodoRango(), an=_ctaPeriodoAnterior(pr[0], pr[1], modo==='yoy'?'yoy':'auto');
+  if(!an || !an[0] || !an[1]) return;
+  var meses=[], y=+an[0].slice(0,4), m=+an[0].slice(5,7), y1=+an[1].slice(0,4), m1=+an[1].slice(5,7);
+  while(y<y1 || (y===y1 && m<=m1)){ meses.push(y+'-'+String(m).padStart(2,'0')); m++; if(m>12){ m=1; y++; } if(meses.length>24) break; }
+  var faltan=meses.filter(function(ym){ return !_ctaState.loaded.has(ym) && !_ctaCmpTried[ym] && (!_ctaState.months || !_ctaState.months.length || _ctaState.months.indexOf(ym)>=0); });
+  if(!faltan.length) return;
+  faltan.forEach(function(ym){ _ctaCmpTried[ym]=1; });
+  await Promise.all(faltan.map(function(ym){ return _ctaFetchChunk(ym).catch(function(){}); }));
+  try{ ctaRenderKPIs(); }catch(e){}
+  try{ _ctaRenderChartV322(); }catch(e){}
+}
+var _ctaRenderChartV322 = (typeof ctaRenderChart==='function') ? ctaRenderChart : null;
+if(_ctaRenderChartV322) window.ctaRenderChart = function(){ var r=_ctaRenderChartV322.apply(this, arguments); try{ _ctaCmpEnsure(); }catch(e){} return r; };
+
+// ── 3) Consumo KV: desglose real (Worker v155) ──
+(function(){
+  var o=window.kvUsageOpenDetails; if(typeof o!=='function' || o._v323) return;
+  var w=async function(){
+    var r=await o.apply(this, arguments);
+    try{
+      var d=await (await fetch(WORKER+'/kv/usage')).json(), b=d&&d.breakdown, m=document.getElementById('kv-usage-modal');
+      if(!m) return r;
+      var box=document.createElement('div');
+      box.style.cssText='background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:11px 13px;margin:0 14px 10px;font-size:11.5px;color:#7c2d12';
+      if(!b){ box.innerHTML='<b>Desglose real:</b> disponible con el Worker v155 (empieza a contar desde que lo subís).'; }
+      else {
+        var top=function(obj){ return Object.keys(obj||{}).map(function(k){ return [k, obj[k]]; }).sort(function(a,c){ return c[1]-a[1]; }).slice(0,10); };
+        var tbl=function(t, rows){ return '<div style="font-weight:700;margin:6px 0 3px">'+t+'</div>'+rows.map(function(x){ return '<div style="display:flex;justify-content:space-between;gap:10px;border-bottom:1px dashed #fed7aa;padding:2px 0"><span style="font-family:monospace">'+String(x[0]).replace(/</g,'&lt;')+'</span><b>'+x[1]+'</b></div>'; }).join(''); };
+        box.innerHTML='<div style="font-size:12.5px;font-weight:800">🔎 Qué escribió hoy en KV (contador real del Worker)</div><div style="color:#9a3412">'+b.total+' escrituras desde que se subió el Worker v155 · actualizado '+(b.updated?new Date(b.updated).toLocaleTimeString('es-AR'):'—')+'</div>'+
+          tbl('Por tipo de dato', top(b.counts))+tbl('Por ruta que lo provocó', top(b.routes));
+      }
+      box.style.margin='0 0 10px';
+      var tips=Array.prototype.slice.call(m.querySelectorAll('.modal-bd > div > div')).find(function(x){ return /Optimizaciones aplicadas/.test(x.textContent); });
+      if(tips) tips.parentNode.insertBefore(box, tips); else { var bd=m.querySelector('.modal-bd > div')||m; bd.appendChild(box); }
+    }catch(e){}
+    return r;
+  };
+  w._v323=true; window.kvUsageOpenDetails=w;
+})();
 </script>
 </body>
 </html>
