@@ -873,7 +873,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v323 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v324 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -58001,6 +58001,94 @@ if(_ctaRenderChartV322) window.ctaRenderChart = function(){ var r=_ctaRenderChar
   };
   w._v323=true; window.kvUsageOpenDetails=w;
 })();
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// v323 · Importar a Woo → vinculados → «Actualizar desde ML»: aplicar en SEGUNDO PLANO
+// La vista previa sigue en la ventana. Al tocar «Aplicar en Woo» la ventana se cierra y el
+// trabajo sigue en la tarjeta de abajo a la izquierda (podés seguir usando el panel):
+//   · un producto por vez, con pausa entre productos,
+//   · si la tienda limita (429 / 5xx / sin respuesta) ese producto se reintenta después,
+//     esperando 30 s, 1, 2 y 4 minutos (hasta 5 vueltas), sin repetir los que ya salieron bien,
+//   · los errores permanentes no se repiten; al final ves el detalle y podés reintentarlos.
+// ═══════════════════════════════════════════════════════════════════════════════
+var WI_UPD_TEMP = /HTTP (429|5\d\d)|limit[oó]|reintent|no respond|cortad|timeout|52\d|Failed to fetch|504/i;
+var _wiUpdLast = null;
+function _wiUpdCard(t, estado){
+  var proc=t.ok+t.fail+t.sin, pct=t.total?Math.min(100, proc/t.total*100):0;
+  if(typeof _wiFloatHtml!=='undefined') _wiFloatHtml.wupd='<div style="font-size:11px;color:#334155;line-height:1.5;margin-top:2px">'+
+    '<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><b>'+wiEsc(t.campos)+'</b></div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;column-gap:10px">'+
+      '<span>Procesados: <b>'+proc+' / '+t.total+'</b></span><span>Vuelta: <b>'+t.ronda+'</b></span>'+
+      '<span style="color:#15803d">Actualizados: <b>'+t.ok+'</b></span><span>Sin cambios: <b>'+t.sin+'</b></span>'+
+      '<span style="color:'+(t.retry?'#b45309':'#64748b')+'">Para reintentar: <b>'+t.retry+'</b></span><span style="color:'+(t.fail?'#b91c1c':'#64748b')+'">Con error: <b>'+t.fail+'</b></span>'+
+    '</div><div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:'+(/pausa|espera/i.test(estado)?'#b45309':'#475569')+'">Estado: '+wiEsc(estado)+'</div></div>';
+  wiFloat('wupd', '📥 ACTUALIZAR DESDE ML', estado, pct, /pausa|espera/i.test(estado)?'#d97706':'#2563eb', 'woo-import');
+}
+var _wiUpdRunV322 = wiUpdRun;
+window.wiUpdRun = async function(sim){
+  if(sim) return _wiUpdRunV322.apply(this, arguments);          // vista previa: igual que antes
+  var f=wiUpdFields(); if(!Object.keys(f).length){ showToast('Elegí al menos un dato','warn'); return; }
+  var ids=(wiS._updIds||[]).slice(); if(!ids.length) return;
+  if(wiS.updRunning){ showToast('Ya hay una actualización en curso (abajo a la izquierda)','warn'); return; }
+  var nom={ price:'precio', dims:'medidas', images:'fotos', attributes:'atributos', description:'descripción', title:'título' };
+  var campos=Object.keys(f).map(function(k){ return nom[k]||k; }).join(', ');
+  if(!confirm('¿Aplicar en Woo ('+campos+') a '+ids.length+' producto(s)?\n\nSigue en segundo plano: podés seguir usando el panel.')) return;
+  wiModal(null);
+  wiS.updRunning=true;
+  var t={ total:ids.length, ok:0, sin:0, fail:0, retry:0, ronda:1, campos:'Copiar de ML a Woo: '+campos }, res={}, pend=ids.slice(), ESPERAS=[30,60,120,240];
+  try{
+    while(pend.length){
+      var otra=[];
+      for(var i=0;i<pend.length;i++){
+        var id=pend[i];
+        _wiUpdCard(t, 'Actualizando '+id+' ('+(i+1)+' de '+pend.length+')');
+        var d=await wiApi('/wsync/update', { ml_item_id:id, fields:f, simulate:false });
+        if(d && !d.error){ res[id]={ ok:true, diff:d.diff||[] }; if((d.diff||[]).length) t.ok++; else t.sin++; }
+        else {
+          var msg=String((d&&(d.message||d.error))||'sin respuesta');
+          if(WI_UPD_TEMP.test(msg) && t.ronda<=ESPERAS.length){ otra.push(id); res[id]={ ok:false, temp:true, error:msg }; }
+          else { res[id]={ ok:false, error:msg }; t.fail++; }
+        }
+        t.retry=otra.length;
+        await new Promise(function(r){ setTimeout(r, 700); });   // respiro para la tienda
+      }
+      pend=otra;
+      if(!pend.length) break;
+      var w=ESPERAS[t.ronda-1], fin=Date.now()+w*1000;
+      while(Date.now()<fin){ _wiUpdCard(t, '⏳ Pausa: la tienda limitó '+pend.length+' producto(s); reintento en '+Math.ceil((fin-Date.now())/1000)+' s'); await new Promise(function(r){ setTimeout(r, 1000); }); }
+      t.ronda++;
+    }
+    // los que siguieron limitados después de todas las vueltas quedan como error
+    Object.keys(res).forEach(function(k){ if(res[k].temp){ res[k].temp=false; t.fail++; } });
+    _wiUpdLast={ fields:f, campos:campos, res:res, t:t };
+    wiFloatEnd('wupd', (t.fail?'⚠ ':'✅ ')+'Actualizar desde ML terminado: '+t.ok+' actualizados, '+t.sin+' sin cambios'+(t.fail?', '+t.fail+' con error':'')+' de '+t.total, t.fail?'warn':'success');
+    if(t.fail) wiUpdShowResult();
+  }catch(err){ wiFloatEnd('wupd','Actualizar desde ML: '+err.message,'error'); }
+  finally{ wiS.updRunning=false; if(_wiFloat.wupd) wiFloatEnd('wupd'); try{ wiLinksLoad(); }catch(e){} }
+};
+function wiUpdShowResult(){
+  var L=_wiUpdLast; if(!L) return;
+  var rows=[], fails=[];
+  Object.keys(L.res).forEach(function(id){ var r=L.res[id];
+    if(!r.ok){ fails.push(id); rows.push('<tr style="border-top:1px solid #f1f5f9"><td style="padding:4px 6px;font-family:var(--mono);font-size:10.5px">'+id+'</td><td colspan="3" style="padding:4px 6px;color:#b91c1c">'+wiEsc(r.error)+'</td></tr>'); }
+    else (r.diff||[]).forEach(function(x){ rows.push('<tr style="border-top:1px solid #f1f5f9"><td style="padding:4px 6px;font-family:var(--mono);font-size:10.5px">'+id+'</td><td style="padding:4px 6px">'+wiEsc(x.campo)+'</td><td style="padding:4px 6px;color:#94a3b8">'+wiEsc(x.antes)+'</td><td style="padding:4px 6px;font-weight:600">'+wiEsc(x.despues)+'</td></tr>'); });
+  });
+  wiModal('<div style="'+WI_M.title+'">'+(L.t.fail?'⚠ Actualizar desde ML: terminado con errores':'✅ Actualizar desde ML: terminado')+'</div>'+
+    '<div style="'+WI_M.sub+'">'+wiEsc(L.campos)+' · '+L.t.ok+' actualizados · '+L.t.sin+' sin cambios · '+L.t.fail+' con error</div>'+
+    '<div style="max-height:320px;overflow:auto;border:1px solid #e2e8f0;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:11.5px;color:#1e293b"><tbody>'+(rows.join('')||'<tr><td style="padding:8px;color:#64748b">Sin cambios.</td></tr>')+'</tbody></table></div>'+
+    '<div style="display:flex;gap:8px;margin-top:12px"><button onclick="wiModal(null)" style="'+WI_M.cancel+';flex:1">Cerrar</button>'+
+    (fails.length?'<button onclick="wiUpdRetry()" style="flex:1;padding:10px;border:none;background:#2563eb;color:#fff;border-radius:9px;font-weight:700;cursor:pointer">🔁 Reintentar los '+fails.length+' con error</button>':'')+'</div>', true);
+}
+function wiUpdRetry(){
+  var L=_wiUpdLast; if(!L) return;
+  var ids=Object.keys(L.res).filter(function(k){ return !L.res[k].ok; }); if(!ids.length) return;
+  wiS._updIds=ids;
+  // reabrir el formulario con los mismos datos tildados para que confirmes
+  wiUpdOpen(ids);
+  ['price','dims','images','attrs','desc','title'].forEach(function(k){ var e=document.getElementById('wu-'+k); if(e) e.checked=false; });
+  var map={ price:'wu-price', dims:'wu-dims', images:'wu-images', attributes:'wu-attrs', description:'wu-desc', title:'wu-title' };
+  Object.keys(L.fields).forEach(function(k){ var e=document.getElementById(map[k]); if(e) e.checked=true; });
+}
 </script>
 </body>
 </html>
