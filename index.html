@@ -873,7 +873,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v324 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v325 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -58089,6 +58089,319 @@ function wiUpdRetry(){
   var map={ price:'wu-price', dims:'wu-dims', images:'wu-images', attributes:'wu-attrs', description:'wu-desc', title:'wu-title' };
   Object.keys(L.fields).forEach(function(k){ var e=document.getElementById(map[k]); if(e) e.checked=true; });
 }
+</script>
+<script>
+// ═══════════════════════════════════════════════════════════════════════════════
+// v325 · Procesos contra la tienda Woo: Cancelar, ritmo lento, sin escrituras vacías,
+//        un solo proceso a la vez (bloqueo compartido con el cron del Worker v156)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── 1) Botón «⏹ Cancelar» en las tarjetas flotantes ──
+// Cada proceso registra cómo se cancela. La tarjeta entera lleva a la sección (onclick):
+// el botón corta la propagación para no cambiar de sección al tocarlo.
+var _WI_CANCEL_TOOL2 = /^(run|img|dup|dupload|dupfoto|load|stock|precio|lprecios|regla)$/;
+function _wiCancelFor(key){
+  if(key==='wupd') return function(){ wiS.updCancel=true; };
+  if(key==='wupd-prev') return function(){ wiS.updPrevStop=true; };
+  if(key==='lsync') return function(){ wiS.lsyncCancel=true; };
+  if(/^wj-/.test(key)) return function(){ wjCancelCard(key.slice(3)); };
+  if(_WI_CANCEL_TOOL2.test(key)) return function(){ wiS.cancel=true; };
+  return null;
+}
+function wiFloatCancel(ev, key){
+  if(ev){ ev.stopPropagation(); ev.preventDefault(); }
+  var f=_wiCancelFor(key); if(!f) return;
+  f();
+  var c=_wiFloat[key]; if(c){ c._cancelando=true; wiFloatPaint(); }
+}
+async function wjCancelCard(id){
+  if(!confirm('¿Cancelar lo que queda pendiente de este trabajo? Lo ya aplicado no se deshace.')) return;
+  await wiApi('/wjob/cancel', { id:id });
+}
+window.wiFloatPaint = function(){
+  var el=document.getElementById('wi-float');
+  var keys=Object.keys(_wiFloat);
+  if(!keys.length){ if(el) el.remove(); return; }
+  if(!el){ el=document.createElement('div'); el.id='wi-float'; document.body.appendChild(el); }
+  el.innerHTML=keys.map(function(k){ var f=_wiFloat[k], h=(typeof _wiFloatHtml!=='undefined')?_wiFloatHtml[k]:null, can=!!_wiCancelFor(k);
+    return '<div class="wi-fcard" style="border-color:'+f.color+(h?';width:340px':'')+'" title="'+(f.section?'Ir a la sección':'')+'" onclick="'+(f.section?'try{showSection(\''+f.section+'\')}catch(e){}':'')+'">'+
+      '<div style="display:flex;gap:9px;align-items:'+(h?'flex-start':'center')+'"><span class="wi-spin" style="border-top-color:'+f.color+';width:16px;height:16px'+(h?';margin-top:2px':'')+'"></span><div style="min-width:0;flex:1">'+
+      '<div style="display:flex;gap:6px;align-items:center"><div style="flex:1;min-width:0;font-weight:800;font-size:12.5px;color:'+f.color+';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+f.title+(f.pct!=null?' · '+Math.round(f.pct)+'%':'')+'</div>'+
+      (can?'<button type="button" onclick="wiFloatCancel(event,\''+k+'\')" title="Cortar el proceso" style="flex:none;font-size:11px;font-weight:700;padding:2px 8px;border-radius:7px;border:1px solid #fecaca;background:#fff;color:#b91c1c;cursor:pointer"'+(f._cancelando?' disabled':'')+'>'+(f._cancelando?'Cancelando…':'⏹ Cancelar')+'</button>':'')+'</div>'+
+      (h ? h : '<div style="font-size:11px;color:#334155;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+f.text+'</div>')+
+      '<div class="wi-pbar" style="height:5px;margin-top:4px"><div class="wi-pbar-in'+(f.pct==null?' wi-pbar-ind':'')+'" style="'+(f.pct!=null?'width:'+Math.max(2,f.pct)+'%;':'')+'background:'+f.color+'"></div></div></div></div></div>'; }).join('');
+};
+// mantener la marca «Cancelando…» aunque el proceso vuelva a pintar su tarjeta
+(function(){ var o=window.wiFloat; if(typeof o!=='function' || o._v325) return; var w=function(key){ var was=_wiFloat[key]&&_wiFloat[key]._cancelando; var r=o.apply(this, arguments); if(was && _wiFloat[key]){ _wiFloat[key]._cancelando=true; wiFloatPaint(); } return r; }; w._v325=true; window.wiFloat=w; })();
+
+// ── 2) Un solo proceso masivo contra Woo a la vez (panel + cron del Worker) ──
+var _wooProc=null;
+async function wooLockTake(who, label){
+  if(_wooProc && _wooProc.who!==who){ alert('Hay otro proceso contra la tienda en curso: «'+_wooProc.label+'».\n\nEsperá a que termine o cancelalo desde su tarjeta (abajo a la izquierda).'); return false; }
+  var force=false, g=await wiApi('/wsync/lock');
+  if(g && !g.error){
+    var l=g.lock, mio=l && l.who==='panel:'+who;
+    if(l && !mio && String(l.who).indexOf('panel')===0){ alert('Hay otro proceso contra la tienda en curso: «'+(l.label||'proceso')+'» (desde este u otro navegador).\n\nEsperá a que termine.'); return false; }
+    if((l && String(l.who).indexOf('cron')===0) || g.cron_stock || g.cron_price){
+      var q=(g.cron_stock?'la sincronización automática de stock':'')+(g.cron_stock&&g.cron_price?' y ':'')+(g.cron_price?'el precio automático':'')||(l&&l.label)||'un proceso automático';
+      if(!confirm('Ahora está trabajando '+q+' contra la tienda.\n\nSi seguís, el proceso automático se pausa mientras corre «'+label+'» y retoma solo al terminar.\n\n¿Seguir?')) return false;
+      force=true;
+    }
+    var d=await wiApi('/wsync/lock', { who:who, label:label, ttl_s:600, force:force });
+    if(d && d.ok===false){ alert('Hay otro proceso contra la tienda en curso: «'+((d.held&&d.held.label)||'proceso')+'».'); return false; }
+  }
+  _wooProc={ who:who, label:label, t:setInterval(function(){ wiApi('/wsync/lock', { who:who, label:label, ttl_s:600, force:true }); }, 240000) };
+  return true;
+}
+function wooLockRelease(who){
+  if(_wooProc && _wooProc.who===who){ clearInterval(_wooProc.t); _wooProc=null; }
+  try{ wiApi('/wsync/unlock', { who:who }); }catch(e){}
+}
+
+// ── 3) «Actualizar desde ML»: precio destildado por defecto + aviso con 0 % ──
+var _wiUpdOpenV324 = wiUpdOpen;
+window.wiUpdOpen = function(ids){
+  var r=_wiUpdOpenV324.apply(this, arguments);
+  var cb=document.getElementById('wu-price'); if(!cb) return r;
+  cb.checked=false;   // v325: viene destildado (antes pisaba la regla general con el precio de ML)
+  var pct=document.getElementById('wu-pct'), disc=document.getElementById('wu-disc');
+  var av=document.createElement('div'); av.id='wu-price-warn';
+  av.style.cssText='display:none;margin:0 0 8px 26px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:8px;padding:7px 10px;font-size:12px;font-weight:600';
+  av.textContent='⚠ Esto pone el mismo precio que ML e ignora la regla general.';
+  var grid=pct && pct.closest('div[style*="grid"]'); if(grid && grid.parentNode) grid.parentNode.insertBefore(av, grid.nextSibling);
+  var chk=function(){ av.style.display = cb.checked && (+(pct&&pct.value)||0)===0 && (+(disc&&disc.value)||0)===0 ? '' : 'none'; };
+  [cb,pct,disc].forEach(function(e){ if(e){ e.addEventListener('change', chk); e.addEventListener('input', chk); } });
+  chk();
+  return r;
+};
+
+// ── 4) «Actualizar desde ML»: vista previa y aplicación ──
+var WI_UPD_PAUSA_MS = 2500;        // pausa entre productos
+var WI_UPD_BLOQUE = 20;            // cada cuántos productos se hace una pausa larga
+var WI_UPD_BLOQUE_PAUSA_S = 60;    // pausa larga
+var WI_UPD_FRENO_S = 300;          // si más de la mitad de los últimos 10 dio 429: frenar 5 minutos
+var WI_UPD_ESPERAS = [30, 60, 120, 240];   // esperas entre vueltas de reintento
+var WI_UPD_TEMP = /HTTP (429|5\d\d)|limit[oó]|no respond|cortad|timeout|52\d|Failed to fetch/i;
+var _wiUpdLast=null;
+function _wiUpdNom(f){ var nom={ price:'precio', dims:'medidas/peso', images:'fotos', attributes:'atributos', description:'descripción', title:'título' }; return Object.keys(f).map(function(k){ return nom[k]||k; }).join(', '); }
+async function _wiUpdSleep(seg, flag, onTick){
+  var fin=Date.now()+seg*1000;
+  while(Date.now()<fin){ if(wiS[flag]) return false; if(onTick) onTick(Math.ceil((fin-Date.now())/1000)); await new Promise(function(r){ setTimeout(r, Math.min(1000, Math.max(50, fin-Date.now()))); }); }
+  return !wiS[flag];
+}
+function _wiUpdCard(t, estado){
+  var proc=t.ok+t.sin+t.fail, pct=t.total?Math.min(100, proc/t.total*100):0;
+  _wiFloatHtml.wupd='<div style="font-size:11px;color:#334155;line-height:1.5;margin-top:2px">'+
+    '<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><b>Copiar de ML a Woo: '+wiEsc(t.campos)+'</b></div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;column-gap:10px">'+
+      '<span>Procesados: <b>'+proc+' / '+t.total+'</b></span><span>Vuelta: <b>'+t.ronda+'</b></span>'+
+      '<span style="color:#15803d">Actualizados: <b>'+t.ok+'</b></span><span>Sin cambios: <b>'+t.sin+'</b></span>'+
+      '<span style="color:'+(t.retry?'#b45309':'#64748b')+'">Para reintentar: <b>'+t.retry+'</b></span><span style="color:'+(t.fail?'#b91c1c':'#64748b')+'">Con error: <b>'+t.fail+'</b></span>'+
+    '</div><div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:'+(/pausa|frena/i.test(estado)?'#b45309':'#475569')+'">Estado: '+wiEsc(estado)+'</div></div>';
+  wiFloat('wupd', '📥 ACTUALIZAR DESDE ML', estado, pct, /pausa|frena/i.test(estado)?'#d97706':'#2563eb', 'woo-import');
+}
+window.wiUpdRun = async function(sim){
+  var f=wiUpdFields(); if(!Object.keys(f).length){ showToast('Elegí al menos un dato','warn'); return; }
+  var ids=(wiS._updIds||[]).slice(); if(!ids.length) return;
+  return sim ? _wiUpdPreview(ids, f) : _wiUpdApply(ids, f);
+};
+
+// Vista previa: muestra sólo lo que cambia; se puede detener
+async function _wiUpdPreview(ids, f){
+  var out=document.getElementById('wu-prev'); if(!out) return;
+  if(wiS.updRunning){ showToast('Hay una actualización aplicándose: esperá a que termine','warn'); return; }
+  wiS.updPrevStop=false;
+  var go=document.getElementById('wu-go'); if(go){ go.disabled=true; go.style.opacity='.5'; }
+  var filas=[], sin=0, err=0, notas=0, n=0;
+  var pinta=function(estado){
+    out.innerHTML='<div style="display:flex;gap:8px;align-items:center;font-size:12px;font-weight:700;margin-bottom:4px">'+estado+
+      (estado.indexOf('Vista previa (no')===0?'':'<button type="button" onclick="wiS.updPrevStop=true" style="margin-left:auto;font-size:11px;padding:3px 9px;border:1px solid #fecaca;background:#fff;color:#b91c1c;border-radius:7px;cursor:pointer">⏹ Detener</button>')+'</div>'+
+      '<div style="font-size:11.5px;color:#475569;margin-bottom:6px">Con cambios: <b>'+(n-sin-err)+'</b> · <b>'+sin+'</b> sin cambios'+(err?' · <b style="color:#b91c1c">'+err+'</b> sin poder leer':'')+(notas?' · '+notas+' sin medidas en ML':'')+'</div>'+
+      (filas.length?'<div style="max-height:260px;overflow:auto;border:1px solid #e2e8f0;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:11.5px"><tbody>'+filas.join('')+'</tbody></table></div>':'');
+  };
+  for(var i=0;i<ids.length;i++){
+    if(wiS.updPrevStop) break;
+    pinta('Calculando '+(i+1)+' / '+ids.length+'…');
+    var d=await wiApi('/wsync/update', { ml_item_id:ids[i], fields:f, simulate:true });
+    n++;
+    if(d && !d.error){
+      var df=(d.diff||[]); if(d.notas&&d.notas.length) notas++;
+      if(!df.length) sin++;
+      df.forEach(function(x){ filas.push('<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:4px 6px;font-family:var(--mono);font-size:10.5px">'+ids[i]+'</td><td style="padding:4px 6px">'+wiEsc(x.campo)+'</td><td style="padding:4px 6px;color:#94a3b8">'+wiEsc(x.antes)+'</td><td style="padding:4px 6px;font-weight:600">'+wiEsc(x.despues)+'</td></tr>'); });
+    } else {
+      err++; var msg=String((d&&(d.error||d.message))||'sin respuesta');
+      filas.push('<tr><td style="padding:4px 6px">'+ids[i]+'</td><td colspan="3" style="color:#b91c1c;padding:4px 6px">'+wiEsc(msg)+'</td></tr>');
+      if(d && (d.temp || WI_UPD_TEMP.test(msg))){ var ok=await _wiUpdSleep(Math.min(120, d.retry_after||30), 'updPrevStop', function(s){ pinta('⏳ La tienda pidió pausa: sigo en '+s+' s'); }); if(!ok) break; }
+    }
+    await _wiUpdSleep(1, 'updPrevStop');
+  }
+  pinta('Vista previa (no se aplicó nada)'+(wiS.updPrevStop?' · detenida en '+n+' de '+ids.length:''));
+  wiS.updPrevStop=false;
+  if(go){ go.disabled=false; go.style.opacity='1'; }
+}
+
+// Aplicar: en segundo plano, lento, con Cancelar y sin escribir lo que no cambia
+async function _wiUpdApply(ids, f){
+  if(wiS.updRunning){ showToast('Ya hay una actualización en curso (abajo a la izquierda)','warn'); return; }
+  var campos=_wiUpdNom(f);
+  if(!confirm('¿Aplicar en Woo ('+campos+') a '+ids.length+' producto(s)?\n\nVa despacio para que la tienda no frene (≈'+Math.ceil(ids.length*(WI_UPD_PAUSA_MS/1000+1)/60)+' min o más). Sigue en segundo plano y lo podés cancelar desde su tarjeta.')) return;
+  if(!(await wooLockTake('actualizar-ml', 'Actualizar desde ML'))) return;
+  wiModal(null);
+  wiS.updRunning=true; wiS.updCancel=false;
+  var t={ total:ids.length, ok:0, sin:0, fail:0, retry:0, ronda:1, campos:campos }, res={}, ronda=ids.slice(), retryQ=[], hechos={}, ultimos=[], cancelado=false;
+  try{
+    while(ronda.length){
+      retryQ=[];
+      for(var i=0;i<ronda.length;i++){
+        if(wiS.updCancel){ cancelado=true; break; }
+        var id=ronda[i];
+        _wiUpdCard(t, 'Actualizando '+id+' ('+(i+1)+' de '+ronda.length+(t.ronda>1?', reintento':'')+')');
+        var d=await wiApi('/wsync/update', { ml_item_id:id, fields:f, simulate:false });
+        var es429=false, ra=0;
+        if(d && !d.error){ hechos[id]=1; res[id]={ ok:true, diff:d.diff||[] }; if((d.diff||[]).length) t.ok++; else t.sin++; }
+        else {
+          var msg=String((d&&(d.error||d.message))||'sin respuesta');
+          if(d && (d.temp || WI_UPD_TEMP.test(msg))){ es429=true; ra=+(d&&d.retry_after)||0; retryQ.push(id); res[id]={ ok:false, temp:true, error:msg }; }
+          else { hechos[id]=1; res[id]={ ok:false, error:msg }; t.fail++; }
+        }
+        t.retry=retryQ.length;
+        ultimos.push(es429?1:0); if(ultimos.length>10) ultimos.shift();
+        var lim=ultimos.reduce(function(a,b){ return a+b; },0);
+        var ok=true;
+        if(ra>0) ok=await _wiUpdSleep(ra, 'updCancel', function(s){ _wiUpdCard(t, '⏳ Pausa: la tienda pidió esperar '+s+' s (Retry-After)'); });
+        else if(ultimos.length>=6 && lim*2>ultimos.length){ ok=await _wiUpdSleep(WI_UPD_FRENO_S, 'updCancel', function(s){ _wiUpdCard(t, '⏳ Frenado: la tienda limitó '+lim+' de los últimos '+ultimos.length+'. Sigo en '+s+' s'); }); ultimos=[]; }
+        else if((i+1)%WI_UPD_BLOQUE===0 && i+1<ronda.length) ok=await _wiUpdSleep(WI_UPD_BLOQUE_PAUSA_S, 'updCancel', function(s){ _wiUpdCard(t, '⏳ Pausa cada '+WI_UPD_BLOQUE+' productos: sigo en '+s+' s'); });
+        else ok=await _wiUpdSleep(WI_UPD_PAUSA_MS/1000, 'updCancel');
+        if(!ok){ cancelado=true; break; }
+      }
+      if(cancelado || !retryQ.length) break;
+      if(t.ronda>WI_UPD_ESPERAS.length){ retryQ.forEach(function(k){ res[k].temp=false; res[k].error='La tienda siguió limitando después de '+WI_UPD_ESPERAS.length+' esperas: '+res[k].error; hechos[k]=1; t.fail++; }); retryQ=[]; t.retry=0; break; }
+      var okW=await _wiUpdSleep(WI_UPD_ESPERAS[t.ronda-1], 'updCancel', function(s){ _wiUpdCard(t, '⏳ Pausa: '+retryQ.length+' para reintentar; sigo en '+s+' s'); });
+      if(!okW){ cancelado=true; break; }
+      ronda=retryQ.slice(); t.ronda++;
+    }
+    var pendientes=ids.filter(function(k){ return !hechos[k]; });
+    _wiUpdLast={ fields:f, campos:campos, res:res, t:t, pendientes:pendientes, cancelado:cancelado };
+    if(cancelado) wiFloatEnd('wupd', '⏹ Actualizar desde ML cancelado: '+(t.ok+t.sin+t.fail)+' procesados ('+t.ok+' actualizados, '+t.sin+' sin cambios, '+t.fail+' con error) · '+pendientes.length+' pendientes', 'warn');
+    else wiFloatEnd('wupd', (t.fail?'⚠ ':'✅ ')+'Actualizar desde ML terminado: '+t.ok+' actualizados, '+t.sin+' sin cambios'+(t.fail?', '+t.fail+' con error':'')+' de '+t.total, t.fail?'warn':'success');
+    if(cancelado || t.fail) wiUpdShowResult();
+  }catch(err){ wiFloatEnd('wupd','Actualizar desde ML: '+err.message,'error'); }
+  finally{ wiS.updRunning=false; wiS.updCancel=false; if(_wiFloat.wupd) wiFloatEnd('wupd'); wooLockRelease('actualizar-ml'); try{ wiLinksLoad(); }catch(e){} }
+}
+window.wiUpdShowResult = function(){
+  var L=_wiUpdLast; if(!L) return;
+  var rows=[], fails=Object.keys(L.res).filter(function(k){ return !L.res[k].ok && !L.res[k].temp; });
+  fails.forEach(function(id){ rows.push('<tr style="border-top:1px solid #f1f5f9"><td style="padding:4px 6px;font-family:var(--mono);font-size:10.5px">'+id+'</td><td style="padding:4px 6px;color:#b91c1c">'+wiEsc(L.res[id].error)+'</td></tr>'); });
+  var p=L.pendientes||[], t=L.t;
+  var box=function(n,l,c){ return '<div style="border:1px solid #e2e8f0;border-radius:9px;padding:6px;text-align:center"><div style="font-size:18px;font-weight:800;color:'+c+'">'+n+'</div><div style="font-size:10.5px;color:#64748b">'+l+'</div></div>'; };
+  wiModal('<div style="'+WI_M.title+'">'+(L.cancelado?'⏹ Actualizar desde ML: cancelado':(t.fail?'⚠ Actualizar desde ML: terminado con errores':'✅ Actualizar desde ML: terminado'))+'</div>'+
+    '<div style="'+WI_M.sub+'">Copiar de ML a Woo: '+wiEsc(L.campos)+'</div>'+
+    '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:10px">'+box(t.ok+t.sin+t.fail,'Procesados','#334155')+box(t.ok,'Actualizados','#15803d')+box(t.sin,'Sin cambios','#475569')+box(p.length,'Pendientes',p.length?'#b45309':'#64748b')+box(t.fail,'Con error',t.fail?'#b91c1c':'#64748b')+'</div>'+
+    (rows.length?'<div style="max-height:260px;overflow:auto;border:1px solid #e2e8f0;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:11.5px;color:#1e293b"><tbody>'+rows.join('')+'</tbody></table></div>':'')+
+    '<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button onclick="wiModal(null)" style="'+WI_M.cancel+';flex:1">Cerrar</button>'+
+    (p.length?'<button onclick="wiUpdReopen(\'pend\')" style="flex:1;padding:10px;border:none;background:#2563eb;color:#fff;border-radius:9px;font-weight:700;cursor:pointer">▶ Reanudar los '+p.length+' pendientes</button>':'')+
+    (fails.length?'<button onclick="wiUpdReopen(\'fail\')" style="flex:1;padding:10px;border:1px solid #2563eb;background:#eff6ff;color:#1d4ed8;border-radius:9px;font-weight:700;cursor:pointer">🔁 Reintentar los '+fails.length+' con error</button>':'')+'</div>', true);
+};
+function wiUpdReopen(cual){
+  var L=_wiUpdLast; if(!L) return;
+  var ids = cual==='pend' ? (L.pendientes||[]) : Object.keys(L.res).filter(function(k){ return !L.res[k].ok && !L.res[k].temp; });
+  if(!ids.length) return;
+  wiS._updIds=ids; wiUpdOpen(ids);
+  ['price','dims','images','attrs','desc','title'].forEach(function(k){ var e=document.getElementById('wu-'+k); if(e) e.checked=false; });
+  var map={ price:'wu-price', dims:'wu-dims', images:'wu-images', attributes:'wu-attrs', description:'wu-desc', title:'wu-title' };
+  Object.keys(L.fields).forEach(function(k){ var e=document.getElementById(map[k]); if(e){ e.checked=true; e.dispatchEvent(new Event('change')); } });
+  if(L.fields.price){ var p=document.getElementById('wu-pct'), d=document.getElementById('wu-disc'); if(p) p.value=L.fields.price.pct; if(d) d.value=L.fields.price.disc; }
+}
+window.wiUpdRetry = function(){ wiUpdReopen('fail'); };
+
+// ── 5) Sincronizar stock y precio (herramienta 3): pausas de la tienda sin «Error», Cancelar, bloqueo ──
+// Con el Worker v156, si la tienda pide pausa la tanda vuelve con wait:true y NO marca error:
+// acá se espera (Retry-After o 30 s, 1, 2, 4 min) y se repite la misma tanda; después de la última
+// espera se manda «final» y recién ahí lo que falle queda en error.
+async function _wiLsCall(path, body, t, paso){
+  var esperas=[30,60,120,240], k=0;
+  while(true){
+    if(wiS.lsyncCancel) return { cancel:true };
+    var d=await wiApi(path, Object.assign({}, body, { final: k>=esperas.length }));
+    if(d && d.error){
+      if((d.temp || WI_UPD_TEMP.test(String(d.error))) && k<esperas.length){ var s0=Math.max(+d.retry_after||0, esperas[k]); k++; t.pausas++; var ok=await _wiUpdSleep(s0, 'lsyncCancel', function(s){ _wiLsCard(t, '⏳ Pausa pedida por la tienda ('+paso+'): sigo en '+s+' s'); }); if(!ok) return { cancel:true }; continue; }
+      throw new Error(d.message||d.error);
+    }
+    if(d && d.wait && k<esperas.length){ var s1=Math.max(+d.retry_after||0, esperas[k]); k++; t.pausas++; t.writes_ml+=(d.stats&&d.stats.writes_ml)||0; t.writes_woo+=(d.stats&&d.stats.writes_woo)||0; t.writes+=(d.stats&&d.stats.writes)||0;
+      var ok2=await _wiUpdSleep(s1, 'lsyncCancel', function(s){ _wiLsCard(t, '⏳ Pausa pedida por la tienda ('+paso+'): repito la tanda en '+s+' s'); }); if(!ok2) return { cancel:true }; body=Object.assign({}, body, { cursor:d.cursor }); continue; }
+    return d;
+  }
+}
+window._wiLsCard = function(t, estado){
+  var proc=t.hechos, tot=t.total, pct=tot?Math.min(100, proc/tot*100):0;
+  _wiFloatHtml.lsync='<div style="font-size:11px;color:#334155;line-height:1.5;margin-top:2px">'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;column-gap:10px">'+
+      '<span>Procesados: <b>'+proc+' / '+tot+'</b></span><span>Pausas de la tienda: <b>'+(t.pausas||0)+'</b></span>'+
+      '<span>Stock: <b>'+t.writes_ml+'</b> ML · <b>'+t.writes_woo+'</b> Woo</span><span>Precio: <b>'+t.writes+'</b> en Woo</span>'+
+    '</div><div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:'+(/pausa/i.test(estado)?'#b45309':'#475569')+'">Estado: '+wiEsc(estado)+'</div></div>';
+  wiFloat('lsync', '🔄 SINCRONIZAR STOCK Y PRECIO', estado, pct, /pausa/i.test(estado)?'#d97706':'#059669', 'woo-import');
+};
+window.wiLSyncRun = async function(){
+  var ids=(wiS._lsync||[]).slice(); wiModal(null);
+  if(!ids.length) return;
+  if(wiS.lsyncing){ showToast('Ya hay una sincronización en curso (abajo a la izquierda)','warn'); return; }
+  if(!(await wooLockTake('sincronizar', 'Sincronizar stock y precio'))) return;
+  wiS.lsyncing=true; wiS.lsyncCancel=false;
+  var prog=document.getElementById('wi-lp-prog'); if(prog) prog.innerHTML='';
+  var t={ total:ids.length, hechos:0, writes_ml:0, writes_woo:0, writes:0, pausas:0 }, run_id='sel-'+Date.now().toString(36), SL=50, cancel=false;
+  try{
+    for(var i=0;i<ids.length && !cancel;i+=SL){
+      var slice=ids.slice(i,i+SL), lote='lote '+(Math.floor(i/SL)+1)+' de '+Math.ceil(ids.length/SL), cursor=0;
+      _wiLsCard(t, '📦 stock · '+lote);
+      while(true){
+        var d=await _wiLsCall('/wsync/run', { ids:slice, simulate:false, confirm:'SINCRONIZAR', run_id:run_id, cursor:cursor, quiet:i>0||cursor>0, total:ids.length }, t, 'stock');
+        if(d.cancel){ cancel=true; break; }
+        t.writes_ml+=(d.stats&&d.stats.writes_ml)||0; t.writes_woo+=(d.stats&&d.stats.writes_woo)||0;
+        cursor=d.cursor; if(d.done) break;
+      }
+      if(cancel) break;
+      _wiLsCard(t, '💲 precio · '+lote); cursor=0;
+      while(true){
+        var q=await _wiLsCall('/wsync/price-run', { ids:slice, simulate:false, confirm:'APLICAR', fallback:'igual', run_id:run_id, cursor:cursor, quiet:true, total:ids.length }, t, 'precio');
+        if(q.cancel){ cancel=true; break; }
+        t.writes+=(q.stats&&q.stats.writes)||0;
+        cursor=q.cursor; if(q.done) break;
+      }
+      if(cancel) break;
+      t.hechos=Math.min(t.total, t.hechos+slice.length);
+      if(i+SL<ids.length){ if(!(await _wiUpdSleep(5, 'lsyncCancel', function(s){ _wiLsCard(t, 'Respiro para la tienda: sigo en '+s+' s'); }))){ cancel=true; break; } }
+    }
+    var l=await wiApi('/wsync/links'); if(!l.error){ wiSetLinks(l); try{ wiLinksRender(); }catch(e){} }
+    var errN=ids.filter(function(k){ var x=wiS.linkByMl[k]; return x && x.state==='error'; }).length;
+    if(cancel) wiFloatEnd('lsync', '⏹ Sincronización cancelada: '+t.hechos+' de '+ids.length+' procesados · stock '+t.writes_ml+' ML / '+t.writes_woo+' Woo · precio '+t.writes+' · '+(ids.length-t.hechos)+' sin procesar', 'warn');
+    else wiFloatEnd('lsync', (errN?'⚠ ':'✅ ')+'Sincronización terminada: '+ids.length+' productos · stock: '+t.writes_ml+' cambios en ML y '+t.writes_woo+' en Woo · precio: '+t.writes+' en Woo'+(t.pausas?' · '+t.pausas+' pausas de la tienda':'')+(errN?' · '+errN+' con error (ver Historial)':''), errN?'warn':'success');
+  }catch(err){ wiFloatEnd('lsync','Sincronizar: '+err.message,'error'); }
+  finally{ wiS.lsyncing=false; wiS.lsyncCancel=false; if(_wiFloat.lsync) wiFloatEnd('lsync'); wooLockRelease('sincronizar'); try{ var l2=await wiApi('/wsync/links'); if(!l2.error){ wiSetLinks(l2); wiLinksRender(); } wiStatusLoad(); }catch(e){} }
+};
+
+// ── 6) Importar y vincular (herramienta 2) y trabajos de Web Tienda: también toman el bloqueo ──
+(function(){
+  var o=window.wiRun; if(typeof o!=='function' || o._v325) return;
+  var w=async function(){
+    if(wiS.running){ showToast('Ya hay un proceso en curso. Esperá a que termine.','warn'); return; }
+    if(!(await wooLockTake('importar-vincular', 'Importar y vincular'))) return;
+    try{ return await o.apply(this, arguments); } finally { wooLockRelease('importar-vincular'); }
+  };
+  w._v325=true; window.wiRun=w;
+})();
+(function(){
+  var o=window.wjCreateAndRun; if(typeof o!=='function' || o._v325) return;
+  var w=async function(kind, label){
+    if(!(await wooLockTake('web-tienda', label||'Trabajo en Web Tienda'))) return null;
+    var job=null;
+    try{ job=await o.apply(this, arguments); } catch(e){ wooLockRelease('web-tienda'); throw e; }
+    if(!job){ wooLockRelease('web-tienda'); return null; }
+    // liberar cuando el panel deja de seguirlo
+    var chk=setInterval(function(){ if(!_wjRunning[job.id]){ clearInterval(chk); wooLockRelease('web-tienda'); } }, 3000);
+    return job;
+  };
+  w._v325=true; window.wjCreateAndRun=w;
+})();
 </script>
 </body>
 </html>
