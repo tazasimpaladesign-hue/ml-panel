@@ -873,7 +873,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v326 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v327 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -1242,6 +1242,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
           <th onclick="pubSort('empaque')" style="cursor:pointer;user-select:none;white-space:nowrap;text-align:center" title="Medidas y peso del paquete para Mercado Envíos. Clic para ordenar por volumen; segundo clic invierte. Las publicaciones sin datos van siempre al final.">📦 Empaque <span id="pub-sort-empaque" style="font-size:10px"></span></th>
           <th onclick="pubSort('sku')"   style="cursor:pointer;user-select:none;white-space:nowrap">SKU <span id="pub-sort-sku" style="font-size:10px"></span></th>
           <th onclick="pubSort('personaje')" style="cursor:pointer;user-select:none;white-space:nowrap" title="Atributo CHARACTER de Mercado Libre, dentro de Características principales. Se edita con el lápiz. En publicaciones de catálogo ML no permite modificarlo.">🎭 Personaje <span id="pub-sort-personaje" style="font-size:10px"></span></th>
+            <th onclick="pubSort('created')" style="cursor:pointer;user-select:none;text-align:center;line-height:1.2;width:80px;max-width:80px" title="Fecha de creación de la publicación en ML">Creada<br><span style="font-size:10px">↕</span><span id="pub-sort-created" style="font-size:10px"></span></th>
           <th onclick="pubSort('lastMod')" style="cursor:pointer;user-select:none;white-space:nowrap;text-align:center" title="Última fecha que ML registró un cambio (precio, fotos, stock). Detecta publicaciones que hace mucho no se tocan y pueden perder posicionamiento.">Fecha modif. <span id="pub-sort-lastMod" style="font-size:10px"></span></th>
           <th onclick="pubSort('price')" style="cursor:pointer;user-select:none;white-space:nowrap;text-align:right">Precio <span id="pub-sort-price" style="font-size:10px"></span></th>
           <th onclick="pubSort('stock')" style="cursor:pointer;user-select:none;white-space:nowrap;text-align:center">Stock <span id="pub-sort-stock" style="font-size:10px"></span></th>
@@ -6662,17 +6663,27 @@ async function loadItemsFull(){
       const msg = (_mlFail[0].err && (_mlFail[0].err.message || _mlFail[0].err.error || _mlFail[0].err.status)) || 'sin detalle';
       console.warn('[loadItemsFull] ML rechazó '+_mlFail.length+' lote(s):', _mlFail[0].err);
       try{ if(typeof tryRefreshToken==='function') await tryRefreshToken(); }catch(e){}
-      const quedan=[];
-      for(const f of _mlFail){
-        await new Promise(r=>setTimeout(r,600));
-        let r2=null; try{ r2=await mlGet('/items?ids='+f.chunk.join(',')+'&include_attributes=all'); }catch(e){}
-        if(Array.isArray(r2)) r2.forEach(x=>{ if(x && x.code===200) full.push(x.body); }); else quedan.push(f);
+      // v327: ML rechaza el lote entero si UNA publicación del lote no se puede pedir así.
+      // Se piden de a una (/items/ID, 4 a la vez) para rescatar las demás y saber cuáles son.
+      const sueltas=[].concat(..._mlFail.map(f=>f.chunk)), quedan=[], motivo={};
+      for(let j=0;j<sueltas.length;j+=4){
+        const part=sueltas.slice(j,j+4);
+        const rr=await Promise.all(part.map(async id=>{ try{ const b=await mlGet('/items/'+id); if(b && b.id===id) return b; motivo[id]=(b&&(b.message||b.error))||'sin detalle'; return null; }catch(e){ motivo[id]=e.message; return null; } }));
+        rr.forEach((b,k)=>{ if(b) full.push(b); else quedan.push(part[k]); });
+        await new Promise(r=>setTimeout(r,150));
       }
+      console.warn('[loadItemsFull] v327: lote(s) rechazados por ML ('+msg+'): '+sueltas.length+' publicaciones pedidas de a una · rescatadas '+(sueltas.length-quedan.length)+' · sin respuesta '+quedan.length, quedan.length?motivo:'');
       if(quedan.length){
         const prev=new Map((allItems||[]).map(i=>[i.id,i])); let kept=0;
-        quedan.forEach(f=>f.chunk.forEach(id=>{ if(prev.has(id)){ full.push(prev.get(id)); kept++; } }));
-        const n=quedan.reduce((a,f)=>a+f.chunk.length,0);
-        if(typeof showToast==='function') showToast('⚠ Mercado Libre no dejó actualizar '+n+' publicaciones ('+String(msg).slice(0,80)+'). '+(kept?'Se muestran con los datos anteriores. ':'')+'Si se repite, cerrá sesión y volvé a entrar.','warn');
+        quedan.forEach(id=>{ if(prev.has(id)){ full.push(prev.get(id)); kept++; } });
+        window._mlFailIds=quedan.slice();
+        // aviso como mucho una vez por día (y si cambia la cantidad)
+        let av=null; try{ av=JSON.parse(localStorage.getItem('ml_fail_aviso')||'null'); }catch(e){}
+        const hoy=new Date().toISOString().slice(0,10);
+        if(!av || av.d!==hoy || av.n!==quedan.length){
+          try{ localStorage.setItem('ml_fail_aviso', JSON.stringify({ d:hoy, n:quedan.length, ids:quedan.slice(0,50) })); }catch(e){}
+          if(typeof showToast==='function') showToast('⚠ Mercado Libre no devolvió '+quedan.length+' publicación(es) ('+String(motivo[quedan[0]]||msg).slice(0,70)+'): '+quedan.slice(0,3).join(', ')+(quedan.length>3?'…':'')+'. '+(kept?'Se muestran con los datos anteriores.':''),'warn');
+        }
       }
     }
     if(full.length || !allItems.length) allItems=full;
@@ -9345,7 +9356,7 @@ function pubSort(col){
   // detectar los bultos grandes, no los chicos.
   else{ pubState.sortCol=col; pubState.sortDir=(col==='empaque'||col==='peso') ? 1 : -1; }
   // actualizar flechas (v141: nuevas columnas sku, ean, type, avail, thermo)
-  ['price','stock','sold','sku','ean','type','avail','thermo','lastMod','empaque','peso','personaje'].forEach(c=>{
+  ['price','stock','sold','sku','ean','type','avail','thermo','lastMod','empaque','peso','personaje','created'].forEach(c=>{
     const el=document.getElementById('pub-sort-'+c);
     if(el) el.innerHTML=sortArrow(c,pubState.sortCol,pubState.sortDir);
   });
@@ -9385,6 +9396,7 @@ function renderPubs(){
     else if(col==='avail')   { va=_itemManufDays(a);                       vb=_itemManufDays(b); }
     else if(col==='thermo')  { va=_itemThermoScore(a);                     vb=_itemThermoScore(b); }
     else if(col==='lastMod') { va=a.last_updated?new Date(a.last_updated).getTime():0; vb=b.last_updated?new Date(b.last_updated).getTime():0; }
+    else if(col==='created') { va=a.date_created?new Date(a.date_created).getTime():0; vb=b.date_created?new Date(b.date_created).getTime():0; }   // v327
     // v288 · Empaque: ordena por VOLUMEN (alto×ancho×largo), que es lo que
     // define si un paquete es "grande". Las que no tienen datos van siempre al
     // final, en los dos sentidos: un paquete sin medir no es chico, es desconocido.
@@ -9425,7 +9437,7 @@ function renderPubs(){
 
   const tbody=document.getElementById('pubs-tbody');
   if(!tbody) return;
-  if(!items.length){tbody.innerHTML='<tr><td colspan="15" style="text-align:center;color:var(--text3);padding:22px">Sin resultados para los filtros actuales</td></tr>';var _pg0=document.getElementById('pubs-pagination');if(_pg0)_pg0.innerHTML='';return;}
+  if(!items.length){tbody.innerHTML='<tr><td colspan="16" style="text-align:center;color:var(--text3);padding:22px">Sin resultados para los filtros actuales</td></tr>';var _pg0=document.getElementById('pubs-pagination');if(_pg0)_pg0.innerHTML='';return;}
   const _pubTypeLabel = { catalog:'Catálogo', premium:'Premium', free:'Gratuita', classic:'Clásica' };
   // v316: paginado de a 50 (vuelve a la página 1 cuando cambian filtros, búsqueda u orden)
   const _sig=[search,pubFilter,tipoFilter,col,dir,legacySort].join('|');
@@ -9447,7 +9459,7 @@ function renderPubs(){
     return `<tr>
       <td><input type="checkbox" class="row-check" value="${item.id}" ${selectedItems.has(item.id)?'checked':''} onchange="toggleItem(this,'${item.id}')"></td>
       <td><div style="display:flex;align-items:flex-start;gap:9px">
-        <div style="flex-shrink:0">${renderThumbnail(item,38)}</div>
+        <div style="flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:2px">${renderThumbnail(item,38)}${typeof shpBadge==='function'?shpBadge(item):''}</div>
         <div style="min-width:0">
           <div style="font-size:12px;font-weight:500;max-width:200px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.35" title="${item.title}">${item.title}</div>
           <div style="font-size:10px;color:var(--text3);margin-top:2px">${item.id}</div>
@@ -9462,6 +9474,7 @@ function renderPubs(){
         </div>
       </td>
       <td style="font-size:11px" id="pers-cell-${item.id}">${_pubPersonajeCell(item)}</td>
+      <td style="text-align:center;font-size:11px;white-space:nowrap">${_pubCreadaCell(item)}</td>
       <td style="text-align:center;font-size:10.5px;color:var(--text2);white-space:nowrap" title="${item.last_updated ? 'Modificada: '+fmtTs(item.last_updated) : 'Sin datos de modificación'}">${_seoFechaModCell(item)}</td>
       <td style="text-align:right">
         <div id="price-cell-${item.id}" style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
@@ -58643,6 +58656,193 @@ async function shpExportRun(){
   }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', poner); else poner();
 })();
+
+</script>
+<script>
+// ═══════════════════════════════════════════════════════════════════════════════
+// v327 · Publicaciones: columna «Creada» y leyenda Shopee bajo la miniatura
+//        · Exportar a Shopee: sin catálogo, repetidas sólo por TÍTULO, un único archivo,
+//          sólo las seleccionadas (opcional) y marca «en Shopee» guardada en el Worker (D1)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── Columna «Creada» (igual que en Analizador SEO) ──
+function _pubCreadaCell(item){
+  if(!item || !item.date_created) return '<span style="color:var(--text3)">—</span>';
+  var d=new Date(item.date_created); if(isNaN(d)) return '<span style="color:var(--text3)">—</span>';
+  var dias=Math.max(0, Math.floor((Date.now()-d.getTime())/86400000));
+  var col=dias<30 ? 'var(--green)' : (dias<180 ? 'var(--text)' : 'var(--text3)');
+  var f=String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();
+  return '<div style="font-weight:700;color:'+col+'">'+f+'</div><div style="font-size:10.5px;color:var(--text2);margin-top:1px;font-weight:600">'+dias+' días</div>';
+}
+
+// ── Marcas «en Shopee» (Worker /shp/marks en D1 + copia local) ──
+var SHP_MARKS = {};
+try{ SHP_MARKS = JSON.parse(localStorage.getItem('shp_marks_v1')||'{}') || {}; }catch(e){ SHP_MARKS = {}; }
+function _shpMarksLocal(){ try{ localStorage.setItem('shp_marks_v1', JSON.stringify(SHP_MARKS)); }catch(e){} }
+function _shpRefrescarTabla(){ try{ if(typeof renderPubs==='function' && document.getElementById('pubs-tbody')) renderPubs(); }catch(e){} }
+async function shpMarksLoad(){
+  if(typeof token==='undefined' || !token || typeof wiApi!=='function') return;
+  var d=await wiApi('/shp/marks');
+  if(d && d.ok && d.marks){ SHP_MARKS=d.marks; _shpMarksLocal(); _shpRefrescarTabla(); }
+}
+async function shpMarksSave(add, remove){
+  (add||[]).forEach(function(id){ SHP_MARKS[id]=new Date().toISOString(); });
+  (remove||[]).forEach(function(id){ delete SHP_MARKS[id]; });
+  _shpMarksLocal(); _shpRefrescarTabla();
+  var d=await wiApi('/shp/marks', { add:add||[], remove:remove||[] });
+  if(d && d.ok && d.marks){ SHP_MARKS=d.marks; _shpMarksLocal(); return true; }
+  showToast('⚠ La marca «en Shopee» quedó sólo en esta PC: '+((d&&(d.message||d.error))||'el Worker no respondió')+' (¿subiste el Worker v157?)','warn');
+  return false;
+}
+function _shpEsCatalogo(it){ return typeof getPubTypeKey==='function' ? getPubTypeKey(it)==='catalog' : !!(it && (it.catalog_listing===true || it.catalog_product_id)); }
+function shpEstado(it){ if(!it) return ''; if(SHP_MARKS[it.id]) return 'shopee'; if(_shpEsCatalogo(it)) return 'catalogo'; return 'pasar'; }
+function shpBadge(it){
+  var e=shpEstado(it); if(!e) return '';
+  var m={ shopee:['en Shopee','#ea580c','#fff7ed','#fdba74','Ya exportada a Shopee'+(SHP_MARKS[it.id]?' ('+String(SHP_MARKS[it.id]).slice(0,10).split('-').reverse().join('/')+')':'')],
+          catalogo:['No Pasar','#dc2626','#fef2f2','#fca5a5','Publicación de catálogo: no se exporta a Shopee'],
+          pasar:['a Pasar','#16a34a','#f0fdf4','#86efac','Todavía no exportada a Shopee'] }[e];
+  return '<span title="'+m[4]+'" style="display:block;font-size:9px;line-height:1;font-weight:800;white-space:nowrap;color:'+m[1]+';background:'+m[2]+';border:1px solid '+m[3]+';border-radius:4px;padding:2px 3px;text-align:center;min-width:38px">'+m[0]+'</span>';
+}
+
+// ── Qué publicaciones van ──
+// Criterio v327: (1) las de catálogo NO van; (2) repetidas = MISMO TÍTULO (normalizado: sin mayúsculas,
+// tildes ni signos). De cada grupo va una: la activa con más ventas. El SKU y la foto ya no se usan.
+function _shpElegir(items, opts){
+  opts=opts||{};
+  var cat=[], ya=[], resto=[];
+  items.forEach(function(it){
+    if(_shpEsCatalogo(it)) cat.push(it);
+    else if(opts.omitirYa && SHP_MARKS[it.id]) ya.push(it);
+    else resto.push(it);
+  });
+  var orden=resto.sort(function(a,b){ return (a.status==='active'?0:1)-(b.status==='active'?0:1) || (b.sold_quantity||0)-(a.sold_quantity||0); });
+  var vistos={}, va=[], dup=[];
+  // si una con el mismo título ya está en Shopee, ésta también se considera repetida
+  if(opts.omitirYa) (typeof allItems!=='undefined'?allItems:[]).forEach(function(it){ if(SHP_MARKS[it.id] && !_shpEsCatalogo(it)){ var t=_shpNorm(it.title); if(t && !vistos[t]) vistos[t]=it.id; } });
+  orden.forEach(function(it){
+    var t=_shpNorm(it.title);
+    if(t && vistos[t]){ dup.push({ it:it, de:vistos[t] }); return; }
+    if(t) vistos[t]=it.id;
+    va.push(it);
+  });
+  // fotos de portada repetidas: van igual, pero se avisan (Shopee puede rechazar la segunda)
+  var porFoto={}; va.forEach(function(it){ var f=(it.pictures&&it.pictures[0]&&it.pictures[0].id)||''; if(f) (porFoto[f]=porFoto[f]||[]).push(it.id); });
+  var fotoRep={}; Object.keys(porFoto).forEach(function(f){ if(porFoto[f].length>1) porFoto[f].slice(1).forEach(function(id){ fotoRep[id]=porFoto[f][0]; }); });
+  return { va:va, dup:dup, cat:cat, ya:ya, fotoRep:fotoRep };
+}
+function _shpBase(soloSel){
+  var todos=(typeof allItems!=='undefined'?allItems:[]);
+  if(soloSel){ var s=(typeof selectedItems!=='undefined'&&selectedItems)?selectedItems:new Set(); return todos.filter(function(i){ return i && s.has(i.id); }); }
+  return todos.filter(function(i){ return i && (i.status==='active'||i.status==='paused'); });
+}
+function _shpOpts(){
+  var r=document.querySelector('input[name="shp-alc"]:checked'), y=document.getElementById('shp-omitir-ya');
+  return { soloSel: !!(r && r.value==='sel'), omitirYa: !y || y.checked };
+}
+function shpExportCalc(){
+  var o=_shpOpts(), base=_shpBase(o.soloSel), sel=_shpElegir(base, o), box=document.getElementById('shp-cnt');
+  if(!box) return sel;
+  box.innerHTML=[['Elegidas', base.length,'#334155'],['Van a Shopee', sel.va.length,'#ea580c'],['Catálogo (no van)', sel.cat.length,'#dc2626'],['Mismo título (se omiten)', sel.dup.length,'#64748b'],['Ya en Shopee', sel.ya.length,'#c2410c']]
+    .map(function(x){ return '<div style="border:1px solid #e2e8f0;border-radius:10px;padding:7px 4px"><div style="font-size:19px;font-weight:800;color:'+x[2]+'">'+x[1]+'</div><div style="font-size:10.5px;color:#64748b;line-height:1.2">'+x[0]+'</div></div>'; }).join('');
+  var t=document.getElementById('shp-tiempo'); if(t) t.textContent=Math.max(1,Math.ceil(sel.va.length*0.4/60));
+  var q=document.getElementById('shp-quitar'); if(q) q.style.display=(o.soloSel && base.some(function(i){ return SHP_MARKS[i.id]; }))?'':'none';
+  return sel;
+}
+window.shpExportOpen = function(){
+  var todos=_shpBase(false);
+  if(!todos.length){ showToast('Esperá a que carguen las publicaciones de ML','warn'); return; }
+  var nSel=(typeof selectedItems!=='undefined'&&selectedItems)?_shpBase(true).length:0;
+  wiModal('<div style="'+WI_M.title+'">🧡 Exportar a Shopee (carga masiva)</div>'+
+    '<div style="'+WI_M.sub+'">Arma la planilla básica de Shopee con tus publicaciones de ML, en un solo archivo. No cambia nada en ML ni en Shopee.</div>'+
+    '<div style="display:flex;flex-direction:column;gap:5px;margin-bottom:10px;font-size:12.5px;color:#1e293b">'+
+      '<label style="cursor:pointer"><input type="radio" name="shp-alc" value="todas" '+(nSel?'':'checked')+' onchange="shpExportCalc()"> Todas las activas y pausadas ('+todos.length+')</label>'+
+      '<label style="cursor:pointer;'+(nSel?'':'color:#94a3b8')+'"><input type="radio" name="shp-alc" value="sel" '+(nSel?'checked':'disabled')+' onchange="shpExportCalc()"> Sólo las seleccionadas en la tabla ('+nSel+')'+(nSel?'':' · tildalas en Publicaciones')+'</label>'+
+      '<label style="cursor:pointer"><input type="checkbox" id="shp-omitir-ya" checked onchange="shpExportCalc()"> No incluir las que ya marqué «en Shopee»</label>'+
+    '</div>'+
+    '<div id="shp-cnt" style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:10px;text-align:center"></div>'+
+    '<div style="'+WI_M.info+';font-size:12px;line-height:1.5">'+
+      '• <b>Precio:</b> igual que en ML (IVA '+SHP_IVA+') · <b>Stock:</b> el de ML · <b>Fotos:</b> hasta 9 en JPG, calidad original<br>'+
+      '• <b>Categoría:</b> botellas → '+SHP_CAT_BOTELLA+' · tazas, jarros, vasos y combos → '+SHP_CAT_TAZA+' · el resto vacío<br>'+
+      '• <b>No van:</b> las de <b>catálogo</b> (leyenda roja «No Pasar») y las de <b>mismo título</b>: de cada grupo va una sola, la activa con más ventas. El SKU y la foto no cuentan.<br>'+
+      '• Si dos que van tienen la misma foto de portada, salen igual y se avisa en el reporte (Shopee puede rechazar la segunda).<br>'+
+      '• Se baja la descripción de cada una desde ML: tarda unos <span id="shp-tiempo">1</span> min.'+
+    '</div>'+
+    '<label style="'+WI_M.label+'">1) Elegí la planilla básica que bajaste de Shopee (.xlsx)</label>'+
+    '<input type="file" id="shp-tpl" accept=".xlsx" style="'+WI_M.input+'" onchange="shpTplElegida(this.files[0])">'+
+    '<div id="shp-tpl-ok" style="font-size:11.5px;margin-top:4px;color:#64748b">Usá siempre la plantilla recién bajada de Shopee: así queda con su formato vigente.</div>'+
+    '<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap"><button onclick="wiModal(null)" style="'+WI_M.cancel+'">Cancelar</button>'+
+    '<button id="shp-quitar" onclick="shpQuitarMarcas()" style="display:none;padding:10px;border:1px solid #fdba74;background:#fff;color:#c2410c;border-radius:9px;font-weight:700;cursor:pointer">Quitar marca «en Shopee» a las seleccionadas</button>'+
+    '<button id="shp-go" disabled onclick="shpExportRun()" style="flex:1;padding:10px;border:none;background:#ea580c;color:#fff;border-radius:9px;font-weight:700;cursor:pointer;opacity:.5">2) Generar planilla para Shopee</button></div>', true);
+  shpExportCalc();
+};
+async function shpQuitarMarcas(){
+  var ids=_shpBase(true).filter(function(i){ return SHP_MARKS[i.id]; }).map(function(i){ return i.id; });
+  if(!ids.length) return;
+  if(!confirm('¿Quitar la marca «en Shopee» a '+ids.length+' publicación(es)? Vuelven a figurar como «a Pasar».')) return;
+  await shpMarksSave([], ids); shpExportCalc(); showToast('Marca «en Shopee» quitada a '+ids.length,'success');
+}
+
+// planilla de más de 1000 filas: extender las listas desplegables (IVA, envío) hasta la última fila
+var _shpArmarArchivoV326 = window._shpArmarArchivo;
+window._shpArmarArchivo = async function(tpl, filas){
+  var fin=6+filas.length;
+  if(fin<=1007) return _shpArmarArchivoV326(tpl, filas);
+  var JSZip=await _shpLoadJSZip(), zip=await JSZip.loadAsync(tpl.buf), xml=await zip.file(tpl.path).async('string');
+  xml=xml.replace(/sqref="([^"]*)"/g, function(all, ref){ return 'sqref="'+ref.replace(/([A-Z]+)7:([A-Z]+)(\d+)/g, function(m, a, b, n){ return +n<fin ? a+'7:'+b+fin : m; })+'"'; });
+  zip.file(tpl.path, xml);
+  var buf=await zip.generateAsync({ type:'arraybuffer' });
+  return _shpArmarArchivoV326(Object.assign({}, tpl, { buf:buf }), filas);
+};
+
+window.shpExportRun = async function(){
+  if(!_shpTpl) return;
+  var o=_shpOpts(), base=_shpBase(o.soloSel), sel=_shpElegir(base, o), tpl=_shpTpl;
+  if(!sel.va.length){ showToast('No queda ninguna publicación para exportar con esas opciones','warn'); return; }
+  wiModal(null); _shpCancel=false;
+  var filas=[], rep=[], hechos=[], key='shpx';
+  sel.cat.forEach(function(it){ rep.push([it.id, it.title, it.status, 'no va: publicación de catálogo']); });
+  sel.ya.forEach(function(it){ rep.push([it.id, it.title, it.status, 'no va: ya marcada «en Shopee»']); });
+  sel.dup.forEach(function(d){ rep.push([d.it.id, d.it.title, d.it.status, 'no va: mismo título que '+d.de]); });
+  try{
+    for(var i=0;i<sel.va.length;i++){
+      if(_shpCancel) break;
+      var it=sel.va[i];
+      wiFloat(key, '🧡 EXPORTAR A SHOPEE', (i+1)+' / '+sel.va.length+' · '+String(it.title).slice(0,40), i/sel.va.length*100, '#ea580c', 'publicaciones');
+      var desc=await _shpDescripcion(it), avisos=[];
+      if(sel.fotoRep[it.id]) avisos.push('misma foto de portada que '+sel.fotoRep[it.id]+' (Shopee puede rechazarla)');
+      _shpFilas(it, desc, avisos).forEach(function(r){ filas.push(r); });
+      if(avisos.length) rep.push([it.id, it.title, it.status, avisos.join(' · ')]);
+      hechos.push(it.id);
+      await new Promise(function(r){ setTimeout(r, 150); });
+    }
+    if(_shpCancel){ wiFloatEnd(key, '⏹ Exportación a Shopee cancelada: no se generó el archivo', 'warn'); return; }
+    wiFloat(key, '🧡 EXPORTAR A SHOPEE', 'Armando el archivo ('+filas.length+' filas)…', 100, '#ea580c', 'publicaciones');
+    var blob=await _shpArmarArchivo(tpl, filas);
+    var nom=(tpl.name||'Shopee_mass_upload').replace(/\.xlsx$/i,'')+'_ML'+(o.soloSel?'_seleccion':'')+'.xlsx';
+    _shpBajar(blob, nom);
+    if(rep.length){
+      await new Promise(function(r){ setTimeout(r, 600); });
+      var csv='ID ML;Título;Estado;Aviso\n'+rep.map(function(r){ return r.map(function(x){ return '"'+String(x==null?'':x).replace(/"/g,'""')+'"'; }).join(';'); }).join('\n');
+      _shpBajar(new Blob(['﻿'+csv],{type:'text/csv'}), 'Shopee_reporte_avisos.csv');
+    }
+    wiFloatEnd(key, '✅ Planilla para Shopee lista: '+hechos.length+' publicaciones ('+filas.length+' filas, 1 archivo) · no van: '+sel.cat.length+' de catálogo, '+sel.dup.length+' de mismo título'+(sel.ya.length?', '+sel.ya.length+' ya en Shopee':'')+(rep.length?' · detalle en «Shopee_reporte_avisos.csv»':''), 'success');
+    // marcar como «en Shopee» (también las de mismo título que se omitieron, para que no se pasen después)
+    await new Promise(function(r){ setTimeout(r, 900); });
+    var dupIds=sel.dup.map(function(d){ return d.it.id; });
+    if(confirm('Se bajó «'+nom+'» con '+hechos.length+' publicaciones.\n\n¿Las marco como «en Shopee»?'+(dupIds.length?'\n(También las '+dupIds.length+' de mismo título que se omitieron, para que no se pasen después.)':'')+'\n\nAceptá cuando ya las hayas subido a Shopee, o si las vas a subir ahora. Si cancelás, siguen como «a Pasar».')){
+      var ok=await shpMarksSave(hechos.concat(dupIds), []);
+      if(ok) showToast('🧡 '+(hechos.length+dupIds.length)+' publicaciones marcadas «en Shopee»','success');
+    }
+  }catch(e){ wiFloatEnd(key, 'Exportar a Shopee: '+e.message, 'error'); }
+};
+
+// cargar las marcas del Worker al entrar (y repintar la tabla)
+(function(){
+  var tries=0;
+  function go(){ if(typeof token!=='undefined' && token){ shpMarksLoad().catch(function(){}); return; } if(++tries<60) setTimeout(go, 2000); }
+  setTimeout(go, 1500);
+})();
+
 </script>
 </body>
 </html>
