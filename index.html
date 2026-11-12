@@ -873,7 +873,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v325 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v326 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -58401,6 +58401,247 @@ window.wiLSyncRun = async function(){
     return job;
   };
   w._v325=true; window.wjCreateAndRun=w;
+})();
+</script>
+<script>
+// ═══════════════════════════════════════════════════════════════════════════════
+// v326 · EXPORTAR A SHOPEE (planilla de carga masiva básica)
+// Toma las publicaciones de ML (activas y pausadas, sin duplicados) y completa la planilla
+// que bajás de Shopee: categoría, título, descripción, SKU, variantes, precio (igual que ML,
+// IVA 21 %), stock, fotos (JPG en la calidad original de ML), peso y medidas del paquete y
+// los dos canales de envío. No toca nada en ML ni en Shopee: sólo arma el archivo.
+// Se completa la planilla ORIGINAL de Shopee (se escribe directo en su XML), así se conservan
+// sus validaciones, listas y hojas ocultas.
+// ═══════════════════════════════════════════════════════════════════════════════
+var SHP_CAT_BOTELLA = '101241';   // Hogar, Muebles y Jardín › Vajilla › Botellas de Agua y Accesorios
+var SHP_CAT_TAZA    = '101240';   // Hogar, Muebles y Jardín › Vajilla › Copas, Tazas y Cristalería
+var SHP_IVA = '21%';
+var SHP_FILAS_POR_ARCHIVO = 1000;
+var _shpCancel = false, _shpTpl = null;
+
+function _shpLoadJSZip(){
+  return new Promise(function(res, rej){
+    if(window.JSZip) return res(window.JSZip);
+    var s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+    s.onload=function(){ window.JSZip ? res(window.JSZip) : rej(new Error('JSZip no disponible')); };
+    s.onerror=function(){ rej(new Error('No se pudo cargar JSZip desde el CDN')); };
+    document.head.appendChild(s);
+  });
+}
+function _shpEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,''); }
+function _shpNorm(s){ return String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,' ').trim(); }
+
+// ── categoría según el título ──
+function _shpCategoria(it){
+  var t=_shpNorm(it.title);
+  if(/\bbotell/.test(t)) return SHP_CAT_BOTELLA;
+  if(/\b(taza|tazon|jarro|jarra|mug|combo|termic|vaso|chopp|copa|pocillo)/.test(t)) return SHP_CAT_TAZA;
+  return '';   // mates, termos y otros: Shopee sugiere la categoría al cargar
+}
+// ── SKU ──
+function _shpAttr(o, id){ var a=(o&&o.attributes||[]).find(function(x){ return x.id===id; }); return a ? (a.value_name||'') : ''; }
+function _shpSku(o){ return String(o.seller_custom_field || _shpAttr(o,'SELLER_SKU') || '').trim(); }
+// ── peso (kg) y medidas (cm) del paquete ──
+function _shpMedida(it, id, tipo){
+  var a=(it.attributes||[]).find(function(x){ return x.id===id; }); if(!a) return null;
+  var n=null, u='';
+  if(a.value_struct && a.value_struct.number!=null){ n=+a.value_struct.number; u=String(a.value_struct.unit||''); }
+  else { var m=String(a.value_name||'').replace(',','.').match(/([\d.]+)\s*([a-zA-Z]*)/); if(m){ n=+m[1]; u=m[2]; } }
+  if(!(n>0)) return null; u=u.toLowerCase();
+  if(tipo==='peso') return u==='kg' ? n : u==='mg' ? n/1e6 : n/1000;   // g por defecto
+  return u==='mm' ? n/10 : u==='m' ? n*100 : n;                       // cm por defecto
+}
+function _shpPaquete(it){
+  var p={ peso:_shpMedida(it,'SELLER_PACKAGE_WEIGHT','peso'), largo:_shpMedida(it,'SELLER_PACKAGE_LENGTH'), ancho:_shpMedida(it,'SELLER_PACKAGE_WIDTH'), alto:_shpMedida(it,'SELLER_PACKAGE_HEIGHT') };
+  if(p.peso==null && it.shipping && it.shipping.dimensions){   // formato viejo de ML: "10x10x15,500" (cm, gramos)
+    var m=String(it.shipping.dimensions).match(/(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?),(\d+(?:\.\d+)?)/);
+    if(m){ p.largo=p.largo||+m[1]; p.ancho=p.ancho||+m[2]; p.alto=p.alto||+m[3]; p.peso=+m[4]/1000; }
+  }
+  return p;
+}
+// ── fotos: JPG en la calidad original de ML (Shopee no acepta webp) ──
+function _shpFoto(pic){
+  if(!pic) return '';
+  var u=String(pic.secure_url||pic.url||'').replace(/^http:\/\//,'https://');
+  if(!u && pic.id) u='https://http2.mlstatic.com/D_'+pic.id+'-O.jpg';
+  return u.replace(/-[A-Z]\.(webp|jpe?g|png)(\?.*)?$/i, '-O.jpg').replace(/\.webp(\?.*)?$/i, '.jpg');
+}
+// ── descripción ──
+async function _shpDescripcion(it){
+  var txt='';
+  try{ var d=await mlGet('/items/'+it.id+'/description'); txt=String((d&&(d.plain_text||d.text))||''); }catch(e){}
+  txt=txt.replace(/\r/g,'').replace(/\n{3,}/g,'\n\n').trim();
+  if(txt.length<10){
+    var at=(it.attributes||[]).filter(function(a){ return a.value_name && !/^SELLER_|GTIN|SKU|PACKAGE/.test(a.id); }).slice(0,12).map(function(a){ return '• '+a.name+': '+a.value_name; });
+    txt=(it.title+'\n\n'+at.join('\n')).trim();
+  }
+  return txt.length>5000 ? txt.slice(0,4990).replace(/\s+\S*$/,'')+'…' : txt;
+}
+
+// ── armar las filas ──
+function _shpElegir(items){
+  var orden=items.slice().sort(function(a,b){ return (a.status==='active'?0:1)-(b.status==='active'?0:1) || (b.sold_quantity||0)-(a.sold_quantity||0); });
+  var vistos={ sku:{}, foto:{}, tit:{} }, va=[], dup=[];
+  orden.forEach(function(it){
+    var sku=_shpSku(it), foto=(it.pictures&&it.pictures[0]&&it.pictures[0].id)||'', tit=_shpNorm(it.title);
+    var igual=(sku && vistos.sku[sku]) || (foto && vistos.foto[foto]) || (tit && vistos.tit[tit]);
+    if(igual){ dup.push({ it:it, de:igual }); return; }
+    if(sku) vistos.sku[sku]=it.id; if(foto) vistos.foto[foto]=it.id; if(tit) vistos.tit[tit]=it.id;
+    va.push(it);
+  });
+  return { va:va, dup:dup };
+}
+function _shpFilas(it, desc, avisos){
+  var cat=_shpCategoria(it), pk=_shpPaquete(it), pics=it.pictures||[], fotos=pics.slice(0,9).map(_shpFoto);
+  var base={ ps_category:cat, ps_product_name:String(it.title||'').slice(0,120), ps_product_description:desc, ps_sku_parent_short:_shpSku(it).slice(0,100),
+    ar_vat:SHP_IVA, ps_item_cover_image:fotos[0]||'',
+    ps_weight: pk.peso!=null ? Math.round(pk.peso*100)/100 : '', ps_length: pk.largo!=null ? Math.ceil(pk.largo) : '', ps_width: pk.ancho!=null ? Math.ceil(pk.ancho) : '', ps_height: pk.alto!=null ? Math.ceil(pk.alto) : '',
+    'channel_id.130012':'Activado', 'channel_id.130013':'Activado' };
+  for(var k=1;k<=8;k++) base['ps_item_image_'+k]=fotos[k]||'';
+  if(!cat) avisos.push('sin categoría (Shopee te va a sugerir una)');
+  if(pk.peso==null) avisos.push('falta el peso del paquete (obligatorio en Shopee)');
+  if(pk.largo==null||pk.ancho==null||pk.alto==null) avisos.push('faltan medidas del paquete');
+  if(!fotos[0]) avisos.push('sin fotos');
+  if(String(it.title||'').length<10) avisos.push('título de menos de 10 caracteres');
+  var vars=(it.variations||[]).filter(function(v){ return v && v.attribute_combinations && v.attribute_combinations.length; });
+  if(!vars.length){
+    return [Object.assign({}, base, { ps_price:+it.price||'', ps_stock:Math.max(0, it.available_quantity||0), ps_sku_short:_shpSku(it).slice(0,100) })];
+  }
+  var n1=String(vars[0].attribute_combinations[0].name||'Variante').slice(0,30), n2=vars[0].attribute_combinations[1] ? String(vars[0].attribute_combinations[1].name||'').slice(0,30) : '';
+  var precios=vars.map(function(v){ return +v.price||+it.price||0; }).filter(function(x){ return x>0; });
+  if(precios.length && Math.max.apply(null,precios)/Math.min.apply(null,precios)>5) avisos.push('el precio de la variante más cara supera 5 veces al de la más barata (Shopee no lo acepta)');
+  if(vars.some(function(v){ return v.attribute_combinations.length>2; })) avisos.push('tiene más de 2 tipos de variante: se usan los 2 primeros');
+  var picById={}; pics.forEach(function(p){ picById[p.id]=p; });
+  return vars.map(function(v, i){
+    var c=v.attribute_combinations, img=(v.picture_ids||[]).map(function(id){ return picById[id]; }).filter(Boolean)[0];
+    var r={ et_title_variation_integration_no:it.id, et_title_variation_1:n1, et_title_option_for_variation_1:String(c[0].value_name||c[0].value_id||'').slice(0,30),
+      et_title_image_per_variation:_shpFoto(img), et_title_variation_2:n2, et_title_option_for_variation_2:c[1]?String(c[1].value_name||'').slice(0,30):'',
+      ps_price:+v.price||+it.price||'', ps_stock:Math.max(0, v.available_quantity||0), ps_sku_short:_shpSku(v).slice(0,100), ar_vat:SHP_IVA };
+    if(i===0) return Object.assign({}, base, r);
+    // filas siguientes de la misma publicación: Shopee pide dejar en blanco título, descripción, fotos, etc.
+    return Object.assign({ 'channel_id.130012':'Activado', 'channel_id.130013':'Activado', ps_weight:base.ps_weight, ps_length:base.ps_length, ps_width:base.ps_width, ps_height:base.ps_height }, r);
+  });
+}
+
+// ── escribir en la planilla original de Shopee ──
+async function _shpLeerPlantilla(file){
+  var JSZip=await _shpLoadJSZip(), buf=await file.arrayBuffer(), zip=await JSZip.loadAsync(buf);
+  var wb=await zip.file('xl/workbook.xml').async('string'), rels=await zip.file('xl/_rels/workbook.xml.rels').async('string');
+  var m=wb.match(/<sheet [^>]*name="Plantilla"[^>]*r:id="([^"]+)"/) || wb.match(/<sheet [^>]*r:id="([^"]+)"[^>]*name="Plantilla"/);
+  if(!m) throw new Error('No encuentro la hoja «Plantilla»: ¿es la planilla básica de carga masiva de Shopee?');
+  var t=rels.match(new RegExp('<Relationship [^>]*Id="'+m[1]+'"[^>]*Target="([^"]+)"')) || rels.match(new RegExp('<Relationship [^>]*Target="([^"]+)"[^>]*Id="'+m[1]+'"'));
+  var path='xl/'+t[1].replace(/^\/?xl\//,'').replace(/^\//,'');
+  var xml=await zip.file(path).async('string');
+  var ss=[]; if(zip.file('xl/sharedStrings.xml')){ var sx=await zip.file('xl/sharedStrings.xml').async('string'); var dom=new DOMParser().parseFromString(sx,'application/xml'); Array.prototype.forEach.call(dom.getElementsByTagName('si'), function(si){ ss.push(Array.prototype.map.call(si.getElementsByTagName('t'), function(x){ return x.textContent; }).join('')); }); }
+  var row1=(xml.match(/<row [^>]*r="1"[^>]*>([\s\S]*?)<\/row>/)||[])[1]||'', cols={};
+  (row1.match(/<c [^>]*>[\s\S]*?<\/c>/g)||[]).forEach(function(c){
+    var ref=(c.match(/r="([A-Z]+)1"/)||[])[1], v=(c.match(/<v>([^<]*)<\/v>/)||[])[1], tt=/t="s"/.test(c);
+    var key=tt ? ss[+v] : (c.match(/<t[^>]*>([^<]*)<\/t>/)||[])[1] || v; if(ref && key) cols[key]=ref;
+  });
+  if(!cols.ps_product_name || !cols.ps_price) throw new Error('La hoja «Plantilla» no tiene las columnas esperadas (ps_product_name, ps_price…)');
+  return { buf:buf, path:path, cols:cols, name:file.name };
+}
+async function _shpArmarArchivo(tpl, filas){
+  var JSZip=await _shpLoadJSZip(), zip=await JSZip.loadAsync(tpl.buf), xml=await zip.file(tpl.path).async('string');
+  var colNum=function(L){ var n=0; for(var i=0;i<L.length;i++) n=n*26+(L.charCodeAt(i)-64); return n; };
+  var orden=Object.keys(tpl.cols).sort(function(a,b){ return colNum(tpl.cols[a])-colNum(tpl.cols[b]); });
+  var rows=filas.map(function(f, i){
+    var r=7+i;
+    return '<row r="'+r+'">'+orden.map(function(k){
+      var v=f[k]; if(v===undefined||v===null||v==='') return '';
+      var ref=tpl.cols[k]+r;
+      if(typeof v==='number' && isFinite(v)) return '<c r="'+ref+'"><v>'+v+'</v></c>';
+      return '<c r="'+ref+'" t="inlineStr"><is><t xml:space="preserve">'+_shpEsc(v)+'</t></is></c>';
+    }).join('')+'</row>';
+  }).join('');
+  // quitar filas de datos previas (desde la 7) y agregar las nuevas
+  xml=xml.replace(/<row [^>]*r="(\d+)"[^>]*>[\s\S]*?<\/row>/g, function(all, n){ return +n>=7 ? '' : all; }).replace(/<row [^>]*r="(\d+)"[^>]*\/>/g, function(all, n){ return +n>=7 ? '' : all; });
+  if(/<sheetData\/>/.test(xml)) xml=xml.replace('<sheetData/>','<sheetData>'+rows+'</sheetData>'); else xml=xml.replace('</sheetData>', rows+'</sheetData>');
+  var last=orden.map(function(k){ return tpl.cols[k]; }).sort(function(a,b){ return colNum(a)-colNum(b); }).pop();
+  xml=xml.replace(/<dimension ref="[^"]*"\s*\/>/, '<dimension ref="A1:'+last+(6+filas.length)+'"/>');
+  zip.file(tpl.path, xml);
+  return await zip.generateAsync({ type:'blob', mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', compression:'DEFLATE' });
+}
+function _shpBajar(blob, nombre){ var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=nombre; document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 4000); }
+
+// ── ventana ──
+function shpExportOpen(){
+  var items=(typeof allItems!=='undefined'?allItems:[]).filter(function(i){ return i && (i.status==='active'||i.status==='paused'); });
+  if(!items.length){ showToast('Esperá a que carguen las publicaciones de ML','warn'); return; }
+  var sel=_shpElegir(items);
+  wiModal('<div style="'+WI_M.title+'">🧡 Exportar a Shopee (carga masiva)</div>'+
+    '<div style="'+WI_M.sub+'">Arma la planilla básica de Shopee con tus publicaciones de ML. No cambia nada en ML ni en Shopee: sólo genera el archivo para que lo subas en el Centro de Vendedores › Acciones masivas.</div>'+
+    '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px;text-align:center">'+
+      [['Activas y pausadas', items.length,'#334155'],['Van a Shopee', sel.va.length,'#ea580c'],['Repetidas (se omiten)', sel.dup.length,'#64748b']].map(function(x){ return '<div style="border:1px solid #e2e8f0;border-radius:10px;padding:8px"><div style="font-size:20px;font-weight:800;color:'+x[2]+'">'+x[1]+'</div><div style="font-size:11px;color:#64748b">'+x[0]+'</div></div>'; }).join('')+'</div>'+
+    '<div style="'+WI_M.info+';font-size:12px;line-height:1.5">'+
+      '• <b>Precio:</b> igual que en ML (con IVA '+SHP_IVA+' incluido) · <b>Stock:</b> el de ML<br>'+
+      '• <b>Categoría:</b> botellas → '+SHP_CAT_BOTELLA+' · tazas, jarros, vasos y combos → '+SHP_CAT_TAZA+' · el resto vacío (Shopee sugiere)<br>'+
+      '• <b>Fotos:</b> hasta 9, en JPG y en la calidad original de ML · <b>Envío:</b> Correo puerta a puerta y sucursal activados<br>'+
+      '• <b>Repetidas:</b> si dos publicaciones tienen el mismo SKU, la misma foto de portada o el mismo título, va una sola (la activa con más ventas). Shopee rechaza fotos repetidas entre publicaciones.<br>'+
+      '• Se baja la descripción de cada publicación desde ML: tarda unos '+Math.max(1,Math.ceil(sel.va.length*0.4/60))+' min.'+
+    '</div>'+
+    '<label style="'+WI_M.label+'">1) Elegí la planilla básica que bajaste de Shopee (.xlsx)</label>'+
+    '<input type="file" id="shp-tpl" accept=".xlsx" style="'+WI_M.input+'" onchange="shpTplElegida(this.files[0])">'+
+    '<div id="shp-tpl-ok" style="font-size:11.5px;margin-top:4px;color:#64748b">Usá siempre la plantilla recién bajada de Shopee: así queda con su formato vigente.</div>'+
+    '<div style="display:flex;gap:8px;margin-top:14px"><button onclick="wiModal(null)" style="'+WI_M.cancel+'">Cancelar</button>'+
+    '<button id="shp-go" disabled onclick="shpExportRun()" style="flex:1;padding:10px;border:none;background:#ea580c;color:#fff;border-radius:9px;font-weight:700;cursor:pointer;opacity:.5">2) Generar planilla para Shopee</button></div>', true);
+}
+async function shpTplElegida(file){
+  var ok=document.getElementById('shp-tpl-ok'), go=document.getElementById('shp-go');
+  _shpTpl=null; if(go){ go.disabled=true; go.style.opacity='.5'; }
+  if(!file) return;
+  try{ _shpTpl=await _shpLeerPlantilla(file); if(ok){ ok.style.color='#15803d'; ok.textContent='✓ Planilla de Shopee reconocida: '+Object.keys(_shpTpl.cols).length+' columnas.'; } if(go){ go.disabled=false; go.style.opacity='1'; } }
+  catch(e){ if(ok){ ok.style.color='#b91c1c'; ok.textContent='⚠ '+e.message; } }
+}
+async function shpExportRun(){
+  if(!_shpTpl) return;
+  var tpl=_shpTpl, items=allItems.filter(function(i){ return i && (i.status==='active'||i.status==='paused'); }), sel=_shpElegir(items);
+  wiModal(null); _shpCancel=false;
+  var filas=[], grupos=[], rep=[], hechos=0, key='shpx';
+  sel.dup.forEach(function(d){ rep.push([d.it.id, d.it.title, d.it.status, 'omitida: repetida de '+d.de]); });
+  try{
+    for(var i=0;i<sel.va.length;i++){
+      if(_shpCancel) break;
+      var it=sel.va[i];
+      if(typeof wiFloat==='function') wiFloat(key, '🧡 EXPORTAR A SHOPEE', (i+1)+' / '+sel.va.length+' · '+String(it.title).slice(0,40), i/sel.va.length*100, '#ea580c', 'publicaciones');
+      var desc=await _shpDescripcion(it), avisos=[];
+      var f=_shpFilas(it, desc, avisos);
+      grupos.push(f);
+      if(avisos.length) rep.push([it.id, it.title, it.status, avisos.join(' · ')]);
+      hechos++;
+      await new Promise(function(r){ setTimeout(r, 150); });
+    }
+    if(_shpCancel){ wiFloatEnd(key, '⏹ Exportación a Shopee cancelada: no se generó el archivo', 'warn'); return; }
+    // repartir en archivos de hasta 1000 filas sin separar las variantes de una misma publicación
+    var partes=[[]];
+    grupos.forEach(function(g){ var p=partes[partes.length-1]; if(p.length && p.length+g.length>SHP_FILAS_POR_ARCHIVO) partes.push(p=[]); g.forEach(function(r){ p.push(r); }); });
+    var base=(tpl.name||'Shopee_mass_upload').replace(/\.xlsx$/i,'');
+    for(var k=0;k<partes.length;k++){
+      if(typeof wiFloat==='function') wiFloat(key, '🧡 EXPORTAR A SHOPEE', 'Armando el archivo '+(k+1)+' de '+partes.length+'…', 100, '#ea580c', 'publicaciones');
+      var blob=await _shpArmarArchivo(tpl, partes[k]);
+      _shpBajar(blob, base+'_ML'+(partes.length>1?'_parte'+(k+1):'')+'.xlsx');
+      await new Promise(function(r){ setTimeout(r, 600); });
+    }
+    if(rep.length){
+      var csv='ID ML;Título;Estado;Aviso\n'+rep.map(function(r){ return r.map(function(x){ return '"'+String(x==null?'':x).replace(/"/g,'""')+'"'; }).join(';'); }).join('\n');
+      _shpBajar(new Blob(['﻿'+csv],{type:'text/csv'}), 'Shopee_reporte_avisos.csv');
+    }
+    var nFilas=partes.reduce(function(a,p){ return a+p.length; },0);
+    wiFloatEnd(key, '✅ Planilla para Shopee lista: '+hechos+' publicaciones ('+nFilas+' filas'+(partes.length>1?' en '+partes.length+' archivos':'')+')'+(rep.length?' · revisá «Shopee_reporte_avisos.csv» ('+rep.length+' avisos)':''), 'success');
+  }catch(e){ wiFloatEnd(key, 'Exportar a Shopee: '+e.message, 'error'); }
+}
+// botón en Publicaciones + Cancelar en la tarjeta
+(function(){
+  var o=window._wiCancelFor; if(typeof o==='function' && !o._v326){ var w=function(key){ if(key==='shpx') return function(){ _shpCancel=true; }; return o(key); }; w._v326=true; window._wiCancelFor=w; }
+  function poner(){
+    if(document.getElementById('shp-export-btn')) return;
+    var tabs=document.querySelector('#section-publicaciones .card-hd .tabs'); if(!tabs) return;
+    var b=document.createElement('button'); b.id='shp-export-btn'; b.className='btn btn-sm'; b.type='button';
+    b.style.cssText='background:#fff7ed;border:1px solid #fdba74;color:#c2410c;font-weight:700;white-space:nowrap';
+    b.textContent='🧡 Exportar a Shopee'; b.title='Arma la planilla de carga masiva de Shopee con tus publicaciones de ML';
+    b.onclick=shpExportOpen; tabs.insertAdjacentElement('afterend', b);
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', poner); else poner();
 })();
 </script>
 </body>
