@@ -873,7 +873,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v327 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v328 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -9382,6 +9382,8 @@ function renderPubs(){
   }
   // Tipo filter
   if(tipoFilter) items=items.filter(i=>getPubTypeKey(i)===tipoFilter);
+  // v328: filtro por leyenda Shopee
+  if(typeof pubShpFilter!=='undefined' && pubShpFilter && typeof shpEstado==='function') items=items.filter(i=>shpEstado(i)===pubShpFilter);
 
   // Ordenar
   const col=pubState.sortCol, dir=pubState.sortDir;
@@ -58841,6 +58843,44 @@ window.shpExportRun = async function(){
   var tries=0;
   function go(){ if(typeof token!=='undefined' && token){ shpMarksLoad().catch(function(){}); return; } if(++tries<60) setTimeout(go, 2000); }
   setTimeout(go, 1500);
+})();
+
+
+</script>
+<script>
+// ═══════════════════════════════════════════════════════════════════════════════
+// v328 · Publicaciones: filtrar por la leyenda Shopee (a Pasar / en Shopee / No Pasar)
+// ═══════════════════════════════════════════════════════════════════════════════
+var pubShpFilter = '';
+try{ pubShpFilter = localStorage.getItem('pub_shp_filter') || ''; }catch(e){}
+var SHP_FILTROS = [ ['', 'Todas', '#334155', '#f8fafc', '#cbd5e1'], ['pasar', 'a Pasar', '#16a34a', '#f0fdf4', '#86efac'], ['shopee', 'en Shopee', '#ea580c', '#fff7ed', '#fdba74'], ['catalogo', 'No Pasar', '#dc2626', '#fef2f2', '#fca5a5'] ];
+function pubShpSet(v){
+  pubShpFilter = v || '';
+  try{ localStorage.setItem('pub_shp_filter', pubShpFilter); }catch(e){}
+  if(typeof pubState!=='undefined') pubState.page = 1;
+  renderPubs();
+}
+function _pubShpBar(){
+  var bar=document.getElementById('pub-shp-filtros');
+  if(!bar){
+    var ref=document.getElementById('shp-export-btn') || document.querySelector('#section-publicaciones .card-hd .tabs'); if(!ref) return;
+    bar=document.createElement('div'); bar.id='pub-shp-filtros';
+    bar.style.cssText='display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;margin-left:6px';
+    ref.insertAdjacentElement('afterend', bar);
+  }
+  // cuántas hay de cada una (respetando el estado elegido: activas / pausadas / todas)
+  var base=(typeof visibleItems==='function'?visibleItems():(allItems||[]));
+  if(typeof pubFilter!=='undefined' && pubFilter!=='all') base=base.filter(function(i){ return i.status===pubFilter; });
+  var n={ '':base.length, pasar:0, shopee:0, catalogo:0 }; base.forEach(function(i){ var e=shpEstado(i); if(n[e]!=null) n[e]++; });
+  bar.innerHTML='<span style="font-size:11px;font-weight:700;color:var(--text2);margin-right:2px">Shopee:</span>'+SHP_FILTROS.map(function(f){
+    var on=pubShpFilter===f[0];
+    return '<button type="button" onclick="pubShpSet(\''+f[0]+'\')" title="'+(f[0]?'Mostrar sólo las «'+f[1]+'»':'Sin filtro Shopee')+'" style="font-size:11px;font-weight:800;padding:3px 8px;border-radius:999px;cursor:pointer;white-space:nowrap;border:1px solid '+(on?f[2]:f[4])+';background:'+(on?f[2]:f[3])+';color:'+(on?'#fff':f[2])+'">'+f[1]+' <span style="opacity:.8;font-weight:700">'+n[f[0]]+'</span></button>';
+  }).join('');
+}
+(function(){
+  var o=window.renderPubs; if(typeof o!=='function' || o._v328) return;
+  var w=function(){ var r=o.apply(this, arguments); try{ _pubShpBar(); }catch(e){} return r; };
+  w._v328=true; window.renderPubs=w;
 })();
 
 </script>
