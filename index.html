@@ -873,7 +873,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v328 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v329 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -9447,6 +9447,7 @@ function renderPubs(){
   const _pp=50, _pages=Math.max(1,Math.ceil(items.length/_pp));
   if(pubState.page>_pages) pubState.page=_pages;
   const _pubTotal=items.length;
+  window._pubFiltradas=items.map(i=>i.id);   // v329: todas las filtradas (para «seleccionar todas»)
   items=items.slice((pubState.page-1)*_pp, pubState.page*_pp);
   setTimeout(function(){ var pg=document.getElementById('pubs-pagination'); if(pg){ pg.style.display='block'; pg.innerHTML=mlPagerHtml(pubState.page,_pages,'pubGoPage',_pubTotal,_pp); } },0);
   tbody.innerHTML=items.map(item=>{
@@ -58881,6 +58882,64 @@ function _pubShpBar(){
   var o=window.renderPubs; if(typeof o!=='function' || o._v328) return;
   var w=function(){ var r=o.apply(this, arguments); try{ _pubShpBar(); }catch(e){} return r; };
   w._v328=true; window.renderPubs=w;
+})();
+
+
+</script>
+<script>
+// ═══════════════════════════════════════════════════════════════════════════════
+// v329 · Publicaciones: seleccionar TODAS las filtradas (todas las páginas), no sólo las 50 visibles
+// ═══════════════════════════════════════════════════════════════════════════════
+function _pubFiltradasIds(){ return (window._pubFiltradas||[]).slice(); }
+function pubSelectAllFiltered(){
+  var ids=_pubFiltradasIds(); if(!ids.length) return;
+  ids.forEach(function(id){ selectedItems.add(id); });
+  document.querySelectorAll('.row-check').forEach(function(c){ c.checked=true; });
+  var ca=document.getElementById('check-all'); if(ca) ca.checked=true;
+  updateBulkBar();
+}
+function _pubCheckAllSync(){
+  var ca=document.getElementById('check-all'); if(!ca) return;
+  var cs=document.querySelectorAll('.row-check'), on=0; cs.forEach(function(c){ if(c.checked) on++; });
+  ca.checked = cs.length>0 && on===cs.length;
+  ca.indeterminate = on>0 && on<cs.length;
+}
+(function(){
+  // la barra de selección ofrece pasar de «las de esta página» a «todas las filtradas»
+  var u=window.updateBulkBar;
+  if(typeof u==='function' && !u._v329){
+    var w=function(){
+      var r=u.apply(this, arguments);
+      try{
+        var bar=document.getElementById('bulk-bar'); if(!bar) return r;
+        var b=document.getElementById('pub-sel-todas');
+        if(!b){ b=document.createElement('button'); b.id='pub-sel-todas'; b.type='button'; b.className='btn btn-sm'; b.style.cssText='font-weight:700;border:1px solid #93c5fd;background:#fff;color:#1d4ed8;white-space:nowrap';
+          b.onclick=pubSelectAllFiltered; var cnt=document.getElementById('bulk-count-bar'); if(cnt) cnt.insertAdjacentElement('afterend', b); else bar.appendChild(b); }
+        var ids=_pubFiltradasIds(), faltan=ids.filter(function(id){ return !selectedItems.has(id); }).length;
+        if(faltan>0 && ids.length>0){ b.style.display=''; b.textContent='☑ Seleccionar las '+ids.length+' del filtro (todas las páginas)'; }
+        else b.style.display='none';
+        var cnt2=document.getElementById('bulk-count-bar');
+        if(cnt2 && selectedItems.size && ids.length && !faltan) cnt2.textContent=selectedItems.size+' seleccionadas · todas las del filtro';
+      }catch(e){}
+      return r;
+    };
+    w._v329=true; window.updateBulkBar=w;
+  }
+  var t=window.toggleAll;
+  if(typeof t==='function' && !t._v329){
+    var w2=function(cb){
+      if(!cb.checked){ selectedItems.clear(); document.querySelectorAll('.row-check').forEach(function(c){ c.checked=false; }); updateBulkBar(); return; }   // destildar = limpiar todo
+      return t.apply(this, arguments);
+    };
+    w2._v329=true; window.toggleAll=w2;
+  }
+  var rp=window.renderPubs;
+  if(typeof rp==='function' && !rp._v329){
+    var w3=function(){ window._pubFiltradas=[]; var r=rp.apply(this, arguments); try{ _pubCheckAllSync(); updateBulkBar(); }catch(e){} return r; };
+    w3._v328=rp._v328; w3._v329=true; window.renderPubs=w3;
+  }
+  var ti=window.toggleItem;
+  if(typeof ti==='function' && !ti._v329){ var w4=function(){ var r=ti.apply(this, arguments); try{ _pubCheckAllSync(); }catch(e){} return r; }; w4._v329=true; window.toggleItem=w4; }
 })();
 
 </script>
