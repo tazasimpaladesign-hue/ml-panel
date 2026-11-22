@@ -40,7 +40,7 @@
 // todo sigue funcionando con localStorage como antes.
 // ═══════════════════════════════════════════════════════════════════════════════
 (function(){
-  var HEAVY = { 'mlp_seo_predictions_v1':1, 'mlp_seo_thermo_v1':1, 'mlp_extra_data_v1':1, 'mlp_items_v2':1, 'mlp_orders_v1':1 };   // v331: + órdenes
+  var HEAVY = { 'mlp_seo_predictions_v1':1, 'mlp_seo_thermo_v1':1, 'mlp_extra_data_v1':1, 'mlp_items_v2':1, 'mlp_orders_v1':1, 'mlp_health_v1':1 };   // v331: + órdenes · v332: + salud
   var MET = 'mlp_metrics_v2_', MET_REC = '__metrics_v2__';
   var DB = 'mlp_store', ST = 'kv';
   var LS = null; try{ LS = window.localStorage; }catch(e){}
@@ -1031,7 +1031,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v331 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v332 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -5910,7 +5910,55 @@ async function exchangeCode(code){
 // loadSEOMetrics peleen por requests y se sumen los rate-limits.
 let _mlRateLimitUntil = 0;
 
-async function mlGet(ep, _retryCount){
+// v332 · ML deprecó el multiget GET /items?ids= ("Resource deprecated - client no longer allowed to
+// consume this resource", ya rechaza algunos pedidos). Reemplazo vigente: GET /items/bulk?ids= (hasta 20),
+// con el filtro de campos como attributes=body.campo. Respuesta: sin attributes [{id, status_code, body}],
+// con attributes [{body}] ({} si no existe). Acá se traduce solo y se devuelve el formato viejo
+// [{code, body}], así ninguna sección cambia. Si bulk falla se prueba sin include_attributes y, por
+// último, el multiget viejo; se recuerda la variante que funcionó.
+let _mlBulkModo = null, _mlBulkAvisado = false;
+function _mlBulkPath(ep, sinIncl){
+  const q = ep.slice(ep.indexOf('?') + 1).split('&').filter(Boolean), out = [];
+  for(const p of q){
+    const i = p.indexOf('='), k = i < 0 ? p : p.slice(0, i), v = i < 0 ? '' : p.slice(i + 1);
+    if(k === 'attributes') out.push('attributes=' + decodeURIComponent(v).split(',').filter(Boolean).map(a => a.indexOf('body.') === 0 ? a : 'body.' + a).join(','));
+    else if(k === 'include_attributes' && sinIncl) continue;
+    else out.push(p);
+  }
+  return '/items/bulk?' + out.join('&');
+}
+function _mlBulkALegado(arr, ids){
+  const idDe = x => x && (x.id || (x.body && x.body.id)) ? String(x.id || x.body.id) : '';
+  const byId = new Map(); arr.forEach(x => { const id = idDe(x); if(id) byId.set(id, x); });
+  return ids.map((id, k) => {
+    let x = byId.get(id); if(!x && arr[k] && !idDe(arr[k])) x = arr[k];
+    if(!x || !Object.keys(x).length) return { code: 404, body: { id, error: 'not_found', message: 'Item not found', status: 404 } };
+    const sc = x.status_code != null ? +x.status_code : (x.code != null ? +x.code : (x.body && x.body.id ? 200 : 404));
+    return { code: sc, body: x.body || { id, error: x.error || 'error', message: x.message || x.error || '', status: sc } };
+  });
+}
+async function _mlItemsMulti(ep){
+  const m = ep.match(/[?&]ids=([^&]*)/), ids = m ? decodeURIComponent(m[1]).split(',').filter(Boolean) : [];
+  let modos = ['bulk', 'bulk-sin-incl', 'legado'];
+  if(!/[?&]include_attributes=/.test(ep)) modos = ['bulk', 'legado'];
+  if(_mlBulkModo && modos.indexOf(_mlBulkModo) >= 0) modos = [_mlBulkModo].concat(modos.filter(x => x !== _mlBulkModo));
+  let ultimo = null;
+  for(const modo of modos){
+    let d;
+    try{ d = await mlGet(modo === 'legado' ? ep : _mlBulkPath(ep, modo === 'bulk-sin-incl'), 0, true); }
+    catch(e){ if(e && e.message === '401') throw e; d = { error: e.message }; }
+    if(Array.isArray(d)){
+      if(_mlBulkModo !== modo){ _mlBulkModo = modo; console.log('[mlGet] multiget de publicaciones vía ' + (modo === 'legado' ? '/items?ids= (endpoint viejo, deprecado)' : '/items/bulk' + (modo === 'bulk-sin-incl' ? ' (sin include_attributes)' : ''))); }
+      return modo === 'legado' ? d : _mlBulkALegado(d, ids);
+    }
+    if(modo !== 'legado' && !_mlBulkAvisado){ _mlBulkAvisado = true; let det = ''; try{ det = JSON.stringify(d); }catch(e){} console.warn('[mlGet] /items/bulk no respondió una lista (' + String(det).slice(0, 300) + '), pruebo la variante siguiente'); }
+    ultimo = d;
+  }
+  return ultimo;
+}
+
+async function mlGet(ep, _retryCount, _crudo){
+  if(!_crudo && typeof ep === 'string' && ep.indexOf('/items?ids=') === 0) return _mlItemsMulti(ep);   // v332
   _retryCount = _retryCount || 0;
   // Si estamos en cooldown global por 429, esperar
   if(_mlRateLimitUntil > Date.now()){
@@ -5929,10 +5977,10 @@ async function mlGet(ep, _retryCount){
     _mlRateLimitUntil = Date.now() + backoffMs;
     console.warn('[mlGet] 429 Too Many Requests para '+ep+' — backoff '+backoffMs+'ms (intento '+(_retryCount+1)+'/3)');
     await new Promise(resolve => setTimeout(resolve, backoffMs));
-    return mlGet(ep, _retryCount + 1);
+    return mlGet(ep, _retryCount + 1, _crudo);
   }
 
-  if(r.status===401){const ok=await tryRefreshToken();if(ok)return mlGet(ep);showSessionExpired();throw new Error('401');}
+  if(r.status===401){const ok=await tryRefreshToken();if(ok)return mlGet(ep, 0, _crudo);showSessionExpired();throw new Error('401');}
   return r.json();
 }
 // mlGetPublic: para endpoints públicos de ML — SIN token, vía Worker server-to-server
@@ -6585,7 +6633,7 @@ async function loadItemsFast(){
     if(_fastFail){
       // v331: detallar qué lote y qué respondió ML
       results.forEach((r,k)=>{ if(!Array.isArray(r)){ let det=''; try{ det=JSON.stringify(r); }catch(e){ det=String(r); }
-        console.warn('[loadItemsFast] lote rechazado por ML · IDs: '+chunks[k].join(',')+' · respuesta: '+String(det).slice(0,400)); } });
+        console.warn('[loadItemsFast] lote rechazado por ML (' + (_mlBulkModo||'?') + ') · IDs: '+chunks[k].join(',')+' · respuesta: '+String(det).slice(0,400)); } });
     }
     _updateItemsUI();
     // refreshHealthScores movido a loadItemsFull (se ejecuta cuando ya están TODOS los items)
@@ -15870,6 +15918,10 @@ function predInit(){
       } catch(e){
         console.warn('[PredInit] upload inicial falló:', e?.message);
       }
+    } else if(local.firstRunTs){
+      // v332: antes sólo se subía después de un snapshot nuevo (al recalcular el Termómetro), y si no se
+      // recargaban métricas esta PC nunca subía. Ahora también al abrir, si pasaron 4 h.
+      try { await predSyncUpload(false); } catch(e){ console.warn('[PredInit] upload falló:', e?.message); }
     }
     _predUpdateReportBadge();
     if(typeof renderRadarAciertos === 'function') renderRadarAciertos();
@@ -17076,7 +17128,10 @@ async function predSyncUpload(force){
   // Cooldown: solo subir si pasaron >12h del último upload
   if(!force){
     const last = parseInt(localStorage.getItem(SEO_PRED_LAST_UPLOAD_KEY) || '0', 10);
-    if(Date.now() - last < SEO_PRED_UPLOAD_COOLDOWN_MS) return false;
+    if(Date.now() - last < SEO_PRED_UPLOAD_COOLDOWN_MS){
+      console.log('[PredSync] upload en espera: la última subida de esta PC fue hace ' + Math.round((Date.now()-last)/60000) + ' min (se sube cada 4 h)');
+      return false;
+    }
   }
   _predSyncBusy = true;
   try {
@@ -17184,7 +17239,7 @@ async function predSyncUpload(force){
       // Guardar el resultado mergeado del Worker (puede tener data nueva de otra PC)
       if(result.merged) _predSave(_predMerge(_predLoad(), result.merged));   // v330: sin perder lo local ni los acumulados
       localStorage.setItem(SEO_PRED_LAST_UPLOAD_KEY, String(Date.now()));
-      console.log('[PredSync] ↑ Upload OK:', result.stats);
+      console.log('[PredSync] ↑ Upload OK · enviado ' + Math.round(String(body).length/1024) + ' KB' + (headers['X-Compression'] ? ' comprimido (de ' + Math.round(jsonStr.length/1024) + ' KB)' : ' sin comprimir') + ' · Worker: ' + (result.written ? 'guardó cambios' : 'sin cambios, no reescribió') + ' · ' + JSON.stringify(result.stats || {}) + (result.mergedOmitido ? ' · mezcla grande: se baja al abrir en la otra PC' : ''));
       return true;
     }
     return false;
@@ -59161,6 +59216,43 @@ function _pubCheckAllSync(){
   }
   var ti=window.toggleItem;
   if(typeof ti==='function' && !ti._v329){ var w4=function(){ var r=ti.apply(this, arguments); try{ _pubCheckAllSync(); }catch(e){} return r; }; w4._v329=true; window.toggleItem=w4; }
+})();
+
+
+</script>
+<script>
+// ═══════════════════════════════════════════════════════════════════════════════
+// v332 · Salud de las publicaciones guardada entre recargas
+// El score de salud y «Poca Visibilidad» usan i.health, que llega de a una publicación
+// (refreshHealthScores) varios minutos después de arrancar. Al arrancar desde caché, o
+// cuando una carga reemplaza la lista, las que todavía no lo tenían caían al cálculo
+// local (más bajo) → 72 en vez de 79, 893 en vez de 719. Ahora se guarda el último health
+// conocido de cada publicación (IndexedDB) y se aplica a las que todavía no lo tienen.
+// ═══════════════════════════════════════════════════════════════════════════════
+var _HP_KEY = 'mlp_health_v1';
+var _hpMap = null;
+function _hpLoad(){ if(_hpMap) return _hpMap; try{ _hpMap = JSON.parse(localStorage.getItem(_HP_KEY) || '{}') || {}; }catch(e){ _hpMap = {}; } return _hpMap; }
+function _hpAplicar(){
+  var m = _hpLoad(), n = 0;
+  (typeof allItems !== 'undefined' && allItems || []).forEach(function(i){
+    if(i && typeof i.health !== 'number' && typeof m[i.id] === 'number'){ i.health = m[i.id]; n++; }
+  });
+  return n;
+}
+function _hpGuardar(){
+  var m = _hpLoad(), n = 0;
+  (typeof allItems !== 'undefined' && allItems || []).forEach(function(i){ if(i && typeof i.health === 'number'){ if(m[i.id] !== i.health) n++; m[i.id] = i.health; } });
+  if(n){ try{ localStorage.setItem(_HP_KEY, JSON.stringify(m)); }catch(e){} }
+}
+(function(){
+  // aplicar antes de cada actualización de la lista (caché, carga rápida, carga completa)
+  var u = window._updateItemsUI;
+  if(typeof u === 'function' && !u._v332){ var w = function(){ try{ _hpAplicar(); }catch(e){} return u.apply(this, arguments); }; w._v332 = true; window._updateItemsUI = w; }
+  // guardar mientras se refresca (cada vuelta de renderBizScore) y al terminar
+  var h = window.refreshHealthScores;
+  if(typeof h === 'function' && !h._v332){ var w2 = async function(){ try{ return await h.apply(this, arguments); } finally { try{ _hpGuardar(); }catch(e){} } }; w2._v332 = true; window.refreshHealthScores = w2; }
+  var b = window.renderBizScore;
+  if(typeof b === 'function' && !b._v332){ var w3 = function(){ try{ _hpAplicar(); }catch(e){} var r = b.apply(this, arguments); try{ if(typeof _healthRefreshRunning !== 'undefined' && _healthRefreshRunning) _hpGuardar(); }catch(e){} return r; }; w3._v332 = true; window.renderBizScore = w3; }
 })();
 
 </script>
