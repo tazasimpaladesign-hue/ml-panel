@@ -40,7 +40,7 @@
 // todo sigue funcionando con localStorage como antes.
 // ═══════════════════════════════════════════════════════════════════════════════
 (function(){
-  var HEAVY = { 'mlp_seo_predictions_v1':1, 'mlp_seo_thermo_v1':1, 'mlp_extra_data_v1':1, 'mlp_items_v2':1 };
+  var HEAVY = { 'mlp_seo_predictions_v1':1, 'mlp_seo_thermo_v1':1, 'mlp_extra_data_v1':1, 'mlp_items_v2':1, 'mlp_orders_v1':1 };   // v331: + órdenes
   var MET = 'mlp_metrics_v2_', MET_REC = '__metrics_v2__';
   var DB = 'mlp_store', ST = 'kv';
   var LS = null; try{ LS = window.localStorage; }catch(e){}
@@ -129,6 +129,17 @@
       if(timer){ clearTimeout(timer); timer = null; }
       if(!db) return Promise.resolve(false);
       return new Promise(function(res){ try{ var tx = db.transaction(ST, 'readwrite'); tx.objectStore(ST).clear(); tx.oncomplete = function(){ res(true); }; tx.onerror = function(){ res(false); }; }catch(e){ res(false); } });
+    },
+    // v331: releer desde IndexedDB lo que guardó otra pestaña (sin pisar lo que esta tiene pendiente de guardar)
+    recargar: function(){
+      if(!activo || !db) return Promise.resolve(false);
+      return new Promise(function(r){ setTimeout(r, 700); }).then(function(){ return leerTodo(db); }).then(function(todo){
+        Object.keys(todo).forEach(function(k){
+          if(k === MET_REC){ if(metPend) return; try{ var o = JSON.parse(todo[k]) || {}; met = Object.create(null); Object.keys(o).forEach(function(id){ met[id] = o[id]; }); }catch(e){} }
+          else if(esPesada(k) && typeof todo[k] === 'string' && !(k in pend)) mem[k] = todo[k];
+        });
+        return true;
+      }).catch(function(){ return false; });
     },
     stats: function(){ var t = 0; Object.keys(mem).forEach(function(k){ t += mem[k].length; }); var m = 0; Object.keys(met).forEach(function(k){ m += met[k].length; });
       return { activo: activo, claves: Object.keys(mem).length, metricas: Object.keys(met).length, kb: Math.round((t + m) / 1024) }; },
@@ -1020,7 +1031,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v330 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v331 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -6118,7 +6129,7 @@ async function initApp(){
     // Una vez publicaciones completas, cargar cosas secundarias
     loadMostVisited(false);
     initAI();
-    loadOrdersHistory();
+    setTimeout(()=>loadOrdersHistory(), 4000);   // v331: unos segundos después, para no competir con el resto del arranque
     loadTrends();
     // Enriquecer preguntas con nicknames (se había retrasado en loadQuestions)
     if(window._pendingEnrichQuestions){
@@ -6564,8 +6575,18 @@ async function loadItemsFast(){
     // v323: si ML rechaza un lote (403/401…) no se rompe la carga ni se vacía la lista
     const _fast=[]; let _fastFail=0;
     results.forEach(r=>{ if(Array.isArray(r)) r.forEach(x=>{if(x && x.code===200)_fast.push(x.body);}); else _fastFail++; });
-    if(_fast.length || !allItems.length) allItems=_fast;
-    if(_fastFail) console.warn('[loadItemsFast] '+_fastFail+' lote(s) rechazados por ML', results.find(r=>!Array.isArray(r)));
+    // v331: esta carga trae sólo las primeras 100. Si ya hay una lista más completa (caché o carga anterior)
+    // se actualizan esas publicaciones dentro de la lista, sin reemplazarla (la lista completa llega con loadItemsFull).
+    if(allItems.length > _fast.length && _fast.length){
+      const nuevo=new Map(_fast.map(x=>[x.id,x])), vistos=new Set();
+      allItems=allItems.map(x=>{ const n=nuevo.get(x.id); if(n){ vistos.add(x.id); return n; } return x; });
+      _fast.forEach(x=>{ if(!vistos.has(x.id)) allItems.unshift(x); });
+    } else if(_fast.length || !allItems.length) allItems=_fast;
+    if(_fastFail){
+      // v331: detallar qué lote y qué respondió ML
+      results.forEach((r,k)=>{ if(!Array.isArray(r)){ let det=''; try{ det=JSON.stringify(r); }catch(e){ det=String(r); }
+        console.warn('[loadItemsFast] lote rechazado por ML · IDs: '+chunks[k].join(',')+' · respuesta: '+String(det).slice(0,400)); } });
+    }
     _updateItemsUI();
     // refreshHealthScores movido a loadItemsFull (se ejecuta cuando ya están TODOS los items)
   }catch(e){console.warn('[loadItemsFast]',e);}
@@ -6870,10 +6891,17 @@ async function loadOrdersRecent(){
     const now=new Date();
     const from=new Date(now.getFullYear(),now.getMonth(),1).toISOString();
     const r=await mlGet('/orders/search?seller='+userId+'&order.date_created.from='+encodeURIComponent(from)+'&sort=date_desc&limit=50');
-    allOrders=r.results||[];
+    // v331: si ya hay más órdenes (caché o historial) se suman/actualizan las 50 recientes sin reemplazar la lista
+    const _rec=Array.isArray(r&&r.results)?r.results:null;
+    if(!_rec){ console.warn('[loadOrdersRecent] ML no devolvió órdenes:', (r&&(r.message||r.error))||r); return; }
+    if(allOrders.length > _rec.length){
+      const byId=new Map(allOrders.map(o=>[o.id,o])); _rec.forEach(o=>byId.set(o.id,o));
+      allOrders=[...byId.values()].sort((a,b)=>new Date(b.date_created)-new Date(a.date_created));
+    } else allOrders=_rec;
     // v74: Computar lastSaleMap (parcial — luego se recompone con loadOrdersHistory)
     computeGlobalLastSaleMap();
-    _updateOrdersUI(allOrders);
+    { const _ar=nowAR(), _mes=new Date(Date.UTC(_ar.getUTCFullYear(),_ar.getUTCMonth(),1));
+      _updateOrdersUI(allOrders.length > _rec.length ? allOrders.filter(o=>dateAR(o.date_created)>=_mes) : allOrders); }
     // Shipments en paralelo, sin bloquear
     loadShippingStatuses(allOrders.filter(o=>o.shipping?.id)).then(()=>{
       _updateVentasBadge();
@@ -6888,19 +6916,38 @@ async function loadOrdersHistory(){
     // 12 meses de historial — suficiente para Ventas, Quiebre de Stock,
     // Facturación, Asistente IA y Rentabilidad. Achicar el rango acelera el boot.
     const from12=new Date();from12.setMonth(from12.getMonth()-12);
-    let hist=[];
-    for(let offset=0;offset<2000;offset+=50){
-      try{
-        const r=await mlGet('/orders/search?seller='+userId+'&order.date_created.from='+encodeURIComponent(from12.toISOString())+'&sort=date_desc&limit=50&offset='+offset);
-        const res=r.results||[];hist.push(...res);
-        if(res.length<50)break;
-        await new Promise(r=>setTimeout(r,80));
-      }catch(e){break;}
+    // v331: sin tope de 2000 — el corte es la fecha (12 meses, lo filtra ML). Pausa de 350 ms entre páginas.
+    // Si una página falla (429, 5xx, sin respuesta) NO se corta en silencio: se reintenta esperando 5, 15 y 30 s.
+    let hist=[], total=null, salteadas=[], cortado=null;
+    const _esp=ms=>new Promise(r=>setTimeout(r,ms)), _url=off=>'/orders/search?seller='+userId+'&order.date_created.from='+encodeURIComponent(from12.toISOString())+'&sort=date_desc&limit=50&offset='+off;
+    for(let offset=0;offset<50000;offset+=50){
+      let r=null, err='';
+      for(let intento=0;intento<4;intento++){
+        if(intento) await _esp([0,5000,15000,30000][intento]);
+        try{ r=await mlGet(_url(offset)); }catch(e){ r=null; err=e.message; }
+        if(r && Array.isArray(r.results)) break;
+        err=err||(r&&(r.message||r.error))||'sin respuesta'; r=null;
+        console.warn('[loadOrdersHistory] página offset='+offset+' falló ('+err+'), reintento '+(intento+1)+'/3'+(intento<3?' en '+[5,15,30][intento]+' s':''));
+      }
+      if(!r){
+        if(total!=null && offset+50<total){ salteadas.push(offset); continue; }   // se sabe que hay más: seguir con la próxima
+        cortado='offset='+offset+' ('+err+')'; break;                            // sin total conocido no hay cómo seguir
+      }
+      if(r.paging && r.paging.total!=null) total=r.paging.total;
+      hist.push(...r.results);
+      if(r.results.length<50 || (total!=null && offset+50>=total)) break;
+      await _esp(350);
     }
     const seen=new Set();
-    allOrders=[...hist].filter(o=>{if(seen.has(o.id))return false;seen.add(o.id);return true;});
+    hist=hist.filter(o=>{if(seen.has(o.id))return false;seen.add(o.id);return true;});
+    if(salteadas.length||cortado) console.warn('[loadOrdersHistory] incompleto: '+hist.length+' de '+(total!=null?total:'?')+' órdenes'+(salteadas.length?' · páginas sin traer (offset): '+salteadas.join(', '):'')+(cortado?' · cortado en '+cortado:''));
+    if((salteadas.length||cortado) && allOrders.length){
+      // incompleto: sumar lo traído a lo que ya había (no reemplazar por una lista con huecos)
+      const byId=new Map(allOrders.map(o=>[o.id,o])); hist.forEach(o=>byId.set(o.id,o));
+      allOrders=[...byId.values()].filter(o=>!o.date_created||new Date(o.date_created)>=from12);
+    } else allOrders=hist;
     allOrders.sort((a,b)=>new Date(b.date_created)-new Date(a.date_created));
-    console.log('[loadOrdersHistory]',allOrders.length);
+    console.log('[loadOrdersHistory]',allOrders.length, total!=null?('(ML informa '+total+' en 12 meses)'):'');
     // v74: Recalcular mapa global de última venta por ítem (lo usan Analizador SEO + Quiebre Stock)
     computeGlobalLastSaleMap();
     updateLast50(allOrders.slice(0,100)); // Fill Últimos 50 from full history
@@ -7262,11 +7309,11 @@ function _saveDataCache(){
         return mt ? [{ id:'MANUFACTURING_TIME', value_name: mt.value_name }] : [];
       }catch(e){ return []; } })(),
     }));
-    // Órdenes: solo últimos 90 días (el dashboard usa 30 días máximo)
-    const cutoff90 = Date.now() - 90 * 24 * 60 * 60 * 1000;
+    // Órdenes: v331 · 12 meses sin tope (ahora se guardan en IndexedDB); antes 90 días y máx. 500,
+    // y con ~240 ventas/mes el arranque desde caché mostraba 90 días incompletos.
+    const cutoff90 = Date.now() - 366 * 24 * 60 * 60 * 1000;
     const ordersSlim = allOrders
       .filter(o => !o.date_created || new Date(o.date_created).getTime() >= cutoff90)
-      .slice(0, 500) // máximo 500 órdenes para no saturar
       .map(o => ({
         id: o.id, status: o.status, date_created: o.date_created,
         total_amount: o.total_amount,
@@ -7485,8 +7532,10 @@ let _syncChannel = null;
 function initCrossTabSync(){
   try{
     _syncChannel = new BroadcastChannel('mlpanel_sync_v1');
-    _syncChannel.onmessage = function(event){
+    _syncChannel.onmessage = async function(event){
       const { type, ts } = event.data || {};
+      // v331: métricas y caché viven en IndexedDB (cada pestaña tiene su copia en memoria) → releer antes de usarlos
+      if((type === 'metrics-updated' || type === 'data-updated') && window._idbLS && window._idbLS.activo()){ try{ await window._idbLS.recargar(); }catch(e){} }
       if(type === 'metrics-updated'){
         // Otra pestaña cargó métricas — restaurar desde localStorage (gratis, sin API)
         console.log('[CrossTab] Métricas actualizadas en otra pestaña — restaurando...');
