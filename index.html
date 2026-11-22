@@ -26,6 +26,153 @@
 </style>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script>
+// ═══════════════════════════════════════════════════════════════════════════════
+// v330 · Datos pesados del panel en IndexedDB (no en localStorage)
+// localStorage tiene ~5 MB y estaba lleno: el caché de publicaciones no se podía guardar.
+// Estas claves pasan a IndexedDB SIN tocar el código de las secciones: se interceptan
+// getItem / setItem / removeItem sólo para ellas y se atienden desde memoria
+// (precargada desde IndexedDB al arrancar) con escritura diferida a IndexedDB.
+//   · mlp_seo_predictions_v1 · mlp_seo_thermo_v1 · mlp_extra_data_v1 · mlp_items_v2
+//   · mlp_metrics_v2_*  (las ~1.700 claves sueltas quedan unificadas en UN registro)
+// Migración: la primera vez se copian desde localStorage y la clave vieja se borra
+// recién cuando IndexedDB confirma la escritura. Si IndexedDB no está disponible,
+// todo sigue funcionando con localStorage como antes.
+// ═══════════════════════════════════════════════════════════════════════════════
+(function(){
+  var HEAVY = { 'mlp_seo_predictions_v1':1, 'mlp_seo_thermo_v1':1, 'mlp_extra_data_v1':1, 'mlp_items_v2':1 };
+  var MET = 'mlp_metrics_v2_', MET_REC = '__metrics_v2__';
+  var DB = 'mlp_store', ST = 'kv';
+  var LS = null; try{ LS = window.localStorage; }catch(e){}
+  var P = (typeof Storage!=='undefined') ? Storage.prototype : null;
+  if(!LS || !P || !window.indexedDB){ window._idbLsReady = Promise.resolve(false); return; }
+  var g0 = P.getItem, s0 = P.setItem, r0 = P.removeItem, k0 = P.key;
+  var lsLen = function(){ return LS.length; };
+  var mem = Object.create(null);      // clave pesada → string
+  var met = Object.create(null);      // id de publicación → string
+  var activo = false, db = null, tarde = false;
+  var pend = Object.create(null), metPend = false, timer = null;
+
+  function esPesada(k){ return HEAVY[k] === 1; }
+  function esMet(k){ return k.length > MET.length && k.indexOf(MET) === 0; }
+
+  function abrir(){
+    return new Promise(function(res, rej){
+      var rq; try{ rq = indexedDB.open(DB, 1); }catch(e){ rej(e); return; }
+      rq.onupgradeneeded = function(){ if(!rq.result.objectStoreNames.contains(ST)) rq.result.createObjectStore(ST); };
+      rq.onsuccess = function(){ res(rq.result); };
+      rq.onerror = function(){ rej(rq.error || new Error('IndexedDB no abrió')); };
+      rq.onblocked = function(){ rej(new Error('IndexedDB bloqueado por otra pestaña')); };
+    });
+  }
+  function leerTodo(d){
+    return new Promise(function(res, rej){
+      var out = {}, tx = d.transaction(ST, 'readonly'), cur = tx.objectStore(ST).openCursor();
+      cur.onsuccess = function(){ var c = cur.result; if(c){ out[c.key] = c.value; c.continue(); } };
+      tx.oncomplete = function(){ res(out); };
+      tx.onerror = function(){ rej(tx.error); };
+    });
+  }
+  // escribe un lote { clave: valor | null (=borrar) } y resuelve cuando IndexedDB lo confirma
+  function escribir(lote){
+    return new Promise(function(res, rej){
+      if(!db){ rej(new Error('sin IndexedDB')); return; }
+      var tx; try{ tx = db.transaction(ST, 'readwrite'); }catch(e){ rej(e); return; }
+      var os = tx.objectStore(ST);
+      Object.keys(lote).forEach(function(k){ if(lote[k] === null) os.delete(k); else os.put(lote[k], k); });
+      tx.oncomplete = function(){ res(true); };
+      tx.onerror = function(){ rej(tx.error); };
+      tx.onabort = function(){ rej(tx.error || new Error('escritura cancelada')); };
+    });
+  }
+  function vaciar(){
+    if(timer){ clearTimeout(timer); timer = null; }
+    var lote = pend; pend = Object.create(null);
+    if(metPend){ metPend = false; lote[MET_REC] = JSON.stringify(met); }
+    if(!Object.keys(lote).length) return Promise.resolve(true);
+    return escribir(lote).catch(function(e){ console.warn('[IDB-LS] no se pudo guardar en IndexedDB:', e && e.message); return false; });
+  }
+  function programar(){ if(!timer) timer = setTimeout(vaciar, 400); }
+
+  P.getItem = function(k){
+    if(activo && this === LS){ k = String(k);
+      if(esPesada(k)) return (k in mem) ? mem[k] : null;
+      if(esMet(k)){ var id = k.slice(MET.length); return (id in met) ? met[id] : null; }
+    }
+    return g0.apply(this, arguments);
+  };
+  P.setItem = function(k, v){
+    if(activo && this === LS){ k = String(k);
+      if(esPesada(k)){ mem[k] = String(v); pend[k] = mem[k]; programar(); return; }
+      if(esMet(k)){ met[k.slice(MET.length)] = String(v); metPend = true; programar(); return; }
+    }
+    return s0.apply(this, arguments);
+  };
+  P.removeItem = function(k){
+    if(activo && this === LS){ k = String(k);
+      if(esPesada(k)){ delete mem[k]; pend[k] = null; programar(); try{ r0.call(LS, k); }catch(e){} return; }
+      if(esMet(k)){ delete met[k.slice(MET.length)]; metPend = true; programar(); try{ r0.call(LS, k); }catch(e){} return; }
+    }
+    return r0.apply(this, arguments);
+  };
+
+  // API para los pocos lugares que recorren claves (métricas, respaldo, cerrar sesión)
+  window._idbLS = {
+    activo: function(){ return activo; },
+    keys: function(prefijo){
+      if(!activo) return [];
+      var out = Object.keys(mem).concat(Object.keys(met).map(function(id){ return MET + id; }));
+      return prefijo ? out.filter(function(k){ return k.indexOf(prefijo) === 0; }) : out;
+    },
+    flush: vaciar,
+    clear: function(){ mem = Object.create(null); met = Object.create(null); pend = Object.create(null); metPend = false;
+      if(timer){ clearTimeout(timer); timer = null; }
+      if(!db) return Promise.resolve(false);
+      return new Promise(function(res){ try{ var tx = db.transaction(ST, 'readwrite'); tx.objectStore(ST).clear(); tx.oncomplete = function(){ res(true); }; tx.onerror = function(){ res(false); }; }catch(e){ res(false); } });
+    },
+    stats: function(){ var t = 0; Object.keys(mem).forEach(function(k){ t += mem[k].length; }); var m = 0; Object.keys(met).forEach(function(k){ m += met[k].length; });
+      return { activo: activo, claves: Object.keys(mem).length, metricas: Object.keys(met).length, kb: Math.round((t + m) / 1024) }; },
+  };
+  // guardar lo pendiente si se cierra la pestaña
+  window.addEventListener('pagehide', function(){ vaciar(); });
+  document.addEventListener('visibilitychange', function(){ if(document.visibilityState === 'hidden') vaciar(); });
+
+  var arranque = abrir().then(function(d){
+    db = d;
+    db.onversionchange = function(){ try{ vaciar(); db.close(); }catch(e){} };
+    return leerTodo(d);
+  }).then(function(todo){
+    if(tarde) return false;    // llegó tarde: esta sesión sigue con localStorage, la migración queda para la próxima
+    Object.keys(todo).forEach(function(k){
+      if(k === MET_REC){ try{ var o = JSON.parse(todo[k]) || {}; Object.keys(o).forEach(function(id){ met[id] = o[id]; }); }catch(e){} }
+      else if(esPesada(k) && typeof todo[k] === 'string') mem[k] = todo[k];
+    });
+    // migración: lo que todavía esté en localStorage es lo más nuevo (se escribió sin IndexedDB) → gana
+    var viejas = [], lote = {}, hayMet = false;
+    for(var i = 0; i < lsLen(); i++){
+      var k = k0.call(LS, i); if(!k) continue;
+      if(esPesada(k)){ var v = g0.call(LS, k); if(v != null){ mem[k] = v; lote[k] = v; viejas.push(k); } }
+      else if(esMet(k)){ var v2 = g0.call(LS, k); if(v2 != null){ met[k.slice(MET.length)] = v2; hayMet = true; viejas.push(k); } }
+    }
+    if(hayMet) lote[MET_REC] = JSON.stringify(met);
+    if(!viejas.length){ activo = true; return true; }
+    return escribir(lote).then(function(){
+      if(tarde) return false;
+      viejas.forEach(function(k){ try{ r0.call(LS, k); }catch(e){} });     // recién ahora se borra de localStorage
+      activo = true;
+      console.log('[IDB-LS] Migradas a IndexedDB ' + viejas.length + ' claves de localStorage (' + Object.keys(lote).length + ' registros).');
+      return true;
+    });
+  }).catch(function(e){
+    console.warn('[IDB-LS] IndexedDB no disponible, sigo con localStorage:', e && e.message);
+    activo = false; mem = Object.create(null); met = Object.create(null);
+    return false;
+  });
+  // nunca trabar el arranque más de 6 s
+  window._idbLsReady = Promise.race([arranque, new Promise(function(r){ setTimeout(function(){ if(!activo){ tarde = true; console.warn('[IDB-LS] IndexedDB tardó demasiado: esta sesión usa localStorage'); } r(activo); }, 6000); })]);
+})();
+
+</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <!-- v89 [P3]: plugin datalabels para mostrar valores fijos sobre las barras (Facturación) -->
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0"></script>
@@ -873,7 +1020,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v329 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v330 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -7240,6 +7387,7 @@ function restoreMetricsFromCache(){
       const k = localStorage.key(i);
       if(k && k.startsWith(METRICS_CACHE_KEY)) claves.push(k);
     }
+    if(window._idbLS) window._idbLS.keys(METRICS_CACHE_KEY).forEach(k => { if(claves.indexOf(k) < 0) claves.push(k); });   // v330
     for(const key of claves){
       const id = key.slice(METRICS_CACHE_KEY.length);
       if(!id) continue;
@@ -7272,8 +7420,10 @@ function updateMetricsTimestamp(){
   if(!btn) return;
   // Buscar el timestamp más reciente entre todas las métricas en caché
   let newestTs = 0;
-  for(let i = 0; i < localStorage.length; i++){
-    const key = localStorage.key(i);
+  const _mKeys = [];   // v330: claves de localStorage + las que están en IndexedDB
+  for(let i = 0; i < localStorage.length; i++) _mKeys.push(localStorage.key(i));
+  if(window._idbLS) _mKeys.push(...window._idbLS.keys(METRICS_CACHE_KEY));
+  for(const key of _mKeys){
     if(!key || !key.startsWith(METRICS_CACHE_KEY)) continue;
     try{
       const entry = JSON.parse(localStorage.getItem(key)||'null');
@@ -16939,6 +17089,12 @@ async function predSyncUpload(force){
     // con JSON plano sin keepalive. Cubre ambos casos:
     //   1. gzip rechazado por el Worker (HTTP 400)
     //   2. payload comprimido muy grande para algún proxy intermedio (red)
+    // v330: el reintento en JSON plano sólo si entra holgado (≤ 20 MB); si no, se corta acá
+    const PLANO_MAX = 20 * 1024 * 1024;
+    if((networkError || !r.ok) && headers['X-Compression'] === 'gzip' && jsonStr.length > PLANO_MAX){
+      console.warn('[PredSync] no reintento en JSON plano: pesa ' + (jsonStr.length/1048576).toFixed(1) + ' MB (máx 20 MB)');
+      return false;
+    }
     if((networkError || !r.ok) && headers['X-Compression'] === 'gzip'){
       const reason = networkError ? 'error de red' : 'HTTP '+r.status;
       console.warn('[PredSync] gzip upload falló ('+reason+'), reintentando con JSON plano...');
@@ -16977,7 +17133,7 @@ async function predSyncUpload(force){
     const result = await r.json();
     if(result?.ok){
       // Guardar el resultado mergeado del Worker (puede tener data nueva de otra PC)
-      if(result.merged) _predSave(result.merged);
+      if(result.merged) _predSave(_predMerge(_predLoad(), result.merged));   // v330: sin perder lo local ni los acumulados
       localStorage.setItem(SEO_PRED_LAST_UPLOAD_KEY, String(Date.now()));
       console.log('[PredSync] ↑ Upload OK:', result.stats);
       return true;
@@ -17124,6 +17280,11 @@ function _predMerge(a, b){
     matches: mergedMatches,
     firstRunTs: Math.min(a.firstRunTs || Date.now(), b.firstRunTs || Date.now()),
     lastReportTs: Math.max(a.lastReportTs || 0, b.lastReportTs || 0),
+    // v330: antes estos acumulados se perdían en cada sincronización
+    cumTP: Math.max(+a.cumTP || 0, +b.cumTP || 0),
+    cumFP: Math.max(+a.cumFP || 0, +b.cumFP || 0),
+    cumDoneTP: Object.assign({}, a.cumDoneTP || {}, b.cumDoneTP || {}),
+    cumDoneFP: Object.assign({}, a.cumDoneFP || {}, b.cumDoneFP || {}),
   };
 }
 
@@ -32471,6 +32632,7 @@ function logout(){
       // Borrar
       localStorage.removeItem(k);
     }
+    try{ if(window._idbLS) window._idbLS.clear(); }catch(e){}   // v330: también los datos pesados en IndexedDB
     // Restaurar lo preservado
     for(const k in preserved){ localStorage.setItem(k, preserved[k]); }
     console.log('[Logout] localStorage limpio. Preservados:', Object.keys(preserved));
@@ -38770,6 +38932,7 @@ function _liberarEspacioSiNecesario(){
 }
 
 (async function boot(){
+  try{ await (window._idbLsReady || Promise.resolve()); }catch(e){}   // v330: datos pesados desde IndexedDB
   _liberarEspacioSiNecesario(); // v198: liberar espacio antes de todo
   const params  = new URLSearchParams(window.location.search);
   let code      = params.get('code');
@@ -39872,6 +40035,15 @@ function _bkpLsLeer() {
       if (v.length > 4 * 1024 * 1024) { omitidas.push(k + ' (muy grande)'); continue; }
       out[k] = v;
     }
+  } catch (e) {}
+  try {   // v330: las claves pesadas ahora están en IndexedDB; viajan en el respaldo igual que antes
+    (window._idbLS ? window._idbLS.keys() : []).forEach(function (k) {
+      if (out[k] != null || BKP_LS_YA.indexOf(k) >= 0 || BKP_LS_EXCLUIR.some(function (r) { return r.test(k); })) return;
+      var v = localStorage.getItem(k); if (v == null) return;
+      if (BKP_LS_SECRETO.test(v)) { omitidas.push(k); return; }
+      if (v.length > 4 * 1024 * 1024) { omitidas.push(k + ' (muy grande)'); return; }
+      out[k] = v;
+    });
   } catch (e) {}
   if (omitidas.length) out.__omitidas = omitidas.join(', ');
   return out;
