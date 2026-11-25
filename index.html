@@ -1031,7 +1031,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v334 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v335 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -5771,6 +5771,52 @@ let allItems=[], allOrders=[], allQuestions=[];
 let _globalLastSaleMap = {};
 let _globalLastSaleComputedAt = 0;
 
+// v335: ¿allOrders ya tiene el historial completo? (si no, ventas 7d/60d serían parciales)
+var _ordersHistOk = false;
+function _ventasCompletas(){
+  if(_ordersHistOk) return true;
+  if(!Array.isArray(allOrders) || !allOrders.length) return false;
+  let min = Infinity;
+  for(const o of allOrders){ const t = o && o.date_created ? Date.parse(o.date_created) : NaN; if(t < min) min = t; }
+  return min < Date.now() - 61*86400000;   // hay órdenes de hace más de 61 días → cubre la ventana de 60d
+}
+// v335: mapas de ventas (misma lógica que _loadPubMetricsBatchInner)
+function _ventasMaps(){
+  const now = nowAR();
+  const from7 = new Date(now - 7*86400000), from14 = new Date(now - 14*86400000), from60 = new Date(now - 60*86400000);
+  const s7 = {}, sp = {}, s60 = {};
+  (Array.isArray(allOrders) ? allOrders : []).forEach(o => {
+    if(!o || o.status === 'cancelled' || o.status === 'invalid') return;
+    const dt = dateAR(o.date_created||0);
+    (o.order_items||[]).forEach(oi => {
+      const rawId = oi && oi.item && oi.item.id; if(!rawId) return;
+      const sid = String(rawId), id = sid.startsWith('MLA') ? sid : 'MLA'+sid, q = oi.quantity||1;
+      if(dt >= from7) s7[id] = (s7[id]||0) + q;
+      else if(dt >= from14) sp[id] = (sp[id]||0) + q;
+      if(dt >= from60) s60[id] = (s60[id]||0) + q;
+    });
+  });
+  return { s7, sp, s60 };
+}
+// v335: recalcula ventas 7d / semana previa / 60d + conversión y tendencia en TODAS las métricas
+function _metricsSyncSales(){
+  try{
+    if(typeof itemMetrics === 'undefined' || typeof nowAR !== 'function') return;
+    const { s7, sp, s60 } = _ventasMaps();
+    for(const id in itemMetrics){
+      const m = itemMetrics[id]; if(!m) continue;
+      m.sales = s7[id]||0; m.salesPrev = sp[id]||0; m.sales60 = s60[id]||0;
+      if('sales7' in m) m.sales7 = m.sales;
+      const v = m._ph ? 0 : (m.visits||0);
+      m.salesTrend = m.salesPrev>0 ? Math.round((m.sales-m.salesPrev)/m.salesPrev*100) : (m.sales>0?100:0);
+      m.conv = v > 0 ? +((m.sales/v)*100).toFixed(1) : 0;
+    }
+    // ítems que vendieron y todavía no tienen entrada → placeholder pendiente (las visitas se cargan solas)
+    Object.keys(s60).forEach(id => {
+      if(!itemMetrics[id]) itemMetrics[id] = { visits:0, visitsPrev:0, visits30:0, sales:s7[id]||0, salesPrev:sp[id]||0, sales60:s60[id], conv:0, salesTrend:0, visitsTrend:0, _ph:true };
+    });
+  }catch(e){ console.warn('[v335] _metricsSyncSales:', e.message); }
+}
 function computeGlobalLastSaleMap(){
   const map = {};
   const orders = Array.isArray(allOrders) ? allOrders : [];
@@ -5793,6 +5839,7 @@ function computeGlobalLastSaleMap(){
   // v80: Invalidar caché de scenarios (los counts cambiaron porque los días sin venta cambiaron)
   if(typeof _scenarioCountsCache !== 'undefined') _scenarioCountsCache = null;
   console.log('[LastSaleMap] Calculado:', Object.keys(map).length, 'ítems con ventas históricas');
+  _metricsSyncSales();   // v335: ventas 7d/60d siempre desde allOrders
 }
 
 // Helpers públicos para los renders
@@ -6311,6 +6358,7 @@ async function pollNewData(){
       }
     });
     if(hasNew){
+      try{ computeGlobalLastSaleMap(); }catch(e){}   // v335: última venta + ventas 7d/60d al instante
       const n=fresh[0];
       showToast('🛍️ Nueva venta: '+(n.order_items?.[0]?.item?.title||'').slice(0,40)+' $'+(n.total_amount||0).toLocaleString('es-AR'),'success','sale');
     }
@@ -6709,7 +6757,8 @@ function _restoreExtraData(){
     const ts = parseInt(localStorage.getItem(_EXTRA_DATA_TS_KEY)||'0',10);
     if(ts){
       const horas = Math.round((Date.now()-ts)/3600000);
-      console.log('[extraData] restaurado: métricas, descuentos, fechas y fueguito de hace '+horas+'h');
+      _metricsSyncSales();   // v335
+    console.log('[extraData] restaurado: métricas, descuentos, fechas y fueguito de hace '+horas+'h');
     }
     // refrescar las tablas para que se vea todo lo restaurado
     if(typeof renderSEOTable==='function' && document.getElementById('section-seo')?.classList.contains('active')) renderSEOTable();
@@ -7000,8 +7049,11 @@ async function loadOrdersHistory(){
     } else allOrders=hist;
     allOrders.sort((a,b)=>new Date(b.date_created)-new Date(a.date_created));
     console.log('[loadOrdersHistory]',allOrders.length, total!=null?('(ML informa '+total+' en 12 meses)'):'');
+    if(!salteadas.length && !cortado) _ordersHistOk = true;   // v335
     // v74: Recalcular mapa global de última venta por ítem (lo usan Analizador SEO + Quiebre Stock)
     computeGlobalLastSaleMap();
+    // v335: refrescar la tabla SEO con las ventas ya completas
+    try{ const _sec=document.getElementById('section-seo'); if(typeof renderSEOTable==='function' && _sec && _sec.offsetParent!==null) renderSEOTable(); }catch(e){}
     updateLast50(allOrders.slice(0,100)); // Fill Últimos 50 from full history
     // Cargar envios del ultimo mes
     const recent=allOrders.filter(o=>o.shipping?.id&&!o.shipping._statusLoaded&&new Date(o.date_created)>new Date(Date.now()-30*24*3600*1000));
@@ -7852,6 +7904,7 @@ async function _loadPubMetricsBatchInner(ids){
       conv:0, salesTrend:0, visitsTrend:0, _ph:true   // v333: visitas pendientes, NO son 0 reales
     };
   });
+  _metricsSyncSales();   // v335
   // Poblar ventas 60d para ítems que vendieron en 60d pero no en 7d
   Object.keys(salesMap60).forEach(id => {
     if(!itemMetrics[id]) itemMetrics[id] = {
@@ -12192,7 +12245,7 @@ async function snapAplicar() {
     // v334: 0 visitas con ventas guardado por versiones viejas = placeholder, no dato real
     if (sm && !sm._ph && sm.mv !== 4 && !sm.visits30 && !sm.visits && ((sm.sales60 || 0) + (sm.sales || 0)) > 0) sm._ph = true;
     itemMetrics[id] = sm;
-  }); _snap.metricasAplicadas = true; }
+  }); _snap.metricasAplicadas = true; _metricsSyncSales(); }
   // 2) Fechas, tiempo de disponibilidad y descuentos
   if (d.extra) allItems.forEach(function (i) {
     var e = d.extra[i.id]; if (!e) return;
@@ -14333,6 +14386,7 @@ function renderSEOTable(){
       })()}</td>
       <td style="text-align:center">${(()=>{
         const ts = getLastSaleTs(item.id);
+        if(!ts && !_ventasCompletas()) return '<span style="font-size:12px;color:var(--text3)" title="Cargando historial de ventas…">⏳</span>';   // v335
         if(!ts) return '<span style="font-size:10px;color:var(--text3);font-weight:600">Sin Ventas 1 año</span>';
         const days = Math.floor((Date.now()-ts)/(24*3600*1000));
         if(days >= 360) return '<span style="font-size:10px;color:var(--text3);font-weight:600">Sin Ventas 1 año</span>';
@@ -14344,6 +14398,7 @@ function renderSEOTable(){
       })()}</td>
       <td style="text-align:center">${(()=>{
         const days = getDaysSinceLastSale(item.id);
+        if(days === Infinity && !_ventasCompletas()) return '<span style="font-size:12px;color:var(--text3)" title="Cargando historial de ventas…">⏳</span>';   // v335
         if(days === Infinity || days >= 360) return '<span style="font-size:11px;color:var(--text3)">—</span>';
         // Código de colores según rango de días
         let bg, fg;
@@ -14404,8 +14459,8 @@ function renderSEOTable(){
           : '<span style="font-size:10px;color:var(--text3)">—</span>'}
       </td>
       <td style="text-align:center;background:#f0fdf4">
-        ${m
-          ? '<span style="font-size:14px;font-weight:700;color:var(--text)">'+m.sales+'</span>'
+        ${!_ventasCompletas() ? '<span style="font-size:12px;color:var(--text3)" title="Cargando historial de ventas…">⏳</span>' : m
+          ? '<span style="font-size:14px;font-weight:700;color:var(--text)">'+(m.sales||0)+'</span>'
             +(m.salesPrev!==undefined
               ? (() => {
                   // v149: delta compacto (la flecha + número ya se entiende; el header dice "Ventas 7d")
@@ -14420,7 +14475,7 @@ function renderSEOTable(){
           : '<span style="font-size:10px;color:var(--text3)">📊</span>'}
       </td>
       <td style="text-align:center;background:#dcfce7">
-        ${m
+        ${!_ventasCompletas() ? '<span style="font-size:12px;color:var(--text3)" title="Cargando historial de ventas…">⏳</span>' : m
           ? '<span style="font-size:14px;font-weight:700;color:'+((m.sales60||0)===0?'#9ca3af':'var(--text)')+'">'+(m.sales60||0)+'</span>'
           : '<span style="font-size:10px;color:var(--text3)">—</span>'}
       </td>
