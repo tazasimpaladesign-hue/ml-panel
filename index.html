@@ -1031,7 +1031,7 @@ input::placeholder,textarea::placeholder{color:#6b7280}
 <nav id="sidebar">
   <div class="sb-logo">
     <div class="sb-icon">ML</div>
-    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v332 · Argentina </div></div>
+    <div><div class="sb-title">Panel Maestro Pro</div><div class="sb-ver">v333 · Argentina </div></div>
   </div>
   <a class="sb-store" href="#dashboard" onclick="showSection('dashboard');return false;">
     <div><div class="sb-store-name" id="sb-store">Tu Tienda</div><div class="sb-store-sub"><div class="online-dot"></div>Conectado</div></div>
@@ -6652,7 +6652,7 @@ function _saveExtraData(){
   try{
     const map = {};
     (allItems||[]).forEach(i=>{
-      const m = (typeof itemMetrics!=='undefined' && itemMetrics[i.id]) ? itemMetrics[i.id] : null;
+      const m = (typeof itemMetrics!=='undefined' && itemMetrics[i.id] && !itemMetrics[i.id]._ph) ? itemMetrics[i.id] : null;   // v333: sin placeholders
       const tieneAlgo = i.last_updated || i._regularPrice || (i.sale_terms && i.sale_terms.length) || m;
       if(tieneAlgo){
         map[i.id] = {
@@ -6695,6 +6695,8 @@ function _restoreExtraData(){
         // v203: restaurar métricas (visitas/ventas) si no están en memoria
         if(d.m && typeof itemMetrics!=='undefined' && !itemMetrics[i.id]){
           itemMetrics[i.id] = { visits30:d.m.v30, visits:d.m.v7, sales60:d.m.s60, sales7:d.m.s7, sold:d.m.sold, conv:d.m.conv };
+          // v333: 0 visitas con ventas = placeholder viejo guardado por error → pendiente
+          if(!d.m.v30 && !d.m.v7 && ((d.m.s60||0) + (d.m.s7||0)) > 0) itemMetrics[i.id]._ph = true;
         }
       }
     });
@@ -6910,6 +6912,8 @@ async function loadItemsFull(){
     // v201: restaurar datos extra guardados (fecha modif, descuentos, tiempo)
     // para que queden VISIBLES aunque no se refresquen. No consume nada de ML.
     if(typeof _restoreExtraData==='function') _restoreExtraData();
+    // v333: arrancar sola la carga de visitas pendientes (90 s, sin competir con la carga inicial)
+    setTimeout(() => { if(typeof _phAutoLoad === 'function') _phAutoLoad('inicio'); }, 90000);
     // La actualización de esos datos se dispara con el botón "Cargar métricas"
     // del Analizador SEO o el botón de Publicaciones, de forma pausada.
     // v118: Cargar cache del Termómetro SEO (sincrono, instantáneo).
@@ -7489,7 +7493,7 @@ function restoreMetricsFromCache(){
       let entry = null;
       try{ entry = JSON.parse(localStorage.getItem(key)||'null'); }catch(e){}
       if(!entry || !entry.data) continue;
-      if(entry.data.mv !== 3){
+      if(entry.data.mv !== 4){   // v333: mv:4 = ventanas por fecha
         try{ localStorage.removeItem(key); }catch(e){}
         purged++;
         continue;
@@ -7693,6 +7697,8 @@ async function loadPubMetricsBatch(ids){
   } finally {
     releaseLock();
     _pubMetricsBatchLock = null;
+    // v333: si quedaron visitas pendientes (placeholders), cargarlas solas
+    if(typeof _phAutoLoad === 'function' && !_phAutoRunning) setTimeout(() => _phAutoLoad('post-lote'), 3000);
   }
 }
 
@@ -7734,7 +7740,7 @@ async function _loadPubMetricsBatchInner(ids){
     // visits (antes venía de /visits?date_from=..., otro endpoint que devolvía
     // totales muy por debajo → el embudo mostraba ▲150% falsos).
     // Las cachés viejas (sin mv:3) se re-piden una vez y quedan sanas.
-    if(cached && typeof cached.visits30 === 'number' && cached.mv === 3){
+    if(cached && typeof cached.visits30 === 'number' && cached.mv === 4){   // v333
       // Datos completos del caché — actualizar ventas (siempre frescos de allOrders)
       cached.sales      = salesMap7[id]    || 0;
       cached.salesPrev  = salesMap_prev[id] || 0;
@@ -7759,6 +7765,8 @@ async function _loadPubMetricsBatchInner(ids){
   //    + 30d (suma total). Esto evita duplicar llamadas API.
   for(const id of toFetch){
     let visits = 0, visitsPrev = 0, visits30 = 0;
+    // v333: _ok = 'api' (dato real), 'fallback' (endpoint alternativo, no se cachea), '' (falló)
+    let _ok = '';
 
     // v223: UNA sola llamada (30 días por día) y de ahí salen las TRES ventanas:
     //   visits     = últimos 7 días        → días [-7 .. -1]
@@ -7774,14 +7782,30 @@ async function _loadPubMetricsBatchInner(ids){
       const dias = (r && Array.isArray(r.results)) ? r.results
                  : (r && Array.isArray(r.visits))  ? r.visits : null;
       if(dias){
+        // v333: la API devuelve SOLO los días con visitas (array disperso), así que
+        // slice(-7) tomaba "los últimos 7 días CON visitas" (a veces de hace 3 semanas)
+        // e inflaba Visitas 7d. Ahora se agrupa por fecha real respecto de date_to.
         visits30   = sumDias(dias);
-        visits     = sumDias(dias.slice(-7));
-        visitsPrev = sumDias(dias.slice(-14, -7));
+        const _refT = r && r.date_to ? Date.parse(r.date_to) : NaN;
+        const _ref  = isNaN(_refT) ? Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()) : _refT;
+        const _edad = d => { const t = Date.parse(d && (d.date || d.day) || ''); return isNaN(t) ? null : Math.round((_ref - t) / 86400000); };
+        if(dias.every(d => _edad(d) !== null)){
+          visits     = sumDias(dias.filter(d => _edad(d) <= 7));
+          visitsPrev = sumDias(dias.filter(d => { const e = _edad(d); return e > 7 && e <= 14; }));
+        } else {
+          visits     = sumDias(dias.slice(-7));
+          visitsPrev = sumDias(dias.slice(-14, -7));
+        }
+        _ok = 'api';
       } else if(r && typeof r.total_visits === 'number'){
         // Fallback: la API solo devolvió el total — repartimos proporcional
         visits30   = r.total_visits;
         visits     = Math.round(r.total_visits / 4);
         visitsPrev = Math.round(r.total_visits / 4);
+        _ok = 'fallback';
+      } else {
+        // v333: respuesta de error (p.ej. 429 agotado) → antes se cacheaba 0 por 24 h
+        console.warn('[Metricas] respuesta sin visitas', id, '—', r && (r.error || r.message || r.status));
       }
     }catch(e){
       console.warn('[Metricas] time_window error', id, '—', e.message);
@@ -7790,6 +7814,7 @@ async function _loadPubMetricsBatchInner(ids){
         visits = (r2 && r2.total_visits) || 0;
         const r3 = await mlGet('/items/'+id+'/visits?date_from='+from14.toISOString().slice(0,10)+'&date_to='+from7.toISOString().slice(0,10));
         visitsPrev = (r3 && r3.total_visits) || 0;
+        if(r2 && typeof r2.total_visits === 'number') _ok = 'fallback';
       }catch(e2){
         console.warn('[Metricas] fallback error', id, '—', e2.message);
         visits = 0; visitsPrev = 0;
@@ -7803,9 +7828,14 @@ async function _loadPubMetricsBatchInner(ids){
     const salesTrend = salesPrev>0 ? Math.round((sales-salesPrev)/salesPrev*100) : (sales>0?100:0);
     const visitsTrend= visitsPrev>0 ? Math.round((visits-visitsPrev)/visitsPrev*100) : (visits>0?100:0);
 
-    const data = { visits, visitsPrev, visits30, sales, salesPrev, sales60, conv, salesTrend, visitsTrend, mv: 3 };
-    itemMetrics[id] = data;
-    metricsToCache(id, data); // persistir en localStorage
+    if(!_ok){
+      // v333: no hay dato real → placeholder pendiente (NO se cachea, se reintenta)
+      itemMetrics[id] = { visits:0, visitsPrev:0, visits30:0, sales, salesPrev, sales60, conv:0, salesTrend, visitsTrend:0, _ph:true };
+    } else {
+      const data = { visits, visitsPrev, visits30, sales, salesPrev, sales60, conv, salesTrend, visitsTrend, mv: 4 };
+      itemMetrics[id] = data;
+      if(_ok === 'api') metricsToCache(id, data); // persistir en localStorage (solo dato real)
+    }
 
     // v136: Delay anti-429 aumentado de 200ms a 350ms entre requests.
     // Con 350ms entre items, son ~3 requests/seg = 180 req/min.
@@ -7819,7 +7849,7 @@ async function _loadPubMetricsBatchInner(ids){
     if(!itemMetrics[id]) itemMetrics[id] = {
       visits:0, visitsPrev:0, visits30:0,
       sales: salesMap7[id], salesPrev: salesMap_prev[id]||0, sales60: salesMap60[id]||0,
-      conv:0, salesTrend:0, visitsTrend:0
+      conv:0, salesTrend:0, visitsTrend:0, _ph:true   // v333: visitas pendientes, NO son 0 reales
     };
   });
   // Poblar ventas 60d para ítems que vendieron en 60d pero no en 7d
@@ -7827,9 +7857,56 @@ async function _loadPubMetricsBatchInner(ids){
     if(!itemMetrics[id]) itemMetrics[id] = {
       visits:0, visitsPrev:0, visits30:0,
       sales:0, salesPrev:0, sales60: salesMap60[id]||0,
-      conv:0, salesTrend:0, visitsTrend:0
+      conv:0, salesTrend:0, visitsTrend:0, _ph:true   // v333
     };
   });
+}
+
+// v333: CARGA AUTOMÁTICA de visitas pendientes en segundo plano.
+// Prioridad: publicaciones activas con ventas cuyas visitas son placeholder (_ph)
+// o vienen de un cálculo viejo (sin mv:4); después el resto de placeholders.
+// Cada id se intenta una sola vez por sesión (no hay bucles infinitos).
+let _phAutoRunning = false;
+const _phAutoTried = new Set();
+function _phAutoPendientes(){
+  if(typeof allItems === 'undefined' || !allItems || typeof itemMetrics === 'undefined') return [];
+  const prio = [], resto = [];
+  allItems.forEach(i => {
+    if(!i || i.status !== 'active') return;
+    const id = String(i.id);
+    if(_phAutoTried.has(id)) return;
+    const m = itemMetrics[id];
+    if(!m) return;
+    const vende = ((m.sales60||0) + (m.sales||0)) > 0;
+    if(m._ph) (vende ? prio : resto).push(id);
+    else if(m.mv !== 4 && vende) prio.push(id);
+  });
+  return prio.concat(resto);
+}
+async function _phAutoLoad(motivo){
+  if(_phAutoRunning || typeof userId === 'undefined' || !userId) return;
+  const ids = _phAutoPendientes();
+  if(!ids.length) return;
+  _phAutoRunning = true;
+  console.log('[Métricas v333] Carga automática de visitas pendientes (' + (motivo||'') + '):', ids.length);
+  try{
+    for(let k = 0; k < ids.length; k += 20){
+      const lote = ids.slice(k, k + 20);
+      lote.forEach(id => _phAutoTried.add(id));
+      await loadPubMetricsBatch(lote);
+      try{
+        const ae = document.activeElement;
+        const editando = ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) && ae.closest && ae.closest('#section-seo');
+        const sec = document.getElementById('section-seo');
+        if(!editando && typeof renderSEOTable === 'function' && sec && sec.offsetParent !== null) renderSEOTable();
+      }catch(e){}
+    }
+    console.log('[Métricas v333] Carga automática terminada');
+  }catch(e){ console.warn('[Métricas v333] auto-carga:', e.message); }
+  finally{
+    _phAutoRunning = false;
+    try{ if(typeof _saveExtraData === 'function') _saveExtraData(); }catch(e){}
+  }
 }
 
 // Obtener thumbnail de un ítem con caché — evita llamadas repetidas para el mismo producto
@@ -14305,7 +14382,7 @@ function renderSEOTable(){
         })()}
       </td>
       <td style="text-align:center;background:#eff6ff">
-        ${m ? `<div style="font-size:14px;font-weight:700;color:var(--text)">${(m.visits||0).toLocaleString('es-AR')}</div>
+        ${m && m._ph ? '<span style="font-size:12px;color:var(--text3)" title="Visitas pendientes de carga (se cargan solas)">⏳</span>' : m ? `<div style="font-size:14px;font-weight:700;color:var(--text)">${(m.visits||0).toLocaleString('es-AR')}</div>
           ${m.visitsPrev!==undefined ? (() => {
               const d = (m.visits||0) - (m.visitsPrev||0);
               const sign = d > 0 ? '+' : '';
@@ -14317,7 +14394,7 @@ function renderSEOTable(){
         : '<span style="font-size:10px;color:var(--text3)">📊</span>'}
       </td>
       <td style="text-align:center;background:#dbeafe">
-        ${m
+        ${m && m._ph ? '<span style="font-size:12px;color:var(--text3)" title="Visitas pendientes de carga (se cargan solas)">⏳</span>' : m
           ? '<span style="font-size:14px;font-weight:700;color:var(--text)">'+(m.visits30||0).toLocaleString('es-AR')+'</span>'
           : '<span style="font-size:10px;color:var(--text3)">—</span>'}
       </td>
@@ -14346,7 +14423,7 @@ function renderSEOTable(){
         <span style="font-size:14px;font-weight:700;color:var(--text)">${item.sold_quantity||0}</span>
       </td>
       <td style="text-align:center;background:#fefce8">
-        ${m ? `<div style="font-size:14px;font-weight:700;color:${(m.conv||0)>=5?'var(--green)':(m.conv||0)>=2?'var(--amber)':'var(--red)'}">${(m.conv||0).toFixed(1)}%</div>` 
+        ${m && m._ph ? '<span style="font-size:10px;color:var(--text3)">—</span>' : m ? `<div style="font-size:14px;font-weight:700;color:${(m.conv||0)>=5?'var(--green)':(m.conv||0)>=2?'var(--amber)':'var(--red)'}">${(m.conv||0).toFixed(1)}%</div>` 
         : '<span style="font-size:10px;color:var(--text3)">—</span>'}
       </td>
       <td style="background:#f5f3ff;padding:6px 8px">
@@ -23056,7 +23133,7 @@ function refreshAlerts(){
     // ── Estrategia: Poca Visibilidad (visitas entre 1 y 5) ──────────────
     if (i.status === 'active') {
       var m_sv = typeof itemMetrics !== 'undefined' ? itemMetrics[id] : null;
-      var visits7_sv = (m_sv && typeof m_sv.visits === 'number') ? m_sv.visits
+      var visits7_sv = (m_sv && !m_sv._ph && typeof m_sv.visits === 'number') ? m_sv.visits
                      : (typeof i.visits_7d === 'number') ? i.visits_7d : null;
       if (visits7_sv !== null && visits7_sv >= 1 && visits7_sv <= 5) {
         alerts.push({
@@ -23076,7 +23153,7 @@ function refreshAlerts(){
     // ── Estrategia: Fuga de Conversión (visitas > 30 y ventas 7d = 0) ───
     if (i.status === 'active' && qty > 0) {
       var m_fc = typeof itemMetrics !== 'undefined' ? itemMetrics[id] : null;
-      var visits7_fc = (m_fc && typeof m_fc.visits === 'number') ? m_fc.visits
+      var visits7_fc = (m_fc && !m_fc._ph && typeof m_fc.visits === 'number') ? m_fc.visits
                      : (typeof i.visits_7d === 'number') ? i.visits_7d : null;
       var sales7_fc  = (m_fc && typeof m_fc.sales  === 'number') ? m_fc.sales : null;
       if (visits7_fc !== null && visits7_fc > 30 && sales7_fc !== null && sales7_fc === 0) {
@@ -26870,7 +26947,7 @@ async function loadMostVisited(forceRefresh){
   for(var k=0; k<items.length; k++){
     var idStr = String(items[k].id);
     var m = (typeof itemMetrics !== 'undefined' && itemMetrics[idStr]) || null;
-    if(!m || typeof m.visits !== 'number'){
+    if(!m || m._ph || typeof m.visits !== 'number'){   // v333: placeholder = sin cargar
       idsNeedingFetch.push(idStr);
     }
   }
@@ -26931,7 +27008,7 @@ function _mvBuildVisitMapFromMetrics(items){
   for(var i=0; i<items.length; i++){
     var idStr = String(items[i].id);
     var m = (typeof itemMetrics !== 'undefined' && itemMetrics[idStr]) || null;
-    if(m && typeof m.visits === 'number'){
+    if(m && !m._ph && typeof m.visits === 'number'){   // v333
       visitMap[idStr] = m.visits;
     }
   }
